@@ -1,0 +1,9 @@
+.DS_Store
+
+# Build and test artifacts
+/bin/
+*.test
+*.out
+
+# opencode runtime state
+.opencode/opencode-loop/

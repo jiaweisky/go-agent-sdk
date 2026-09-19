@@ -1,0 +1,389 @@
+package tool
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"golang.org/x/net/html"
+
+	"github.com/user/go-agent-sdk/core"
+	"github.com/user/go-agent-sdk/llm/schema"
+)
+
+const WebFetchName = "webfetch"
+
+const (
+	WebFetchMaxResponseBytes      = 5 * 1024 * 1024
+	WebFetchDefaultTimeoutSeconds = 30
+	WebFetchMaxTimeoutSeconds     = 120
+)
+
+const WebFetchDescription = `Fetch content from an HTTP or HTTPS URL and return it as text, markdown, or HTML. Markdown is the default.
+
+Use a more targeted tool when one is available. This tool is read-only. Large text results may be replaced with a preview while the complete output is retained in managed storage.`
+
+var WebFetchInputSchema = schema.JsonSchema{
+	"type": "object",
+	"properties": map[string]any{
+		"url": map[string]any{
+			"type":        "string",
+			"description": "The HTTP or HTTPS URL to fetch content from",
+		},
+		"format": map[string]any{
+			"type":        "string",
+			"enum":        []any{"text", "markdown", "html"},
+			"default":     "markdown",
+			"description": "The format to return the content in. Defaults to markdown.",
+		},
+		"timeout": map[string]any{
+			"type":             "number",
+			"exclusiveMinimum": 0,
+			"maximum":          WebFetchMaxTimeoutSeconds,
+			"description":      fmt.Sprintf("Optional timeout in seconds (maximum: %d)", WebFetchMaxTimeoutSeconds),
+		},
+	},
+	"required": []any{"url"},
+}
+
+var WebFetchOutputSchema = schema.JsonSchema{
+	"type": "object",
+	"properties": map[string]any{
+		"url":         map[string]any{"type": "string"},
+		"contentType": map[string]any{"type": "string"},
+		"format":      map[string]any{"enum": []any{"text", "markdown", "html"}},
+		"output":      map[string]any{"type": "string"},
+	},
+	"required": []any{"url", "contentType", "format", "output"},
+}
+
+type WebFetchInput struct {
+	URL     string   `json:"url"`
+	Format  string   `json:"format"`
+	Timeout *float64 `json:"timeout,omitempty"`
+}
+
+// UnmarshalJSON applies the schema decoding default for format: when the field
+// is absent it becomes "markdown", mirroring Schema.withDecodingDefault. The
+// remaining Input constraints are enforced by WebFetchInputSchema.
+func (i *WebFetchInput) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		URL     string   `json:"url"`
+		Format  *string  `json:"format"`
+		Timeout *float64 `json:"timeout"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	format := "markdown"
+	if aux.Format != nil {
+		format = *aux.Format
+	}
+	*i = WebFetchInput{URL: aux.URL, Format: format, Timeout: aux.Timeout}
+	return nil
+}
+
+type WebFetchOutput struct {
+	URL         string `json:"url"`
+	ContentType string `json:"contentType"`
+	Format      string `json:"format"`
+	Output      string `json:"output"`
+}
+
+const webFetchBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+
+// WebFetchHTTPClient is the transport seam used by the tool. It mirrors the
+// Effect HttpClient capability so callers can inject fakes in tests.
+type WebFetchHTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+type WebFetchDeps struct {
+	HTTPClient WebFetchHTTPClient
+	Permission core.Permission
+}
+
+func webFetchAcceptHeader(format string) string {
+	switch format {
+	case "markdown":
+		return "text/markdown;q=1.0, text/x-markdown;q=0.9, text/plain;q=0.8, text/html;q=0.7, */*;q=0.1"
+	case "text":
+		return "text/plain;q=1.0, text/markdown;q=0.9, text/html;q=0.8, */*;q=0.1"
+	case "html":
+		return "text/html;q=1.0, application/xhtml+xml;q=0.9, text/plain;q=0.8, text/markdown;q=0.7, */*;q=0.1"
+	}
+	return "*/*"
+}
+
+func webFetchHeaders(format, userAgent string) map[string]string {
+	return map[string]string{
+		"User-Agent":      userAgent,
+		"Accept":          webFetchAcceptHeader(format),
+		"Accept-Language": "en-US,en;q=0.9",
+	}
+}
+
+func webFetchAssertHTTPURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("URL must use http:// or https://")
+	}
+	return nil
+}
+
+type webFetchStatusError struct {
+	response *http.Response
+}
+
+func (e *webFetchStatusError) Error() string {
+	return fmt.Sprintf("StatusCodeError: %d", e.response.StatusCode)
+}
+
+func webFetchIsCloudflareChallenge(err error) bool {
+	var statusErr *webFetchStatusError
+	if !errors.As(err, &statusErr) || statusErr.response == nil {
+		return false
+	}
+	return statusErr.response.StatusCode == 403 &&
+		statusErr.response.Header.Get("cf-mitigated") == "challenge"
+}
+
+func webFetchExecute(client WebFetchHTTPClient, ctx context.Context, rawURL, format, userAgent string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range webFetchHeaders(format, userAgent) {
+		req.Header.Set(key, value)
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return response, &webFetchStatusError{response: response}
+	}
+	return response, nil
+}
+
+func webFetchMimeFrom(contentType string) string {
+	parts := strings.SplitN(contentType, ";", 2)
+	return strings.ToLower(strings.TrimSpace(parts[0]))
+}
+
+func webFetchIsImageAttachment(mime string) bool {
+	return strings.HasPrefix(mime, "image/") && mime != "image/svg+xml" && mime != "image/vnd.fastbidsheet"
+}
+
+func webFetchIsTextualMime(mime string) bool {
+	return mime == "" ||
+		strings.HasPrefix(mime, "text/") ||
+		mime == "application/json" ||
+		strings.HasSuffix(mime, "+json") ||
+		mime == "application/xml" ||
+		strings.HasSuffix(mime, "+xml") ||
+		mime == "application/javascript" ||
+		mime == "application/x-javascript"
+}
+
+func webFetchConvert(content, contentType, format string) (string, error) {
+	if !strings.Contains(contentType, "text/html") {
+		return content, nil
+	}
+	switch format {
+	case "markdown":
+		return ConvertHTMLToMarkdown(content)
+	case "text":
+		return ExtractTextFromHTML(content), nil
+	}
+	return content, nil
+}
+
+func webFetchFetch(deps WebFetchDeps, ctx context.Context, input WebFetchInput) ([]byte, string, error) {
+	client := deps.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	response, err := webFetchExecute(client, ctx, input.URL, input.Format, webFetchBrowserUserAgent)
+	if err != nil && webFetchIsCloudflareChallenge(err) {
+		if response != nil && response.Body != nil {
+			response.Body.Close()
+		}
+		response, err = webFetchExecute(client, ctx, input.URL, input.Format, "opencode")
+	}
+	if err != nil {
+		if response != nil && response.Body != nil {
+			response.Body.Close()
+		}
+		return nil, "", err
+	}
+	defer response.Body.Close()
+
+	contentType := response.Header.Get("Content-Type")
+	mime := webFetchMimeFrom(contentType)
+	if webFetchIsImageAttachment(mime) {
+		return nil, "", fmt.Errorf("Unsupported fetched image content type: %s", mime)
+	}
+	if !webFetchIsTextualMime(mime) {
+		return nil, "", fmt.Errorf("Unsupported fetched file content type: %s", mime)
+	}
+
+	body, err := CollectBoundedResponseBody(response, WebFetchMaxResponseBytes, func() error {
+		return fmt.Errorf("Response too large (exceeds %d byte limit)", WebFetchMaxResponseBytes)
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return body, contentType, nil
+}
+
+func MakeWebFetch(deps WebFetchDeps) *Def[WebFetchInput, WebFetchOutput, WebFetchOutput] {
+	return Make(Config[WebFetchInput, WebFetchOutput, WebFetchOutput]{
+		Description: WebFetchDescription,
+		Input:       WebFetchInputSchema,
+		Output:      WebFetchOutputSchema,
+		ToModelOutput: func(input WebFetchInput, output any) []Content {
+			var out WebFetchOutput
+			if b, err := json.Marshal(output); err == nil {
+				json.Unmarshal(b, &out)
+			}
+			return []Content{TextContent{Text: out.Output}}
+		},
+		Execute: func(input WebFetchInput, ctx Context) (WebFetchOutput, error) {
+			result, err := executeWebFetch(deps, input, ctx)
+			if err != nil {
+				return WebFetchOutput{}, &Failure{Message: "Unable to fetch " + input.URL}
+			}
+			return result, nil
+		},
+	})
+}
+
+func executeWebFetch(deps WebFetchDeps, input WebFetchInput, ctx Context) (WebFetchOutput, error) {
+	if err := webFetchAssertHTTPURL(input.URL); err != nil {
+		return WebFetchOutput{}, err
+	}
+
+	if deps.Permission != nil {
+		metadata := map[string]any{"url": input.URL, "format": input.Format}
+		if input.Timeout != nil {
+			metadata["timeout"] = *input.Timeout
+		}
+		source := &core.PermissionSource{
+			Type:      core.PermissionSourceTypeTool,
+			MessageID: ctx.AssistantMessageID,
+			CallID:    ctx.ToolCallID,
+		}
+		if err := deps.Permission.Assert(core.PermissionAssertInput{
+			SessionID: ctx.SessionID,
+			Action:    WebFetchName,
+			Resources: []string{input.URL},
+			Save:      []string{"*"},
+			Metadata:  metadata,
+			Source:    source,
+			Agent:     &ctx.Agent,
+		}); err != nil {
+			return WebFetchOutput{}, err
+		}
+	}
+
+	timeoutSeconds := float64(WebFetchDefaultTimeoutSeconds)
+	if input.Timeout != nil {
+		timeoutSeconds = *input.Timeout
+	}
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds*float64(time.Second)))
+	defer cancel()
+
+	body, contentType, err := webFetchFetch(deps, timeoutCtx, input)
+	if err != nil {
+		return WebFetchOutput{}, err
+	}
+
+	output, err := webFetchConvert(string(body), contentType, input.Format)
+	if err != nil {
+		return WebFetchOutput{}, err
+	}
+	return WebFetchOutput{
+		URL:         input.URL,
+		ContentType: contentType,
+		Format:      input.Format,
+		Output:      output,
+	}, nil
+}
+
+func RegisterWebFetch(registry *Registry, deps WebFetchDeps) (func(), error) {
+	return registry.Register(map[string]Tool{
+		WebFetchName: MakeWebFetch(deps),
+	})
+}
+
+var webFetchSkipTextTags = map[string]bool{
+	"script": true, "style": true, "noscript": true, "iframe": true, "object": true, "embed": true,
+}
+
+var webFetchVoidTags = map[string]bool{
+	"area": true, "base": true, "basefont": true, "br": true, "col": true, "command": true,
+	"embed": true, "frame": true, "hr": true, "img": true, "input": true, "isindex": true,
+	"keygen": true, "link": true, "meta": true, "param": true, "source": true, "track": true,
+	"wbr": true,
+}
+
+// ExtractTextFromHTML returns the concatenated text of an HTML document while
+// dropping the contents of script/style/noscript/iframe/object/embed elements.
+// It ports webfetch.ts extractTextFromHTML (htmlparser2 streaming parser). The
+// only known divergence is nested markup inside <iframe>: the HTML spec treats
+// iframe content as raw text, so it is not tokenized like htmlparser2 would.
+func ExtractTextFromHTML(input string) string {
+	var b strings.Builder
+	tokenizer := html.NewTokenizer(strings.NewReader(input))
+	skipDepth := 0
+	for {
+		tokenType := tokenizer.Next()
+		if tokenType == html.ErrorToken {
+			break
+		}
+		switch tokenType {
+		case html.StartTagToken, html.SelfClosingTagToken:
+			name, _ := tokenizer.TagName()
+			tag := string(name)
+			if webFetchVoidTags[tag] {
+				continue
+			}
+			if skipDepth > 0 || webFetchSkipTextTags[tag] {
+				skipDepth++
+			}
+		case html.TextToken:
+			if skipDepth == 0 {
+				b.Write(tokenizer.Text())
+			}
+		case html.EndTagToken:
+			if skipDepth > 0 {
+				skipDepth--
+			}
+		}
+	}
+	return turndownTrimSpace(b.String())
+}
+
+// ConvertHTMLToMarkdown converts HTML to Markdown using the same turndown
+// options configured in webfetch.ts convertHTMLToMarkdown.
+func ConvertHTMLToMarkdown(input string) (string, error) {
+	options := defaultTurndownOptions()
+	options.headingStyle = "atx"
+	options.hr = "---"
+	options.bulletListMarker = "-"
+	options.codeBlockStyle = "fenced"
+	options.emDelimiter = "*"
+	service := newTurndownService(options)
+	service.removeTags("script", "style", "meta", "link")
+	return service.turndown(input)
+}

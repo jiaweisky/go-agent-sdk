@@ -1,0 +1,116 @@
+package schema
+
+// ModelID mirrors the branded ModelV2.ID string.
+type ModelID string
+
+func (id ModelID) String() string {
+	return string(id)
+}
+
+// ModelVariantID mirrors the branded VariantID string.
+type ModelVariantID string
+
+// ModelFamily mirrors the branded Family string.
+type ModelFamily string
+
+// ModelRef mirrors Model.Ref.
+type ModelRef struct {
+	ID         ModelID         `json:"id"`
+	ProviderID ProviderID      `json:"providerID"`
+	Variant    *ModelVariantID `json:"variant,omitempty"`
+}
+
+// ModelCapabilities mirrors Model.Capabilities.
+type ModelCapabilities struct {
+	Tools  bool     `json:"tools"`
+	Input  []string `json:"input"`
+	Output []string `json:"output"`
+}
+
+// ModelCostTier mirrors the Model.Cost tier struct.
+type ModelCostTier struct {
+	Type string `json:"type"`
+	Size int    `json:"size"`
+}
+
+// ModelCostCache mirrors the Model.Cost cache struct.
+type ModelCostCache struct {
+	Read  float64 `json:"read"`
+	Write float64 `json:"write"`
+}
+
+// ModelCost mirrors Model.Cost.
+type ModelCost struct {
+	Tier   *ModelCostTier  `json:"tier,omitempty"`
+	Input  float64         `json:"input"`
+	Output float64         `json:"output"`
+	Cache  *ModelCostCache `json:"cache,omitempty"`
+}
+
+// ModelAPI mirrors Model.Api (id plus the AISDK | Native union).
+type ModelAPI struct {
+	ID       *ModelID       `json:"id,omitempty"`
+	Type     string         `json:"type"`
+	Package  string         `json:"package,omitempty"`
+	URL      *string        `json:"url,omitempty"`
+	Settings map[string]any `json:"settings,omitempty"`
+}
+
+// ModelLimit mirrors the Model.Info limit struct.
+type ModelLimit struct {
+	Context int  `json:"context"`
+	Input   *int `json:"input,omitempty"`
+	Output  int  `json:"output"`
+}
+
+// ModelTime mirrors the Model.Info time struct.
+type ModelTime struct {
+	Released float64 `json:"released"`
+}
+
+// ModelVariant mirrors the Model.Info variants entry.
+type ModelVariant struct {
+	ID      ModelVariantID    `json:"id"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    map[string]any    `json:"body,omitempty"`
+}
+
+// ModelInfo mirrors ModelV2.Info.
+type ModelInfo struct {
+	ID           ModelID           `json:"id"`
+	ProviderID   ProviderID        `json:"providerID"`
+	Family       *ModelFamily      `json:"family,omitempty"`
+	Name         string            `json:"name"`
+	API          ModelAPI          `json:"api"`
+	Capabilities ModelCapabilities `json:"capabilities"`
+	Request      ProviderRequest   `json:"request"`
+	Variants     []ModelVariant    `json:"variants"`
+	Time         ModelTime         `json:"time"`
+	Cost         []ModelCost       `json:"cost"`
+	Status       string            `json:"status"`
+	Enabled      bool              `json:"enabled"`
+	Limit        ModelLimit        `json:"limit"`
+}
+
+// ModelInfoEmpty mirrors Model.Info.empty.
+func ModelInfoEmpty(providerID ProviderID, modelID ModelID) ModelInfo {
+	id := modelID
+	return ModelInfo{
+		ID:         modelID,
+		ProviderID: providerID,
+		Name:       string(modelID),
+		API:        ModelAPI{ID: &id, Type: "native", Settings: map[string]any{}},
+		Capabilities: ModelCapabilities{
+			Tools:  false,
+			Input:  []string{},
+			Output: []string{},
+		},
+		Request:  ProviderRequest{Headers: map[string]string{}, Body: map[string]any{}},
+		Variants: []ModelVariant{},
+		Time:     ModelTime{Released: 0},
+		Cost:     []ModelCost{},
+		Status:   "active",
+		Enabled:  true,
+		Limit:    ModelLimit{Context: 0, Output: 0},
+	}
+}
