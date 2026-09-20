@@ -100,11 +100,11 @@ func Make[Input, Output, Structured any](cfg Config[Input, Output, Structured]) 
 			if cfg.Structured != nil {
 				outSchema = *cfg.Structured
 			}
-			closedOut := closeObjectSchemas(outSchema)
+			closedOut := modelFacingSchema(outSchema)
 			def := schema.NewToolDefinition(schema.ToolDefinitionInput{
 				Name:         name,
 				Description:  cfg.Description,
-				InputSchema:  closeObjectSchemas(cfg.Input),
+				InputSchema:  modelFacingSchema(cfg.Input),
 				OutputSchema: &closedOut,
 			})
 			definitions[name] = def
@@ -212,29 +212,36 @@ func Settle(tool Tool, execCtx context.Context, call schema.ToolCallPart, ctx Co
 	return rt.settle(execCtx, call, ctx)
 }
 
-// closeObjectSchemas mirrors Effect's Schema.toJsonSchemaDocument for
-// Schema.Struct: every object schema derived from a struct is closed with
-// `additionalProperties: false`. It deep-copies the schema so shared nested
-// values (e.g. a struct reused across two parents) are not mutated.
+// modelFacingSchema mirrors Effect's Schema.toJsonSchemaDocument for the
+// struct schemas used by core tools:
+//
+//   - every object schema derived from a struct is closed with
+//     `additionalProperties: false`;
+//   - every optional (not required) property is wrapped as
+//     `anyOf: [<schema>, { "type": "null" }]`.
+//
+// It deep-copies the schema so shared nested values (e.g. a struct reused
+// across two parents) are not mutated.
 //
 // This is applied only to the model-facing tool definition. Input validation
-// stays permissive because Effect's runtime decoder strips unknown properties
-// instead of rejecting them.
-func closeObjectSchemas(js schema.JsonSchema) schema.JsonSchema {
-	closed, _ := closeSchemaValue(js).(map[string]any)
-	return schema.JsonSchema(closed)
+// keeps the original schemas: Effect's runtime decoder rejects null for
+// optional fields and strips unknown properties, neither of which is
+// expressed by the generated JSON Schema.
+func modelFacingSchema(js schema.JsonSchema) schema.JsonSchema {
+	transformed, _ := modelFacingValue(js).(map[string]any)
+	return schema.JsonSchema(transformed)
 }
 
-func closeSchemaValue(value any) any {
+func modelFacingValue(value any) any {
 	switch v := value.(type) {
 	case schema.JsonSchema:
-		return closeSchemaMap(map[string]any(v))
+		return modelFacingMap(map[string]any(v))
 	case map[string]any:
-		return closeSchemaMap(v)
+		return modelFacingMap(v)
 	case []any:
 		result := make([]any, len(v))
 		for i, item := range v {
-			result[i] = closeSchemaValue(item)
+			result[i] = modelFacingValue(item)
 		}
 		return result
 	default:
@@ -242,17 +249,42 @@ func closeSchemaValue(value any) any {
 	}
 }
 
-func closeSchemaMap(input map[string]any) map[string]any {
+func modelFacingMap(input map[string]any) map[string]any {
 	result := make(map[string]any, len(input))
 	for key, value := range input {
-		result[key] = closeSchemaValue(value)
+		result[key] = modelFacingValue(value)
 	}
-	if _, isObject := result["properties"]; isObject {
-		if _, ok := result["additionalProperties"]; !ok {
-			result["additionalProperties"] = false
+	properties, isObject := result["properties"].(map[string]any)
+	if !isObject {
+		return result
+	}
+	if _, ok := result["additionalProperties"]; !ok {
+		result["additionalProperties"] = false
+	}
+	required := schemaStringSet(result["required"])
+	for name, property := range properties {
+		if required[name] {
+			continue
+		}
+		properties[name] = map[string]any{
+			"anyOf": []any{property, map[string]any{"type": "null"}},
 		}
 	}
 	return result
+}
+
+func schemaStringSet(value any) map[string]bool {
+	set := make(map[string]bool)
+	items, ok := value.([]any)
+	if !ok {
+		return set
+	}
+	for _, item := range items {
+		if name, ok := item.(string); ok {
+			set[name] = true
+		}
+	}
+	return set
 }
 
 func compileSchema(js schema.JsonSchema) *jsonschema.Schema {
