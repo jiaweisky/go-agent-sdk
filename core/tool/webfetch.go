@@ -38,7 +38,6 @@ var WebFetchInputSchema = schema.JsonSchema{
 		"format": map[string]any{
 			"type":        "string",
 			"enum":        []any{"text", "markdown", "html"},
-			"default":     "markdown",
 			"description": "The format to return the content in. Defaults to markdown.",
 		},
 		"timeout": map[string]any{

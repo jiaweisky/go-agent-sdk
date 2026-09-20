@@ -254,6 +254,7 @@ func modelFacingMap(input map[string]any) map[string]any {
 	for key, value := range input {
 		result[key] = modelFacingValue(value)
 	}
+	applyEffectShape(result)
 	properties, isObject := result["properties"].(map[string]any)
 	if !isObject {
 		return result
@@ -271,6 +272,78 @@ func modelFacingMap(input map[string]any) map[string]any {
 		}
 	}
 	return result
+}
+
+// numericConstraintKeys are the JSON Schema numeric keywords Effect emits inside
+// `allOf` for `Schema.Int`/`Schema.Number` checks, in the order they are moved.
+var numericConstraintKeys = []string{"exclusiveMinimum", "minimum", "exclusiveMaximum", "maximum", "multipleOf"}
+
+// applyEffectShape rewrites the hand-written schema keywords that Effect's
+// Schema.toJsonSchemaDocument represents differently:
+//
+//   - `Schema.Literal` / literal unions are emitted as `{"type": "...", "enum": [...]}`
+//     rather than `const` or a bare `enum`;
+//   - `Schema.Number` is emitted as an `anyOf` that also accepts the string
+//     encodings "NaN"/"Infinity"/"-Infinity";
+//   - `Schema.Int`/`Schema.Number` checks are emitted inside `allOf`.
+func applyEffectShape(result map[string]any) {
+	if literal, ok := result["const"]; ok {
+		delete(result, "const")
+		result["enum"] = []any{literal}
+		if _, hasType := result["type"]; !hasType {
+			result["type"] = schemaTypeName(literal)
+		}
+	}
+	if _, hasEnum := result["enum"]; hasEnum {
+		if _, hasType := result["type"]; !hasType {
+			if values, ok := result["enum"].([]any); ok && len(values) > 0 {
+				result["type"] = schemaTypeName(values[0])
+			}
+		}
+	}
+	switch result["type"] {
+	case "number":
+		delete(result, "type")
+		result["anyOf"] = []any{
+			map[string]any{"type": "number"},
+			map[string]any{"type": "string", "enum": []any{"NaN"}},
+			map[string]any{"type": "string", "enum": []any{"Infinity"}},
+			map[string]any{"type": "string", "enum": []any{"-Infinity"}},
+		}
+		moveNumericConstraints(result)
+	case "integer":
+		moveNumericConstraints(result)
+	}
+}
+
+func moveNumericConstraints(result map[string]any) {
+	var allOf []any
+	for _, key := range numericConstraintKeys {
+		value, ok := result[key]
+		if !ok {
+			continue
+		}
+		delete(result, key)
+		allOf = append(allOf, map[string]any{key: value})
+	}
+	if len(allOf) > 0 {
+		result["allOf"] = allOf
+	}
+}
+
+func schemaTypeName(value any) string {
+	switch value.(type) {
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case float64, float32, int, int32, int64:
+		return "number"
+	case nil:
+		return "null"
+	default:
+		return "string"
+	}
 }
 
 func schemaStringSet(value any) map[string]bool {

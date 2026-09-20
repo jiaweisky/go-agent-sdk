@@ -78,6 +78,39 @@ func TestModelFacingSchema(t *testing.T) {
 	}
 }
 
+func TestModelFacingEffectShape(t *testing.T) {
+	// Schema.Literal -> typed enum.
+	literal := modelFacingSchema(schema.JsonSchema{"const": "text-page"})
+	if !reflect.DeepEqual(literal, schema.JsonSchema{"type": "string", "enum": []any{"text-page"}}) {
+		t.Fatalf("literal = %+v", literal)
+	}
+	// Bare enum -> typed enum.
+	enum := modelFacingSchema(schema.JsonSchema{"enum": []any{"file", "directory"}})
+	if !reflect.DeepEqual(enum, schema.JsonSchema{"type": "string", "enum": []any{"file", "directory"}}) {
+		t.Fatalf("enum = %+v", enum)
+	}
+	// Schema.Number -> NaN/Infinity anyOf.
+	number := modelFacingSchema(schema.JsonSchema{"type": "number"})
+	expectedNumber := schema.JsonSchema{"anyOf": []any{
+		map[string]any{"type": "number"},
+		map[string]any{"type": "string", "enum": []any{"NaN"}},
+		map[string]any{"type": "string", "enum": []any{"Infinity"}},
+		map[string]any{"type": "string", "enum": []any{"-Infinity"}},
+	}}
+	if !reflect.DeepEqual(number, expectedNumber) {
+		t.Fatalf("number = %+v", number)
+	}
+	// Int checks -> allOf.
+	integer := modelFacingSchema(schema.JsonSchema{"type": "integer", "exclusiveMinimum": 0, "maximum": 600000})
+	expectedInteger := schema.JsonSchema{"type": "integer", "allOf": []any{
+		map[string]any{"exclusiveMinimum": 0},
+		map[string]any{"maximum": 600000},
+	}}
+	if !reflect.DeepEqual(integer, expectedInteger) {
+		t.Fatalf("integer = %+v", integer)
+	}
+}
+
 func TestToolDefinitionModelFacing(t *testing.T) {
 	definition := Definition(TodoWriteName, MakeTodoWrite(TodoWriteDeps{
 		Todos:      &stubTodoUpdater{},
