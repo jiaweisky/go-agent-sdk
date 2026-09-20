@@ -1,9 +1,46 @@
 package tool
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/user/go-agent-sdk/jsonschema"
 )
+
+// TestAllToolSchemasCompile guards against a schema that cannot be compiled:
+// Make panics in that case, so this test makes the failure obvious at build
+// time instead of at tool registration.
+func TestAllToolSchemasCompile(t *testing.T) {
+	cases := map[string]*jsonschema.Schema{
+		"apply_patch.in": ApplyPatchInputSchema, "apply_patch.out": ApplyPatchOutputSchema,
+		"bash.in": BashInputSchema, "bash.out": BashOutputSchema, "bash.structured": BashStructuredOutputSchema,
+		"edit.in": EditInputSchema, "edit.out": EditOutputSchema,
+		"glob.in": GlobInputSchema, "glob.out": GlobOutputSchema,
+		"grep.in": GrepInputSchema, "grep.out": GrepOutputSchema,
+		"question.in": QuestionInputSchema, "question.out": QuestionOutputSchema,
+		"read.in": ReadInputSchema, "read.out": ReadOutputSchema,
+		"skill.in": SkillInputSchema, "skill.out": SkillOutputSchema,
+		"todowrite.in": TodoWriteInputSchema, "todowrite.out": TodoWriteOutputSchema,
+		"webfetch.in": WebFetchInputSchema, "webfetch.out": WebFetchOutputSchema,
+		"websearch.in": WebSearchInputSchema, "websearch.out": WebSearchOutputSchema,
+		"write.in": WriteInputSchema, "write.out": WriteOutputSchema,
+	}
+	for name, schema := range cases {
+		if schema == nil {
+			t.Fatalf("%s: nil schema", name)
+		}
+		if _, err := json.Marshal(schema.Model()); err != nil {
+			t.Errorf("%s: model marshal: %v", name, err)
+		}
+		if compiled := compileSchema(schema.Model()); compiled == nil {
+			t.Errorf("%s: model schema failed to compile", name)
+		}
+		if compiled := compileSchema(schema.Validation()); compiled == nil {
+			t.Errorf("%s: validation schema failed to compile", name)
+		}
+	}
+}
 
 func TestToolDefinitionModelFacing(t *testing.T) {
 	definition := Definition(TodoWriteName, MakeTodoWrite(TodoWriteDeps{

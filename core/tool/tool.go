@@ -80,13 +80,13 @@ type Config[Input, Output, Structured any] struct {
 func Make[Input, Output, Structured any](cfg Config[Input, Output, Structured]) *Def[Input, Output, Structured] {
 	var inputSchema, outputSchema, structuredSchema *jsonschema6.Schema
 	if cfg.Input != nil {
-		inputSchema = compileSchema(cfg.Input.Validation())
+		inputSchema = mustCompileSchema(cfg.Input.Validation())
 	}
 	if cfg.Output != nil {
-		outputSchema = compileSchema(cfg.Output.Validation())
+		outputSchema = mustCompileSchema(cfg.Output.Validation())
 	}
 	if cfg.Structured != nil {
-		structuredSchema = compileSchema(cfg.Structured.Validation())
+		structuredSchema = mustCompileSchema(cfg.Structured.Validation())
 	}
 
 	t := &Def[Input, Output, Structured]{}
@@ -216,6 +216,17 @@ func Settle(tool Tool, execCtx context.Context, call schema.ToolCallPart, ctx Co
 		panic("invalid Core Tool value")
 	}
 	return rt.settle(execCtx, call, ctx)
+}
+
+// mustCompileSchema compiles a validation schema, panicking when a non-nil
+// schema cannot be compiled. Silently skipping validation would let malformed
+// tool calls through, so this fails fast at Make time instead.
+func mustCompileSchema(js map[string]any) *jsonschema6.Schema {
+	compiled := compileSchema(js)
+	if compiled == nil {
+		panic("tool: schema failed to compile")
+	}
+	return compiled
 }
 
 func compileSchema(js map[string]any) *jsonschema6.Schema {
