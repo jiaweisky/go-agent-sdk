@@ -15,6 +15,7 @@ import (
 	"github.com/user/go-agent-sdk/core/skill"
 	"github.com/user/go-agent-sdk/core/systemcontext"
 	"github.com/user/go-agent-sdk/core/tool"
+	"github.com/user/go-agent-sdk/jsonschema"
 	"github.com/user/go-agent-sdk/llm/protocols"
 	"github.com/user/go-agent-sdk/llm/route"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
@@ -131,8 +132,8 @@ func newRunnerTestRunner(t *testing.T, db *database.Database, llm route.LLMClien
 	if _, err := registry.Register(map[string]tool.Tool{
 		"echo": tool.Make(tool.Config[map[string]any, string, string]{
 			Description: "echo",
-			Input:       llmschema.JsonSchema{"type": "object"},
-			Output:      llmschema.JsonSchema{"type": "string"},
+			Input:       jsonschema.Raw(map[string]any{"type": "object"}),
+			Output:      jsonschema.Raw(map[string]any{"type": "string"}),
 			Execute: func(context.Context, map[string]any, tool.Context) (string, error) {
 				return "ok", nil
 			},

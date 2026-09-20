@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 const ReadName = "read"
@@ -23,72 +23,48 @@ type ReadInput struct {
 	Limit  *int   `json:"limit,omitempty"`
 }
 
-var ReadInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"path": map[string]any{"type": "string"},
-		"offset": map[string]any{
-			"type":             "integer",
-			"exclusiveMinimum": 0,
-			"description":      "The 1-based directory entry or text line offset to start reading from",
-		},
-		"limit": map[string]any{
-			"type":             "integer",
-			"exclusiveMinimum": 0,
-			"maximum":          ReadMaxReadLines,
-			"description":      "The maximum number of directory entries or text lines to read",
-		},
-	},
-	"required": []any{"path"},
-}
+var ReadInputSchema = jsonschema.Object(
+	jsonschema.Required("path", jsonschema.String()),
+	jsonschema.Optional("offset", jsonschema.Integer(
+		jsonschema.ExclusiveMinimum(0),
+		jsonschema.Description("The 1-based directory entry or text line offset to start reading from"),
+	)),
+	jsonschema.Optional("limit", jsonschema.Integer(
+		jsonschema.ExclusiveMinimum(0),
+		jsonschema.Maximum(ReadMaxReadLines),
+		jsonschema.Description("The maximum number of directory entries or text lines to read"),
+	)),
+)
 
-var readEntrySchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"path": map[string]any{"type": "string"},
-		"type": map[string]any{"enum": []any{"file", "directory"}},
-	},
-	"required": []any{"path", "type"},
-}
+var readEntrySchema = jsonschema.Object(
+	jsonschema.Required("path", jsonschema.String()),
+	jsonschema.Required("type", jsonschema.Literal("file", "directory")),
+)
 
-var readContentSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"uri":      map[string]any{"type": "string"},
-		"name":     map[string]any{"type": "string"},
-		"content":  map[string]any{"type": "string"},
-		"encoding": map[string]any{"enum": []any{"utf8", "base64"}},
-		"mime":     map[string]any{"type": "string"},
-	},
-	"required": []any{"uri", "content", "encoding", "mime"},
-}
+var readContentSchema = jsonschema.Object(
+	jsonschema.Required("uri", jsonschema.String()),
+	jsonschema.Optional("name", jsonschema.String()),
+	jsonschema.Required("content", jsonschema.String()),
+	jsonschema.Required("encoding", jsonschema.Literal("utf8", "base64")),
+	jsonschema.Required("mime", jsonschema.String()),
+)
 
-var readTextPageSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"type":      map[string]any{"const": "text-page"},
-		"content":   map[string]any{"type": "string"},
-		"mime":      map[string]any{"type": "string"},
-		"offset":    map[string]any{"type": "integer", "exclusiveMinimum": 0},
-		"truncated": map[string]any{"type": "boolean"},
-		"next":      map[string]any{"type": "integer", "exclusiveMinimum": 0},
-	},
-	"required": []any{"type", "content", "mime", "offset", "truncated"},
-}
+var readTextPageSchema = jsonschema.Object(
+	jsonschema.Required("type", jsonschema.Literal("text-page")),
+	jsonschema.Required("content", jsonschema.String()),
+	jsonschema.Required("mime", jsonschema.String()),
+	jsonschema.Required("offset", jsonschema.Integer(jsonschema.ExclusiveMinimum(0))),
+	jsonschema.Required("truncated", jsonschema.Boolean()),
+	jsonschema.Optional("next", jsonschema.Integer(jsonschema.ExclusiveMinimum(0))),
+)
 
-var readListPageSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"entries":   map[string]any{"type": "array", "items": readEntrySchema},
-		"truncated": map[string]any{"type": "boolean"},
-		"next":      map[string]any{"type": "integer", "exclusiveMinimum": 0},
-	},
-	"required": []any{"entries", "truncated"},
-}
+var readListPageSchema = jsonschema.Object(
+	jsonschema.Required("entries", jsonschema.Array(readEntrySchema)),
+	jsonschema.Required("truncated", jsonschema.Boolean()),
+	jsonschema.Optional("next", jsonschema.Integer(jsonschema.ExclusiveMinimum(0))),
+)
 
-var ReadOutputSchema = schema.JsonSchema{
-	"anyOf": []any{readContentSchema, readTextPageSchema, readListPageSchema},
-}
+var ReadOutputSchema = jsonschema.Union(readContentSchema, readTextPageSchema, readListPageSchema)
 
 type ReadDeps struct {
 	Mutation   core.LocationMutation

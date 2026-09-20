@@ -3,113 +3,7 @@ package tool
 import (
 	"reflect"
 	"testing"
-
-	"github.com/user/go-agent-sdk/llm/schema"
 )
-
-func TestModelFacingSchema(t *testing.T) {
-	input := schema.JsonSchema{
-		"type": "object",
-		"properties": map[string]any{
-			"required": map[string]any{"type": "string"},
-			"optional": map[string]any{"type": "string", "description": "d"},
-			"nested": map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"value": map[string]any{"type": "string"},
-				},
-				"required": []any{"value"},
-			},
-			"list": map[string]any{
-				"type": "array",
-				"items": map[string]any{
-					"type":       "object",
-					"properties": map[string]any{"value": map[string]any{"type": "string"}},
-					"required":   []any{"value"},
-				},
-			},
-		},
-		"required": []any{"required", "nested", "list"},
-	}
-	transformed := modelFacingSchema(input)
-
-	if transformed["additionalProperties"] != false {
-		t.Fatalf("top-level additionalProperties = %v", transformed["additionalProperties"])
-	}
-	properties := transformed["properties"].(map[string]any)
-
-	// Required property stays a bare schema.
-	if got := properties["required"]; !reflect.DeepEqual(got, map[string]any{"type": "string"}) {
-		t.Fatalf("required property = %+v", got)
-	}
-
-	// Optional property is wrapped in anyOf [schema, null].
-	optional := properties["optional"].(map[string]any)
-	anyOf, ok := optional["anyOf"].([]any)
-	if !ok || len(anyOf) != 2 {
-		t.Fatalf("optional property = %+v", optional)
-	}
-	if !reflect.DeepEqual(anyOf[0], map[string]any{"type": "string", "description": "d"}) {
-		t.Fatalf("optional anyOf[0] = %+v", anyOf[0])
-	}
-	if !reflect.DeepEqual(anyOf[1], map[string]any{"type": "null"}) {
-		t.Fatalf("optional anyOf[1] = %+v", anyOf[1])
-	}
-
-	nested := properties["nested"].(map[string]any)
-	if nested["additionalProperties"] != false {
-		t.Fatalf("nested additionalProperties = %v", nested["additionalProperties"])
-	}
-	items := properties["list"].(map[string]any)["items"].(map[string]any)
-	if items["additionalProperties"] != false {
-		t.Fatalf("items additionalProperties = %v", items["additionalProperties"])
-	}
-
-	// The original schema must not be mutated.
-	if _, ok := input["additionalProperties"]; ok {
-		t.Fatalf("input schema was mutated: %+v", input)
-	}
-	originalProperties := input["properties"].(map[string]any)
-	if _, ok := originalProperties["nested"].(map[string]any)["additionalProperties"]; ok {
-		t.Fatalf("nested input schema was mutated")
-	}
-	if _, ok := originalProperties["optional"].(map[string]any)["anyOf"]; ok {
-		t.Fatalf("optional input schema was mutated")
-	}
-}
-
-func TestModelFacingEffectShape(t *testing.T) {
-	// Schema.Literal -> typed enum.
-	literal := modelFacingSchema(schema.JsonSchema{"const": "text-page"})
-	if !reflect.DeepEqual(literal, schema.JsonSchema{"type": "string", "enum": []any{"text-page"}}) {
-		t.Fatalf("literal = %+v", literal)
-	}
-	// Bare enum -> typed enum.
-	enum := modelFacingSchema(schema.JsonSchema{"enum": []any{"file", "directory"}})
-	if !reflect.DeepEqual(enum, schema.JsonSchema{"type": "string", "enum": []any{"file", "directory"}}) {
-		t.Fatalf("enum = %+v", enum)
-	}
-	// Schema.Number -> NaN/Infinity anyOf.
-	number := modelFacingSchema(schema.JsonSchema{"type": "number"})
-	expectedNumber := schema.JsonSchema{"anyOf": []any{
-		map[string]any{"type": "number"},
-		map[string]any{"type": "string", "enum": []any{"NaN"}},
-		map[string]any{"type": "string", "enum": []any{"Infinity"}},
-		map[string]any{"type": "string", "enum": []any{"-Infinity"}},
-	}}
-	if !reflect.DeepEqual(number, expectedNumber) {
-		t.Fatalf("number = %+v", number)
-	}
-	// Int checks -> allOf.
-	integer := modelFacingSchema(schema.JsonSchema{"type": "integer", "exclusiveMinimum": 0, "maximum": 600000})
-	expectedInteger := schema.JsonSchema{"type": "integer", "allOf": []any{
-		map[string]any{"exclusiveMinimum": 0},
-		map[string]any{"maximum": 600000},
-	}}
-	if !reflect.DeepEqual(integer, expectedInteger) {
-		t.Fatalf("integer = %+v", integer)
-	}
-}
 
 func TestToolDefinitionModelFacing(t *testing.T) {
 	definition := Definition(TodoWriteName, MakeTodoWrite(TodoWriteDeps{
@@ -132,11 +26,43 @@ func TestToolDefinitionModelFacing(t *testing.T) {
 	}
 }
 
+func TestBashInputModelShape(t *testing.T) {
+	model := BashInputSchema.Model()
+	properties := model["properties"].(map[string]any)
+
+	if got := properties["command"]; !reflect.DeepEqual(got, map[string]any{
+		"type": "string", "description": "Shell command string to execute",
+	}) {
+		t.Fatalf("command = %+v", got)
+	}
+
+	workdir := properties["workdir"].(map[string]any)
+	anyOf, ok := workdir["anyOf"].([]any)
+	if !ok || len(anyOf) != 2 || !reflect.DeepEqual(anyOf[1], map[string]any{"type": "null"}) {
+		t.Fatalf("workdir = %+v", workdir)
+	}
+	if _, ok := workdir["description"]; !ok {
+		t.Fatalf("workdir description should live on the wrapper: %+v", workdir)
+	}
+
+	timeout := properties["timeout"].(map[string]any)["anyOf"].([]any)[0].(map[string]any)
+	if timeout["type"] != "integer" {
+		t.Fatalf("timeout type = %v", timeout["type"])
+	}
+	allOf, ok := timeout["allOf"].([]any)
+	if !ok || len(allOf) != 2 {
+		t.Fatalf("timeout allOf = %+v", timeout["allOf"])
+	}
+	if !reflect.DeepEqual(allOf[0], map[string]any{"exclusiveMinimum": 0}) {
+		t.Fatalf("timeout allOf[0] = %+v", allOf[0])
+	}
+}
+
 func TestValidationRejectsNullOptional(t *testing.T) {
 	// Effect's decoder rejects null for optional fields even though its JSON
 	// Schema advertises `anyOf: [T, null]`; the validation schema must keep
 	// rejecting null while accepting an absent field.
-	compiled := compileSchema(schema.JsonSchema{
+	compiled := compileSchema(map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"a": map[string]any{"type": "string"},

@@ -17,7 +17,7 @@ import (
 	"github.com/user/go-agent-sdk/core/flag"
 	"github.com/user/go-agent-sdk/core/installation"
 	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 const WebSearchName = "websearch"
@@ -41,52 +41,37 @@ Optional controls support result count, live crawling ('fallback' or 'preferred'
 
 The current year is %d. Use this year when searching for recent information or current events.`, time.Now().Year())
 
-var WebSearchInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"query": map[string]any{
-			"type":        "string",
-			"description": "Websearch query",
-		},
-		"numResults": map[string]any{
-			"type":             "integer",
-			"exclusiveMinimum": 0,
-			"maximum":          WebSearchMaxNumResults,
-			"description":      fmt.Sprintf("Number of search results to return (default: 8, maximum: %d)", WebSearchMaxNumResults),
-		},
-		"livecrawl": map[string]any{
-			"type": "string",
-			"enum": []any{"fallback", "preferred"},
-			"description": "Live crawl mode - 'fallback': use live crawling as backup if cached unavailable, " +
-				"'preferred': prioritize live crawling (default: 'fallback')",
-		},
-		"type": map[string]any{
-			"type": "string",
-			"enum": []any{"auto", "fast", "deep"},
-			"description": "Search type - 'auto': balanced search (default), 'fast': quick results, " +
-				"'deep': comprehensive search",
-		},
-		"contextMaxCharacters": map[string]any{
-			"type":             "integer",
-			"exclusiveMinimum": 0,
-			"maximum":          WebSearchMaxContextCharacters,
-			"description": fmt.Sprintf(
-				"Maximum characters for context string optimized for models (default: 10000, maximum: %d)",
-				WebSearchMaxContextCharacters,
-			),
-		},
-	},
-	"required": []any{"query"},
-}
+var WebSearchInputSchema = jsonschema.Object(
+	jsonschema.Required("query", jsonschema.String(jsonschema.Description("Websearch query"))),
+	jsonschema.Optional("numResults", jsonschema.Integer(
+		jsonschema.ExclusiveMinimum(0),
+		jsonschema.Maximum(WebSearchMaxNumResults),
+		jsonschema.Description(fmt.Sprintf("Number of search results to return (default: 8, maximum: %d)", WebSearchMaxNumResults)),
+	)),
+	jsonschema.Optional("livecrawl", jsonschema.Enum(
+		[]any{"fallback", "preferred"},
+		jsonschema.Description("Live crawl mode - 'fallback': use live crawling as backup if cached unavailable, "+
+			"'preferred': prioritize live crawling (default: 'fallback')"),
+	)),
+	jsonschema.Optional("type", jsonschema.Enum(
+		[]any{"auto", "fast", "deep"},
+		jsonschema.Description("Search type - 'auto': balanced search (default), 'fast': quick results, "+
+			"'deep': comprehensive search"),
+	)),
+	jsonschema.Optional("contextMaxCharacters", jsonschema.Integer(
+		jsonschema.ExclusiveMinimum(0),
+		jsonschema.Maximum(WebSearchMaxContextCharacters),
+		jsonschema.Description(fmt.Sprintf(
+			"Maximum characters for context string optimized for models (default: 10000, maximum: %d)",
+			WebSearchMaxContextCharacters,
+		)),
+	)),
+)
 
-var WebSearchOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"provider": map[string]any{"enum": []any{"exa", "parallel"}},
-		"text":     map[string]any{"type": "string"},
-	},
-	"required": []any{"provider", "text"},
-}
+var WebSearchOutputSchema = jsonschema.Object(
+	jsonschema.Required("provider", jsonschema.Literal("exa", "parallel")),
+	jsonschema.Required("text", jsonschema.String()),
+)
 
 type WebSearchInput struct {
 	Query                string `json:"query"`

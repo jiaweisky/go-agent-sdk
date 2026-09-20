@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 const GrepName = "grep"
@@ -28,65 +28,36 @@ func grepDefaultLimit() int {
 	return int(value)
 }
 
-var GrepInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"pattern": map[string]any{
-			"type":        "string",
-			"description": "Regex pattern to search for in file contents",
-		},
-		"path": map[string]any{
-			"type":        "string",
-			"description": "Relative directory to search. Defaults to the active Location.",
-		},
-		"include": map[string]any{
-			"type":        "string",
-			"description": `File glob to include in the search (for example, "*.js" or "*.{ts,tsx}")`,
-		},
-		"limit": map[string]any{
-			"type":             "integer",
-			"exclusiveMinimum": 0,
-			"description":      "Maximum matches to return",
-		},
-	},
-	"required": []any{"pattern"},
-}
+var GrepInputSchema = jsonschema.Object(
+	jsonschema.Required("pattern", jsonschema.String(jsonschema.Description("Regex pattern to search for in file contents"))),
+	jsonschema.Optional("path", jsonschema.String(jsonschema.Description("Relative directory to search. Defaults to the active Location."))),
+	jsonschema.Optional("include", jsonschema.String(jsonschema.Description(`File glob to include in the search (for example, "*.js" or "*.{ts,tsx}")`))),
+	jsonschema.Optional("limit", jsonschema.Integer(
+		jsonschema.ExclusiveMinimum(0),
+		jsonschema.Description("Maximum matches to return"),
+	)),
+)
 
-var grepEntrySchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"path": map[string]any{"type": "string"},
-		"type": map[string]any{"enum": []any{"file", "directory"}},
-	},
-	"required": []any{"path", "type"},
-}
+var grepEntrySchema = jsonschema.Object(
+	jsonschema.Required("path", jsonschema.String()),
+	jsonschema.Required("type", jsonschema.Literal("file", "directory")),
+)
 
-var grepSubmatchSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"text":  map[string]any{"type": "string"},
-		"start": map[string]any{"type": "integer", "minimum": 0},
-		"end":   map[string]any{"type": "integer", "minimum": 0},
-	},
-	"required": []any{"text", "start", "end"},
-}
+var grepSubmatchSchema = jsonschema.Object(
+	jsonschema.Required("text", jsonschema.String()),
+	jsonschema.Required("start", jsonschema.Integer(jsonschema.Minimum(0))),
+	jsonschema.Required("end", jsonschema.Integer(jsonschema.Minimum(0))),
+)
 
-var grepMatchSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"entry":      grepEntrySchema,
-		"line":       map[string]any{"type": "integer", "exclusiveMinimum": 0},
-		"offset":     map[string]any{"type": "integer", "minimum": 0},
-		"text":       map[string]any{"type": "string"},
-		"submatches": map[string]any{"type": "array", "items": grepSubmatchSchema},
-	},
-	"required": []any{"entry", "line", "offset", "text", "submatches"},
-}
+var grepMatchSchema = jsonschema.Object(
+	jsonschema.Required("entry", grepEntrySchema),
+	jsonschema.Required("line", jsonschema.Integer(jsonschema.ExclusiveMinimum(0))),
+	jsonschema.Required("offset", jsonschema.Integer(jsonschema.Minimum(0))),
+	jsonschema.Required("text", jsonschema.String()),
+	jsonschema.Required("submatches", jsonschema.Array(grepSubmatchSchema)),
+)
 
-var GrepOutputSchema = schema.JsonSchema{
-	"type":  "array",
-	"items": grepMatchSchema,
-}
+var GrepOutputSchema = jsonschema.Array(grepMatchSchema)
 
 type GrepInput struct {
 	Pattern string  `json:"pattern"`

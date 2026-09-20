@@ -11,41 +11,26 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 	coreschema "github.com/user/go-agent-sdk/schema"
 )
 
 const ApplyPatchName = "apply_patch"
 
-var ApplyPatchInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"patchText": map[string]any{
-			"type":        "string",
-			"description": "The full patch text describing add, update, and delete operations",
-		},
-	},
-	"required": []any{"patchText"},
-}
+var ApplyPatchInputSchema = jsonschema.Object(
+	jsonschema.Required("patchText", jsonschema.String(jsonschema.Description("The full patch text describing add, update, and delete operations"))),
+)
 
-var applyPatchAppliedSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"type":     map[string]any{"enum": []any{"add", "update", "delete"}},
-		"resource": map[string]any{"type": "string"},
-		"target":   map[string]any{"type": "string"},
-	},
-	"required": []any{"type", "resource", "target"},
-}
+var applyPatchAppliedSchema = jsonschema.Object(
+	jsonschema.Required("type", jsonschema.Literal("add", "update", "delete")),
+	jsonschema.Required("resource", jsonschema.String()),
+	jsonschema.Required("target", jsonschema.String()),
+)
 
-var ApplyPatchOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"applied": map[string]any{"type": "array", "items": applyPatchAppliedSchema},
-		"files":   map[string]any{"type": "array", "items": editFileDiffSchema},
-	},
-	"required": []any{"applied", "files"},
-}
+var ApplyPatchOutputSchema = jsonschema.Object(
+	jsonschema.Required("applied", jsonschema.Array(applyPatchAppliedSchema)),
+	jsonschema.Required("files", jsonschema.Array(editFileDiffSchema)),
+)
 
 type ApplyPatchInput struct {
 	PatchText string `json:"patchText"`

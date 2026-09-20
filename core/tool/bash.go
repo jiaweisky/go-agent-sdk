@@ -14,7 +14,7 @@ import (
 	"unicode"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 const BashName = "bash"
@@ -25,55 +25,34 @@ const (
 	BashMaxCaptureBytes  = 1024 * 1024
 )
 
-var BashInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"command": map[string]any{
-			"type":        "string",
-			"description": "Shell command string to execute",
-		},
-		"workdir": map[string]any{
-			"type":        "string",
-			"description": "Working directory. Defaults to the active Location; relative paths resolve from that Location.",
-		},
-		"timeout": map[string]any{
-			"type":             "integer",
-			"exclusiveMinimum": 0,
-			"maximum":          BashMaxTimeoutMS,
-			"description": fmt.Sprintf(
-				"Timeout in milliseconds. Defaults to %d and may not exceed %d.",
-				BashDefaultTimeoutMS,
-				BashMaxTimeoutMS,
-			),
-		},
-	},
-	"required": []any{"command"},
-}
+var BashInputSchema = jsonschema.Object(
+	jsonschema.Required("command", jsonschema.String(jsonschema.Description("Shell command string to execute"))),
+	jsonschema.Optional("workdir", jsonschema.String(jsonschema.Description(
+		"Working directory. Defaults to the active Location; relative paths resolve from that Location."))),
+	jsonschema.Optional("timeout", jsonschema.Integer(
+		jsonschema.ExclusiveMinimum(0),
+		jsonschema.Maximum(BashMaxTimeoutMS),
+		jsonschema.Description(fmt.Sprintf(
+			"Timeout in milliseconds. Defaults to %d and may not exceed %d.",
+			BashDefaultTimeoutMS,
+			BashMaxTimeoutMS,
+		)),
+	)),
+)
 
-var BashStructuredOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"exit":      map[string]any{"type": "number"},
-		"truncated": map[string]any{"type": "boolean"},
-		"timeout":   map[string]any{"type": "boolean"},
-	},
-	"required": []any{"truncated"},
-}
+var BashStructuredOutputSchema = jsonschema.Object(
+	jsonschema.Optional("exit", jsonschema.Number()),
+	jsonschema.Required("truncated", jsonschema.Boolean()),
+	jsonschema.Optional("timeout", jsonschema.Boolean()),
+)
 
-var BashOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"exit":      map[string]any{"type": "number"},
-		"truncated": map[string]any{"type": "boolean"},
-		"timeout":   map[string]any{"type": "boolean"},
-		"output":    map[string]any{"type": "string"},
-		"warnings": map[string]any{
-			"type":  "array",
-			"items": map[string]any{"type": "string"},
-		},
-	},
-	"required": []any{"truncated", "output"},
-}
+var BashOutputSchema = jsonschema.Object(
+	jsonschema.Optional("exit", jsonschema.Number()),
+	jsonschema.Required("truncated", jsonschema.Boolean()),
+	jsonschema.Optional("timeout", jsonschema.Boolean()),
+	jsonschema.Required("output", jsonschema.String()),
+	jsonschema.Optional("warnings", jsonschema.Array(jsonschema.String())),
+)
 
 type BashInput struct {
 	Command string  `json:"command"`
@@ -115,7 +94,7 @@ func MakeBash(deps BashDeps) *Def[BashInput, BashOutput, BashStructuredOutput] {
 		),
 		Input:      BashInputSchema,
 		Output:     BashOutputSchema,
-		Structured: &BashStructuredOutputSchema,
+		Structured: BashStructuredOutputSchema,
 		ToStructuredOutput: func(input BashInput, output any) (BashStructuredOutput, error) {
 			var out BashOutput
 			if b, err := json.Marshal(output); err == nil {

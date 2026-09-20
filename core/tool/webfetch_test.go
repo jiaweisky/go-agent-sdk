@@ -81,13 +81,13 @@ func TestWebFetch_DefaultsFormatAndValidatesTimeout(t *testing.T) {
 		t.Fatalf("expected default format markdown, got %q", input.Format)
 	}
 
-	if err := decodeAndValidate(map[string]any{"url": "https://example.com", "timeout": 0}, &input, compileSchema(WebFetchInputSchema)); err == nil {
+	if err := decodeAndValidate(map[string]any{"url": "https://example.com", "timeout": 0}, &input, compileSchema(WebFetchInputSchema.Validation())); err == nil {
 		t.Fatalf("expected timeout 0 to be rejected")
 	}
-	if err := decodeAndValidate(map[string]any{"url": "https://example.com", "timeout": WebFetchMaxTimeoutSeconds + 1}, &input, compileSchema(WebFetchInputSchema)); err == nil {
+	if err := decodeAndValidate(map[string]any{"url": "https://example.com", "timeout": WebFetchMaxTimeoutSeconds + 1}, &input, compileSchema(WebFetchInputSchema.Validation())); err == nil {
 		t.Fatalf("expected timeout above maximum to be rejected")
 	}
-	if err := decodeAndValidate(map[string]any{"url": "https://example.com", "timeout": 1.5}, &input, compileSchema(WebFetchInputSchema)); err != nil {
+	if err := decodeAndValidate(map[string]any{"url": "https://example.com", "timeout": 1.5}, &input, compileSchema(WebFetchInputSchema.Validation())); err != nil {
 		t.Fatalf("expected fractional timeout to be accepted: %v", err)
 	}
 	if input.Timeout == nil || *input.Timeout != 1.5 {

@@ -13,7 +13,7 @@ import (
 	"golang.org/x/net/html"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 const WebFetchName = "webfetch"
@@ -28,38 +28,25 @@ const WebFetchDescription = `Fetch content from an HTTP or HTTPS URL and return 
 
 Use a more targeted tool when one is available. This tool is read-only. Large text results may be replaced with a preview while the complete output is retained in managed storage.`
 
-var WebFetchInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"url": map[string]any{
-			"type":        "string",
-			"description": "The HTTP or HTTPS URL to fetch content from",
-		},
-		"format": map[string]any{
-			"type":        "string",
-			"enum":        []any{"text", "markdown", "html"},
-			"description": "The format to return the content in. Defaults to markdown.",
-		},
-		"timeout": map[string]any{
-			"type":             "number",
-			"exclusiveMinimum": 0,
-			"maximum":          WebFetchMaxTimeoutSeconds,
-			"description":      fmt.Sprintf("Optional timeout in seconds (maximum: %d)", WebFetchMaxTimeoutSeconds),
-		},
-	},
-	"required": []any{"url"},
-}
+var WebFetchInputSchema = jsonschema.Object(
+	jsonschema.Required("url", jsonschema.String(jsonschema.Description("The HTTP or HTTPS URL to fetch content from"))),
+	jsonschema.Optional("format", jsonschema.Enum(
+		[]any{"text", "markdown", "html"},
+		jsonschema.Description("The format to return the content in. Defaults to markdown."),
+	)),
+	jsonschema.Optional("timeout", jsonschema.Number(
+		jsonschema.ExclusiveMinimum(0),
+		jsonschema.Maximum(WebFetchMaxTimeoutSeconds),
+		jsonschema.Description(fmt.Sprintf("Optional timeout in seconds (maximum: %d)", WebFetchMaxTimeoutSeconds)),
+	)),
+)
 
-var WebFetchOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"url":         map[string]any{"type": "string"},
-		"contentType": map[string]any{"type": "string"},
-		"format":      map[string]any{"enum": []any{"text", "markdown", "html"}},
-		"output":      map[string]any{"type": "string"},
-	},
-	"required": []any{"url", "contentType", "format", "output"},
-}
+var WebFetchOutputSchema = jsonschema.Object(
+	jsonschema.Required("url", jsonschema.String()),
+	jsonschema.Required("contentType", jsonschema.String()),
+	jsonschema.Required("format", jsonschema.Literal("text", "markdown", "html")),
+	jsonschema.Required("output", jsonschema.String()),
+)
 
 type WebFetchInput struct {
 	URL     string   `json:"url"`

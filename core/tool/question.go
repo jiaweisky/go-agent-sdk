@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 const QuestionName = "question"
@@ -22,52 +22,25 @@ Usage notes:
 - Answers are returned as arrays of labels; set ` + "`multiple: true`" + ` to allow selecting more than one
 - If you recommend a specific option, make that the first option in the list and add "(Recommended)" at the end of the label`
 
-var questionOptionSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"label":       map[string]any{"type": "string", "description": "Display text (1-5 words, concise)"},
-		"description": map[string]any{"type": "string", "description": "Explanation of choice"},
-	},
-	"required": []any{"label", "description"},
-}
+var questionOptionSchema = jsonschema.Object(
+	jsonschema.Required("label", jsonschema.String(jsonschema.Description("Display text (1-5 words, concise)"))),
+	jsonschema.Required("description", jsonschema.String(jsonschema.Description("Explanation of choice"))),
+)
 
-var questionPromptSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"question": map[string]any{"type": "string", "description": "Complete question"},
-		"header":   map[string]any{"type": "string", "description": "Very short label (max 30 chars)"},
-		"options": map[string]any{
-			"type":        "array",
-			"description": "Available choices",
-			"items":       questionOptionSchema,
-		},
-		"multiple": map[string]any{"type": "boolean", "description": "Allow selecting multiple choices"},
-	},
-	"required": []any{"question", "header", "options"},
-}
+var questionPromptSchema = jsonschema.Object(
+	jsonschema.Required("question", jsonschema.String(jsonschema.Description("Complete question"))),
+	jsonschema.Required("header", jsonschema.String(jsonschema.Description("Very short label (max 30 chars)"))),
+	jsonschema.Required("options", jsonschema.Array(questionOptionSchema, jsonschema.Description("Available choices"))),
+	jsonschema.OptionalKey("multiple", jsonschema.Boolean()),
+)
 
-var QuestionInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"questions": map[string]any{
-			"type":        "array",
-			"description": "Questions to ask",
-			"items":       questionPromptSchema,
-		},
-	},
-	"required": []any{"questions"},
-}
+var QuestionInputSchema = jsonschema.Object(
+	jsonschema.Required("questions", jsonschema.Array(questionPromptSchema, jsonschema.Description("Questions to ask"))),
+)
 
-var QuestionOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"answers": map[string]any{
-			"type":  "array",
-			"items": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-		},
-	},
-	"required": []any{"answers"},
-}
+var QuestionOutputSchema = jsonschema.Object(
+	jsonschema.Required("answers", jsonschema.Array(jsonschema.Array(jsonschema.String()))),
+)
 
 type QuestionInput struct {
 	Questions []core.QuestionPrompt `json:"questions"`

@@ -10,7 +10,7 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 const SkillName = "skill"
@@ -23,26 +23,15 @@ const SkillDescription = "Load a specialized skill when the task at hand matches
 	"\n" +
 	"The skill name must match one of the available skills in the system context."
 
-var SkillInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"name": map[string]any{
-			"type":        "string",
-			"description": "The name of the skill from the available skills list",
-		},
-	},
-	"required": []any{"name"},
-}
+var SkillInputSchema = jsonschema.Object(
+	jsonschema.Required("name", jsonschema.String(jsonschema.Description("The name of the skill from the available skills list"))),
+)
 
-var SkillOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"name":      map[string]any{"type": "string"},
-		"directory": map[string]any{"type": "string"},
-		"output":    map[string]any{"type": "string"},
-	},
-	"required": []any{"name", "directory", "output"},
-}
+var SkillOutputSchema = jsonschema.Object(
+	jsonschema.Required("name", jsonschema.String()),
+	jsonschema.Required("directory", jsonschema.String()),
+	jsonschema.Required("output", jsonschema.String()),
+)
 
 type SkillInput struct {
 	Name string `json:"name"`

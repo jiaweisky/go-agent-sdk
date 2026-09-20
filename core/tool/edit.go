@@ -11,7 +11,7 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 	coreschema "github.com/user/go-agent-sdk/schema"
 )
 
@@ -21,51 +21,28 @@ import (
 // separate external_directory approval before edit approval.
 const EditName = "edit"
 
-var EditInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"path": map[string]any{
-			"type": "string",
-			"description": "File path to edit. Relative paths resolve within the active Location. " +
-				"Absolute paths inside that Location are accepted; external absolute paths require " +
-				"external_directory approval.",
-		},
-		"oldString": map[string]any{
-			"type":        "string",
-			"description": "Exact text to replace",
-		},
-		"newString": map[string]any{
-			"type":        "string",
-			"description": "Replacement text, which must differ from oldString",
-		},
-		"replaceAll": map[string]any{
-			"type":        "boolean",
-			"description": "Replace all exact occurrences of oldString (default false)",
-		},
-	},
-	"required": []any{"path", "oldString", "newString"},
-}
+var EditInputSchema = jsonschema.Object(
+	jsonschema.Required("path", jsonschema.String(jsonschema.Description(
+		"File path to edit. Relative paths resolve within the active Location. "+
+			"Absolute paths inside that Location are accepted; external absolute paths require "+
+			"external_directory approval."))),
+	jsonschema.Required("oldString", jsonschema.String(jsonschema.Description("Exact text to replace"))),
+	jsonschema.Required("newString", jsonschema.String(jsonschema.Description("Replacement text, which must differ from oldString"))),
+	jsonschema.Optional("replaceAll", jsonschema.Boolean(jsonschema.Description("Replace all exact occurrences of oldString (default false)"))),
+)
 
-var editFileDiffSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"file":      map[string]any{"type": "string"},
-		"patch":     map[string]any{"type": "string"},
-		"additions": map[string]any{"type": "number"},
-		"deletions": map[string]any{"type": "number"},
-		"status":    map[string]any{"enum": []any{"added", "deleted", "modified"}},
-	},
-	"required": []any{"additions", "deletions"},
-}
+var editFileDiffSchema = jsonschema.Object(
+	jsonschema.OptionalKey("file", jsonschema.String()),
+	jsonschema.OptionalKey("patch", jsonschema.String()),
+	jsonschema.Required("additions", jsonschema.Finite()),
+	jsonschema.Required("deletions", jsonschema.Finite()),
+	jsonschema.OptionalKey("status", jsonschema.Literal("added", "deleted", "modified")),
+)
 
-var EditOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"files":        map[string]any{"type": "array", "items": editFileDiffSchema},
-		"replacements": map[string]any{"type": "number"},
-	},
-	"required": []any{"files", "replacements"},
-}
+var EditOutputSchema = jsonschema.Object(
+	jsonschema.Required("files", jsonschema.Array(editFileDiffSchema)),
+	jsonschema.Required("replacements", jsonschema.Number()),
+)
 
 type EditInput struct {
 	Path       string `json:"path"`

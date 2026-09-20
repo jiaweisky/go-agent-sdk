@@ -455,9 +455,9 @@ type Tool interface { getRuntime() *runtime }
 
 type Config[Input, Output, Structured any] struct {
     Description        string
-    Input              schema.JsonSchema
-    Output             schema.JsonSchema
-    Structured         *schema.JsonSchema
+    Input              *jsonschema.Schema
+    Output             *jsonschema.Schema
+    Structured         *jsonschema.Schema
     Execute            func(input Input, ctx Context) (Output, error)
     ToStructuredOutput func(input Input, output any) (Structured, error)
     ToModelOutput      func(input Input, output any) []Content
@@ -486,9 +486,9 @@ func safeOpen(root *os.Root, path string) (*os.File, error) {
 | TS 模式 | Go 方案 | 理由 |
 |---|---|---|
 | `WeakMap<AnyTool, Runtime>` | `Def[I,O,S]` 内联 runtime + `Tool` 接口擦除 | 无需 WeakMap |
-| `Schema.Codec` 校验入参 | `santhosh-tekuri/jsonschema/v6` 校验 + `json.Unmarshal` | JSON Schema 直接来自 Config |
+| `Schema.Codec` 校验入参 | `santhosh-tekuri/jsonschema/v6` 校验 + `json.Unmarshal` | 校验 schema 由 `jsonschema.Schema.Validation()` 派生 |
 | `Schema.encode` 编码出参 | 直接 `json.Marshal` | 性能更好，代码更简单 |
-| `input: Schema.Type<Input>` | `Config.Input: schema.JsonSchema` | LLM 只看 JSON Schema，不看 Go 类型 |
+| `input: Schema.Type<Input>` | `Config.Input: *jsonschema.Schema` | 类型化 AST；`Model()` 发给模型，`Validation()` 用于校验 |
 | `withPermission(tool, perm)` | `WithPermission(tool, perm)` 返回新 `Def` | 共享 runtime，覆写 permission |
 
 ---

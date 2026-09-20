@@ -96,6 +96,7 @@ Go 1.27.1，以下特性可放心使用：
 | `Route<Body, Prepared>` | `llm/route/` struct + `any` 类型擦除 |
 | `WeakMap<AnyTool, Runtime>` | 泛型 `Def[Input, Output, Structured]` + `Tool` 接口 |
 | `Schema.Codec` | `santhosh-tekuri/jsonschema/v6` 验证 |
+| 工具 schema（`Schema.Struct` 等） | `jsonschema.Schema` 类型化 AST：`Model()` 发给模型 + `Validation()` 校验 |
 
 ## 包架构
 
@@ -122,6 +123,7 @@ go-agent-sdk/                       opencode TS
 └── schema/       ← packages/schema/src/      (@opencode-ai/schema)
 ```
 
+- `jsonschema/` 是 Go 专属的类型化 JSON Schema AST（对标 Effect `Schema`），供 `core/tool` 定义工具 schema，无 TS 对应目录
 - 全部为公开包，无需 `internal/`
 - `packages/<pkg>/src/` 下的平铺文件进入 `<pkg>/` 包根目录；子目录成为子包
 - Effect 的 `Context.Tag` + `Layer`（DI）不移植，改用构造器注入

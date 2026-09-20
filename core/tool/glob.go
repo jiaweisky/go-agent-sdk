@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 const GlobName = "glob"
@@ -27,39 +27,21 @@ func globDefaultLimit() int {
 	return int(value)
 }
 
-var GlobInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"pattern": map[string]any{
-			"type":        "string",
-			"description": "Glob pattern to match files against",
-		},
-		"path": map[string]any{
-			"type":        "string",
-			"description": "Relative directory to search. Defaults to the active Location.",
-		},
-		"limit": map[string]any{
-			"type":             "integer",
-			"exclusiveMinimum": 0,
-			"description":      "Maximum results to return",
-		},
-	},
-	"required": []any{"pattern"},
-}
+var GlobInputSchema = jsonschema.Object(
+	jsonschema.Required("pattern", jsonschema.String(jsonschema.Description("Glob pattern to match files against"))),
+	jsonschema.Optional("path", jsonschema.String(jsonschema.Description("Relative directory to search. Defaults to the active Location."))),
+	jsonschema.Optional("limit", jsonschema.Integer(
+		jsonschema.ExclusiveMinimum(0),
+		jsonschema.Description("Maximum results to return"),
+	)),
+)
 
-var globEntrySchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"path": map[string]any{"type": "string"},
-		"type": map[string]any{"enum": []any{"file", "directory"}},
-	},
-	"required": []any{"path", "type"},
-}
+var globEntrySchema = jsonschema.Object(
+	jsonschema.Required("path", jsonschema.String()),
+	jsonschema.Required("type", jsonschema.Literal("file", "directory")),
+)
 
-var GlobOutputSchema = schema.JsonSchema{
-	"type":  "array",
-	"items": globEntrySchema,
-}
+var GlobOutputSchema = jsonschema.Array(globEntrySchema)
 
 type GlobInput struct {
 	Pattern string  `json:"pattern"`

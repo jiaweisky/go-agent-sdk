@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 	rootschema "github.com/user/go-agent-sdk/schema"
 )
 
@@ -16,47 +16,19 @@ const TodoWriteName = "todowrite"
 const TodoWriteDescription = "Create and maintain a structured task list for the current coding session. " +
 	"Use it to track progress during multi-step work and keep todo statuses current."
 
-var todoWriteInfoSchema = map[string]any{
-	"type": "object",
-	"properties": map[string]any{
-		"content": map[string]any{
-			"type":        "string",
-			"description": "Brief description of the task",
-		},
-		"status": map[string]any{
-			"type":        "string",
-			"description": "Current status of the task: pending, in_progress, completed, cancelled",
-		},
-		"priority": map[string]any{
-			"type":        "string",
-			"description": "Priority level of the task: high, medium, low",
-		},
-	},
-	"required": []any{"content", "status", "priority"},
-}
+var todoWriteInfoSchema = jsonschema.Object(
+	jsonschema.Required("content", jsonschema.String(jsonschema.Description("Brief description of the task"))),
+	jsonschema.Required("status", jsonschema.String(jsonschema.Description("Current status of the task: pending, in_progress, completed, cancelled"))),
+	jsonschema.Required("priority", jsonschema.String(jsonschema.Description("Priority level of the task: high, medium, low"))),
+)
 
-var TodoWriteInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"todos": map[string]any{
-			"type":        "array",
-			"description": "The updated todo list",
-			"items":       todoWriteInfoSchema,
-		},
-	},
-	"required": []any{"todos"},
-}
+var TodoWriteInputSchema = jsonschema.Object(
+	jsonschema.Required("todos", jsonschema.Array(todoWriteInfoSchema, jsonschema.Description("The updated todo list"))),
+)
 
-var TodoWriteOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"todos": map[string]any{
-			"type":  "array",
-			"items": todoWriteInfoSchema,
-		},
-	},
-	"required": []any{"todos"},
-}
+var TodoWriteOutputSchema = jsonschema.Object(
+	jsonschema.Required("todos", jsonschema.Array(todoWriteInfoSchema)),
+)
 
 type TodoWriteInput struct {
 	Todos []rootschema.SessionTodoInfo `json:"todos"`

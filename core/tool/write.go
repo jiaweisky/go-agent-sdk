@@ -6,38 +6,25 @@ import (
 	"fmt"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 const WriteName = "write"
 
-var WriteInputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"path": map[string]any{
-			"type": "string",
-			"description": "File path to write. Relative paths resolve within the active Location. " +
-				"Absolute paths inside that Location are accepted; external absolute paths require " +
-				"external_directory approval.",
-		},
-		"content": map[string]any{
-			"type":        "string",
-			"description": "Content to write to the file",
-		},
-	},
-	"required": []any{"path", "content"},
-}
+var WriteInputSchema = jsonschema.Object(
+	jsonschema.Required("path", jsonschema.String(jsonschema.Description(
+		"File path to write. Relative paths resolve within the active Location. "+
+			"Absolute paths inside that Location are accepted; external absolute paths require "+
+			"external_directory approval."))),
+	jsonschema.Required("content", jsonschema.String(jsonschema.Description("Content to write to the file"))),
+)
 
-var WriteOutputSchema = schema.JsonSchema{
-	"type": "object",
-	"properties": map[string]any{
-		"operation": map[string]any{"type": "string", "const": "write"},
-		"target":    map[string]any{"type": "string"},
-		"resource":  map[string]any{"type": "string"},
-		"existed":   map[string]any{"type": "boolean"},
-	},
-	"required": []any{"operation", "target", "resource", "existed"},
-}
+var WriteOutputSchema = jsonschema.Object(
+	jsonschema.Required("operation", jsonschema.Literal("write")),
+	jsonschema.Required("target", jsonschema.String()),
+	jsonschema.Required("resource", jsonschema.String()),
+	jsonschema.Required("existed", jsonschema.Boolean()),
+)
 
 type WriteInput struct {
 	Path    string `json:"path"`

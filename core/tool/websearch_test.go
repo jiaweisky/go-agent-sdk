@@ -105,13 +105,13 @@ func TestWebSearch_ProviderSelection(t *testing.T) {
 
 func TestWebSearch_RejectsOutOfRangeNumericControls(t *testing.T) {
 	var input WebSearchInput
-	if err := decodeAndValidate(map[string]any{"query": "x", "numResults": 0}, &input, compileSchema(WebSearchInputSchema)); err == nil {
+	if err := decodeAndValidate(map[string]any{"query": "x", "numResults": 0}, &input, compileSchema(WebSearchInputSchema.Validation())); err == nil {
 		t.Fatalf("expected numResults 0 to be rejected")
 	}
-	if err := decodeAndValidate(map[string]any{"query": "x", "numResults": WebSearchMaxNumResults + 1}, &input, compileSchema(WebSearchInputSchema)); err == nil {
+	if err := decodeAndValidate(map[string]any{"query": "x", "numResults": WebSearchMaxNumResults + 1}, &input, compileSchema(WebSearchInputSchema.Validation())); err == nil {
 		t.Fatalf("expected numResults above maximum to be rejected")
 	}
-	if err := decodeAndValidate(map[string]any{"query": "x", "contextMaxCharacters": WebSearchMaxContextCharacters + 1}, &input, compileSchema(WebSearchInputSchema)); err == nil {
+	if err := decodeAndValidate(map[string]any{"query": "x", "contextMaxCharacters": WebSearchMaxContextCharacters + 1}, &input, compileSchema(WebSearchInputSchema.Validation())); err == nil {
 		t.Fatalf("expected contextMaxCharacters above maximum to be rejected")
 	}
 }

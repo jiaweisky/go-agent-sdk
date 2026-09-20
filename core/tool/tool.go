@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/santhosh-tekuri/jsonschema/v6"
+	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/user/go-agent-sdk/jsonschema"
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
@@ -68,24 +69,24 @@ type runtime struct {
 
 type Config[Input, Output, Structured any] struct {
 	Description        string
-	Input              schema.JsonSchema
-	Output             schema.JsonSchema
-	Structured         *schema.JsonSchema
+	Input              *jsonschema.Schema
+	Output             *jsonschema.Schema
+	Structured         *jsonschema.Schema
 	Execute            func(execCtx context.Context, input Input, ctx Context) (Output, error)
 	ToStructuredOutput func(input Input, output any) (Structured, error)
 	ToModelOutput      func(input Input, output any) []Content
 }
 
 func Make[Input, Output, Structured any](cfg Config[Input, Output, Structured]) *Def[Input, Output, Structured] {
-	var inputSchema, outputSchema, structuredSchema *jsonschema.Schema
+	var inputSchema, outputSchema, structuredSchema *jsonschema6.Schema
 	if cfg.Input != nil {
-		inputSchema = compileSchema(cfg.Input)
+		inputSchema = compileSchema(cfg.Input.Validation())
 	}
 	if cfg.Output != nil {
-		outputSchema = compileSchema(cfg.Output)
+		outputSchema = compileSchema(cfg.Output.Validation())
 	}
 	if cfg.Structured != nil {
-		structuredSchema = compileSchema(*cfg.Structured)
+		structuredSchema = compileSchema(cfg.Structured.Validation())
 	}
 
 	t := &Def[Input, Output, Structured]{}
@@ -98,15 +99,20 @@ func Make[Input, Output, Structured any](cfg Config[Input, Output, Structured]) 
 			}
 			outSchema := cfg.Output
 			if cfg.Structured != nil {
-				outSchema = *cfg.Structured
+				outSchema = cfg.Structured
 			}
-			closedOut := modelFacingSchema(outSchema)
-			def := schema.NewToolDefinition(schema.ToolDefinitionInput{
-				Name:         name,
-				Description:  cfg.Description,
-				InputSchema:  modelFacingSchema(cfg.Input),
-				OutputSchema: &closedOut,
-			})
+			input := schema.ToolDefinitionInput{
+				Name:        name,
+				Description: cfg.Description,
+			}
+			if cfg.Input != nil {
+				input.InputSchema = cfg.Input.Model()
+			}
+			if outSchema != nil {
+				model := schema.JsonSchema(outSchema.Model())
+				input.OutputSchema = &model
+			}
+			def := schema.NewToolDefinition(input)
 			definitions[name] = def
 			return def
 		},
@@ -212,155 +218,7 @@ func Settle(tool Tool, execCtx context.Context, call schema.ToolCallPart, ctx Co
 	return rt.settle(execCtx, call, ctx)
 }
 
-// modelFacingSchema mirrors Effect's Schema.toJsonSchemaDocument for the
-// struct schemas used by core tools:
-//
-//   - every object schema derived from a struct is closed with
-//     `additionalProperties: false`;
-//   - every optional (not required) property is wrapped as
-//     `anyOf: [<schema>, { "type": "null" }]`.
-//
-// It deep-copies the schema so shared nested values (e.g. a struct reused
-// across two parents) are not mutated.
-//
-// This is applied only to the model-facing tool definition. Input validation
-// keeps the original schemas: Effect's runtime decoder rejects null for
-// optional fields and strips unknown properties, neither of which is
-// expressed by the generated JSON Schema.
-func modelFacingSchema(js schema.JsonSchema) schema.JsonSchema {
-	transformed, _ := modelFacingValue(js).(map[string]any)
-	return schema.JsonSchema(transformed)
-}
-
-func modelFacingValue(value any) any {
-	switch v := value.(type) {
-	case schema.JsonSchema:
-		return modelFacingMap(map[string]any(v))
-	case map[string]any:
-		return modelFacingMap(v)
-	case []any:
-		result := make([]any, len(v))
-		for i, item := range v {
-			result[i] = modelFacingValue(item)
-		}
-		return result
-	default:
-		return value
-	}
-}
-
-func modelFacingMap(input map[string]any) map[string]any {
-	result := make(map[string]any, len(input))
-	for key, value := range input {
-		result[key] = modelFacingValue(value)
-	}
-	applyEffectShape(result)
-	properties, isObject := result["properties"].(map[string]any)
-	if !isObject {
-		return result
-	}
-	if _, ok := result["additionalProperties"]; !ok {
-		result["additionalProperties"] = false
-	}
-	required := schemaStringSet(result["required"])
-	for name, property := range properties {
-		if required[name] {
-			continue
-		}
-		properties[name] = map[string]any{
-			"anyOf": []any{property, map[string]any{"type": "null"}},
-		}
-	}
-	return result
-}
-
-// numericConstraintKeys are the JSON Schema numeric keywords Effect emits inside
-// `allOf` for `Schema.Int`/`Schema.Number` checks, in the order they are moved.
-var numericConstraintKeys = []string{"exclusiveMinimum", "minimum", "exclusiveMaximum", "maximum", "multipleOf"}
-
-// applyEffectShape rewrites the hand-written schema keywords that Effect's
-// Schema.toJsonSchemaDocument represents differently:
-//
-//   - `Schema.Literal` / literal unions are emitted as `{"type": "...", "enum": [...]}`
-//     rather than `const` or a bare `enum`;
-//   - `Schema.Number` is emitted as an `anyOf` that also accepts the string
-//     encodings "NaN"/"Infinity"/"-Infinity";
-//   - `Schema.Int`/`Schema.Number` checks are emitted inside `allOf`.
-func applyEffectShape(result map[string]any) {
-	if literal, ok := result["const"]; ok {
-		delete(result, "const")
-		result["enum"] = []any{literal}
-		if _, hasType := result["type"]; !hasType {
-			result["type"] = schemaTypeName(literal)
-		}
-	}
-	if _, hasEnum := result["enum"]; hasEnum {
-		if _, hasType := result["type"]; !hasType {
-			if values, ok := result["enum"].([]any); ok && len(values) > 0 {
-				result["type"] = schemaTypeName(values[0])
-			}
-		}
-	}
-	switch result["type"] {
-	case "number":
-		delete(result, "type")
-		result["anyOf"] = []any{
-			map[string]any{"type": "number"},
-			map[string]any{"type": "string", "enum": []any{"NaN"}},
-			map[string]any{"type": "string", "enum": []any{"Infinity"}},
-			map[string]any{"type": "string", "enum": []any{"-Infinity"}},
-		}
-		moveNumericConstraints(result)
-	case "integer":
-		moveNumericConstraints(result)
-	}
-}
-
-func moveNumericConstraints(result map[string]any) {
-	var allOf []any
-	for _, key := range numericConstraintKeys {
-		value, ok := result[key]
-		if !ok {
-			continue
-		}
-		delete(result, key)
-		allOf = append(allOf, map[string]any{key: value})
-	}
-	if len(allOf) > 0 {
-		result["allOf"] = allOf
-	}
-}
-
-func schemaTypeName(value any) string {
-	switch value.(type) {
-	case string:
-		return "string"
-	case bool:
-		return "boolean"
-	case float64, float32, int, int32, int64:
-		return "number"
-	case nil:
-		return "null"
-	default:
-		return "string"
-	}
-}
-
-func schemaStringSet(value any) map[string]bool {
-	set := make(map[string]bool)
-	items, ok := value.([]any)
-	if !ok {
-		return set
-	}
-	for _, item := range items {
-		if name, ok := item.(string); ok {
-			set[name] = true
-		}
-	}
-	return set
-}
-
-func compileSchema(js schema.JsonSchema) *jsonschema.Schema {
+func compileSchema(js map[string]any) *jsonschema6.Schema {
 	if js == nil {
 		return nil
 	}
@@ -372,7 +230,7 @@ func compileSchema(js schema.JsonSchema) *jsonschema.Schema {
 	if err := json.Unmarshal(data, &document); err != nil {
 		return nil
 	}
-	c := jsonschema.NewCompiler()
+	c := jsonschema6.NewCompiler()
 	if err := c.AddResource("schema.json", document); err != nil {
 		return nil
 	}
@@ -383,7 +241,7 @@ func compileSchema(js schema.JsonSchema) *jsonschema.Schema {
 	return sch
 }
 
-func encodeOutput[T any](value T, schema *jsonschema.Schema) (any, error) {
+func encodeOutput[T any](value T, schema *jsonschema6.Schema) (any, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
@@ -400,7 +258,7 @@ func encodeOutput[T any](value T, schema *jsonschema.Schema) (any, error) {
 	return encoded, nil
 }
 
-func decodeAndValidate(input any, target any, schemas ...*jsonschema.Schema) error {
+func decodeAndValidate(input any, target any, schemas ...*jsonschema6.Schema) error {
 	data, err := json.Marshal(input)
 	if err != nil {
 		return fmt.Errorf("cannot marshal input: %w", err)
