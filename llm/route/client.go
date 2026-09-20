@@ -56,7 +56,7 @@ type Route struct {
 	Body             RouteBody
 	Transport        Transport
 	With             func(patch RoutePatch) Route
-	Model            func(input RouteModelInput) schema.Model
+	Model            func(input RouteModelInput) Model
 	PrepareTransport func(body any, request *schema.LLMRequest) (any, error)
 	StreamPrepared   func(prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error]
 }
@@ -75,7 +75,8 @@ type MakeTransportInput struct {
 func MakeFromTransport(input MakeTransportInput) Route {
 	var build func(makeTransportInput) Route
 	build = func(ri makeTransportInput) Route {
-		r := Route{
+		var r Route
+		r = Route{
 			ID:        ri.ID,
 			Provider:  schema.ProviderID(ri.Provider),
 			Protocol:  ri.Protocol.ID,
@@ -109,7 +110,7 @@ func MakeFromTransport(input MakeTransportInput) Route {
 				}
 				return build(next)
 			},
-			Model: func(input RouteModelInput) schema.Model {
+			Model: func(input RouteModelInput) Model {
 				prov := input.Provider
 				if prov == "" {
 					prov = ri.Provider
@@ -117,12 +118,15 @@ func MakeFromTransport(input MakeTransportInput) Route {
 				if prov == "" {
 					panic(fmt.Sprintf("Route.Model(%s) requires a provider", ri.ID))
 				}
-				return schema.NewModel(schema.ModelInput{
-					ID:            input.ID,
-					Provider:      prov,
-					Defaults:      input.Defaults,
-					Compatibility: input.Compatibility,
-				})
+				return Model{
+					Model: schema.NewModel(schema.ModelInput{
+						ID:            input.ID,
+						Provider:      prov,
+						Defaults:      input.Defaults,
+						Compatibility: input.Compatibility,
+					}),
+					Route: r,
+				}
 			},
 			PrepareTransport: func(body any, request *schema.LLMRequest) (any, error) {
 				return ri.Transport.Prepare(TransportPrepareInput{

@@ -24,7 +24,7 @@ type GoogleConfig struct {
 type GoogleProvider struct {
 	ID     schema.ProviderID
 	Routes []route.Route
-	Model  func(id string, opts ...llm.ModelOptions) schema.Model
+	Model  func(id string, opts ...llm.ModelOptions) route.Model
 }
 
 func googleAuth(input GoogleConfig) *route.Auth {
@@ -66,7 +66,7 @@ func NewGoogle(geminiRoute route.Route, input GoogleConfig) GoogleProvider {
 	return GoogleProvider{
 		ID:     GoogleProviderID,
 		Routes: []route.Route{r},
-		Model: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			modelInput := route.RouteModelInput{ID: id}
 			if len(opts) > 0 {
 				opt := opts[0]

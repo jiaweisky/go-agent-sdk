@@ -22,9 +22,9 @@ type XAIConfig struct {
 type XAIProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
-	Model     func(id string, opts ...llm.ModelOptions) schema.Model
-	Responses func(id string, opts ...llm.ModelOptions) schema.Model
-	Chat      func(id string, opts ...llm.ModelOptions) schema.Model
+	Model     func(id string, opts ...llm.ModelOptions) route.Model
+	Responses func(id string, opts ...llm.ModelOptions) route.Model
+	Chat      func(id string, opts ...llm.ModelOptions) route.Model
 }
 
 func xaiDefaultBaseURL() string {
@@ -71,13 +71,13 @@ func NewXAI(responsesRoute, chatRoute route.Route, input XAIConfig) XAIProvider 
 	return XAIProvider{
 		ID:     XAIProviderID,
 		Routes: []route.Route{respCfg, chatCfg},
-		Model: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(respCfg, id, xaiDefaults(input), nil, opts...)
 		},
-		Responses: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(respCfg, id, xaiDefaults(input), nil, opts...)
 		},
-		Chat: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(chatCfg, id, xaiDefaults(input), nil, opts...)
 		},
 	}

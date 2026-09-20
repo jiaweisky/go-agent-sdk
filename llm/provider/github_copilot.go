@@ -29,9 +29,9 @@ type GitHubCopilotConfig struct {
 type GitHubCopilotProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
-	Model     func(id string, opts ...llm.ModelOptions) schema.Model
-	Responses func(id string, opts ...llm.ModelOptions) schema.Model
-	Chat      func(id string, opts ...llm.ModelOptions) schema.Model
+	Model     func(id string, opts ...llm.ModelOptions) route.Model
+	Responses func(id string, opts ...llm.ModelOptions) route.Model
+	Chat      func(id string, opts ...llm.ModelOptions) route.Model
 }
 
 func ShouldUseResponsesAPI(modelID string, endpoint *string) bool {
@@ -83,16 +83,16 @@ func NewGitHubCopilot(responsesRoute, chatRoute route.Route, options GitHubCopil
 	return GitHubCopilotProvider{
 		ID:     GitHubCopilotProviderID,
 		Routes: []route.Route{responsesCfg, chatCfg},
-		Model: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			if ShouldUseResponsesAPI(id, options.Endpoint) {
 				return modelFactory(responsesCfg, id, base, nil, opts...)
 			}
 			return modelFactory(chatCfg, id, base, nil, opts...)
 		},
-		Responses: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(responsesCfg, id, base, nil, opts...)
 		},
-		Chat: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(chatCfg, id, base, nil, opts...)
 		},
 	}

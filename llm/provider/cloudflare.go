@@ -43,12 +43,12 @@ type CloudflareWorkersAIConfig struct {
 
 type CloudflareAIGatewayProvider struct {
 	ID    schema.ProviderID
-	Model func(id string, opts ...llm.ModelOptions) schema.Model
+	Model func(id string, opts ...llm.ModelOptions) route.Model
 }
 
 type CloudflareWorkersAIProvider struct {
 	ID    schema.ProviderID
-	Model func(id string, opts ...llm.ModelOptions) schema.Model
+	Model func(id string, opts ...llm.ModelOptions) route.Model
 }
 
 func AIGatewayBaseURL(input CloudflareAIGatewayConfig) string {
@@ -143,7 +143,7 @@ func NewCloudflareAIGateway(openAICompatibleChatRoute route.Route, input Cloudfl
 	})
 	return CloudflareAIGatewayProvider{
 		ID: CloudflareAIGatewayProviderID,
-		Model: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			modelInput := route.RouteModelInput{ID: id}
 			if len(opts) > 0 {
 				opt := opts[0]
@@ -168,7 +168,7 @@ func NewCloudflareWorkersAI(openAICompatibleChatRoute route.Route, input Cloudfl
 	})
 	return CloudflareWorkersAIProvider{
 		ID: CloudflareWorkersAIProviderID,
-		Model: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			modelInput := route.RouteModelInput{ID: id}
 			if len(opts) > 0 {
 				opt := opts[0]

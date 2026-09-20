@@ -390,8 +390,10 @@ func anthropicMessagesFromRequest(request *schema.LLMRequest) (any, error) {
 		toolChoice = anthropicMessagesLowerToolChoice(*request.ToolChoice)
 	}
 	outputLimit := 4096
-	if request.Model.GetDefaults() != nil && request.Model.GetDefaults().Limits != nil {
-		outputLimit = request.Model.GetDefaults().Limits.Output
+	if defaults := request.Model.GetDefaults(); defaults != nil && defaults.Limits != nil {
+		outputLimit = defaults.Limits.Output
+	} else if defaults := request.Model.GetRouteDefaults(); defaults != nil && defaults.Limits != nil {
+		outputLimit = defaults.Limits.Output
 	}
 	if gen != nil && gen.MaxTokens != nil {
 		outputLimit = *gen.MaxTokens

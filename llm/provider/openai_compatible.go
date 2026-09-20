@@ -33,7 +33,7 @@ type OpenAICompatibleFamilyOptions struct {
 
 type OpenAICompatibleProvider struct {
 	ID    schema.ProviderID
-	Model func(id string, opts ...llm.ModelOptions) schema.Model
+	Model func(id string, opts ...llm.ModelOptions) route.Model
 }
 
 func configure(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
@@ -63,7 +63,7 @@ func configure(openAICompatibleChatRoute route.Route, input OpenAICompatibleGene
 	})
 	return OpenAICompatibleProvider{
 		ID: schema.ProviderID(prov),
-		Model: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			modelInput := route.RouteModelInput{
 				ID:       id,
 				Provider: prov,

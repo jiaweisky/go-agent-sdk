@@ -68,6 +68,9 @@ type ModelSchema interface {
 	ModelID() ModelID
 	ProviderID() ProviderID
 	GetDefaults() *ModelDefaults
+	// GetRouteDefaults mirrors `model.route.defaults`; nil when the model has no
+	// route (bare schema.Model / ModelID).
+	GetRouteDefaults() *ModelDefaults
 	GetCompatibility() *ModelCompatibility
 }
 
@@ -81,11 +84,13 @@ type Model struct {
 func (m Model) ModelID() ModelID                      { return m.ID }
 func (m Model) ProviderID() ProviderID                { return m.Provider }
 func (m Model) GetDefaults() *ModelDefaults           { return m.Defaults }
+func (m Model) GetRouteDefaults() *ModelDefaults      { return nil }
 func (m Model) GetCompatibility() *ModelCompatibility { return m.Compatibility }
 
 func (m ModelID) ModelID() ModelID                      { return m }
 func (m ModelID) ProviderID() ProviderID                { return "" }
 func (m ModelID) GetDefaults() *ModelDefaults           { return nil }
+func (m ModelID) GetRouteDefaults() *ModelDefaults      { return nil }
 func (m ModelID) GetCompatibility() *ModelCompatibility { return nil }
 
 type ModelInput struct {

@@ -25,7 +25,7 @@ type AmazonBedrockConfig struct {
 
 type AmazonBedrockProvider struct {
 	ID    schema.ProviderID
-	Model func(id string, opts ...llm.ModelOptions) schema.Model
+	Model func(id string, opts ...llm.ModelOptions) route.Model
 }
 
 func bedrockBaseURL(region string) string {
@@ -77,7 +77,7 @@ func NewAmazonBedrock(bedrockConverseRoute route.Route, input AmazonBedrockConfi
 	})
 	return AmazonBedrockProvider{
 		ID: AmazonAmazonBedrockProviderID,
-		Model: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			modelInput := route.RouteModelInput{ID: id}
 			if len(opts) > 0 {
 				opt := opts[0]

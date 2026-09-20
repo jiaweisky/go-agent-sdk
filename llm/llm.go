@@ -43,7 +43,7 @@ type (
 	ToolFailure                   = schema.ToolFailure
 	ToolDefinition                = schema.ToolDefinition
 	ToolChoice                    = schema.ToolChoice
-	Model                         = schema.Model
+	Model                         = route.Model
 	ModelSchema                   = schema.ModelSchema
 	ToolContent                   = schema.ToolContent
 	ToolTextContent               = schema.ToolTextContent

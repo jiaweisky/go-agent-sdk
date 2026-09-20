@@ -23,10 +23,10 @@ type OpenAIConfig struct {
 type OpenAIProvider struct {
 	ID                 schema.ProviderID
 	Routes             []route.Route
-	Model              func(id string, opts ...llm.ModelOptions) schema.Model
-	Responses          func(id string, opts ...llm.ModelOptions) schema.Model
-	ResponsesWebSocket func(id string, opts ...llm.ModelOptions) schema.Model
-	Chat               func(id string, opts ...llm.ModelOptions) schema.Model
+	Model              func(id string, opts ...llm.ModelOptions) route.Model
+	Responses          func(id string, opts ...llm.ModelOptions) route.Model
+	ResponsesWebSocket func(id string, opts ...llm.ModelOptions) route.Model
+	Chat               func(id string, opts ...llm.ModelOptions) route.Model
 }
 
 func openAIAuth(input OpenAIConfig) *route.Auth {
@@ -61,7 +61,7 @@ func configureOpenAIRoute(r route.Route, input OpenAIConfig) route.Route {
 	})
 }
 
-func modelFactory(r route.Route, modelID string, baseOpts route.RouteDefaultsInput, textVerbosity *bool, modelOpts ...llm.ModelOptions) schema.Model {
+func modelFactory(r route.Route, modelID string, baseOpts route.RouteDefaultsInput, textVerbosity *bool, modelOpts ...llm.ModelOptions) route.Model {
 	merged := baseOpts
 	merged.ProviderOptions = withOpenAIOptions(modelID, baseOpts.ProviderOptions, textVerbosity)
 	modelInput := route.RouteModelInput{ID: modelID}
@@ -82,16 +82,16 @@ func NewOpenAI(responsesRoute, responsesWebSocketRoute, chatRoute route.Route, i
 	return OpenAIProvider{
 		ID:     OpenAIProviderID,
 		Routes: []route.Route{responsesRoute, responsesWebSocketRoute, chatRoute},
-		Model: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(responsesRoute, id, base, ptr(true), opts...)
 		},
-		Responses: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(responsesRoute, id, base, ptr(true), opts...)
 		},
-		ResponsesWebSocket: func(id string, opts ...llm.ModelOptions) schema.Model {
+		ResponsesWebSocket: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(responsesWebSocketRoute, id, base, ptr(true), opts...)
 		},
-		Chat: func(id string, opts ...llm.ModelOptions) schema.Model {
+		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(chatRoute, id, base, nil, opts...)
 		},
 	}
