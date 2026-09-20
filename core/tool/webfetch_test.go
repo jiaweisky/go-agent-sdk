@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -55,7 +56,7 @@ func settleWebFetch(t *testing.T, deps WebFetchDeps, input map[string]any) *Sett
 	if _, err := RegisterWebFetch(registry, deps); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_webfetch_test",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",

@@ -258,8 +258,8 @@ func MakeWebFetch(deps WebFetchDeps) *Def[WebFetchInput, WebFetchOutput, WebFetc
 			}
 			return []Content{TextContent{Text: out.Output}}
 		},
-		Execute: func(input WebFetchInput, ctx Context) (WebFetchOutput, error) {
-			result, err := executeWebFetch(deps, input, ctx)
+		Execute: func(execCtx context.Context, input WebFetchInput, ctx Context) (WebFetchOutput, error) {
+			result, err := executeWebFetch(deps, execCtx, input, ctx)
 			if err != nil {
 				return WebFetchOutput{}, &Failure{Message: "Unable to fetch " + input.URL}
 			}
@@ -268,39 +268,37 @@ func MakeWebFetch(deps WebFetchDeps) *Def[WebFetchInput, WebFetchOutput, WebFetc
 	})
 }
 
-func executeWebFetch(deps WebFetchDeps, input WebFetchInput, ctx Context) (WebFetchOutput, error) {
+func executeWebFetch(deps WebFetchDeps, execCtx context.Context, input WebFetchInput, ctx Context) (WebFetchOutput, error) {
 	if err := webFetchAssertHTTPURL(input.URL); err != nil {
 		return WebFetchOutput{}, err
 	}
 
-	if deps.Permission != nil {
-		metadata := map[string]any{"url": input.URL, "format": input.Format}
-		if input.Timeout != nil {
-			metadata["timeout"] = *input.Timeout
-		}
-		source := &core.PermissionSource{
-			Type:      core.PermissionSourceTypeTool,
-			MessageID: ctx.AssistantMessageID,
-			CallID:    ctx.ToolCallID,
-		}
-		if err := deps.Permission.Assert(core.PermissionAssertInput{
-			SessionID: ctx.SessionID,
-			Action:    WebFetchName,
-			Resources: []string{input.URL},
-			Save:      []string{"*"},
-			Metadata:  metadata,
-			Source:    source,
-			Agent:     &ctx.Agent,
-		}); err != nil {
-			return WebFetchOutput{}, err
-		}
+	metadata := map[string]any{"url": input.URL, "format": input.Format}
+	if input.Timeout != nil {
+		metadata["timeout"] = *input.Timeout
+	}
+	source := &core.PermissionSource{
+		Type:      core.PermissionSourceTypeTool,
+		MessageID: ctx.AssistantMessageID,
+		CallID:    ctx.ToolCallID,
+	}
+	if err := deps.Permission.Assert(core.PermissionAssertInput{
+		SessionID: ctx.SessionID,
+		Action:    WebFetchName,
+		Resources: []string{input.URL},
+		Save:      []string{"*"},
+		Metadata:  metadata,
+		Source:    source,
+		Agent:     &ctx.Agent,
+	}); err != nil {
+		return WebFetchOutput{}, err
 	}
 
 	timeoutSeconds := float64(WebFetchDefaultTimeoutSeconds)
 	if input.Timeout != nil {
 		timeoutSeconds = *input.Timeout
 	}
-	timeoutCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds*float64(time.Second)))
+	timeoutCtx, cancel := context.WithTimeout(execCtx, time.Duration(timeoutSeconds*float64(time.Second)))
 	defer cancel()
 
 	body, contentType, err := webFetchFetch(deps, timeoutCtx, input)

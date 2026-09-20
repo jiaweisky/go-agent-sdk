@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -44,7 +45,7 @@ func settleGlob(t *testing.T, deps GlobDeps, input map[string]any) *Settlement {
 	if _, err := RegisterGlob(registry, deps); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",

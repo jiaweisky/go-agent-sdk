@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -122,7 +123,7 @@ func MakeQuestion(deps QuestionDeps) *Def[QuestionInput, QuestionOutput, Questio
 			}
 			return []Content{TextContent{Text: QuestionToModelOutput(input.Questions, out.Answers)}}
 		},
-		Execute: func(input QuestionInput, ctx Context) (QuestionOutput, error) {
+		Execute: func(execCtx context.Context, input QuestionInput, ctx Context) (QuestionOutput, error) {
 			source := &core.PermissionSource{
 				Type:      core.PermissionSourceTypeTool,
 				MessageID: ctx.AssistantMessageID,
@@ -138,7 +139,7 @@ func MakeQuestion(deps QuestionDeps) *Def[QuestionInput, QuestionOutput, Questio
 				return QuestionOutput{}, &Failure{Message: "Permission denied: question"}
 			}
 
-			answers, err := deps.Question.Ask(core.QuestionAskInput{
+			answers, err := deps.Question.Ask(execCtx, core.QuestionAskInput{
 				SessionID: ctx.SessionID,
 				Questions: questionInfosFromPrompts(input.Questions),
 				Tool:      &core.QuestionTool{MessageID: ctx.AssistantMessageID, CallID: ctx.ToolCallID},

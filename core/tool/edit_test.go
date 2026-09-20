@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,7 @@ func settleEdit(t *testing.T, deps EditDeps, input map[string]any) *Settlement {
 	if _, err := RegisterEdit(registry, deps); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",

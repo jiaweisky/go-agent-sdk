@@ -2,6 +2,7 @@ package tool
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"image"
 	"image/png"
@@ -39,7 +40,7 @@ func settleRead(t *testing.T, deps ReadDeps, input map[string]any) *Settlement {
 	if _, err := RegisterRead(registry, deps); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",

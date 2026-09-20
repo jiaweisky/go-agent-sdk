@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"testing"
 
 	"github.com/user/go-agent-sdk/core"
@@ -12,7 +13,7 @@ type testQuestion struct {
 	asked   *core.QuestionAskInput
 }
 
-func (q *testQuestion) Ask(input core.QuestionAskInput) ([]core.QuestionAnswer, error) {
+func (q *testQuestion) Ask(_ context.Context, input core.QuestionAskInput) ([]core.QuestionAnswer, error) {
 	q.asked = &input
 	return q.answers, nil
 }
@@ -73,7 +74,7 @@ func TestQuestion_AnswersToModelOutput(t *testing.T) {
 		t.Fatalf("expected definition name %q, got %q", QuestionName, mat.Definitions[0].Name)
 	}
 
-	result, err := mat.Settle(ExecuteInput{
+	result, err := mat.Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",
@@ -105,7 +106,7 @@ func TestQuestion_Unanswered(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",
@@ -141,7 +142,7 @@ func TestQuestion_DeniedPermission(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",

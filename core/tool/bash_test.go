@@ -101,7 +101,7 @@ func settleBash(t *testing.T, deps BashDeps, input map[string]any) *Settlement {
 	if _, err := RegisterBash(registry, deps); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",

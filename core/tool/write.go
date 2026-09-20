@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -78,7 +79,10 @@ func MakeWrite(deps WriteDeps) *Def[WriteInput, WriteOutput, WriteOutput] {
 			}
 			return []Content{TextContent{Text: WriteToModelOutput(out)}}
 		},
-		Execute: func(input WriteInput, ctx Context) (WriteOutput, error) {
+		Execute: func(execCtx context.Context, input WriteInput, ctx Context) (WriteOutput, error) {
+			if err := execCtx.Err(); err != nil {
+				return WriteOutput{}, err
+			}
 			result, err := executeWrite(deps, input, ctx)
 			if err != nil {
 				return WriteOutput{}, &Failure{Message: fmt.Sprintf("Unable to write %s", input.Path)}

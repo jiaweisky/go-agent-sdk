@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,7 +69,7 @@ func TestWrite_CreatesFile(t *testing.T) {
 		t.Fatalf("expected definition name %q, got %q", WriteName, mat.Definitions[0].Name)
 	}
 
-	result, err := mat.Settle(ExecuteInput{
+	result, err := mat.Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",
@@ -110,7 +111,7 @@ func TestWrite_OverwritesExisting(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",
@@ -146,7 +147,7 @@ func TestWrite_PreservesBom(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	if _, err := registry.Materialize(nil).Settle(ExecuteInput{
+	if _, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",
@@ -177,7 +178,7 @@ func TestWrite_AbsolutePathInsideLocation(t *testing.T) {
 	}
 
 	abs := filepath.Join(root, "sub", "inside.txt")
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",
@@ -216,7 +217,7 @@ func TestWrite_AbsoluteExternalPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("eval symlinks: %v", err)
 	}
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",
@@ -264,7 +265,7 @@ func TestWrite_DeniedPermission(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_1",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",

@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -101,7 +102,10 @@ func MakeGlob(deps GlobDeps) *Def[GlobInput, GlobOutput, GlobOutput] {
 			}
 			return []Content{TextContent{Text: GlobToModelOutput(entries)}}
 		},
-		Execute: func(input GlobInput, ctx Context) (GlobOutput, error) {
+		Execute: func(execCtx context.Context, input GlobInput, ctx Context) (GlobOutput, error) {
+			if err := execCtx.Err(); err != nil {
+				return GlobOutput{}, err
+			}
 			result, err := executeGlob(deps, input, ctx)
 			if err != nil {
 				return nil, &Failure{Message: "Unable to find files matching " + input.Pattern}

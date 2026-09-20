@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,7 +99,10 @@ func MakeEdit(deps EditDeps) *Def[EditInput, EditOutput, EditOutput] {
 			}
 			return []Content{TextContent{Text: EditToModelOutput(out, input.OldString, input.NewString)}}
 		},
-		Execute: func(input EditInput, ctx Context) (EditOutput, error) {
+		Execute: func(execCtx context.Context, input EditInput, ctx Context) (EditOutput, error) {
+			if err := execCtx.Err(); err != nil {
+				return EditOutput{}, err
+			}
 			result, err := executeEdit(deps, input, ctx)
 			if err != nil {
 				return EditOutput{}, editUnableToEdit(err, input.Path)

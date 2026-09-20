@@ -267,6 +267,7 @@ type WebSearchHTTPClient interface {
 const webSearchTimeout = 25 * time.Second
 
 func webSearchCallMCP(
+	ctx context.Context,
 	client WebSearchHTTPClient,
 	rawURL string,
 	toolName string,
@@ -281,7 +282,7 @@ func webSearchCallMCP(
 		return "", err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), webSearchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, webSearchTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(payload))
@@ -349,26 +350,24 @@ func webSearchMetadata(input WebSearchInput, provider WebSearchProvider) map[str
 	return metadata
 }
 
-func executeWebSearch(deps WebSearchDeps, input WebSearchInput, ctx Context) (WebSearchOutput, error) {
+func executeWebSearch(deps WebSearchDeps, execCtx context.Context, input WebSearchInput, ctx Context) (WebSearchOutput, error) {
 	provider := SelectWebSearchProvider(ctx.SessionID, deps.Config, deps.Config.Provider)
 
-	if deps.Permission != nil {
-		source := &core.PermissionSource{
-			Type:      core.PermissionSourceTypeTool,
-			MessageID: ctx.AssistantMessageID,
-			CallID:    ctx.ToolCallID,
-		}
-		if err := deps.Permission.Assert(core.PermissionAssertInput{
-			SessionID: ctx.SessionID,
-			Action:    WebSearchName,
-			Resources: []string{input.Query},
-			Save:      []string{"*"},
-			Metadata:  webSearchMetadata(input, provider),
-			Source:    source,
-			Agent:     &ctx.Agent,
-		}); err != nil {
-			return WebSearchOutput{}, err
-		}
+	source := &core.PermissionSource{
+		Type:      core.PermissionSourceTypeTool,
+		MessageID: ctx.AssistantMessageID,
+		CallID:    ctx.ToolCallID,
+	}
+	if err := deps.Permission.Assert(core.PermissionAssertInput{
+		SessionID: ctx.SessionID,
+		Action:    WebSearchName,
+		Resources: []string{input.Query},
+		Save:      []string{"*"},
+		Metadata:  webSearchMetadata(input, provider),
+		Source:    source,
+		Agent:     &ctx.Agent,
+	}); err != nil {
+		return WebSearchOutput{}, err
 	}
 
 	client := deps.HTTPClient
@@ -391,7 +390,7 @@ func executeWebSearch(deps WebSearchDeps, input WebSearchInput, ctx Context) (We
 		if livecrawl == "" {
 			livecrawl = "fallback"
 		}
-		text, err = webSearchCallMCP(client, webSearchExaURL(deps.Config.ExaAPIKey), "web_search_exa", webSearchExaArgs{
+		text, err = webSearchCallMCP(execCtx, client, webSearchExaURL(deps.Config.ExaAPIKey), "web_search_exa", webSearchExaArgs{
 			Query:                input.Query,
 			Type:                 searchType,
 			NumResults:           numResults,
@@ -403,7 +402,7 @@ func executeWebSearch(deps WebSearchDeps, input WebSearchInput, ctx Context) (We
 		if deps.Config.ParallelAPIKey != "" {
 			headers["Authorization"] = "Bearer " + deps.Config.ParallelAPIKey
 		}
-		text, err = webSearchCallMCP(client, WebSearchParallelURL, "web_search", webSearchParallelArgs{
+		text, err = webSearchCallMCP(execCtx, client, WebSearchParallelURL, "web_search", webSearchParallelArgs{
 			Objective:     input.Query,
 			SearchQueries: []string{input.Query},
 			SessionID:     ctx.SessionID,
@@ -430,8 +429,8 @@ func MakeWebSearch(deps WebSearchDeps) *Def[WebSearchInput, WebSearchOutput, Web
 			}
 			return []Content{TextContent{Text: out.Text}}
 		},
-		Execute: func(input WebSearchInput, ctx Context) (WebSearchOutput, error) {
-			result, err := executeWebSearch(deps, input, ctx)
+		Execute: func(execCtx context.Context, input WebSearchInput, ctx Context) (WebSearchOutput, error) {
+			result, err := executeWebSearch(deps, execCtx, input, ctx)
 			if err != nil {
 				return WebSearchOutput{}, &Failure{Message: "Unable to search the web for " + input.Query}
 			}

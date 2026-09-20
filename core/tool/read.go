@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"errors"
 
 	"github.com/user/go-agent-sdk/core"
@@ -120,7 +121,10 @@ func MakeRead(deps ReadDeps) *Def[ReadInput, any, any] {
 				FileContent{Data: data, MIME: mime, Name: &name},
 			}
 		},
-		Execute: func(input ReadInput, ctx Context) (any, error) {
+		Execute: func(execCtx context.Context, input ReadInput, ctx Context) (any, error) {
+			if err := execCtx.Err(); err != nil {
+				return nil, err
+			}
 			result, err := executeRead(deps, input, ctx)
 			if err != nil {
 				return nil, &Failure{Message: readToolErrorMessage(err, input.Path)}

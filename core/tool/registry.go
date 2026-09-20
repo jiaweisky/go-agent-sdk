@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -125,7 +126,7 @@ func (r *Registry) Register(tools map[string]Tool) (func(), error) {
 
 type Materialization struct {
 	Definitions []schema.ToolDefinition
-	Settle      func(ExecuteInput) (*Settlement, error)
+	Settle      func(execCtx context.Context, input ExecuteInput) (*Settlement, error)
 }
 
 func (r *Registry) Materialize(permissions []PermissionRule) *Materialization {
@@ -164,13 +165,13 @@ func (r *Registry) Materialize(permissions []PermissionRule) *Materialization {
 
 	return &Materialization{
 		Definitions: defs,
-		Settle: func(input ExecuteInput) (*Settlement, error) {
-			return r.settle(input, identities)
+		Settle: func(execCtx context.Context, input ExecuteInput) (*Settlement, error) {
+			return r.settle(execCtx, input, identities)
 		},
 	}
 }
 
-func (r *Registry) settle(input ExecuteInput, identities map[string]interface{}) (*Settlement, error) {
+func (r *Registry) settle(execCtx context.Context, input ExecuteInput, identities map[string]interface{}) (*Settlement, error) {
 	identity, known := identities[input.Call.Name]
 	if !known {
 		return &Settlement{
@@ -191,7 +192,7 @@ func (r *Registry) settle(input ExecuteInput, identities map[string]interface{})
 		}, nil
 	}
 
-	output, err := Settle(current.tool, input.Call, Context{
+	output, err := Settle(current.tool, execCtx, input.Call, Context{
 		SessionID:          input.SessionID,
 		Agent:              input.Agent,
 		AssistantMessageID: input.AssistantMessageID,

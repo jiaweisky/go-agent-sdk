@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -64,7 +65,7 @@ func settleWebSearch(t *testing.T, deps WebSearchDeps, input map[string]any) *Se
 	if _, err := RegisterWebSearch(registry, deps); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_websearch_test",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",
@@ -206,6 +207,7 @@ func TestWebSearch_CallsParallelWithBearer(t *testing.T) {
 	client := &webSearchTestClient{response: webSearchTextResponse(webSearchPayload("parallel results"))}
 	deps := WebSearchDeps{
 		HTTPClient: client,
+		Permission: &bashTestPermission{},
 		Config: WebSearchConfig{
 			Provider:       webSearchProviderPtr(WebSearchProviderParallel),
 			ParallelAPIKey: "parallel-secret",
@@ -253,6 +255,7 @@ func TestWebSearch_KeepsExaCredentialInURL(t *testing.T) {
 	client := &webSearchTestClient{response: webSearchTextResponse(webSearchPayload("credentialed exa results"))}
 	deps := WebSearchDeps{
 		HTTPClient: client,
+		Permission: &bashTestPermission{},
 		Config: WebSearchConfig{
 			Provider:  webSearchProviderPtr(WebSearchProviderExa),
 			ExaAPIKey: "exa secret",
@@ -275,6 +278,7 @@ func TestWebSearch_ReturnsNoResultsFallback(t *testing.T) {
 	client := &webSearchTestClient{response: webSearchTextResponse("")}
 	deps := WebSearchDeps{
 		HTTPClient: client,
+		Permission: &bashTestPermission{},
 		Config:     WebSearchConfig{Provider: webSearchProviderPtr(WebSearchProviderExa)},
 	}
 	result := settleWebSearch(t, deps, map[string]any{"query": "nothing"})
@@ -294,6 +298,7 @@ func TestWebSearch_RejectsOversizedResponse(t *testing.T) {
 	}}
 	deps := WebSearchDeps{
 		HTTPClient: client,
+		Permission: &bashTestPermission{},
 		Config:     WebSearchConfig{Provider: webSearchProviderPtr(WebSearchProviderExa)},
 	}
 	result := settleWebSearch(t, deps, map[string]any{"query": "too much"})

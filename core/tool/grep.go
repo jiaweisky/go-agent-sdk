@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -139,7 +140,10 @@ func MakeGrep(deps GrepDeps) *Def[GrepInput, GrepOutput, GrepOutput] {
 			}
 			return []Content{TextContent{Text: GrepToModelOutput(matches)}}
 		},
-		Execute: func(input GrepInput, ctx Context) (GrepOutput, error) {
+		Execute: func(execCtx context.Context, input GrepInput, ctx Context) (GrepOutput, error) {
+			if err := execCtx.Err(); err != nil {
+				return GrepOutput{}, err
+			}
 			result, err := executeGrep(deps, input, ctx)
 			if err != nil {
 				return nil, &Failure{Message: "Unable to grep for " + input.Pattern}

@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -62,7 +63,7 @@ type AnyTool = Tool
 type runtime struct {
 	permission string
 	definition func(name string) schema.ToolDefinition
-	settle     func(call schema.ToolCallPart, ctx Context) (schema.ToolOutput, error)
+	settle     func(execCtx context.Context, call schema.ToolCallPart, ctx Context) (schema.ToolOutput, error)
 }
 
 type Config[Input, Output, Structured any] struct {
@@ -70,7 +71,7 @@ type Config[Input, Output, Structured any] struct {
 	Input              schema.JsonSchema
 	Output             schema.JsonSchema
 	Structured         *schema.JsonSchema
-	Execute            func(input Input, ctx Context) (Output, error)
+	Execute            func(execCtx context.Context, input Input, ctx Context) (Output, error)
 	ToStructuredOutput func(input Input, output any) (Structured, error)
 	ToModelOutput      func(input Input, output any) []Content
 }
@@ -95,20 +96,21 @@ func Make[Input, Output, Structured any](cfg Config[Input, Output, Structured]) 
 			if cached, ok := definitions[name]; ok {
 				return cached
 			}
-			outSchema := &cfg.Output
+			outSchema := cfg.Output
 			if cfg.Structured != nil {
-				outSchema = cfg.Structured
+				outSchema = *cfg.Structured
 			}
+			closedOut := closeObjectSchemas(outSchema)
 			def := schema.NewToolDefinition(schema.ToolDefinitionInput{
 				Name:         name,
 				Description:  cfg.Description,
-				InputSchema:  cfg.Input,
-				OutputSchema: outSchema,
+				InputSchema:  closeObjectSchemas(cfg.Input),
+				OutputSchema: &closedOut,
 			})
 			definitions[name] = def
 			return def
 		},
-		settle: func(call schema.ToolCallPart, ctx Context) (schema.ToolOutput, error) {
+		settle: func(execCtx context.Context, call schema.ToolCallPart, ctx Context) (schema.ToolOutput, error) {
 			var input Input
 			if err := decodeAndValidate(call.Input, &input, inputSchema); err != nil {
 				return schema.ToolOutput{}, &Failure{
@@ -116,7 +118,7 @@ func Make[Input, Output, Structured any](cfg Config[Input, Output, Structured]) 
 				}
 			}
 
-			output, err := cfg.Execute(input, ctx)
+			output, err := cfg.Execute(execCtx, input, ctx)
 			if err != nil {
 				return schema.ToolOutput{}, err
 			}
@@ -202,12 +204,55 @@ func Definition(name string, tool Tool) schema.ToolDefinition {
 	return rt.definition(name)
 }
 
-func Settle(tool Tool, call schema.ToolCallPart, ctx Context) (schema.ToolOutput, error) {
+func Settle(tool Tool, execCtx context.Context, call schema.ToolCallPart, ctx Context) (schema.ToolOutput, error) {
 	rt := tool.getRuntime()
 	if rt == nil {
 		panic("invalid Core Tool value")
 	}
-	return rt.settle(call, ctx)
+	return rt.settle(execCtx, call, ctx)
+}
+
+// closeObjectSchemas mirrors Effect's Schema.toJsonSchemaDocument for
+// Schema.Struct: every object schema derived from a struct is closed with
+// `additionalProperties: false`. It deep-copies the schema so shared nested
+// values (e.g. a struct reused across two parents) are not mutated.
+//
+// This is applied only to the model-facing tool definition. Input validation
+// stays permissive because Effect's runtime decoder strips unknown properties
+// instead of rejecting them.
+func closeObjectSchemas(js schema.JsonSchema) schema.JsonSchema {
+	closed, _ := closeSchemaValue(js).(map[string]any)
+	return schema.JsonSchema(closed)
+}
+
+func closeSchemaValue(value any) any {
+	switch v := value.(type) {
+	case schema.JsonSchema:
+		return closeSchemaMap(map[string]any(v))
+	case map[string]any:
+		return closeSchemaMap(v)
+	case []any:
+		result := make([]any, len(v))
+		for i, item := range v {
+			result[i] = closeSchemaValue(item)
+		}
+		return result
+	default:
+		return value
+	}
+}
+
+func closeSchemaMap(input map[string]any) map[string]any {
+	result := make(map[string]any, len(input))
+	for key, value := range input {
+		result[key] = closeSchemaValue(value)
+	}
+	if _, isObject := result["properties"]; isObject {
+		if _, ok := result["additionalProperties"]; !ok {
+			result["additionalProperties"] = false
+		}
+	}
+	return result
 }
 
 func compileSchema(js schema.JsonSchema) *jsonschema.Schema {

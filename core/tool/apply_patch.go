@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,7 +99,10 @@ func MakeApplyPatch(deps ApplyPatchDeps) *Def[ApplyPatchInput, ApplyPatchOutput,
 			}
 			return []Content{TextContent{Text: ApplyPatchToModelOutput(out)}}
 		},
-		Execute: func(input ApplyPatchInput, ctx Context) (ApplyPatchOutput, error) {
+		Execute: func(execCtx context.Context, input ApplyPatchInput, ctx Context) (ApplyPatchOutput, error) {
+			if err := execCtx.Err(); err != nil {
+				return ApplyPatchOutput{}, err
+			}
 			return executeApplyPatch(deps, input, ctx)
 		},
 	})

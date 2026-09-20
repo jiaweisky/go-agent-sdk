@@ -1,6 +1,7 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -82,7 +83,7 @@ func newApplyPatchDeps(root string, permission core.Permission, files core.FileM
 
 func settleApplyPatch(t *testing.T, registry *Registry, patchText string) *Settlement {
 	t.Helper()
-	result, err := registry.Materialize(nil).Settle(ExecuteInput{
+	result, err := registry.Materialize(nil).Settle(context.Background(), ExecuteInput{
 		SessionID:          "ses_apply_patch_tool_test",
 		Agent:              "build",
 		AssistantMessageID: "msg_1",

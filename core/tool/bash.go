@@ -137,8 +137,8 @@ func MakeBash(deps BashDeps) *Def[BashInput, BashOutput, BashStructuredOutput] {
 				TextContent{Text: BashModelOutput(out)},
 			}
 		},
-		Execute: func(input BashInput, ctx Context) (BashOutput, error) {
-			result, err := executeBash(deps, input, ctx)
+		Execute: func(execCtx context.Context, input BashInput, ctx Context) (BashOutput, error) {
+			result, err := executeBash(deps, execCtx, input, ctx)
 			if err != nil {
 				return BashOutput{}, &Failure{Message: fmt.Sprintf("Unable to execute command: %s", input.Command)}
 			}
@@ -287,7 +287,7 @@ func bashWarningPath(directory string) string {
 	return strings.ReplaceAll(filepath.Join(directory, "*"), "\\", "/")
 }
 
-func executeBash(deps BashDeps, input BashInput, ctx Context) (BashOutput, error) {
+func executeBash(deps BashDeps, execCtx context.Context, input BashInput, ctx Context) (BashOutput, error) {
 	source := &core.PermissionSource{
 		Type:      core.PermissionSourceTypeTool,
 		MessageID: ctx.AssistantMessageID,
@@ -357,7 +357,7 @@ func executeBash(deps BashDeps, input BashInput, ctx Context) (BashOutput, error
 		timeout = *input.Timeout
 	}
 	maxBytes := BashMaxCaptureBytes
-	result, err := deps.Process.Run(context.Background(), shell, bashShellArgs(input.Command), core.RunOptions{
+	result, err := deps.Process.Run(execCtx, shell, bashShellArgs(input.Command), core.RunOptions{
 		Dir:            target.Canonical,
 		CombineOutput:  true,
 		Timeout:        time.Duration(timeout) * time.Millisecond,
