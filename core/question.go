@@ -70,7 +70,7 @@ type QuestionConfig struct {
 }
 
 type Question interface {
-	Ask(input QuestionAskInput) ([]QuestionAnswer, error)
+	Ask(ctx context.Context, input QuestionAskInput) ([]QuestionAnswer, error)
 	Reply(input QuestionReplyInput) error
 	Reject(requestID QuestionID) error
 	List() []QuestionRequest
@@ -123,7 +123,7 @@ func (s *questionService) publish(def schema.EventDefinition, data any) error {
 	return err
 }
 
-func (s *questionService) Ask(input QuestionAskInput) ([]QuestionAnswer, error) {
+func (s *questionService) Ask(ctx context.Context, input QuestionAskInput) ([]QuestionAnswer, error) {
 	id := NewQuestionID()
 	request := QuestionRequest{
 		ID:        id,
@@ -150,7 +150,15 @@ func (s *questionService) Ask(input QuestionAskInput) ([]QuestionAnswer, error) 
 		}
 	}
 
-	result := <-item.done
+	var result questionResult
+	select {
+	case result = <-item.done:
+	case <-ctx.Done():
+		s.mu.Lock()
+		delete(s.pending, id)
+		s.mu.Unlock()
+		return nil, ctx.Err()
+	}
 
 	s.mu.Lock()
 	delete(s.pending, id)

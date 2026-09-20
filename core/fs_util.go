@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/funnyfactor/mimetype"
+	"github.com/user/go-agent-sdk/core/util"
 )
 
 type FileSystemError struct {
@@ -232,6 +233,36 @@ func Contains(parent, child string) bool {
 
 func Overlaps(a, b string) bool {
 	return Contains(a, b) || Contains(b, a)
+}
+
+// ReadFileStringSafe mirrors FileSystem.readFileStringSafe: missing or
+// unreadable files yield ("", false) instead of an error.
+func ReadFileStringSafe(path string) (string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
+}
+
+// Glob mirrors FileSystem.glob.
+func Glob(pattern string, options util.GlobOptions) ([]string, error) {
+	return util.GlobScan(pattern, options)
+}
+
+// GlobMatch mirrors FileSystem.globMatch.
+func GlobMatch(pattern, filepath string) bool {
+	return util.GlobMatch(pattern, filepath)
+}
+
+// Rename mirrors FileSystem.rename.
+func Rename(oldPath, newPath string) error {
+	return os.Rename(oldPath, newPath)
+}
+
+// RemoveAll mirrors fs.remove(path, { recursive: true, force: true }).
+func RemoveAll(path string) error {
+	return os.RemoveAll(path)
 }
 
 // MimeType mirrors fs-util.ts's `mimeType(p) = lookup(p) || "application/octet-stream"`.

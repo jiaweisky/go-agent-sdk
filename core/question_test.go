@@ -65,7 +65,7 @@ func TestQuestion_AskReply(t *testing.T) {
 	answers := make(chan []QuestionAnswer, 1)
 	errs := make(chan error, 1)
 	go func() {
-		result, err := q.Ask(questionTestInput())
+		result, err := q.Ask(context.Background(), questionTestInput())
 		if err != nil {
 			errs <- err
 			return
@@ -119,7 +119,7 @@ func TestQuestion_AskRejected(t *testing.T) {
 
 	errs := make(chan error, 1)
 	go func() {
-		_, err := q.Ask(questionTestInput())
+		_, err := q.Ask(context.Background(), questionTestInput())
 		errs <- err
 	}()
 
@@ -166,7 +166,7 @@ func TestQuestion_PublishesToEventV2(t *testing.T) {
 		return len(svc.typedSubscribers[schema.QuestionEventAsked.Type]) >= 1
 	})
 
-	go func() { _, _ = q.Ask(questionTestInput()) }()
+	go func() { _, _ = q.Ask(context.Background(), questionTestInput()) }()
 
 	select {
 	case event := <-received:
@@ -200,7 +200,7 @@ func TestQuestion_CloseRejectsPending(t *testing.T) {
 
 	errs := make(chan error, 1)
 	go func() {
-		_, err := q.Ask(questionTestInput())
+		_, err := q.Ask(context.Background(), questionTestInput())
 		errs <- err
 	}()
 	waitForPending(t, q)
@@ -233,7 +233,7 @@ func TestQuestion_AskAfterClose(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	_, err := q.Ask(questionTestInput())
+	_, err := q.Ask(context.Background(), questionTestInput())
 	var rejected *QuestionRejectedError
 	if !errors.As(err, &rejected) {
 		t.Fatalf("expected rejected error, got %v", err)
@@ -257,7 +257,7 @@ func TestQuestion_ContextCancelRejectsPending(t *testing.T) {
 
 	errs := make(chan error, 1)
 	go func() {
-		_, err := q.Ask(questionTestInput())
+		_, err := q.Ask(context.Background(), questionTestInput())
 		errs <- err
 	}()
 	waitForPending(t, q)
@@ -283,7 +283,7 @@ func TestQuestion_DoubleReply(t *testing.T) {
 
 	answers := make(chan []QuestionAnswer, 1)
 	go func() {
-		result, _ := q.Ask(questionTestInput())
+		result, _ := q.Ask(context.Background(), questionTestInput())
 		answers <- result
 	}()
 
