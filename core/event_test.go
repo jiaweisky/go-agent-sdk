@@ -265,7 +265,7 @@ func TestEventCommitInsideTransaction(t *testing.T) {
 	}
 
 	if _, err := events.Publish(eventTestSync, map[string]any{"id": "agg", "text": "hello"}, &EventPublishOptions{
-		Commit: func(seq int) error {
+		Commit: func(_ EventDB, seq int) error {
 			received = append(received, "commit")
 			return nil
 		},
@@ -296,7 +296,7 @@ func TestEventRollbackOnCommitFailure(t *testing.T) {
 	}
 
 	_, err := events.Publish(eventTestSync, map[string]any{"id": "agg", "text": "hello"}, &EventPublishOptions{
-		Commit: func(seq int) error { return errors.New("commit failed") },
+		Commit: func(_ EventDB, seq int) error { return errors.New("commit failed") },
 	})
 	if err == nil || err.Error() != "commit failed" {
 		t.Fatalf("expected commit failure, got %v", err)
@@ -317,7 +317,7 @@ func TestEventRollbackOnCommitFailure(t *testing.T) {
 func TestEventRejectsCommitOnLiveOnly(t *testing.T) {
 	events := newTestEvent(t, EventConfig{})
 	_, err := events.Publish(eventTestMessage, map[string]any{"text": "hello"}, &EventPublishOptions{
-		Commit: func(seq int) error { return nil },
+		Commit: func(_ EventDB, seq int) error { return nil },
 	})
 	if err == nil || err.Error() != "Local commit hooks require a durable event" {
 		t.Fatalf("unexpected error: %v", err)

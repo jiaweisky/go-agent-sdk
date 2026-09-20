@@ -80,7 +80,10 @@ type EventPublishOptions struct {
 	ID       *EventID
 	Metadata map[string]any
 	Location *schema.LocationRef
-	Commit   func(seq int) error
+	// Commit runs inside the durable event transaction. It receives the
+	// transaction so local operational projections commit atomically with the
+	// event and are not replayed.
+	Commit func(tx EventDB, seq int) error
 }
 
 type EventReplayOptions struct {
@@ -670,7 +673,7 @@ func (s *eventService) commitDurableEvent(
 			}
 		}
 		if options != nil && options.Commit != nil {
-			if err := options.Commit(seq); err != nil {
+			if err := options.Commit(tx, seq); err != nil {
 				return err
 			}
 		}
