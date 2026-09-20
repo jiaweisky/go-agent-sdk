@@ -518,8 +518,8 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 | WebSearch | `websearch` | ✅ 已移植（`core/tool/websearch.go`） |
 | Task | `task` | 待移植 |
 | Question | `question` | ✅ 已移植（`core/tool/question.go`） |
-| Skill | `skill` | 待移植 |
-| Todo | `todo` | 待移植 |
+| Skill | `skill` | ✅ 已移植（`core/tool/skill.go`） |
+| Todo | `todo` | ✅ 已移植（`core/tool/todowrite.go`） |
 | LSP | `lsp` | 待移植 |
 | ApplyPatch | `apply_patch` | 待移植 |
 

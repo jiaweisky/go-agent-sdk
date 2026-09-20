@@ -11,6 +11,33 @@
 
 ## 移植规则
 
+### 移植范围：legacy / v1 代码默认不移植
+
+默认只移植 **v2 core**（`packages/core/src/`）。**legacy / v1 代码默认不移植**，除非确认它是 v2 core 的必需依赖——此时**先与用户确认**再动手。
+
+判定为 legacy 的信号（满足其一即可）：
+- 位于 `packages/opencode/src/session/`（v1 CLI 编排层）
+- 导入 v1 模块：`v1/`、`SessionV1`、`ConfigV1`、`MessageV2`、`SessionProcessor`、`Plugin`、legacy `Provider`、`EventV2Bridge`、`RuntimeFlags`、`InstanceState` 等
+- 面向 opencode CLI 的 HTTP handler / `app-runtime`
+
+示例：`packages/core/src/session/compaction.ts`（v2，移植）vs `packages/opencode/src/session/compaction.ts`（v1 legacy，不移植，仅因复用 core 的 `buildPrompt` 而依赖前者）。
+
+> 注意：`packages/opencode/src/` 下的**工具类**（如 `id/`、`tool/json-schema.ts`）不属于 legacy，仍按需移植。
+
+### CLI 基础设施：不照搬，改用 SDK 原生窄输入
+
+opencode 中**面向 CLI 的基础设施模块默认不照搬移植**，例如 `catalog`（models.dev 模型目录 + provider 注册表）、`credential`（`auth.json` 凭据存储）、`integration`（OAuth 连接流程/存储）等。
+
+判定信号（满足其一即可）：
+- 职责是「数据源 / 持久化 / OAuth / DI 服务」，而非 agent 循环的纯逻辑
+- 依赖 Effect `Context.Service` + `Layer`（DI node）而本身没有实质算法
+
+做法：**只移植其纯转换逻辑**，把数据源换成 SDK 原生窄输入（构造器注入）。
+- 例：`session/runner/model.ts` 的 `fromCatalogModel` / `withDefaults` / `withVariant` 只依赖 `schema.ModelInfo` + API key + `llm` 的 route/protocol/Auth。移植时用「`ModelInfo` provider + API key」构造器替代 `Catalog.Service` / `Integration.Service` / `Credential.Value`，不必移植三个服务。
+- 参考：DESIGN.md 公开 API 直接传 `ProviderConfig{APIKey}` + `Model`，SDK 走 `llm/provider` facade + `llm/route`，不引入 catalog/credential/integration。
+
+若确认某基础设施确实是必需依赖，**先与用户确认**再移植。
+
 ### 动手前必须读完整个 TS 源文件
 
 之前犯过错误：`events.ts` 有 618 行，只读了前半部分（类型定义）就开始写，遗漏了后半部分（状态机、LLMResponse namespace）的 15+ 个方法。**每个文件必须完整读完再动手**，包括：
