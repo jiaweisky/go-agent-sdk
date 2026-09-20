@@ -75,6 +75,14 @@ type ModelVariant struct {
 	Body    map[string]any    `json:"body,omitempty"`
 }
 
+// ModelRequest mirrors Model.Info.request: Provider.Request plus an optional
+// default variant.
+type ModelRequest struct {
+	Headers map[string]string `json:"headers"`
+	Body    map[string]any    `json:"body"`
+	Variant *string           `json:"variant,omitempty"`
+}
+
 // ModelInfo mirrors ModelV2.Info.
 type ModelInfo struct {
 	ID           ModelID           `json:"id"`
@@ -83,7 +91,7 @@ type ModelInfo struct {
 	Name         string            `json:"name"`
 	API          ModelAPI          `json:"api"`
 	Capabilities ModelCapabilities `json:"capabilities"`
-	Request      ProviderRequest   `json:"request"`
+	Request      ModelRequest      `json:"request"`
 	Variants     []ModelVariant    `json:"variants"`
 	Time         ModelTime         `json:"time"`
 	Cost         []ModelCost       `json:"cost"`
@@ -105,7 +113,7 @@ func ModelInfoEmpty(providerID ProviderID, modelID ModelID) ModelInfo {
 			Input:  []string{},
 			Output: []string{},
 		},
-		Request:  ProviderRequest{Headers: map[string]string{}, Body: map[string]any{}},
+		Request:  ModelRequest{Headers: map[string]string{}, Body: map[string]any{}},
 		Variants: []ModelVariant{},
 		Time:     ModelTime{Released: 0},
 		Cost:     []ModelCost{},
