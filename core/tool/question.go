@@ -31,7 +31,7 @@ var questionPromptSchema = jsonschema.Object(
 	jsonschema.Required("question", jsonschema.String(jsonschema.Description("Complete question"))),
 	jsonschema.Required("header", jsonschema.String(jsonschema.Description("Very short label (max 30 chars)"))),
 	jsonschema.Required("options", jsonschema.Array(questionOptionSchema, jsonschema.Description("Available choices"))),
-	jsonschema.OptionalKey("multiple", jsonschema.Boolean()),
+	jsonschema.Optional("multiple", jsonschema.Boolean()),
 )
 
 var QuestionInputSchema = jsonschema.Object(

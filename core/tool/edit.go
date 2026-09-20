@@ -32,11 +32,11 @@ var EditInputSchema = jsonschema.Object(
 )
 
 var editFileDiffSchema = jsonschema.Object(
-	jsonschema.OptionalKey("file", jsonschema.String()),
-	jsonschema.OptionalKey("patch", jsonschema.String()),
-	jsonschema.Required("additions", jsonschema.Finite()),
-	jsonschema.Required("deletions", jsonschema.Finite()),
-	jsonschema.OptionalKey("status", jsonschema.Literal("added", "deleted", "modified")),
+	jsonschema.Optional("file", jsonschema.String()),
+	jsonschema.Optional("patch", jsonschema.String()),
+	jsonschema.Required("additions", jsonschema.Number()),
+	jsonschema.Required("deletions", jsonschema.Number()),
+	jsonschema.Optional("status", jsonschema.Literal("added", "deleted", "modified")),
 )
 
 var EditOutputSchema = jsonschema.Object(

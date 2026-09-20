@@ -469,7 +469,7 @@ func Make[Input, Output, Structured any](cfg Config[Input, Output, Structured]) 
 
 > 对应 TS `core/src/tool/tool.ts` 的 `Tool.make()` / `Tool.Definition` / `Tool.Context`。TS 的 `WeakMap<AnyTool, Runtime>` 在 Go 里直接内联为 `Def.rt`。
 >
-> 工具 schema 使用类型化的 `jsonschema.Schema`（对标 Effect 的 `Schema` AST），单一来源产出两个投影：`Model()` 是发给模型的 JSON Schema（对象闭合、optional → `anyOf[T, null]`、literal → enum、number 兼容 NaN/Infinity、int check → `allOf`），`Validation()` 的校验语义对标 Effect 解码器（拒绝 optional 的 `null`、容忍多余字段）。外部 JSON Schema 用 `jsonschema.Raw` 包一层。注意：Effect 会把带 `identifier` 的 schema 提升到 `$defs` 并用 `$ref` 引用，Go 侧**内联**（LLM 层不解析 `$ref`，内联对 provider 更安全）。
+> 工具 schema 使用类型化的 `jsonschema.Schema`（对标 Effect 的 `Schema` AST），单一来源产出两个投影：`Model()` 是发给模型的 JSON Schema（对象闭合 `additionalProperties:false`、optional 仅不进 `required`、literal → typed enum、int check → `allOf`），`Validation()` 用于校验（对象不闭合、容忍多余字段）。两者只在「对象是否闭合」上不同，且**都不广告解码器会拒绝的值**（optional 不接受 `null`、number 不接受 `"NaN"` 等字符串——Effect 会广告但它们解码器实际拒绝）。外部 JSON Schema 用 `jsonschema.Raw` 包一层。注意：Effect 会把带 `identifier` 的 schema 提升到 `$defs` 并用 `$ref` 引用，Go 侧**内联**（LLM 层不解析 `$ref`，内联对 provider 更安全）。
 
 ### 7.2 内置工具定义
 

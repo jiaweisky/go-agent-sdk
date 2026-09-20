@@ -3,19 +3,20 @@
 // It mirrors the subset of Effect's Schema used by core tools. A single Schema
 // yields two projections from one source:
 //
-//   - Model renders the JSON Schema sent to models, matching Effect's
-//     Schema.toJsonSchemaDocument: objects are closed with
-//     `additionalProperties: false`, optional fields become
-//     `anyOf: [<schema>, { "type": "null" }]`, literals become typed enums,
-//     numbers also accept the string encodings NaN/Infinity/-Infinity, and
-//     Int/Number checks live inside `allOf`.
+//   - Model renders the JSON Schema sent to models. Object schemas are closed
+//     with `additionalProperties: false`, optional fields are simply omitted
+//     from `required`, literals become typed enums, and Int/Number checks live
+//     inside `allOf`.
 //
-//   - Validation renders a JSON Schema whose validation semantics match
-//     Effect's runtime decoder instead: unknown object properties are allowed
-//     (and stripped), and `null` is rejected for optional fields.
+//   - Validation renders the schema used to validate decoded input/output. It
+//     matches Effect's runtime decoder: unknown object properties are allowed
+//     (and stripped) and optional fields are not required.
 //
-// Keeping both projections on one AST means the definition sent to models and
-// the schema used to validate input can never drift apart.
+// The two projections differ only in object closure. Crucially, neither
+// advertises a value the decoder rejects: optional fields do not accept null,
+// and numbers do not accept the string encodings NaN/Infinity/-Infinity. Effect
+// advertises both even though its decoder rejects them, which makes models emit
+// values that then fail validation.
 package jsonschema
 
 type kind int
@@ -24,7 +25,6 @@ const (
 	kindString kind = iota
 	kindInteger
 	kindNumber
-	kindFinite
 	kindBoolean
 	kindEnum
 	kindArray
@@ -43,10 +43,6 @@ type Field struct {
 	name     string
 	schema   *Schema
 	optional bool
-	// nullable marks an Effect `Schema.optional` field, which is represented in
-	// the model schema as `anyOf: [<schema>, { "type": "null" }]`. Non-nullable
-	// optional fields (the custom `optionalKey` helper) stay a bare schema.
-	nullable bool
 }
 
 // Required declares a required object property.
@@ -54,16 +50,9 @@ func Required(name string, schema *Schema) Field {
 	return Field{name: name, schema: schema}
 }
 
-// Optional declares an optional property that also accepts null, mirroring
-// Effect's `Schema.optional`.
+// Optional declares an optional object property: it may be absent, but when
+// present it must match the schema (null is not accepted).
 func Optional(name string, schema *Schema) Field {
-	return Field{name: name, schema: schema, optional: true, nullable: true}
-}
-
-// OptionalKey declares an optional property that must not be null, mirroring
-// the custom `optionalKey` helper (the key may be absent, the value may not be
-// null).
-func OptionalKey(name string, schema *Schema) Field {
 	return Field{name: name, schema: schema, optional: true}
 }
 
@@ -132,17 +121,9 @@ func Integer(options ...Option) *Schema {
 	return s
 }
 
-// Number is Schema.Number: a number that also accepts the string encodings of
-// the non-finite values.
+// Number is Schema.Number / Schema.Finite: a JSON number.
 func Number(options ...Option) *Schema {
 	s := &Schema{kind: kindNumber}
-	apply(s, options)
-	return s
-}
-
-// Finite is Schema.Finite: a plain JSON number.
-func Finite(options ...Option) *Schema {
-	s := &Schema{kind: kindFinite}
 	apply(s, options)
 	return s
 }
@@ -212,15 +193,6 @@ func (s *Schema) render(model bool) map[string]any {
 	case kindInteger:
 		out["type"] = "integer"
 	case kindNumber:
-		// Effect's number codec also accepts the string encodings of the
-		// non-finite values.
-		out["anyOf"] = []any{
-			map[string]any{"type": "number"},
-			map[string]any{"type": "string", "enum": []any{"NaN"}},
-			map[string]any{"type": "string", "enum": []any{"Infinity"}},
-			map[string]any{"type": "string", "enum": []any{"-Infinity"}},
-		}
-	case kindFinite:
 		out["type"] = "number"
 	case kindBoolean:
 		out["type"] = "boolean"
@@ -250,7 +222,7 @@ func (s *Schema) render(model bool) map[string]any {
 	if s.description != "" {
 		out["description"] = s.description
 	}
-	if (s.kind == kindInteger || s.kind == kindNumber || s.kind == kindFinite) && len(s.constraints) > 0 {
+	if (s.kind == kindInteger || s.kind == kindNumber) && len(s.constraints) > 0 {
 		allOf := make([]any, 0, len(s.constraints))
 		for _, c := range s.constraints {
 			allOf = append(allOf, map[string]any{c.key: c.value})
@@ -265,26 +237,10 @@ func renderObject(out map[string]any, s *Schema, model bool) {
 	properties := make(map[string]any, len(s.fields))
 	required := make([]any, 0, len(s.fields))
 	for _, field := range s.fields {
-		child := field.schema.render(model)
+		properties[field.name] = field.schema.render(model)
 		if !field.optional {
-			properties[field.name] = child
 			required = append(required, field.name)
-			continue
 		}
-		if !model || !field.nullable {
-			properties[field.name] = child
-			continue
-		}
-		// Optional fields are represented as anyOf [schema, null]; Effect
-		// attaches the description to that wrapper rather than the variant.
-		wrapper := map[string]any{
-			"anyOf": []any{child, map[string]any{"type": "null"}},
-		}
-		if description, ok := child["description"]; ok {
-			delete(child, "description")
-			wrapper["description"] = description
-		}
-		properties[field.name] = wrapper
 	}
 	out["properties"] = properties
 	if len(required) > 0 {

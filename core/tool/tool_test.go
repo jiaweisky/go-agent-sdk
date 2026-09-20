@@ -36,16 +36,16 @@ func TestBashInputModelShape(t *testing.T) {
 		t.Fatalf("command = %+v", got)
 	}
 
+	// Optional fields are bare (no null advertisement); they are simply not required.
 	workdir := properties["workdir"].(map[string]any)
-	anyOf, ok := workdir["anyOf"].([]any)
-	if !ok || len(anyOf) != 2 || !reflect.DeepEqual(anyOf[1], map[string]any{"type": "null"}) {
+	if workdir["type"] != "string" {
 		t.Fatalf("workdir = %+v", workdir)
 	}
-	if _, ok := workdir["description"]; !ok {
-		t.Fatalf("workdir description should live on the wrapper: %+v", workdir)
+	if _, ok := workdir["anyOf"]; ok {
+		t.Fatalf("workdir should not advertise null: %+v", workdir)
 	}
 
-	timeout := properties["timeout"].(map[string]any)["anyOf"].([]any)[0].(map[string]any)
+	timeout := properties["timeout"].(map[string]any)
 	if timeout["type"] != "integer" {
 		t.Fatalf("timeout type = %v", timeout["type"])
 	}
@@ -55,6 +55,11 @@ func TestBashInputModelShape(t *testing.T) {
 	}
 	if !reflect.DeepEqual(allOf[0], map[string]any{"exclusiveMinimum": 0}) {
 		t.Fatalf("timeout allOf[0] = %+v", allOf[0])
+	}
+
+	required := model["required"].([]any)
+	if !reflect.DeepEqual(required, []any{"command"}) {
+		t.Fatalf("required = %+v", required)
 	}
 }
 

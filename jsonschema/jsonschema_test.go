@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestModelMatchesEffectShape(t *testing.T) {
+func TestModelShape(t *testing.T) {
 	schema := Object(
 		Required("command", String(Description("Shell command string to execute"))),
 		Optional("workdir", String(Description("Working directory."))),
@@ -20,18 +20,10 @@ func TestModelMatchesEffectShape(t *testing.T) {
 		"type": "object",
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "Shell command string to execute"},
-			"workdir": map[string]any{
-				"anyOf":       []any{map[string]any{"type": "string"}, map[string]any{"type": "null"}},
-				"description": "Working directory.",
-			},
+			"workdir": map[string]any{"type": "string", "description": "Working directory."},
 			"timeout": map[string]any{
-				"anyOf": []any{
-					map[string]any{
-						"type":  "integer",
-						"allOf": []any{map[string]any{"exclusiveMinimum": 0}, map[string]any{"maximum": 600000}},
-					},
-					map[string]any{"type": "null"},
-				},
+				"type":        "integer",
+				"allOf":       []any{map[string]any{"exclusiveMinimum": 0}, map[string]any{"maximum": 600000}},
 				"description": "Timeout in milliseconds.",
 			},
 		},
@@ -62,6 +54,17 @@ func TestValidationKeepsDecoderSemantics(t *testing.T) {
 	}
 }
 
+func TestOptionalFieldsDoNotAdvertiseNull(t *testing.T) {
+	schema := Object(Optional("value", String()))
+	property := schema.Model()["properties"].(map[string]any)["value"].(map[string]any)
+	if _, ok := property["anyOf"]; ok {
+		t.Fatalf("optional field advertises null: %#v", property)
+	}
+	if property["type"] != "string" {
+		t.Fatalf("optional field = %#v", property)
+	}
+}
+
 func TestLiteralsAndNumbers(t *testing.T) {
 	literal := Literal("text-page").Model()
 	if !reflect.DeepEqual(literal, map[string]any{"type": "string", "enum": []any{"text-page"}}) {
@@ -69,13 +72,7 @@ func TestLiteralsAndNumbers(t *testing.T) {
 	}
 
 	number := Number().Model()
-	expectedNumber := map[string]any{"anyOf": []any{
-		map[string]any{"type": "number"},
-		map[string]any{"type": "string", "enum": []any{"NaN"}},
-		map[string]any{"type": "string", "enum": []any{"Infinity"}},
-		map[string]any{"type": "string", "enum": []any{"-Infinity"}},
-	}}
-	if !reflect.DeepEqual(number, expectedNumber) {
+	if !reflect.DeepEqual(number, map[string]any{"type": "number"}) {
 		t.Fatalf("number = %#v", number)
 	}
 }
