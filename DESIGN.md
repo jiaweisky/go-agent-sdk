@@ -227,7 +227,7 @@ go-agent-sdk/                            opencode TS
     └── workspace_id.go              workspace-id.ts
 ```
 
-> 已实现：高层 `agent/` 公开 API、core/session 主循环、12 个内置工具、Skill。尚未移植：MCP、Plugin、task/lsp 工具、reference 服务。
+> 已实现：高层 `agent/` 公开 API、core/session 主循环、12 个内置工具、Skill、MCP。尚未移植：Plugin、task/lsp 工具、reference 服务。
 
 ---
 
@@ -504,7 +504,7 @@ func (r *Registry) Materialize(permissions core.PermissionRuleset) *Materializat
 func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 ```
 
-> MCP / Plugin 动态工具（外部 JSON Schema）尚未移植；届时需为 `Tool` 接口提供可外部实现的适配路径。
+> MCP 已实现（见 §8，`mcp/` 包）。Plugin 动态工具（外部 JSON Schema）尚未移植；届时需为 `Tool` 接口提供可外部实现的适配路径。
 
 ### 7.4 内置工具
 
@@ -527,42 +527,47 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 
 ## 8. MCP 集成
 
-> **尚未移植。** 对应 opencode `packages/opencode/src/mcp/`。
+**已实现**（`mcp/` 包）。移植 opencode `packages/opencode/src/mcp/` 的**纯 client + 适配**；OAuth/凭据/浏览器/TUI/v1 config 按 AGENTS.md 窄化掉，改为传入 `ServerConfig`。
+
+协议层使用官方 Go SDK `github.com/modelcontextprotocol/go-sdk`（对标 TS 用官方 `@modelcontextprotocol/sdk`）。
 
 ```go
-// MCP Client 支持两种传输方式
-type MCPClient struct {
-    // stdio: 子进程标准输入/输出
-    // SSE: HTTP Server-Sent Events
-    Transport MCPTransport
+// mcp/client.go
+type Client struct { /* sessions, status per server */ }
+func NewClient(directory, version string) *Client
+func (c *Client) Connect(ctx, name string, cfg ServerConfig) Status      // local: stdio; remote: StreamableHTTP → SSE 回退
+func (c *Client) ConnectTransport(ctx, name string, t sdk.Transport, timeout time.Duration) Status
+func (c *Client) Disconnect(name string)
+func (c *Client) Status() map[string]Status
+func (c *Client) Tools(ctx) (map[string]AdaptedTool, error)              // key: "<server>_<tool>"
+func (c *Client) CallTool(ctx, server, tool string, args any) (*sdk.CallToolResult, error)
+
+// mcp/config.go
+type ServerConfig struct {
+    Type string // "local" | "remote"
+    Command []string; Cwd string; Environment map[string]string // local
+    URL string; Headers map[string]string                       // remote
+    Enabled *bool; Timeout time.Duration
 }
+type Status struct { Status string; Error string } // connected|disabled|failed|needs_auth|needs_client_registration
 
-type MCPTransport interface {
-    Start(ctx context.Context) error
-    Send(ctx context.Context, msg Message) error
-    Recv(ctx context.Context) (Message, error)
-    Close() error
-}
+// mcp/catalog.go —— 对应 McpCatalog
+func Sanitize(value string) string
+func ToolName(server, name string) string   // sanitize(server)+"_"+sanitize(name)
+func ListTools/ListPrompts/ListResources/ListResourceTemplates(ctx, session)
 
-// 工具适配: MCP tool → Tool 接口
-func AdaptMCPTool(mcpTool MCPTool) Tool
+// mcp/tool.go —— 对应 McpCatalog.convertTool
+func AdaptMCPTool(def *sdk.Tool, session *sdk.ClientSession, server string, timeout time.Duration) tool.Tool
+type AdaptedTool struct { Def *sdk.Tool; Session *sdk.ClientSession; Server string; Timeout time.Duration }
+func (t AdaptedTool) CoreTool() tool.Tool
 ```
 
-### 发现流程
-
-```
-MCPCatalog
-  → 扫描 config 中注册的 mcpServers
-  → 启动/连接每个 MCP Server
-  → 调用 tools/list 获取工具列表
-  → 适配为 ToolDef 注册到 ToolRegistry
-```
-
----
+- `schema/mcp_event.go`：`mcp.tools.changed` / `mcp.browser.open.failed`。
+- **未移植**：OAuth（`oauth-provider.ts`/`oauth-callback.ts`/`auth.ts`）、浏览器打开、TUI 事件、`EventV2Bridge`/`InstanceState`/`CrossSpawnSpawner`/`ConfigV1`——需要时用 SDK 原生窄接口补。
 
 ## 9. Skill 系统
 
-> **尚未移植。** 对应 opencode `packages/core/src/skill.ts`、`packages/opencode/src/skill/`。
+> **已实现。** 对应 opencode `packages/core/src/skill.ts`、`packages/core/src/skill/`（见 `core/skill.go` / `core/skill/`）。
 
 ```go
 type Skill struct {

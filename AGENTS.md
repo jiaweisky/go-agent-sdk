@@ -97,6 +97,7 @@ Go 1.27.1，以下特性可放心使用：
 | `WeakMap<AnyTool, Runtime>` | 泛型 `Def[Input, Output, Structured]` + `Tool` 接口 |
 | `Schema.Codec` | `santhosh-tekuri/jsonschema/v6` 验证 |
 | 工具 schema（`Schema.Struct` 等） | `jsonschema.Schema` 类型化 AST：`Model()` 发给模型 + `Validation()` 校验 |
+| MCP（`@modelcontextprotocol/sdk`） | 官方 Go SDK `github.com/modelcontextprotocol/go-sdk` |
 
 ## 包架构
 
@@ -117,6 +118,7 @@ go-agent-sdk/                       opencode TS
 │   ├── project/    Project schema + directories
 │   ├── tool/       工具框架 (tool, registry, write, ...)
 │   └── util/       通用工具 (wildcard, hash)
+├── mcp/          ← packages/opencode/src/mcp/  (MCP client + 适配)
 ├── agent/        ← 高层公开 API（对标 copilot-sdk/go 形态，无 TS 对应目录）
 │   Client / Session / Send / On / DefineTool / Hooks / Permission
 ├── opencode/     ← packages/opencode/src/    (opencode CLI)
