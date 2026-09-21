@@ -262,8 +262,12 @@ func compileSchema(raw schema.JsonSchema) *jsonschema.Schema {
 	if err != nil {
 		return nil
 	}
+	var document any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil
+	}
 	c := jsonschema.NewCompiler()
-	if err := c.AddResource("schema.json", data); err != nil {
+	if err := c.AddResource("schema.json", document); err != nil {
 		return nil
 	}
 	sch, err := c.Compile("schema.json")

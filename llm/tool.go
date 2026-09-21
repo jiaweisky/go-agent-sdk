@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/santhosh-tekuri/jsonschema/v6"
+	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/user/go-agent-sdk/jsonschema"
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
@@ -21,18 +22,30 @@ type ToModelOutputInput struct {
 
 type Tool struct {
 	description          string
-	paramsSchema         schema.JsonSchema
-	outputSchema         schema.JsonSchema
-	paramsSchemaCompiled *jsonschema.Schema
-	outputSchemaCompiled *jsonschema.Schema
+	paramsSchema         *jsonschema.Schema
+	outputSchema         *jsonschema.Schema
+	paramsSchemaCompiled *jsonschema6.Schema
+	outputSchemaCompiled *jsonschema6.Schema
 	execute              func(ctx context.Context, params any, info *ToolExecuteContext) (any, error)
 	toModelOutput        func(input ToModelOutputInput) []schema.ToolContent
 	toStructuredOutput   func(output any) any
 }
 
-func (t *Tool) Description() string             { return t.description }
-func (t *Tool) InputSchema() schema.JsonSchema  { return t.paramsSchema }
-func (t *Tool) OutputSchema() schema.JsonSchema { return t.outputSchema }
+func (t *Tool) Description() string { return t.description }
+
+func (t *Tool) InputSchema() schema.JsonSchema {
+	if t.paramsSchema == nil {
+		return nil
+	}
+	return schema.JsonSchema(t.paramsSchema.Model())
+}
+
+func (t *Tool) OutputSchema() schema.JsonSchema {
+	if t.outputSchema == nil {
+		return nil
+	}
+	return schema.JsonSchema(t.outputSchema.Model())
+}
 
 func (t *Tool) Decode(input any) (any, error) {
 	if t.paramsSchemaCompiled == nil {
@@ -90,10 +103,13 @@ func (t *Tool) Project(parameters any, callID string, output any) schema.ToolOut
 	return schema.NewToolOutput(structured, content...)
 }
 
+// ToolConfig mirrors the typed Tool.make mode in packages/llm/src/tool.ts: the
+// parameters and success schemas drive both the model-facing definition
+// (Model) and input/output validation (Validation).
 type ToolConfig struct {
 	Description        string
-	Parameters         schema.JsonSchema
-	OutputSchema       schema.JsonSchema
+	Parameters         *jsonschema.Schema
+	OutputSchema       *jsonschema.Schema
 	Execute            func(ctx context.Context, params any, info *ToolExecuteContext) (any, error)
 	ToModelOutput      func(input ToModelOutputInput) []schema.ToolContent
 	ToStructuredOutput func(output any) any
@@ -109,12 +125,22 @@ func Make(config ToolConfig) *Tool {
 		toStructuredOutput: config.ToStructuredOutput,
 	}
 	if t.paramsSchema != nil {
-		t.paramsSchemaCompiled = compileSchema(t.paramsSchema)
+		t.paramsSchemaCompiled = mustCompileToolSchema(schema.JsonSchema(t.paramsSchema.Validation()))
 	}
 	if t.outputSchema != nil {
-		t.outputSchemaCompiled = compileSchema(t.outputSchema)
+		t.outputSchemaCompiled = mustCompileToolSchema(schema.JsonSchema(t.outputSchema.Validation()))
 	}
 	return t
+}
+
+// mustCompileToolSchema fails fast when a schema cannot be compiled; silently
+// skipping validation would let malformed calls through.
+func mustCompileToolSchema(raw schema.JsonSchema) *jsonschema6.Schema {
+	compiled := compileSchema(raw)
+	if compiled == nil {
+		panic("llm: tool schema failed to compile")
+	}
+	return compiled
 }
 
 type Tools map[string]*Tool
@@ -125,10 +151,12 @@ func ToDefinitions(tools Tools) []schema.ToolDefinition {
 		def := schema.ToolDefinition{
 			Name:        name,
 			Description: tool.description,
-			InputSchema: tool.paramsSchema,
+		}
+		if tool.paramsSchema != nil {
+			def.InputSchema = tool.paramsSchema.Model()
 		}
 		if tool.outputSchema != nil {
-			out := tool.outputSchema
+			out := schema.JsonSchema(tool.outputSchema.Model())
 			def.OutputSchema = &out
 		}
 		result = append(result, def)
