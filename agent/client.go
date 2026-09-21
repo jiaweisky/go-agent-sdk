@@ -7,6 +7,7 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/llm/route"
+	"github.com/user/go-agent-sdk/mcp"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -32,11 +33,19 @@ type ClientOptions struct {
 	DataDir string
 	// Tools are application-level tools exposed to every session.
 	Tools []Tool
+	// MCP configures MCP servers whose tools are registered as application tools.
+	MCP []MCPConfig
 	// Permission is the default permission handler. Defaults to ApproveAll.
 	Permission PermissionHandlerFunc
 
 	// llm overrides the LLM client (tests only).
 	llm route.LLMClient
+}
+
+// MCPConfig names an MCP server and its connection config.
+type MCPConfig struct {
+	Name   string
+	Server mcp.ServerConfig
 }
 
 // AgentConfig defines a named agent.

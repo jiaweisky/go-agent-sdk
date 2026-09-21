@@ -10,6 +10,7 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/database"
+	"github.com/user/go-agent-sdk/core/installation"
 	"github.com/user/go-agent-sdk/core/reference"
 	"github.com/user/go-agent-sdk/core/session"
 	"github.com/user/go-agent-sdk/core/session/runner"
@@ -21,6 +22,7 @@ import (
 	"github.com/user/go-agent-sdk/llm/provider"
 	"github.com/user/go-agent-sdk/llm/route"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/mcp"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -46,6 +48,7 @@ type runtime struct {
 	builtin     builtinDeps
 	clientTools []Tool
 	dispatcher  *toolDispatcher
+	mcp         *mcp.Client
 }
 
 // toolDispatcher routes materialization to a session-scoped registry when one
@@ -224,7 +227,44 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 	rt.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
 		return rt.runner.Run(runner.RunInput{SessionID: id, Force: force})
 	})
+	if err := rt.connectMCP(opts.MCP); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return rt, nil
+}
+
+// connectMCP connects the configured MCP servers and registers their tools as
+// application tools on the base registry.
+func (r *runtime) connectMCP(configs []MCPConfig) error {
+	if len(configs) == 0 {
+		return nil
+	}
+	client := mcp.NewClient(string(r.location.Directory), installation.InstallationVersion, mcp.WithEvents(mcpEventPublisher{events: r.events}))
+	ctx := context.Background()
+	for _, cfg := range configs {
+		client.Connect(ctx, cfg.Name, cfg.Server)
+	}
+	tools, err := client.Tools(ctx)
+	if err != nil {
+		client.Close()
+		return err
+	}
+	for name, adapted := range tools {
+		if _, err := r.tools.Register(map[string]tool.Tool{name: adapted.CoreTool()}); err != nil {
+			client.Close()
+			return err
+		}
+	}
+	r.mcp = client
+	return nil
+}
+
+type mcpEventPublisher struct{ events core.Event }
+
+func (p mcpEventPublisher) Publish(def schema.EventDefinition, data any) error {
+	_, err := p.events.Publish(def, data, nil)
+	return err
 }
 
 func chooseLLM(opts *ClientOptions) route.LLMClient {
@@ -235,6 +275,9 @@ func chooseLLM(opts *ClientOptions) route.LLMClient {
 }
 
 func (r *runtime) close() error {
+	if r.mcp != nil {
+		r.mcp.Close()
+	}
 	if r.permission != nil {
 		_ = r.permission.Close()
 	}

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,49 @@ import (
 	"github.com/user/go-agent-sdk/core/tool"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 )
+
+func TestClassifyError(t *testing.T) {
+	cases := []struct {
+		message string
+		status  string
+	}{
+		{"OAuth authorization required", "needs_auth"},
+		{"dynamic client registration failed", "needs_client_registration"},
+		{"connection refused", "failed"},
+	}
+	for _, tc := range cases {
+		if got := classifyError(errors.New(tc.message)); got.Status != tc.status {
+			t.Fatalf("classify(%q) = %q, want %q", tc.message, got.Status, tc.status)
+		}
+	}
+}
+
+func TestClientPromptsAccessor(t *testing.T) {
+	ctx := context.Background()
+	server := sdk.NewServer(&sdk.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	server.AddPrompt(&sdk.Prompt{Name: "greet", Description: "greeting"}, func(context.Context, *sdk.GetPromptRequest) (*sdk.GetPromptResult, error) {
+		return &sdk.GetPromptResult{}, nil
+	})
+	serverTransport, clientTransport := sdk.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer serverSession.Close()
+
+	client := NewClient(t.TempDir(), "test")
+	defer client.Close()
+	if status := client.ConnectTransport(ctx, "srv", clientTransport, 5*time.Second); status.Status != "connected" {
+		t.Fatalf("status = %+v", status)
+	}
+	prompts, err := client.Prompts(ctx)
+	if err != nil {
+		t.Fatalf("prompts: %v", err)
+	}
+	if got := prompts["srv:greet"]; got.Description != "greeting" || got.Client != "srv" {
+		t.Fatalf("prompt = %+v", got)
+	}
+}
 
 func TestSanitizeAndToolName(t *testing.T) {
 	if got := Sanitize("my server/tools"); got != "my_server_tools" {

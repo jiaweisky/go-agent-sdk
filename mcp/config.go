@@ -4,7 +4,11 @@
 // away: callers pass a plain ServerConfig.
 package mcp
 
-import "time"
+import (
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/auth"
+)
 
 // DefaultTimeout mirrors DEFAULT_TIMEOUT.
 const DefaultTimeout = 30 * time.Second
@@ -19,6 +23,10 @@ type ServerConfig struct {
 	// remote
 	URL     string
 	Headers map[string]string
+	// OAuth, when set, authorizes remote requests. Callers supply their own
+	// handler (the SDK provides auth.AuthorizationCodeHandler); credential
+	// storage and the interactive callback are the caller's responsibility.
+	OAuth auth.OAuthHandler
 	// shared
 	Enabled *bool
 	Timeout time.Duration
