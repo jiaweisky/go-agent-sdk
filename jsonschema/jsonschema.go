@@ -175,6 +175,17 @@ func apply(s *Schema, options []Option) {
 	}
 }
 
+// With returns a copy of the schema with the given options applied.
+func (s *Schema) With(options ...Option) *Schema {
+	copied := *s
+	copied.constraints = append([]constraint(nil), s.constraints...)
+	copied.fields = append([]Field(nil), s.fields...)
+	copied.variants = append([]*Schema(nil), s.variants...)
+	copied.enum = append([]any(nil), s.enum...)
+	apply(&copied, options)
+	return &copied
+}
+
 // Model renders the schema sent to models.
 func (s *Schema) Model() map[string]any {
 	return s.render(true)

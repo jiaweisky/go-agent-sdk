@@ -45,13 +45,18 @@ var (
 	_ Snapshotter   = (*core.Snapshot)(nil)
 )
 
+// ToolRegistry is the narrow tool-registry surface the runner needs.
+type ToolRegistry interface {
+	Materialize(permissions []core.PermissionRule) *tool.Materialization
+}
+
 // LLMRunner mirrors SessionRunner.layer: it runs one durable coding-agent
 // Session until it settles.
 type LLMRunner struct {
 	Events            RunnerEvents
 	LLM               route.LLMClient
 	Agents            AgentSelector
-	Tools             *tool.Registry
+	Tools             ToolRegistry
 	Models            ModelResolver
 	Store             *session.Store
 	Location          core.Location

@@ -1,0 +1,225 @@
+package agent
+
+import (
+	"fmt"
+
+	"github.com/user/go-agent-sdk/schema"
+)
+
+// Event is a high-level session event surfaced by Session.Send and Session.On.
+//
+// Events are a closed set; use a type switch to handle them:
+//
+//	switch e := event.(type) {
+//	case agent.TextDelta:
+//	    fmt.Print(e.Delta)
+//	case agent.ToolCalled:
+//	    fmt.Println("calling", e.Name)
+//	case agent.Idle:
+//	    // turn finished
+//	}
+type Event interface{ eventKind() string }
+
+// TextDelta is a streamed assistant text chunk.
+type TextDelta struct {
+	SessionID string
+	MessageID string
+	TextID    string
+	Delta     string
+}
+
+func (TextDelta) eventKind() string { return "text-delta" }
+
+// TextEnded is the completed assistant text for one text part.
+type TextEnded struct {
+	SessionID string
+	MessageID string
+	TextID    string
+	Text      string
+}
+
+func (TextEnded) eventKind() string { return "text-ended" }
+
+// ReasoningDelta is a streamed reasoning chunk (model dependent).
+type ReasoningDelta struct {
+	SessionID   string
+	MessageID   string
+	ReasoningID string
+	Delta       string
+}
+
+func (ReasoningDelta) eventKind() string { return "reasoning-delta" }
+
+// ReasoningEnded is the completed reasoning text for one part.
+type ReasoningEnded struct {
+	SessionID   string
+	MessageID   string
+	ReasoningID string
+	Text        string
+}
+
+func (ReasoningEnded) eventKind() string { return "reasoning-ended" }
+
+// ToolCalled reports a tool invocation started by the model.
+type ToolCalled struct {
+	SessionID string
+	MessageID string
+	CallID    string
+	Name      string
+	Input     any
+}
+
+func (ToolCalled) eventKind() string { return "tool-called" }
+
+// ToolSuccess reports a completed tool invocation.
+type ToolSuccess struct {
+	SessionID string
+	MessageID string
+	CallID    string
+	Result    any
+	Content   any
+}
+
+func (ToolSuccess) eventKind() string { return "tool-success" }
+
+// ToolFailed reports a failed tool invocation.
+type ToolFailed struct {
+	SessionID string
+	MessageID string
+	CallID    string
+	Error     any
+	Result    any
+}
+
+func (ToolFailed) eventKind() string { return "tool-failed" }
+
+// StepStarted reports the start of an agent step.
+type StepStarted struct {
+	SessionID string
+	MessageID string
+	Agent     string
+}
+
+func (StepStarted) eventKind() string { return "step-started" }
+
+// StepEnded reports the end of an agent step.
+type StepEnded struct {
+	SessionID string
+	MessageID string
+	Finish    any
+	Tokens    any
+}
+
+func (StepEnded) eventKind() string { return "step-ended" }
+
+// StepFailed reports a failed agent step.
+type StepFailed struct {
+	SessionID string
+	MessageID string
+	Error     any
+}
+
+func (StepFailed) eventKind() string { return "step-failed" }
+
+// CompactionEnded reports that context compaction finished.
+type CompactionEnded struct {
+	SessionID string
+	MessageID string
+	Text      string
+}
+
+func (CompactionEnded) eventKind() string { return "compaction-ended" }
+
+// ErrorEvent reports a session-level failure.
+type ErrorEvent struct {
+	SessionID string
+	Err       error
+}
+
+func (ErrorEvent) eventKind() string { return "error" }
+
+// Idle is a synthetic event emitted by Session.Send when the turn settles.
+type Idle struct {
+	SessionID string
+}
+
+func (Idle) eventKind() string { return "idle" }
+
+// mapEvent converts a core session event payload into a high-level Event.
+// The bool is false for event types the high-level API does not surface.
+func mapEvent(payload schema.EventPayload) (Event, bool) {
+	data, _ := payload.Data.(map[string]any)
+	sessionID := fieldString(data, "sessionID")
+	messageID := fieldString(data, "assistantMessageID")
+	switch payload.Type {
+	case schema.SessionEventTextDelta.Type:
+		return TextDelta{
+			SessionID: sessionID, MessageID: messageID,
+			TextID: fieldString(data, "textID"), Delta: fieldString(data, "delta"),
+		}, true
+	case schema.SessionEventTextEnded.Type:
+		return TextEnded{
+			SessionID: sessionID, MessageID: messageID,
+			TextID: fieldString(data, "textID"), Text: fieldString(data, "text"),
+		}, true
+	case schema.SessionEventReasoningDelta.Type:
+		return ReasoningDelta{
+			SessionID: sessionID, MessageID: messageID,
+			ReasoningID: fieldString(data, "reasoningID"), Delta: fieldString(data, "delta"),
+		}, true
+	case schema.SessionEventReasoningEnded.Type:
+		return ReasoningEnded{
+			SessionID: sessionID, MessageID: messageID,
+			ReasoningID: fieldString(data, "reasoningID"), Text: fieldString(data, "text"),
+		}, true
+	case schema.SessionEventToolCalled.Type:
+		return ToolCalled{
+			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
+			Name: fieldString(data, "tool"), Input: data["input"],
+		}, true
+	case schema.SessionEventToolSuccess.Type:
+		return ToolSuccess{
+			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
+			Result: data["result"], Content: data["content"],
+		}, true
+	case schema.SessionEventToolFailed.Type:
+		return ToolFailed{
+			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
+			Error: data["error"], Result: data["result"],
+		}, true
+	case schema.SessionEventStepStarted.Type:
+		return StepStarted{
+			SessionID: sessionID, MessageID: messageID, Agent: fieldString(data, "agent"),
+		}, true
+	case schema.SessionEventStepEnded.Type:
+		return StepEnded{
+			SessionID: sessionID, MessageID: messageID,
+			Finish: data["finish"], Tokens: data["tokens"],
+		}, true
+	case schema.SessionEventStepFailed.Type:
+		return StepFailed{
+			SessionID: sessionID, MessageID: messageID, Error: data["error"],
+		}, true
+	case schema.SessionEventCompactionEnded.Type:
+		return CompactionEnded{
+			SessionID: sessionID, MessageID: messageID, Text: fieldString(data, "text"),
+		}, true
+	}
+	return nil, false
+}
+
+func fieldString(data map[string]any, key string) string {
+	if data == nil {
+		return ""
+	}
+	switch value := data[key].(type) {
+	case nil:
+		return ""
+	case string:
+		return value
+	case fmt.Stringer:
+		return value.String()
+	default:
+		return fmt.Sprint(value)
+	}
+}
