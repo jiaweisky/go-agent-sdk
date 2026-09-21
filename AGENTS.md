@@ -117,6 +117,8 @@ go-agent-sdk/                       opencode TS
 │   ├── project/    Project schema + directories
 │   ├── tool/       工具框架 (tool, registry, write, ...)
 │   └── util/       通用工具 (wildcard, hash)
+├── agent/        ← 高层公开 API（对标 copilot-sdk/go 形态，无 TS 对应目录）
+│   Client / Session / Send / On / DefineTool / Hooks / Permission
 ├── opencode/     ← packages/opencode/src/    (opencode CLI)
 │   ├── id/         带前缀的单调 ID 生成
 │   └── tool/       opencode 工具层 (schema, json-schema)

@@ -168,6 +168,9 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 	})
 	question := core.NewQuestion(core.QuestionConfig{Events: events})
 
+	global := core.NewGlobal()
+	skills := core.NewSkill(core.NewSkillDiscovery(filepath.Join(global.Cache, "skills"), http.DefaultClient))
+
 	models, err := buildModelResolver(opts)
 	if err != nil {
 		db.Close()
@@ -176,7 +179,7 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 
 	builtin := builtinDeps{
 		db: db, events: events, permission: permission, question: question,
-		location: location, config: emptyConfig{}, skills: noopSkills{},
+		location: location, config: emptyConfig{}, skills: skills,
 	}
 	registry := tool.NewRegistry()
 	if err := registerBuiltins(registry, builtin); err != nil {
@@ -188,6 +191,11 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 			db.Close()
 			return nil, err
 		}
+	}
+
+	snapshots := runner.Snapshotter(noopSnapshots{})
+	if snapshot, err := core.NewSnapshot(core.NewGit(core.NewAppProcess()), emptyConfig{}, global, &location); err == nil {
+		snapshots = snapshot
 	}
 
 	store := session.NewStore(db)
@@ -207,10 +215,10 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 		Store:             store,
 		Location:          location,
 		SystemContext:     systemcontext.NewRegistry(),
-		SkillGuidance:     skill.NewGuidance(noopSkills{}, allowAllEvaluator{}),
+		SkillGuidance:     skill.NewGuidance(skills, allowAllEvaluator{}),
 		ReferenceGuidance: reference.NewGuidance(noopReferences{}),
 		Config:            emptyConfig{},
-		Snapshots:         noopSnapshots{},
+		Snapshots:         snapshots,
 		DB:                db,
 	})
 	rt.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
@@ -306,10 +314,6 @@ func (noopSnapshots) Capture() (*core.SnapshotID, error) { return nil, nil }
 func (noopSnapshots) Files(core.SnapshotCompareInput) ([]schema.RelativePath, error) {
 	return nil, nil
 }
-
-type noopSkills struct{}
-
-func (noopSkills) List() ([]schema.SkillInfo, error) { return nil, nil }
 
 type noopReferences struct{}
 

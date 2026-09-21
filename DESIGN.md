@@ -30,12 +30,12 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 | `llm/route/` | Route + Protocol + Transport + Framing + Auth + Endpoint | LLM 协议层核心 |
 | `llm/protocols/` | OpenAI Chat / Responses、Anthropic Messages、Bedrock Converse、Gemini | 各 provider 线协议 |
 | `llm/provider/` | Provider Facades（openai, anthropic, openrouter, ...） | 预配置默认值 |
-| `agent/`（尚未移植） | Agent 循环（loop + turn + session + context + event） | stream → tool-call → 执行 → continuation |
+| `agent/`（已实现） | 高层公开 API（Client/Session/Send/On/DefineTool/Hooks） | 组装 core/session + llm + tool |
 | `core/tool/` | ToolRegistry + `registry.go` / `tool.go` | 注册、查询、权限过滤 |
 | 内置工具 | 目前仅 `write`（`core/tool/write.go`） | 核心文件操作 |
 | `core/permission.go` | 规则引擎（allow / deny / ask） | 权限评估 |
 | `core/` | file-mutation / location-mutation / git / database / process ... | 支撑模块 |
-| 根 package | `NewClient` / `NewSession` / `Send` / `RegisterAgent` | 公开 API（尚未移植） |
+| `agent/` | `NewClient` / `CreateSession` / `Send` / `On` / `RegisterAgent` | 公开 API（已实现，见 §11） |
 | `schema/` | 基础类型 | JSON Schema、ID 生成 |
 
 ### 不包含（推迟到后续版本）
@@ -85,7 +85,7 @@ Go 目录直接镜像 opencode 的 TS monorepo 包结构（详见 §4）。依�
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  agent/             ← 尚未移植                                    │
+│  agent/             ← 高层公开 API（已实现）                     │
 │  High-level API (Agent, Session, Prompt, Stream)               │
 └───────────────────────────┬────────────────────────────────────┘
                             │ depends on
@@ -227,7 +227,7 @@ go-agent-sdk/                            opencode TS
     └── workspace_id.go              workspace-id.ts
 ```
 
-> Agent 主循环、MCP、Skill、内置工具（read/edit/shell/...）等尚未移植；后续按相同目录规则追加。
+> 已实现：高层 `agent/` 公开 API、core/session 主循环、12 个内置工具、Skill。尚未移植：MCP、Plugin、task/lsp 工具、reference 服务。
 
 ---
 
@@ -619,94 +619,70 @@ func NewPermission(cfg PermissionConfig) Permission
 
 ## 11. SDK 层 (高级 API)
 
-SDK 公开入口（规划，尚未移植）位于顶层 `agent/` 包，导入路径 `github.com/user/go-agent-sdk/agent`。
+公开入口位于顶层 `agent/` 包，导入路径 `github.com/user/go-agent-sdk/agent`。**已实现**，形态参考 `github/copilot-sdk/go`（`Client` → `CreateSession` → `Send`/`On`）。
 
 ```go
 import "github.com/user/go-agent-sdk/agent"
 
-// ─── 客户端（管理多个 Agent） ────────────────────────────────
-
-type Client struct {
-    llm    *LLMClient
-    agents map[string]*Agent
-    tools  *ToolRegistry
+// ─── Client ─────────────────────────────────────────────
+type ClientOptions struct {
+    Provider         ProviderConfig            // Type("openai"|"anthropic")/BaseURL/APIKey
+    Model            string                    // 默认模型
+    WorkingDirectory string
+    DataDir          string                    // 会话数据库目录
+    Tools            []Tool                    // 应用级工具
+    Permission       PermissionHandlerFunc     // 默认权限回调
 }
+func NewClient(*ClientOptions) (*Client, error)
+func (c *Client) RegisterAgent(name string, cfg AgentConfig) error
+func (c *Client) CreateSession(ctx, *SessionConfig) (*Session, error)
+func (c *Client) ResumeSession(ctx, sessionID string, *SessionConfig) (*Session, error)
+func (c *Client) ListSessions(ctx) ([]SessionInfo, error)
+func (c *Client) DeleteSession(ctx, sessionID string) error
+func (c *Client) Close() error
 
-func New(config Config) *Client
-
-type Config struct {
-    Provider ProviderConfig   // 默认 provider
-}
-
-// 注册 Agent 到客户端
-func (c *Client) RegisterAgent(name string, config AgentConfig)
-
-type AgentConfig struct {
+// ─── Session ────────────────────────────────────────────
+type SessionConfig struct {
+    Agent        string
     Model        string
-    Provider     *ProviderConfig   // nil = 使用客户端默认 provider
+    Title        string
+    SystemPrompt *SystemPromptConfig           // append | replace | customize(sections)
     Tools        []Tool
-    SystemPrompt string
-    Steps        int               // max turn steps (default 100)
-    Temperature  *float64
-    TopP         *float64
+    Hooks        *SessionHooks
 }
+type MessageOptions struct { Prompt string; Mode string } // Mode: "queue"(默认)|"steer"
 
-// ─── Session（对话上下文） ────────────────────────────────────
+func (s *Session) ID() string
+func (s *Session) Send(ctx, MessageOptions) iter.Seq2[Event, error] // 本轮流，结尾 Idle
+func (s *Session) On(func(Event)) (unsubscribe func())
+func (s *Session) Abort()
+func (s *Session) Close() error
 
-// 创建新会话，绑定一个 Agent
-func (c *Client) NewSession(ctx context.Context, agent string) *Session
+// ─── 事件（类型化并集） ──────────────────────────────────
+type Event interface{ eventKind() string }
+// TextDelta / TextEnded / ReasoningDelta / ReasoningEnded /
+// ToolCalled / ToolSuccess / ToolFailed / StepStarted / StepEnded /
+// StepFailed / CompactionEnded / ErrorEvent / Idle
 
-// 切换 Agent（共享上下文历史）
-func (s *Session) UseAgent(name string)
+// ─── 用户工具 ───────────────────────────────────────────
+func DefineTool[In, Out any](name, description string,
+    handler func(In, ToolContext) (Out, error)) Tool
+func SchemaForType(reflect.Type) *jsonschema.Schema // reflect → AST
 
-// 发送消息，返回 agent 循环事件流
-func (s *Session) Send(ctx context.Context, input string) iter.Seq2[Event, error]
-
-func (s *Session) Close()
-
-// ─── 使用方式 ────────────────────────────────────────────────
-
-c := agent.New(agent.Config{
-    Provider: agent.ProviderConfig{
-        Type:    "openai",
-        BaseURL: "https://api.openai.com/v1",
-        APIKey:  "...",
-    },
-})
-
-// 注册 Agent
-c.RegisterAgent("explore", agent.AgentConfig{
-    Model:       "gpt-4o",
-    Tools:       []Tool{ReadTool, GlobTool, GrepTool},
-    SystemPrompt: "You are an exploration agent.",
-})
-
-c.RegisterAgent("build", agent.AgentConfig{
-    Model:       "claude-sonnet-4-20250514",
-    Tools:       []Tool{ReadTool, WriteTool, EditTool, ShellTool},
-    SystemPrompt: "You are a development agent.",
-})
-
-// 创建会话，绑定 Agent
-session := c.NewSession(ctx, "explore")
-
-// 多轮对话（session 自动累积上下文历史）
-for event := range session.Send(ctx, "Find all Go files") {
-    switch e := event.(type) {
-    case TextDelta:    fmt.Print(e.Text)
-    case ReasoningDelta: fmt.Print(e.Text)
-    case ToolCall:     fmt.Printf("calling %s\n", e.Name)
-    }
-}
-
-// 切换 Agent，上下文共享
-session.UseAgent("build")
-for event := range session.Send(ctx, "Edit main.go to add a handler") {
-    // ...
-}
+// ─── 权限 / Hooks ───────────────────────────────────────
+type PermissionHandlerFunc func(PermissionRequest) (PermissionDecision, error)
+var ApproveAll PermissionHandlerFunc
+type SessionHooks struct { /* Pre/PostToolUse, UserPromptSubmitted,
+                              SessionStart/End, ErrorOccurred */ }
 ```
 
----
+实现要点：
+- 进程内运行（无外部 runtime 进程）：`NewClient` 组装 DB + 事件服务 + projectors + 工具注册 + runner + coordinator。
+- 工具**按会话隔离**：每个会话一个 registry（内置 + 客户端工具 + 会话工具），通过 `core/session/runner.ToolRegistry.MaterializeFor(sessionID, permissions)` 分派。
+- 权限：`OnPermissionRequest` 回调经装饰器桥接 `core.Permission`（allow/deny/ask → 回调 → 自动 reply）。
+- 工具 Hooks（Pre/PostToolUse）通过 `hookedRegistry` 包裹 settlement 实现。
+
+> 未完成：MCP/Plugin 工具接入；`reference` 服务仍是 no-op；provider 仅 openai/anthropic；system prompt sections 粒度比 copilot 粗。
 
 ## 12. 错误处理
 
