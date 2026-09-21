@@ -6,12 +6,19 @@ package mcp
 
 import (
 	"time"
-
-	"github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 // DefaultTimeout mirrors DEFAULT_TIMEOUT.
 const DefaultTimeout = 30 * time.Second
+
+// OAuth2Config configures the OAuth 2.0 client credentials grant
+// (RFC 6749 §1.3.4) used to obtain a bearer token for remote servers.
+type OAuth2Config struct {
+	ClientID     string
+	ClientSecret string
+	TokenURL     string
+	Scopes       []string
+}
 
 // ServerConfig describes a configured MCP server. Type is "local" or "remote".
 type ServerConfig struct {
@@ -23,10 +30,10 @@ type ServerConfig struct {
 	// remote
 	URL     string
 	Headers map[string]string
-	// OAuth, when set, authorizes remote requests. Callers supply their own
-	// handler (the SDK provides auth.AuthorizationCodeHandler); credential
-	// storage and the interactive callback are the caller's responsibility.
-	OAuth auth.OAuthHandler
+	// BearerToken is sent as `Authorization: Bearer <token>`.
+	BearerToken string
+	// OAuth2 obtains a bearer token via the client credentials grant.
+	OAuth2 *OAuth2Config
 	// shared
 	Enabled *bool
 	Timeout time.Duration

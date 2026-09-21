@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,42 @@ import (
 	"github.com/user/go-agent-sdk/core/tool"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 )
+
+func TestHTTPClientBearerToken(t *testing.T) {
+	var authorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	client := httpClientFor(context.Background(), ServerConfig{BearerToken: "tok"})
+	response, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	response.Body.Close()
+	if authorization != "Bearer tok" {
+		t.Fatalf("authorization = %q", authorization)
+	}
+}
+
+func TestHTTPClientHeaders(t *testing.T) {
+	var apiKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiKey = r.Header.Get("X-Api-Key")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	client := httpClientFor(context.Background(), ServerConfig{Headers: map[string]string{"X-Api-Key": "k"}})
+	response, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	response.Body.Close()
+	if apiKey != "k" {
+		t.Fatalf("api key = %q", apiKey)
+	}
+}
 
 func TestClassifyError(t *testing.T) {
 	cases := []struct {
