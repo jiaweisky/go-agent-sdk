@@ -40,6 +40,41 @@ func TestNewOpenAICompatibleDefaultsProvider(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleConfigure(t *testing.T) {
+	apiKey := "k"
+	facade := NewOpenAICompatible(protocols.OpenAICompatibleChatHTTPRoute, OpenAICompatibleGenericOptions{
+		Provider: "a", BaseURL: "https://a/v1", APIKey: &apiKey,
+	})
+	next := facade.Configure(OpenAICompatibleGenericOptions{Provider: "b", BaseURL: "https://b/v1"})
+	if next.ID != "b" {
+		t.Fatalf("configured id = %q", next.ID)
+	}
+	model := next.Model("m")
+	if model.Provider != "b" || model.Route.Endpoint.BaseURL != "https://b/v1" {
+		t.Fatalf("configured model = %+v", model.Model)
+	}
+}
+
+func TestOpenAICompatibleProfileConfigure(t *testing.T) {
+	InitOpenAICompatible(protocols.OpenAICompatibleChatHTTPRoute)
+	if len(OpenAICompatibleRoutes) != 1 {
+		t.Fatalf("routes = %d", len(OpenAICompatibleRoutes))
+	}
+	// Profile configure fixes the provider and falls back to the profile BaseURL.
+	groq := Groq.Configure(OpenAICompatibleGenericOptions{})
+	if groq.ID != "groq" {
+		t.Fatalf("profile id = %q", groq.ID)
+	}
+	if url := groq.Model("llama").Route.Endpoint.BaseURL; url != "https://api.groq.com/openai/v1" {
+		t.Fatalf("profile base url = %q", url)
+	}
+	// An explicit BaseURL overrides the profile default.
+	custom := Groq.Configure(OpenAICompatibleGenericOptions{BaseURL: "https://custom/v1"})
+	if url := custom.Model("m").Route.Endpoint.BaseURL; url != "https://custom/v1" {
+		t.Fatalf("custom base url = %q", url)
+	}
+}
+
 func TestOpenAICompatibleProfile(t *testing.T) {
 	profile, ok := Profiles["groq"]
 	if !ok || profile.Provider != "groq" || profile.BaseURL == "" {

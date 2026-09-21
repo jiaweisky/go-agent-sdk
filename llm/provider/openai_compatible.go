@@ -34,7 +34,14 @@ type OpenAICompatibleFamilyOptions struct {
 type OpenAICompatibleProvider struct {
 	ID    schema.ProviderID
 	Model func(id string, opts ...llm.ModelOptions) route.Model
+	// Configure mirrors the facade's `configure`: it rebuilds the facade with
+	// new options. For profile facades the provider id is fixed to the profile
+	// and BaseURL falls back to the profile default.
+	Configure func(OpenAICompatibleGenericOptions) OpenAICompatibleProvider
 }
+
+// OpenAICompatibleRoutes mirrors the module-level `routes` export.
+var OpenAICompatibleRoutes []route.Route
 
 func configure(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
 	prov := input.Provider
@@ -75,14 +82,27 @@ func configure(openAICompatibleChatRoute route.Route, input OpenAICompatibleGene
 			}
 			return r.Model(modelInput)
 		},
+		Configure: func(next OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
+			return configure(openAICompatibleChatRoute, next)
+		},
 	}
 }
 
 func define(openAICompatibleChatRoute route.Route, profile OpenAICompatibleProfile) OpenAICompatibleProvider {
-	return configure(openAICompatibleChatRoute, OpenAICompatibleGenericOptions{
+	facade := configure(openAICompatibleChatRoute, OpenAICompatibleGenericOptions{
 		Provider: profile.Provider,
 		BaseURL:  profile.BaseURL,
 	})
+	// Profile facades keep the provider id fixed and fall back to the profile
+	// BaseURL, mirroring `define`'s configureProfile.
+	facade.Configure = func(next OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
+		next.Provider = profile.Provider
+		if next.BaseURL == "" {
+			next.BaseURL = profile.BaseURL
+		}
+		return configure(openAICompatibleChatRoute, next)
+	}
+	return facade
 }
 
 // NewOpenAICompatible mirrors OpenAICompatible.configure: it builds a facade for
@@ -101,6 +121,7 @@ var Groq OpenAICompatibleProvider
 var TogetherAI OpenAICompatibleProvider
 
 func InitOpenAICompatible(openAICompatibleChatRoute route.Route) {
+	OpenAICompatibleRoutes = []route.Route{openAICompatibleChatRoute}
 	Baseten = define(openAICompatibleChatRoute, Profiles["baseten"])
 	Cerebras = define(openAICompatibleChatRoute, Profiles["cerebras"])
 	DeepInfra = define(openAICompatibleChatRoute, Profiles["deepinfra"])
