@@ -114,14 +114,19 @@ type ErrorOccurredOutput struct {
 	ErrorHandling string
 }
 
-// hookedRegistry wraps a tool registry so tool hooks fire around settlement.
+// toolMaterializer is the session-aware materialization surface.
+type toolMaterializer interface {
+	MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization
+}
+
+// hookedRegistry wraps a tool materializer so tool hooks fire around settlement.
 type hookedRegistry struct {
-	inner    *tool.Registry
+	inner    toolMaterializer
 	hooksFor func(sessionID string) *SessionHooks
 }
 
-func (h hookedRegistry) Materialize(permissions []core.PermissionRule) *tool.Materialization {
-	mat := h.inner.Materialize(permissions)
+func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization {
+	mat := h.inner.MaterializeFor(sessionID, permissions)
 	inner := mat.Settle
 	mat.Settle = func(ctx context.Context, input tool.ExecuteInput) (*tool.Settlement, error) {
 		var hooks *SessionHooks

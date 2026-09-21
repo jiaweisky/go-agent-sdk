@@ -45,9 +45,10 @@ var (
 	_ Snapshotter   = (*core.Snapshot)(nil)
 )
 
-// ToolRegistry is the narrow tool-registry surface the runner needs.
+// ToolRegistry is the narrow tool-registry surface the runner needs. The
+// session id lets embedders scope tools per session.
 type ToolRegistry interface {
-	Materialize(permissions []core.PermissionRule) *tool.Materialization
+	MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization
 }
 
 // LLMRunner mirrors SessionRunner.layer: it runs one durable coding-agent
@@ -361,7 +362,7 @@ func (r *LLMRunner) runTurnAttempt(
 		if agent.Info != nil {
 			permissions = agent.Info.Permissions
 		}
-		toolMaterialization = r.Tools.Materialize(permissions)
+		toolMaterialization = r.Tools.MaterializeFor(string(sessionID), permissions)
 	}
 
 	promptCacheKey := string(sessionID)

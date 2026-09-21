@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/tool"
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -65,12 +64,6 @@ func NewClient(opts *ClientOptions) (*Client, error) {
 		return nil, err
 	}
 	client := &Client{opts: *opts, rt: rt}
-	for _, userTool := range opts.Tools {
-		if _, err := rt.tools.Register(map[string]tool.Tool{userTool.Name: userTool.build(rt.permission)}); err != nil {
-			_ = rt.close()
-			return nil, err
-		}
-	}
 	return client, nil
 }
 
@@ -127,10 +120,9 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 			return nil, err
 		}
 	}
-	for _, userTool := range cfg.Tools {
-		if _, err := c.rt.tools.Register(map[string]tool.Tool{userTool.Name: userTool.build(c.rt.permission)}); err != nil {
-			return nil, err
-		}
+	sessionRegistry, err := c.rt.newSessionRegistry(cfg.Tools)
+	if err != nil {
+		return nil, err
 	}
 
 	sessionID := schema.NewSessionID()
@@ -156,6 +148,7 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 		return nil, err
 	}
 	c.rt.sessions.Set(string(sessionID), agentID)
+	c.rt.dispatcher.set(string(sessionID), sessionRegistry)
 	c.rt.setHooks(string(sessionID), cfg.Hooks)
 
 	session := &Session{client: c, id: sessionID, hooks: cfg.Hooks, listeners: map[int]func(Event){}}
@@ -177,4 +170,96 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 // Close releases the runtime and its database.
 func (c *Client) Close() error {
 	return c.rt.close()
+}
+
+// SessionInfo summarizes a stored session.
+type SessionInfo struct {
+	ID          string
+	Title       string
+	Agent       string
+	Directory   string
+	TimeCreated int64
+	TimeUpdated int64
+}
+
+// ResumeSession reattaches to an existing session.
+func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *SessionConfig) (*Session, error) {
+	if cfg == nil {
+		cfg = &SessionConfig{}
+	}
+	stored, err := c.rt.store.Get(schema.SessionID(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	if stored == nil {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+	registry, err := c.rt.newSessionRegistry(cfg.Tools)
+	if err != nil {
+		return nil, err
+	}
+	c.rt.dispatcher.set(sessionID, registry)
+	c.rt.setHooks(sessionID, cfg.Hooks)
+
+	session := &Session{client: c, id: schema.SessionID(sessionID), hooks: cfg.Hooks, listeners: map[int]func(Event){}}
+	unsubscribe, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
+		session.dispatch(payload)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	session.unsub = unsubscribe
+	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
+		_, _ = cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: sessionID, Agent: string(agentIDOf(stored)), Model: modelIDOf(stored)})
+	}
+	return session, nil
+}
+
+// ListSessions returns the sessions in the client's project, newest first.
+func (c *Client) ListSessions(ctx context.Context) ([]SessionInfo, error) {
+	rows, err := c.rt.db.DB.Query(
+		"SELECT `id`,`title`,`agent`,`directory`,`time_created`,`time_updated` FROM `session` WHERE `project_id` = ? ORDER BY `time_updated` DESC",
+		string(c.rt.projectID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []SessionInfo
+	for rows.Next() {
+		var info SessionInfo
+		var agent *string
+		if err := rows.Scan(&info.ID, &info.Title, &agent, &info.Directory, &info.TimeCreated, &info.TimeUpdated); err != nil {
+			return nil, err
+		}
+		if agent != nil {
+			info.Agent = *agent
+		}
+		result = append(result, info)
+	}
+	return result, rows.Err()
+}
+
+// DeleteSession permanently removes a session.
+func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
+	if _, err := c.rt.db.DB.Exec("DELETE FROM `session` WHERE `id` = ?", sessionID); err != nil {
+		return err
+	}
+	c.rt.dispatcher.remove(sessionID)
+	return nil
+}
+
+func agentIDOf(info *schema.SessionInfo) string {
+	if info.Agent == nil {
+		return ""
+	}
+	return string(*info.Agent)
+}
+
+func modelIDOf(info *schema.SessionInfo) string {
+	if info.Model == nil {
+		return ""
+	}
+	return string(info.Model.ID)
 }

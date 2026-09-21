@@ -153,6 +153,7 @@ func (s *Session) Close() error {
 	if unsubscribe != nil {
 		unsubscribe()
 	}
+	s.client.rt.dispatcher.remove(s.ID())
 	if s.hooks != nil && s.hooks.OnSessionEnd != nil {
 		_, _ = s.hooks.OnSessionEnd(SessionEndInput{SessionID: s.ID(), Reason: "closed"})
 	}

@@ -42,6 +42,58 @@ type runtime struct {
 
 	hooksMu sync.Mutex
 	hooks   map[string]*SessionHooks
+
+	builtin     builtinDeps
+	clientTools []Tool
+	dispatcher  *toolDispatcher
+}
+
+// toolDispatcher routes materialization to a session-scoped registry when one
+// exists, falling back to the base registry.
+type toolDispatcher struct {
+	base     *tool.Registry
+	mu       sync.Mutex
+	sessions map[string]*tool.Registry
+}
+
+func (d *toolDispatcher) MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization {
+	d.mu.Lock()
+	registry := d.sessions[sessionID]
+	d.mu.Unlock()
+	if registry == nil {
+		registry = d.base
+	}
+	return registry.Materialize(permissions)
+}
+
+func (d *toolDispatcher) set(sessionID string, registry *tool.Registry) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.sessions[sessionID] = registry
+}
+
+func (d *toolDispatcher) remove(sessionID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.sessions, sessionID)
+}
+
+// newSessionRegistry builds a registry with the built-ins plus the client and
+// session user tools, isolating session-scoped tools from other sessions.
+func (r *runtime) newSessionRegistry(sessionTools []Tool) (*tool.Registry, error) {
+	registry := tool.NewRegistry()
+	if err := registerBuiltins(registry, r.builtin); err != nil {
+		return nil, err
+	}
+	tools := make([]Tool, 0, len(r.clientTools)+len(sessionTools))
+	tools = append(tools, r.clientTools...)
+	tools = append(tools, sessionTools...)
+	for _, userTool := range tools {
+		if _, err := registry.Register(map[string]tool.Tool{userTool.Name: userTool.build(r.permission)}); err != nil {
+			return nil, err
+		}
+	}
+	return registry, nil
 }
 
 func (r *runtime) setHooks(sessionID string, hooks *SessionHooks) {
@@ -122,14 +174,20 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 		return nil, err
 	}
 
-	registry := tool.NewRegistry()
-	tools := tool.Tools(registry)
-	if err := registerBuiltins(tools, builtinDeps{
+	builtin := builtinDeps{
 		db: db, events: events, permission: permission, question: question,
 		location: location, config: emptyConfig{}, skills: noopSkills{},
-	}); err != nil {
+	}
+	registry := tool.NewRegistry()
+	if err := registerBuiltins(registry, builtin); err != nil {
 		db.Close()
 		return nil, err
+	}
+	for _, userTool := range opts.Tools {
+		if _, err := registry.Register(map[string]tool.Tool{userTool.Name: userTool.build(permission)}); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 
 	store := session.NewStore(db)
@@ -137,13 +195,14 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 		db: db, events: events, store: store, agents: agents, tools: registry,
 		permission: permission, question: question, location: location,
 		projectID: projectID, models: models, sessions: agentSessions,
-		hooks: map[string]*SessionHooks{},
+		hooks: map[string]*SessionHooks{}, builtin: builtin, clientTools: opts.Tools,
+		dispatcher: &toolDispatcher{base: registry, sessions: map[string]*tool.Registry{}},
 	}
 	rt.runner = runner.NewLLMRunner(runner.LLMRunner{
 		Events:            appEvents{events: events},
 		LLM:               chooseLLM(opts),
 		Agents:            agents,
-		Tools:             hookedRegistry{inner: registry, hooksFor: rt.hooksFor},
+		Tools:             hookedRegistry{inner: rt.dispatcher, hooksFor: rt.hooksFor},
 		Models:            models,
 		Store:             store,
 		Location:          location,
