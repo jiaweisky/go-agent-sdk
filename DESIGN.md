@@ -374,7 +374,7 @@ type LLMClient interface {
 | Anthropic Messages | `llm/protocols/anthropic_messages.go` | Anthropic (Claude) |
 | Bedrock Converse | `llm/protocols/bedrock_converse.go` | AWS Bedrock |
 | Google Gemini | `llm/protocols/gemini.go` | Google |
-| OpenAI Compatible Chat | `llm/protocols/openai_compatible_chat.go`（尚未移植） | 通用 OpenAI 兼容 |
+| OpenAI Compatible Chat | `llm/protocols/openai_compatible_chat.go` | 通用 OpenAI 兼容 |
 
 ---
 

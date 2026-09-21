@@ -85,6 +85,13 @@ func define(openAICompatibleChatRoute route.Route, profile OpenAICompatibleProfi
 	})
 }
 
+// NewOpenAICompatible mirrors OpenAICompatible.configure: it builds a facade for
+// a generic OpenAI Chat-compatible endpoint. When input.Provider is empty the
+// provider id defaults to "openai-compatible".
+func NewOpenAICompatible(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
+	return configure(openAICompatibleChatRoute, input)
+}
+
 var Baseten OpenAICompatibleProvider
 var Cerebras OpenAICompatibleProvider
 var DeepInfra OpenAICompatibleProvider

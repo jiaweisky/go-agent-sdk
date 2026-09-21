@@ -12,10 +12,13 @@ import (
 
 // ProviderConfig selects the model provider and credentials.
 type ProviderConfig struct {
-	// Type is "openai" (default) or "anthropic".
+	// Type is "openai" (default), "anthropic", or "openai-compatible".
 	Type    string
 	BaseURL string
 	APIKey  string
+	// Provider is the provider id for openai-compatible endpoints; it defaults
+	// to "openai-compatible".
+	Provider string
 }
 
 // ClientOptions configures a Client.

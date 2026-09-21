@@ -56,6 +56,22 @@ func newTestClient(t *testing.T) *Client {
 	return client
 }
 
+func TestClientOpenAICompatibleProvider(t *testing.T) {
+	client, err := NewClient(&ClientOptions{
+		Provider: ProviderConfig{
+			Type: "openai-compatible", BaseURL: "https://api.deepseek.com/v1",
+			APIKey: "test", Provider: "deepseek",
+		},
+		Model:   "deepseek-chat",
+		DataDir: t.TempDir(),
+		llm:     fakeLLM{reply: "x"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+}
+
 func TestSessionSend(t *testing.T) {
 	client := newTestClient(t)
 	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})

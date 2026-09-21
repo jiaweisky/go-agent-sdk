@@ -288,6 +288,16 @@ func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
 			provider.AnthropicConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL},
 		)
 		model = facade.Model(opts.Model)
+	case "openai-compatible":
+		facade := provider.NewOpenAICompatible(
+			protocols.OpenAICompatibleChatHTTPRoute,
+			provider.OpenAICompatibleGenericOptions{
+				APIKey:   &apiKey,
+				BaseURL:  opts.Provider.BaseURL,
+				Provider: opts.Provider.Provider,
+			},
+		)
+		model = facade.Model(opts.Model)
 	default:
 		facade := provider.NewOpenAI(
 			protocols.OpenAIResponsesHTTPRoute,
