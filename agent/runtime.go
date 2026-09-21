@@ -271,8 +271,8 @@ func (e appEvents) PublishWithCommit(
 
 // buildModelResolver maps a provider config to a model resolver.
 func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
-	var model route.Model
 	apiKey := opts.Provider.APIKey
+	var build func(id string) route.Model
 	switch opts.Provider.Type {
 	case "", "openai":
 		facade := provider.NewOpenAI(
@@ -281,13 +281,13 @@ func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
 			protocols.OpenAIChatHTTPRoute,
 			provider.OpenAIConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL},
 		)
-		model = facade.Model(opts.Model)
+		build = func(id string) route.Model { return facade.Model(id) }
 	case "anthropic":
 		facade := provider.NewAnthropic(
 			protocols.AnthropicMessagesHTTPRoute,
 			provider.AnthropicConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL},
 		)
-		model = facade.Model(opts.Model)
+		build = func(id string) route.Model { return facade.Model(id) }
 	case "openai-compatible":
 		facade := provider.NewOpenAICompatible(
 			protocols.OpenAICompatibleChatHTTPRoute,
@@ -297,7 +297,7 @@ func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
 				Provider: opts.Provider.Provider,
 			},
 		)
-		model = facade.Model(opts.Model)
+		build = func(id string) route.Model { return facade.Model(id) }
 	default:
 		facade := provider.NewOpenAI(
 			protocols.OpenAIResponsesHTTPRoute,
@@ -305,10 +305,14 @@ func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
 			protocols.OpenAIChatHTTPRoute,
 			provider.OpenAIConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL},
 		)
-		model = facade.Model(opts.Model)
+		build = func(id string) route.Model { return facade.Model(id) }
 	}
 	return func(stored schema.SessionInfo) (route.Model, error) {
-		return model, nil
+		id := opts.Model
+		if stored.Model != nil && stored.Model.ID != "" {
+			id = string(stored.Model.ID)
+		}
+		return build(id), nil
 	}, nil
 }
 

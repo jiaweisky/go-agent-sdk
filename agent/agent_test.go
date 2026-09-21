@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/schema"
 )
 
 type fakeLLM struct{ reply string }
@@ -70,6 +71,30 @@ func TestClientOpenAICompatibleProvider(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 	defer client.Close()
+}
+
+func TestModelResolverUsesSessionModel(t *testing.T) {
+	resolve, err := buildModelResolver(&ClientOptions{
+		Provider: ProviderConfig{Type: "openai-compatible", Provider: "deepseek"},
+		Model:    "default-model",
+	})
+	if err != nil {
+		t.Fatalf("build resolver: %v", err)
+	}
+	model, err := resolve(schema.SessionInfo{Model: &schema.ModelRef{ID: "session-model"}})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if model.ID != "session-model" {
+		t.Fatalf("model id = %q", model.ID)
+	}
+	fallback, err := resolve(schema.SessionInfo{})
+	if err != nil {
+		t.Fatalf("resolve fallback: %v", err)
+	}
+	if fallback.ID != "default-model" {
+		t.Fatalf("fallback model id = %q", fallback.ID)
+	}
 }
 
 func TestSessionSend(t *testing.T) {
