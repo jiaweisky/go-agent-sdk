@@ -304,8 +304,8 @@ func executeWebFetch(deps WebFetchDeps, execCtx context.Context, input WebFetchI
 	}, nil
 }
 
-func RegisterWebFetch(registry *Registry, deps WebFetchDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterWebFetch(tools Tools, deps WebFetchDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		WebFetchName: MakeWebFetch(deps),
 	})
 }

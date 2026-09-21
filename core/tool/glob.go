@@ -181,8 +181,8 @@ func decodeGlobOutput(output any) []core.FileSystemEntry {
 	return entries
 }
 
-func RegisterGlob(registry *Registry, deps GlobDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterGlob(tools Tools, deps GlobDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		GlobName: MakeGlob(deps),
 	})
 }

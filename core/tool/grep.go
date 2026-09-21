@@ -226,8 +226,8 @@ func decodeGrepOutput(output any) []core.FileSystemMatch {
 	return matches
 }
 
-func RegisterGrep(registry *Registry, deps GrepDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterGrep(tools Tools, deps GrepDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		GrepName: MakeGrep(deps),
 	})
 }

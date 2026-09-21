@@ -128,8 +128,8 @@ func MakeQuestion(deps QuestionDeps) *Def[QuestionInput, QuestionOutput, Questio
 	})
 }
 
-func RegisterQuestion(registry *Registry, deps QuestionDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterQuestion(tools Tools, deps QuestionDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		QuestionName: MakeQuestion(deps),
 	})
 }

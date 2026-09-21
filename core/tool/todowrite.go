@@ -104,8 +104,8 @@ func MakeTodoWrite(deps TodoWriteDeps) *Def[TodoWriteInput, TodoWriteOutput, Tod
 	})
 }
 
-func RegisterTodoWrite(registry *Registry, deps TodoWriteDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterTodoWrite(tools Tools, deps TodoWriteDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		TodoWriteName: MakeTodoWrite(deps),
 	})
 }

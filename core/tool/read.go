@@ -200,8 +200,8 @@ func readToolErrorMessage(err error, path string) string {
 	}
 }
 
-func RegisterRead(registry *Registry, deps ReadDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterRead(tools Tools, deps ReadDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		ReadName: MakeRead(deps),
 	})
 }

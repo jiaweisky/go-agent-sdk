@@ -137,8 +137,8 @@ func WithWritePermission(tool *Def[WriteInput, WriteOutput, WriteOutput]) *Def[W
 	return WithPermission(tool, "edit")
 }
 
-func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterWrite(tools Tools, deps WriteDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		WriteName: WithWritePermission(MakeWrite(deps)),
 	})
 }

@@ -339,8 +339,8 @@ func WithEditPermission(tool *Def[EditInput, EditOutput, EditOutput]) *Def[EditI
 	return WithPermission(tool, "edit")
 }
 
-func RegisterEdit(registry *Registry, deps EditDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterEdit(tools Tools, deps EditDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		EditName: WithEditPermission(MakeEdit(deps)),
 	})
 }

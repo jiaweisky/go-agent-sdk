@@ -160,8 +160,8 @@ func MakeSkill(deps SkillToolDeps) *Def[SkillInput, SkillOutput, SkillOutput] {
 	})
 }
 
-func RegisterSkill(registry *Registry, deps SkillToolDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterSkill(tools Tools, deps SkillToolDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		SkillName: MakeSkill(deps),
 	})
 }

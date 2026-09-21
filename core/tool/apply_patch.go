@@ -97,8 +97,8 @@ func WithApplyPatchPermission(tool *Def[ApplyPatchInput, ApplyPatchOutput, Apply
 	return WithPermission(tool, "edit")
 }
 
-func RegisterApplyPatch(registry *Registry, deps ApplyPatchDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterApplyPatch(tools Tools, deps ApplyPatchDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		ApplyPatchName: WithApplyPatchPermission(MakeApplyPatch(deps)),
 	})
 }

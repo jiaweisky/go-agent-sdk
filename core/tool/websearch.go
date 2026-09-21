@@ -424,8 +424,8 @@ func MakeWebSearch(deps WebSearchDeps) *Def[WebSearchInput, WebSearchOutput, Web
 	})
 }
 
-func RegisterWebSearch(registry *Registry, deps WebSearchDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterWebSearch(tools Tools, deps WebSearchDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		WebSearchName: MakeWebSearch(deps),
 	})
 }

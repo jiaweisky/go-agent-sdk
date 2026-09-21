@@ -391,8 +391,8 @@ func bashIsTimeout(err error) bool {
 	return errors.Is(err, core.ErrTimedOut)
 }
 
-func RegisterBash(registry *Registry, deps BashDeps) (func(), error) {
-	return registry.Register(map[string]Tool{
+func RegisterBash(tools Tools, deps BashDeps) (func(), error) {
+	return tools.Register(map[string]Tool{
 		BashName: MakeBash(deps),
 	})
 }
