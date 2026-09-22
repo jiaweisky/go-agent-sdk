@@ -69,12 +69,19 @@ func TestClassifyError(t *testing.T) {
 	}
 }
 
-func TestClientPromptsAccessor(t *testing.T) {
+func TestClientCatalogAccessors(t *testing.T) {
 	ctx := context.Background()
-	server := sdk.NewServer(&sdk.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	server := sdk.NewServer(&sdk.Implementation{Name: "test-server", Version: "1.0.0"},
+		&sdk.ServerOptions{Instructions: "use carefully"})
 	server.AddPrompt(&sdk.Prompt{Name: "greet", Description: "greeting"}, func(context.Context, *sdk.GetPromptRequest) (*sdk.GetPromptResult, error) {
-		return &sdk.GetPromptResult{}, nil
+		return &sdk.GetPromptResult{Description: "hi"}, nil
 	})
+	server.AddResource(&sdk.Resource{Name: "readme", URI: "file:///readme", MIMEType: "text/plain"},
+		func(context.Context, *sdk.ReadResourceRequest) (*sdk.ReadResourceResult, error) {
+			return &sdk.ReadResourceResult{Contents: []*sdk.ResourceContents{
+				{URI: "file:///readme", MIMEType: "text/plain", Text: "hello"},
+			}}, nil
+		})
 	serverTransport, clientTransport := sdk.NewInMemoryTransports()
 	serverSession, err := server.Connect(ctx, serverTransport, nil)
 	if err != nil {
@@ -87,12 +94,34 @@ func TestClientPromptsAccessor(t *testing.T) {
 	if status := client.ConnectTransport(ctx, "srv", clientTransport, 5*time.Second); status.Status != "connected" {
 		t.Fatalf("status = %+v", status)
 	}
+
 	prompts, err := client.Prompts(ctx)
 	if err != nil {
 		t.Fatalf("prompts: %v", err)
 	}
 	if got := prompts["srv:greet"]; got.Description != "greeting" || got.Client != "srv" {
 		t.Fatalf("prompt = %+v", got)
+	}
+	prompt, err := client.GetPrompt(ctx, "srv", "greet", nil)
+	if err != nil || prompt == nil || prompt.Description != "hi" {
+		t.Fatalf("get prompt = %+v, %v", prompt, err)
+	}
+
+	resources, err := client.Resources(ctx)
+	if err != nil {
+		t.Fatalf("resources: %v", err)
+	}
+	if got := resources["srv:readme"]; got.URI != "file:///readme" {
+		t.Fatalf("resource = %+v", got)
+	}
+	resource, err := client.ReadResource(ctx, "srv", "file:///readme")
+	if err != nil || len(resource.Contents) == 0 || resource.Contents[0].Text != "hello" {
+		t.Fatalf("read resource = %+v, %v", resource, err)
+	}
+
+	instructions := client.Instructions()
+	if len(instructions) != 1 || instructions[0].Name != "srv" || instructions[0].Instructions != "use carefully" {
+		t.Fatalf("instructions = %+v", instructions)
 	}
 }
 

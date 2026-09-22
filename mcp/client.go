@@ -345,6 +345,64 @@ func (c *Client) CallTool(ctx context.Context, server, toolName string, args any
 	return session.CallTool(ctx, &sdk.CallToolParams{Name: toolName, Arguments: args})
 }
 
+// GetPrompt fetches a prompt from the named server.
+func (c *Client) GetPrompt(ctx context.Context, server, name string, args map[string]string) (*sdk.GetPromptResult, error) {
+	session, ok := c.Session(server)
+	if !ok {
+		return nil, fmt.Errorf("mcp server not connected: %s", server)
+	}
+	return session.GetPrompt(ctx, &sdk.GetPromptParams{Name: name, Arguments: args})
+}
+
+// ReadResource reads a resource from the named server.
+func (c *Client) ReadResource(ctx context.Context, server, uri string) (*sdk.ReadResourceResult, error) {
+	session, ok := c.Session(server)
+	if !ok {
+		return nil, fmt.Errorf("mcp server not connected: %s", server)
+	}
+	return session.ReadResource(ctx, &sdk.ReadResourceParams{URI: uri})
+}
+
+// ServerInstructions describes a server's usage instructions and tools.
+type ServerInstructions struct {
+	Name         string
+	Instructions string
+	Tools        []string
+}
+
+// Instructions returns the instructions of every server that provides them,
+// mirroring MCP.instructions.
+func (c *Client) Instructions() []ServerInstructions {
+	c.mu.Lock()
+	sessions := make(map[string]*sdk.ClientSession, len(c.sessions))
+	for name, session := range c.sessions {
+		sessions[name] = session
+	}
+	defs := make(map[string][]*sdk.Tool, len(c.defs))
+	for name, tools := range c.defs {
+		defs[name] = tools
+	}
+	c.mu.Unlock()
+
+	var result []ServerInstructions
+	for name, session := range sessions {
+		initialized := session.InitializeResult()
+		if initialized == nil || strings.TrimSpace(initialized.Instructions) == "" {
+			continue
+		}
+		tools := make([]string, 0, len(defs[name]))
+		for _, def := range defs[name] {
+			tools = append(tools, def.Name)
+		}
+		result = append(result, ServerInstructions{
+			Name:         name,
+			Instructions: strings.TrimSpace(initialized.Instructions),
+			Tools:        tools,
+		})
+	}
+	return result
+}
+
 func (c *Client) setStatus(name string, status Status) {
 	c.mu.Lock()
 	c.status[name] = status
