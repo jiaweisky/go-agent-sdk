@@ -15,13 +15,9 @@ import (
 // AdaptMCPTool mirrors McpCatalog.convertTool: it binds an MCP tool definition
 // to its session and returns a core tool.
 func AdaptMCPTool(def *sdk.Tool, session *sdk.ClientSession, server string, timeout time.Duration) tool.Tool {
-	inputSchema, _ := def.InputSchema.(map[string]any)
-	if inputSchema == nil {
-		inputSchema = map[string]any{"type": "object", "properties": map[string]any{}}
-	}
 	return tool.Make(tool.Config[map[string]any, any, any]{
 		Description: def.Description,
-		Input:       jsonschema.Raw(inputSchema),
+		Input:       jsonschema.Raw(MCPInputSchema(def)),
 		Output:      jsonschema.Raw(map[string]any{}),
 		Execute: func(ctx context.Context, input map[string]any, tctx tool.Context) (any, error) {
 			callCtx := ctx
@@ -43,6 +39,24 @@ func AdaptMCPTool(def *sdk.Tool, session *sdk.ClientSession, server string, time
 			return []tool.Content{tool.TextContent{Text: RenderMCPResult(output)}}
 		},
 	})
+}
+
+// MCPInputSchema mirrors convertTool's input-schema normalization: the schema is
+// spread from the server, forced to an object with a properties map and
+// additionalProperties:false.
+func MCPInputSchema(def *sdk.Tool) map[string]any {
+	schema := map[string]any{}
+	if raw, ok := def.InputSchema.(map[string]any); ok {
+		for key, value := range raw {
+			schema[key] = value
+		}
+	}
+	schema["type"] = "object"
+	if _, ok := schema["properties"]; !ok {
+		schema["properties"] = map[string]any{}
+	}
+	schema["additionalProperties"] = false
+	return schema
 }
 
 // AdaptedTool is a discovered MCP tool plus the session it belongs to.

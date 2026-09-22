@@ -32,6 +32,27 @@ func TestHTTPClientHeaders(t *testing.T) {
 	}
 }
 
+func TestMCPInputSchemaNormalization(t *testing.T) {
+	def := &sdk.Tool{
+		Name:        "t",
+		InputSchema: map[string]any{"properties": map[string]any{"a": map[string]any{"type": "string"}}},
+	}
+	schema := MCPInputSchema(def)
+	if schema["type"] != "object" {
+		t.Fatalf("type = %v", schema["type"])
+	}
+	if schema["additionalProperties"] != false {
+		t.Fatalf("additionalProperties = %v", schema["additionalProperties"])
+	}
+	if _, ok := schema["properties"].(map[string]any); !ok {
+		t.Fatalf("properties = %v", schema["properties"])
+	}
+	empty := MCPInputSchema(&sdk.Tool{Name: "t"})
+	if _, ok := empty["properties"].(map[string]any); !ok {
+		t.Fatalf("empty properties = %v", empty["properties"])
+	}
+}
+
 func TestClassifyError(t *testing.T) {
 	cases := []struct {
 		message string

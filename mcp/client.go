@@ -365,7 +365,11 @@ func transportsFor(cfg ServerConfig, directory string) ([]sdk.Transport, error) 
 	}
 	command := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 	if cfg.Cwd != "" {
-		command.Dir = filepath.Join(directory, cfg.Cwd)
+		if filepath.IsAbs(cfg.Cwd) {
+			command.Dir = cfg.Cwd
+		} else {
+			command.Dir = filepath.Join(directory, cfg.Cwd)
+		}
 	} else {
 		command.Dir = directory
 	}
