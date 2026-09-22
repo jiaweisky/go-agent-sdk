@@ -639,6 +639,7 @@ type ClientOptions struct {
     DataDir          string                    // 会话数据库目录
     Tools            []Tool                    // 应用级工具
     MCP              []MCPConfig               // MCP servers（工具注册为应用级）
+    Plugins          []PluginConfig            // 启动时加载的插件
     Permission       PermissionHandlerFunc     // 默认权限回调
     LLM              route.LLMClient           // 可选：注入自定义 LLM client
 }

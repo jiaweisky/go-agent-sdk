@@ -49,6 +49,7 @@ type runtime struct {
 	clientTools []Tool
 	dispatcher  *toolDispatcher
 	mcp         *mcp.Client
+	plugin      *core.Plugin
 }
 
 // toolDispatcher routes materialization to a session-scoped registry when one
@@ -235,6 +236,13 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db.Close()
 		return nil, err
 	}
+	rt.plugin = core.NewPlugin(events, agents, skills)
+	for _, config := range opts.Plugins {
+		if err := rt.plugin.Add(schema.PluginID(config.ID), core.PluginEffect(config.Effect)); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	return rt, nil
 }
 
@@ -278,6 +286,9 @@ func chooseLLM(opts *ClientOptions) route.LLMClient {
 }
 
 func (r *runtime) close() error {
+	if r.plugin != nil {
+		_ = r.plugin.Close()
+	}
 	if r.mcp != nil {
 		r.mcp.Close()
 	}

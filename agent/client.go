@@ -36,6 +36,8 @@ type ClientOptions struct {
 	Tools []Tool
 	// MCP configures MCP servers whose tools are registered as application tools.
 	MCP []MCPConfig
+	// Plugins are loaded at startup and can transform agents and skills.
+	Plugins []PluginConfig
 	// Permission is the default permission handler. Defaults to ApproveAll.
 	Permission PermissionHandlerFunc
 
@@ -48,6 +50,12 @@ type ClientOptions struct {
 type MCPConfig struct {
 	Name   string
 	Server mcp.ServerConfig
+}
+
+// PluginConfig registers a plugin loaded at client startup.
+type PluginConfig struct {
+	ID     string
+	Effect func(*core.PluginContext) (func(), error)
 }
 
 // AgentConfig defines a named agent.
@@ -234,6 +242,11 @@ func (c *Client) removeDerivedAgent(agentID string, derived bool) {
 // MCP returns the MCP client, or nil when no MCP servers are configured.
 func (c *Client) MCP() *mcp.Client {
 	return c.rt.mcp
+}
+
+// Plugin returns the plugin manager.
+func (c *Client) Plugin() *core.Plugin {
+	return c.rt.plugin
 }
 
 // Close closes active sessions and releases the runtime and its database.

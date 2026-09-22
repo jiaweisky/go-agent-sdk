@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/user/go-agent-sdk/core"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -462,5 +463,40 @@ func TestSessionSystemPromptIsolation(t *testing.T) {
 	}
 	if secondAgent == nil || secondAgent.System == nil || *secondAgent.System != "S2" {
 		t.Fatalf("second agent = %+v", secondAgent)
+	}
+}
+
+func TestClientPlugin(t *testing.T) {
+	loaded := false
+	client, err := NewClient(&ClientOptions{
+		Provider: ProviderConfig{Type: "openai", APIKey: "k"},
+		Model:    "test-model",
+		DataDir:  t.TempDir(),
+		LLM:      fakeLLM{reply: "x"},
+		Plugins: []PluginConfig{{
+			ID: "test",
+			Effect: func(ctx *core.PluginContext) (func(), error) {
+				loaded = true
+				_, err := ctx.Agents.Transform(func(draft core.AgentDraft) error {
+					draft.Update(schema.AgentID("build"), func(info *schema.AgentInfo) {
+						system := "from plugin"
+						info.System = &system
+					})
+					return nil
+				})
+				return func() {}, err
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+	if !loaded {
+		t.Fatal("plugin was not loaded")
+	}
+	info := client.rt.agents.Get(schema.AgentID("build"))
+	if info == nil || info.System == nil || *info.System != "from plugin" {
+		t.Fatalf("agent = %+v", info)
 	}
 }

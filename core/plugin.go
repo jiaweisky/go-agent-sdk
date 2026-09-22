@@ -122,6 +122,23 @@ func (p *Plugin) Remove(id schema.PluginID) error {
 	return result
 }
 
+// Close unloads every active plugin.
+func (p *Plugin) Close() error {
+	p.mu.Lock()
+	cleanups := make([]func(), 0, len(p.active))
+	for _, cleanup := range p.active {
+		cleanups = append(cleanups, cleanup)
+	}
+	p.active = map[schema.PluginID]func(){}
+	p.mu.Unlock()
+	for _, cleanup := range cleanups {
+		if cleanup != nil {
+			cleanup()
+		}
+	}
+	return nil
+}
+
 // Wait blocks until a plugin is active (nil), has failed, or is already active.
 func (p *Plugin) Wait(id schema.PluginID) error {
 	var (
