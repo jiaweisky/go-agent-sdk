@@ -30,15 +30,24 @@ func WithEvents(publisher EventPublisher) Option {
 	return func(c *Client) { c.events = publisher }
 }
 
+// LogHandler receives server logging notifications (notifications/message).
+type LogHandler func(server string, params *sdk.LoggingMessageParams)
+
+// WithLogHandler wires a handler for server logging notifications.
+func WithLogHandler(handler LogHandler) Option {
+	return func(c *Client) { c.logHandler = handler }
+}
+
 // Client manages connections to configured MCP servers.
 type Client struct {
-	mu        sync.Mutex
-	directory string
-	version   string
-	events    EventPublisher
-	sessions  map[string]*sdk.ClientSession
-	status    map[string]Status
-	defs      map[string][]*sdk.Tool
+	mu         sync.Mutex
+	directory  string
+	version    string
+	events     EventPublisher
+	logHandler LogHandler
+	sessions   map[string]*sdk.ClientSession
+	status     map[string]Status
+	defs       map[string][]*sdk.Tool
 }
 
 // NewClient creates an MCP client rooted at directory.
@@ -79,8 +88,17 @@ func (c *Client) Connect(ctx context.Context, name string, cfg ServerConfig) Sta
 			return status
 		}
 		last = status
+		// Auth failures stop the transport fallback, matching connectRemote.
+		if status.Status == "needs_auth" || status.Status == "needs_client_registration" {
+			break
+		}
 	}
 	return last
+}
+
+// Add connects a server config, mirroring MCP.add.
+func (c *Client) Add(ctx context.Context, name string, cfg ServerConfig) Status {
+	return c.Connect(ctx, name, cfg)
 }
 
 // ConnectTransport connects a single transport, storing the session on success.
@@ -89,6 +107,11 @@ func (c *Client) ConnectTransport(ctx context.Context, name string, transport sd
 		ToolListChangedHandler: func(context.Context, *sdk.ToolListChangedRequest) {
 			c.refreshTools(name)
 			c.publishToolsChanged(name)
+		},
+		LoggingMessageHandler: func(_ context.Context, request *sdk.LoggingMessageRequest) {
+			if c.logHandler != nil {
+				c.logHandler(name, request.Params)
+			}
 		},
 	})
 	if c.directory != "" {
@@ -270,9 +293,9 @@ type ResourceTemplateInfo struct {
 }
 
 // Prompts lists the prompts of every connected server.
-func (c *Client) Prompts(ctx context.Context) (map[string]PromptInfo, error) {
+func (c *Client) Prompts(ctx context.Context, clientName ...string) (map[string]PromptInfo, error) {
 	result := map[string]PromptInfo{}
-	for server, session := range c.snapshotSessions() {
+	for server, session := range c.filteredSessions(clientName) {
 		prompts, err := ListPrompts(ctx, session)
 		if err != nil {
 			return nil, err
@@ -287,9 +310,9 @@ func (c *Client) Prompts(ctx context.Context) (map[string]PromptInfo, error) {
 }
 
 // Resources lists the resources of every connected server.
-func (c *Client) Resources(ctx context.Context) (map[string]ResourceInfo, error) {
+func (c *Client) Resources(ctx context.Context, clientName ...string) (map[string]ResourceInfo, error) {
 	result := map[string]ResourceInfo{}
-	for server, session := range c.snapshotSessions() {
+	for server, session := range c.filteredSessions(clientName) {
 		resources, err := ListResources(ctx, session)
 		if err != nil {
 			return nil, err
@@ -305,9 +328,9 @@ func (c *Client) Resources(ctx context.Context) (map[string]ResourceInfo, error)
 }
 
 // ResourceTemplates lists the resource templates of every connected server.
-func (c *Client) ResourceTemplates(ctx context.Context) (map[string]ResourceTemplateInfo, error) {
+func (c *Client) ResourceTemplates(ctx context.Context, clientName ...string) (map[string]ResourceTemplateInfo, error) {
 	result := map[string]ResourceTemplateInfo{}
-	for server, session := range c.snapshotSessions() {
+	for server, session := range c.filteredSessions(clientName) {
 		templates, err := ListResourceTemplates(ctx, session)
 		if err != nil {
 			return nil, err
@@ -320,6 +343,18 @@ func (c *Client) ResourceTemplates(ctx context.Context) (map[string]ResourceTemp
 		}
 	}
 	return result, nil
+}
+
+func (c *Client) filteredSessions(clientName []string) map[string]*sdk.ClientSession {
+	sessions := c.snapshotSessions()
+	if len(clientName) == 0 || clientName[0] == "" {
+		return sessions
+	}
+	filtered := map[string]*sdk.ClientSession{}
+	if session, ok := sessions[clientName[0]]; ok {
+		filtered[clientName[0]] = session
+	}
+	return filtered
 }
 
 func (c *Client) snapshotSessions() map[string]*sdk.ClientSession {

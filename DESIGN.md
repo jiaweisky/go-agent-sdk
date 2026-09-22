@@ -564,6 +564,8 @@ func (t AdaptedTool) CoreTool() tool.Tool
 
 - `schema/mcp_event.go`：`mcp.tools.changed` / `mcp.browser.open.failed`。
 - 远程鉴权：**完全对齐 TS** —— 只用 `ServerConfig.Headers`（如 `Authorization: Bearer <token>` 或 `X-API-Key: <key>`），不做 OAuth（TS 的 `oauth-provider.ts`/`oauth-callback.ts`/`browser.ts`/`auth.ts` 均不移植）。也不接 `EventV2Bridge`/`InstanceState`/`CrossSpawnSpawner`/`ConfigV1`。
+- 其他已对齐：`GetPrompt`/`ReadResource`、server `instructions`、`clientName` 过滤、运行时 `Add`、server 日志（`WithLogHandler`）。
+- 唯一无法对齐：`callTool` 的 `resetTimeoutOnProgress`/`onprogress`（进度重置超时）—— Go SDK 的 `CallTool` 未暴露该选项，只能用 context 超时。
 
 ## 9. Skill 系统
 

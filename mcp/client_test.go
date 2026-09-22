@@ -106,6 +106,12 @@ func TestClientCatalogAccessors(t *testing.T) {
 	if err != nil || prompt == nil || prompt.Description != "hi" {
 		t.Fatalf("get prompt = %+v, %v", prompt, err)
 	}
+	if filtered, err := client.Prompts(ctx, "srv"); err != nil || len(filtered) != 1 {
+		t.Fatalf("filtered prompts = %+v, %v", filtered, err)
+	}
+	if none, err := client.Prompts(ctx, "other"); err != nil || len(none) != 0 {
+		t.Fatalf("unmatched prompts = %+v, %v", none, err)
+	}
 
 	resources, err := client.Resources(ctx)
 	if err != nil {
