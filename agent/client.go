@@ -38,8 +38,9 @@ type ClientOptions struct {
 	// Permission is the default permission handler. Defaults to ApproveAll.
 	Permission PermissionHandlerFunc
 
-	// llm overrides the LLM client (tests only).
-	llm route.LLMClient
+	// LLM overrides the default LLM client (route.LLMClient). When nil, a client
+	// is built from Provider/Model over the default HTTP transport.
+	LLM route.LLMClient
 }
 
 // MCPConfig names an MCP server and its connection config.
@@ -162,6 +163,7 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 	c.rt.sessions.Set(string(sessionID), agentID)
 	c.rt.dispatcher.set(string(sessionID), sessionRegistry)
 	c.rt.setHooks(string(sessionID), cfg.Hooks)
+	c.rt.permission.setHandler(string(sessionID), cfg.OnPermissionRequest)
 
 	session := &Session{client: c, id: sessionID, hooks: cfg.Hooks, listeners: map[int]func(Event){}}
 	unsub, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
@@ -212,6 +214,7 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *Sessi
 	}
 	c.rt.dispatcher.set(sessionID, registry)
 	c.rt.setHooks(sessionID, cfg.Hooks)
+	c.rt.permission.setHandler(sessionID, cfg.OnPermissionRequest)
 
 	session := &Session{client: c, id: schema.SessionID(sessionID), hooks: cfg.Hooks, listeners: map[int]func(Event){}}
 	unsubscribe, err := c.rt.events.Listen(func(payload schema.EventPayload) error {

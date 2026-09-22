@@ -638,7 +638,9 @@ type ClientOptions struct {
     WorkingDirectory string
     DataDir          string                    // 会话数据库目录
     Tools            []Tool                    // 应用级工具
+    MCP              []MCPConfig               // MCP servers（工具注册为应用级）
     Permission       PermissionHandlerFunc     // 默认权限回调
+    LLM              route.LLMClient           // 可选：注入自定义 LLM client
 }
 func NewClient(*ClientOptions) (*Client, error)
 func (c *Client) RegisterAgent(name string, cfg AgentConfig) error
@@ -655,11 +657,13 @@ type SessionConfig struct {
     Title        string
     SystemPrompt *SystemPromptConfig           // append | replace | customize(sections)
     Tools        []Tool
+    OnPermissionRequest PermissionHandlerFunc  // 覆盖 client 级权限回调
     Hooks        *SessionHooks
 }
 type MessageOptions struct { Prompt string; Mode string } // Mode: "queue"(默认)|"steer"
 
 func (s *Session) ID() string
+func (s *Session) Messages() ([]schema.SessionMessage, error)       // 历史读取
 func (s *Session) Send(ctx, MessageOptions) iter.Seq2[Event, error] // 本轮流，结尾 Idle
 func (s *Session) On(func(Event)) (unsubscribe func())
 func (s *Session) Abort()

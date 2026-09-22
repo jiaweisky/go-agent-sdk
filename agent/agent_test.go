@@ -46,7 +46,7 @@ func newTestClient(t *testing.T) *Client {
 		Model:      "test-model",
 		DataDir:    t.TempDir(),
 		Permission: ApproveAll,
-		llm:        fakeLLM{reply: "hello world"},
+		LLM:        fakeLLM{reply: "hello world"},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -66,7 +66,7 @@ func TestClientOpenAICompatibleProvider(t *testing.T) {
 		},
 		Model:   "deepseek-chat",
 		DataDir: t.TempDir(),
-		llm:     fakeLLM{reply: "x"},
+		LLM:     fakeLLM{reply: "x"},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -129,7 +129,7 @@ func TestSessionPermissionHandlerIsWired(t *testing.T) {
 			permissionCalls++
 			return PermissionDecision{Allow: true}, nil
 		},
-		llm: toolCallLLM{calls: &calls, toolName: "echo", reply: "done"},
+		LLM: toolCallLLM{calls: &calls, toolName: "echo", reply: "done"},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -160,6 +160,75 @@ func TestSessionPermissionHandlerIsWired(t *testing.T) {
 	}
 	if permissionCalls == 0 {
 		t.Fatal("permission handler was not called")
+	}
+}
+
+func TestSessionPermissionOverride(t *testing.T) {
+	calls := 0
+	executed := false
+	client, err := NewClient(&ClientOptions{
+		Provider: ProviderConfig{Type: "openai", APIKey: "k"},
+		Model:    "test-model",
+		DataDir:  t.TempDir(),
+		// Client default denies; the session override allows.
+		Permission: func(PermissionRequest) (PermissionDecision, error) {
+			return PermissionDecision{Allow: false}, nil
+		},
+		LLM: toolCallLLM{calls: &calls, toolName: "echo", reply: "done"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+	if err := client.RegisterAgent("build", AgentConfig{System: "s"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	echo := DefineTool("echo", "echo", func(struct{}, ToolContext) (string, error) {
+		executed = true
+		return "ok", nil
+	})
+	session, err := client.CreateSession(context.Background(), &SessionConfig{
+		Agent: "build",
+		Tools: []Tool{echo},
+		OnPermissionRequest: func(PermissionRequest) (PermissionDecision, error) {
+			return PermissionDecision{Allow: true}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer session.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, err := range session.Send(ctx, MessageOptions{Prompt: "hi"}) {
+		if err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+	if !executed {
+		t.Fatal("session permission override was not applied")
+	}
+}
+
+func TestSessionMessages(t *testing.T) {
+	client := newTestClient(t)
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer session.Close()
+	for _, err := range session.Send(context.Background(), MessageOptions{Prompt: "hi"}) {
+		if err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+	messages, err := session.Messages()
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if len(messages) == 0 {
+		t.Fatal("expected stored messages")
 	}
 }
 

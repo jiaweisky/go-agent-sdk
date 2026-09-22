@@ -20,6 +20,9 @@ type SessionConfig struct {
 	SystemPrompt *SystemPromptConfig
 	// Tools are session-scoped user tools.
 	Tools []Tool
+	// OnPermissionRequest overrides the client permission handler for this
+	// session.
+	OnPermissionRequest PermissionHandlerFunc
 	// Hooks intercepts session and tool lifecycle events.
 	Hooks *SessionHooks
 }
@@ -46,6 +49,11 @@ type Session struct {
 
 // ID returns the session identifier.
 func (s *Session) ID() string { return string(s.id) }
+
+// Messages returns the session's stored messages (user, assistant, tool parts).
+func (s *Session) Messages() ([]schema.SessionMessage, error) {
+	return s.client.rt.store.Context(s.id)
+}
 
 // On subscribes to session events. The returned function unsubscribes.
 func (s *Session) On(handler func(Event)) func() {
@@ -154,6 +162,7 @@ func (s *Session) Close() error {
 		unsubscribe()
 	}
 	s.client.rt.dispatcher.remove(s.ID())
+	s.client.rt.permission.removeHandler(s.ID())
 	if s.hooks != nil && s.hooks.OnSessionEnd != nil {
 		_, _ = s.hooks.OnSessionEnd(SessionEndInput{SessionID: s.ID(), Reason: "closed"})
 	}

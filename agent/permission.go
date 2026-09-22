@@ -33,18 +33,51 @@ var ApproveAll PermissionHandlerFunc = func(PermissionRequest) (PermissionDecisi
 }
 
 // handlerPermission decorates a core Permission service so that "ask" decisions
-// are answered by the configured PermissionHandlerFunc instead of blocking for
-// an external reply.
+// are answered by a PermissionHandlerFunc instead of blocking for an external
+// reply. A per-session handler overrides the client default.
 type handlerPermission struct {
-	inner   core.Permission
-	handler PermissionHandlerFunc
+	inner core.Permission
+
+	mu       sync.Mutex
+	def      PermissionHandlerFunc
+	handlers map[string]PermissionHandlerFunc
 }
 
-func (p handlerPermission) Ask(input core.PermissionAssertInput) (*core.PermissionAskResult, error) {
+func (p *handlerPermission) setHandler(sessionID string, handler PermissionHandlerFunc) {
+	if handler == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.handlers == nil {
+		p.handlers = map[string]PermissionHandlerFunc{}
+	}
+	p.handlers[sessionID] = handler
+}
+
+func (p *handlerPermission) removeHandler(sessionID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.handlers, sessionID)
+}
+
+func (p *handlerPermission) handlerFor(sessionID string) PermissionHandlerFunc {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if handler, ok := p.handlers[sessionID]; ok && handler != nil {
+		return handler
+	}
+	if p.def != nil {
+		return p.def
+	}
+	return ApproveAll
+}
+
+func (p *handlerPermission) Ask(input core.PermissionAssertInput) (*core.PermissionAskResult, error) {
 	return p.inner.Ask(input)
 }
 
-func (p handlerPermission) Assert(input core.PermissionAssertInput) error {
+func (p *handlerPermission) Assert(input core.PermissionAssertInput) error {
 	result, err := p.inner.Ask(input)
 	if err != nil {
 		return err
@@ -55,14 +88,11 @@ func (p handlerPermission) Assert(input core.PermissionAssertInput) error {
 	case core.PermissionEffectDeny:
 		return &core.PermissionDeclinedError{}
 	}
-	if p.handler == nil {
-		return &core.PermissionDeclinedError{}
-	}
 	agent := ""
 	if input.Agent != nil {
 		agent = *input.Agent
 	}
-	decision, err := p.handler(PermissionRequest{
+	decision, err := p.handlerFor(input.SessionID)(PermissionRequest{
 		SessionID: input.SessionID,
 		Agent:     agent,
 		Action:    input.Action,
@@ -85,23 +115,23 @@ func (p handlerPermission) Assert(input core.PermissionAssertInput) error {
 	return &core.PermissionDeclinedError{}
 }
 
-func (p handlerPermission) Reply(input core.PermissionReplyInput) error {
+func (p *handlerPermission) Reply(input core.PermissionReplyInput) error {
 	return p.inner.Reply(input)
 }
 
-func (p handlerPermission) Get(id core.PermissionID) *core.PermissionRequest {
+func (p *handlerPermission) Get(id core.PermissionID) *core.PermissionRequest {
 	return p.inner.Get(id)
 }
 
-func (p handlerPermission) ForSession(sessionID string) []core.PermissionRequest {
+func (p *handlerPermission) ForSession(sessionID string) []core.PermissionRequest {
 	return p.inner.ForSession(sessionID)
 }
 
-func (p handlerPermission) List() []core.PermissionRequest {
+func (p *handlerPermission) List() []core.PermissionRequest {
 	return p.inner.List()
 }
 
-func (p handlerPermission) Close() error {
+func (p *handlerPermission) Close() error {
 	return p.inner.Close()
 }
 

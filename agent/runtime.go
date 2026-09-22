@@ -33,7 +33,7 @@ type runtime struct {
 	store      *session.Store
 	agents     *core.Agent
 	tools      *tool.Registry
-	permission core.Permission
+	permission *handlerPermission
 	question   core.Question
 	runner     *runner.LLMRunner
 	coord      *session.Coordinator[schema.SessionID]
@@ -162,11 +162,7 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 
 	agents := core.NewAgent()
 	agentSessions := newPermissionSessions()
-	handler := opts.Permission
-	if handler == nil {
-		handler = ApproveAll
-	}
-	permission := handlerPermission{
+	permission := &handlerPermission{
 		inner: core.NewPermission(core.PermissionConfig{
 			Sessions:  agentSessions,
 			Agents:    permissionAgents{agents: agents},
@@ -174,7 +170,8 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 			Events:    permissionEvents{events: events},
 			ProjectID: string(projectID),
 		}),
-		handler: handler,
+		def:      opts.Permission,
+		handlers: map[string]PermissionHandlerFunc{},
 	}
 	question := core.NewQuestion(core.QuestionConfig{Events: events})
 
@@ -275,8 +272,8 @@ func (p mcpEventPublisher) Publish(def schema.EventDefinition, data any) error {
 }
 
 func chooseLLM(opts *ClientOptions) route.LLMClient {
-	if opts.llm != nil {
-		return opts.llm
+	if opts.LLM != nil {
+		return opts.LLM
 	}
 	return llm.NewClient(route.TransportRuntime{HTTP: route.NewExecutor(http.DefaultClient)})
 }
