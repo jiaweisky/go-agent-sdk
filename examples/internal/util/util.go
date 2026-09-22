@@ -1,5 +1,5 @@
-// Package setup provides shared setup for the go-agent-sdk examples.
-package setup
+// Package util provides shared setup for the go-agent-sdk examples.
+package util
 
 import (
 	"os"
