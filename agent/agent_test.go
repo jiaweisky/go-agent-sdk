@@ -500,3 +500,23 @@ func TestClientPlugin(t *testing.T) {
 		t.Fatalf("agent = %+v", info)
 	}
 }
+
+func TestClientReferences(t *testing.T) {
+	client, err := NewClient(&ClientOptions{
+		Provider: ProviderConfig{Type: "openai", APIKey: "k"},
+		Model:    "test-model",
+		DataDir:  t.TempDir(),
+		LLM:      fakeLLM{reply: "x"},
+		References: map[string]core.ReferenceSource{
+			"local": core.ReferenceLocalSource{Type: "local", Path: schema.AbsolutePath("/tmp/ref")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+	infos := client.Reference().List()
+	if len(infos) != 1 || infos[0].Name != "local" || infos[0].Path != schema.AbsolutePath("/tmp/ref") {
+		t.Fatalf("references = %+v", infos)
+	}
+}

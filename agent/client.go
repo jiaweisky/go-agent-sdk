@@ -38,6 +38,8 @@ type ClientOptions struct {
 	MCP []MCPConfig
 	// Plugins are loaded at startup and can transform agents and skills.
 	Plugins []PluginConfig
+	// References are named reference sources injected into the system context.
+	References map[string]core.ReferenceSource
 	// Permission is the default permission handler. Defaults to ApproveAll.
 	Permission PermissionHandlerFunc
 
@@ -247,6 +249,11 @@ func (c *Client) MCP() *mcp.Client {
 // Plugin returns the plugin manager.
 func (c *Client) Plugin() *core.Plugin {
 	return c.rt.plugin
+}
+
+// Reference returns the reference service.
+func (c *Client) Reference() *core.Reference {
+	return c.rt.reference
 }
 
 // Close closes active sessions and releases the runtime and its database.

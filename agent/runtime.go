@@ -50,6 +50,7 @@ type runtime struct {
 	dispatcher  *toolDispatcher
 	mcp         *mcp.Client
 	plugin      *core.Plugin
+	reference   *core.Reference
 }
 
 // toolDispatcher routes materialization to a session-scoped registry when one
@@ -178,6 +179,19 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 
 	global := core.NewGlobal()
 	skills := core.NewSkill(core.NewSkillDiscovery(filepath.Join(global.Cache, "skills"), http.DefaultClient))
+	referenceCache := core.NewRepositoryCache(core.NewGit(core.NewAppProcess()), global.Repos)
+	referenceService := core.NewReference(global, events, referenceCache)
+	if len(opts.References) > 0 {
+		if _, err := referenceService.Transform(func(draft core.ReferenceDraft) error {
+			for name, source := range opts.References {
+				draft.Add(name, source)
+			}
+			return nil
+		}); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 
 	models, err := buildModelResolver(opts)
 	if err != nil {
@@ -213,6 +227,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		projectID: projectID, models: models, sessions: agentSessions,
 		hooks: map[string]*SessionHooks{}, builtin: builtin, clientTools: opts.Tools,
 		dispatcher: &toolDispatcher{base: registry, sessions: map[string]*tool.Registry{}},
+		reference:  referenceService,
 	}
 	rt.runner = runner.NewLLMRunner(runner.LLMRunner{
 		Events:            appEvents{events: events},
@@ -224,7 +239,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		Location:          location,
 		SystemContext:     systemcontext.NewRegistry(),
 		SkillGuidance:     skill.NewGuidance(skills, allowAllEvaluator{}),
-		ReferenceGuidance: reference.NewGuidance(noopReferences{}),
+		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: referenceService}),
 		Config:            emptyConfig{},
 		Snapshots:         snapshots,
 		DB:                db,
@@ -386,14 +401,22 @@ func (noopSnapshots) Files(core.SnapshotCompareInput) ([]schema.RelativePath, er
 	return nil, nil
 }
 
-type noopReferences struct{}
-
-func (noopReferences) List() ([]reference.Info, error) { return nil, nil }
-
 type allowAllEvaluator struct{}
 
 func (allowAllEvaluator) Evaluate(action, resource string, rules schema.PermissionRuleset) schema.PermissionRule {
 	return core.PermissionEvaluate(action, resource, rules)
+}
+
+// referenceLister adapts *core.Reference to reference.Guidance's Lister.
+type referenceLister struct{ reference *core.Reference }
+
+func (l referenceLister) List() ([]reference.Info, error) {
+	infos := l.reference.List()
+	result := make([]reference.Info, 0, len(infos))
+	for _, info := range infos {
+		result = append(result, reference.Info{Name: info.Name, Path: string(info.Path), Description: info.Description})
+	}
+	return result, nil
 }
 
 var _ = llmschema.ToolResultValue{}
