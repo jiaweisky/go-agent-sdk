@@ -563,7 +563,7 @@ func (t AdaptedTool) CoreTool() tool.Tool
 ```
 
 - `schema/mcp_event.go`：`mcp.tools.changed` / `mcp.browser.open.failed`。
-- 远程鉴权：`ServerConfig.BearerToken`（静态）或 `ServerConfig.OAuth2`（RFC 6749 §1.3.4 client credentials，用 `golang.org/x/oauth2/clientcredentials` 换 bearer token）。**不做交互式 OAuth 回调/浏览器/凭据持久化**（TS 的 `oauth-provider.ts`/`oauth-callback.ts`/`browser.ts`/`auth.ts`），也不接 `EventV2Bridge`/`InstanceState`/`CrossSpawnSpawner`/`ConfigV1`。
+- 远程鉴权：**完全对齐 TS** —— 只用 `ServerConfig.Headers`（如 `Authorization: Bearer <token>` 或 `X-API-Key: <key>`），不做 OAuth（TS 的 `oauth-provider.ts`/`oauth-callback.ts`/`browser.ts`/`auth.ts` 均不移植）。也不接 `EventV2Bridge`/`InstanceState`/`CrossSpawnSpawner`/`ConfigV1`。
 
 ## 9. Skill 系统
 

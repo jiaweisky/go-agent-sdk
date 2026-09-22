@@ -14,8 +14,6 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/user/go-agent-sdk/schema"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
 )
 
 // EventPublisher publishes MCP lifecycle events (for example mcp.tools.changed).
@@ -68,7 +66,7 @@ func (c *Client) Connect(ctx context.Context, name string, cfg ServerConfig) Sta
 	if _, ok := c.Session(name); ok {
 		return c.StatusOf(name)
 	}
-	transports, err := transportsFor(ctx, cfg, c.directory)
+	transports, err := transportsFor(cfg, c.directory)
 	if err != nil {
 		status := Status{Status: "failed", Error: err.Error()}
 		c.setStatus(name, status)
@@ -354,9 +352,9 @@ func (c *Client) setStatus(name string, status Status) {
 }
 
 // transportsFor builds the candidate transports for a server config.
-func transportsFor(ctx context.Context, cfg ServerConfig, directory string) ([]sdk.Transport, error) {
+func transportsFor(cfg ServerConfig, directory string) ([]sdk.Transport, error) {
 	if cfg.Type == "remote" {
-		httpClient := httpClientFor(ctx, cfg)
+		httpClient := clientWithHeaders(cfg.Headers)
 		return []sdk.Transport{
 			&sdk.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: httpClient},
 			&sdk.SSEClientTransport{Endpoint: cfg.URL, HTTPClient: httpClient},
@@ -376,30 +374,6 @@ func transportsFor(ctx context.Context, cfg ServerConfig, directory string) ([]s
 		command.Env = append(command.Env, key+"="+value)
 	}
 	return []sdk.Transport{&sdk.CommandTransport{Command: command}}, nil
-}
-
-// httpClientFor builds the HTTP client for a remote server: OAuth2 client
-// credentials (RFC 6749 §1.3.4), a static bearer token, or plain headers.
-func httpClientFor(ctx context.Context, cfg ServerConfig) *http.Client {
-	var client *http.Client
-	switch {
-	case cfg.OAuth2 != nil:
-		config := &clientcredentials.Config{
-			ClientID:     cfg.OAuth2.ClientID,
-			ClientSecret: cfg.OAuth2.ClientSecret,
-			TokenURL:     cfg.OAuth2.TokenURL,
-			Scopes:       cfg.OAuth2.Scopes,
-		}
-		client = config.Client(ctx)
-	case cfg.BearerToken != "":
-		client = oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: cfg.BearerToken}))
-	default:
-		return clientWithHeaders(cfg.Headers)
-	}
-	if len(cfg.Headers) > 0 {
-		client.Transport = &headerTransport{base: client.Transport, headers: cfg.Headers}
-	}
-	return client
 }
 
 func clientWithHeaders(headers map[string]string) *http.Client {
