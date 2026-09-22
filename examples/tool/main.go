@@ -1,0 +1,58 @@
+// Command tool demonstrates a custom tool with a permission handler.
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/user/go-agent-sdk/agent"
+	"github.com/user/go-agent-sdk/examples/internal/sampleutil"
+)
+
+type statusInput struct {
+	ID string `json:"id" jsonschema:"Identifier to look up"`
+}
+
+func main() {
+	ctx := context.Background()
+	client, err := sampleutil.Client()
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+
+	status := agent.DefineTool("status_lookup", "Look up a status value for an identifier",
+		func(input statusInput, tc agent.ToolContext) (string, error) {
+			return fmt.Sprintf("status for %s: READY", input.ID), nil
+		})
+
+	session, err := client.CreateSession(ctx, &agent.SessionConfig{
+		Agent: "build",
+		Tools: []agent.Tool{status},
+		OnPermissionRequest: func(request agent.PermissionRequest) (agent.PermissionDecision, error) {
+			fmt.Printf("[permission] %s %v -> allow\n", request.Action, request.Resources)
+			return agent.PermissionDecision{Allow: true}, nil
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	for event, err := range session.Send(ctx, agent.MessageOptions{
+		Prompt: "Use the status_lookup tool with id 'alpha' and tell me the result.",
+	}) {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			break
+		}
+		switch e := event.(type) {
+		case agent.TextDelta:
+			fmt.Print(e.Delta)
+		case agent.ToolCalled:
+			fmt.Printf("\n[tool: %s]\n", e.Name)
+		}
+	}
+	fmt.Println()
+}
