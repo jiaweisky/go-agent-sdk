@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/user/go-agent-sdk/core"
@@ -65,19 +66,27 @@ type AgentConfig struct {
 type Client struct {
 	opts ClientOptions
 	rt   *runtime
+
+	mu       sync.Mutex
+	sessions map[*Session]struct{}
 }
 
 // NewClient builds a client and its backing runtime.
 func NewClient(opts *ClientOptions) (*Client, error) {
+	return NewClientContext(context.Background(), opts)
+}
+
+// NewClientContext is NewClient with a context used for startup work such as
+// connecting MCP servers.
+func NewClientContext(ctx context.Context, opts *ClientOptions) (*Client, error) {
 	if opts == nil {
 		opts = &ClientOptions{}
 	}
-	rt, err := newRuntime(opts)
+	rt, err := newRuntime(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	client := &Client{opts: *opts, rt: rt}
-	return client, nil
+	return &Client{opts: *opts, rt: rt, sessions: map[*Session]struct{}{}}, nil
 }
 
 // RegisterAgent registers or updates a named agent.
@@ -175,14 +184,43 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 	}
 	session.unsub = unsub
 
+	c.trackSession(session)
 	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
-		_, _ = cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: string(sessionID), Agent: agentID, Model: modelID})
+		if out, _ := cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: string(sessionID), Agent: agentID, Model: modelID}); out != nil && out.AdditionalContext != "" {
+			context := out.AdditionalContext
+			_, _ = c.rt.agents.Transform(func(draft core.AgentDraft) error {
+				draft.Update(schema.AgentID(agentID), func(info *schema.AgentInfo) {
+					base := ""
+					if info.System != nil {
+						base = *info.System
+					}
+					combined := base + "\n\n" + context
+					info.System = &combined
+				})
+				return nil
+			})
+		}
 	}
 	return session, nil
 }
 
-// Close releases the runtime and its database.
+// MCP returns the MCP client, or nil when no MCP servers are configured.
+func (c *Client) MCP() *mcp.Client {
+	return c.rt.mcp
+}
+
+// Close closes active sessions and releases the runtime and its database.
 func (c *Client) Close() error {
+	c.mu.Lock()
+	sessions := make([]*Session, 0, len(c.sessions))
+	for session := range c.sessions {
+		sessions = append(sessions, session)
+	}
+	c.sessions = map[*Session]struct{}{}
+	c.mu.Unlock()
+	for _, session := range sessions {
+		_ = session.Close()
+	}
 	return c.rt.close()
 }
 
@@ -225,10 +263,26 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *Sessi
 		return nil, err
 	}
 	session.unsub = unsubscribe
+	c.trackSession(session)
 	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
 		_, _ = cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: sessionID, Agent: string(agentIDOf(stored)), Model: modelIDOf(stored)})
 	}
 	return session, nil
+}
+
+func (c *Client) trackSession(session *Session) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sessions == nil {
+		c.sessions = map[*Session]struct{}{}
+	}
+	c.sessions[session] = struct{}{}
+}
+
+func (c *Client) untrackSession(session *Session) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.sessions, session)
 }
 
 // ListSessions returns the sessions in the client's project, newest first.

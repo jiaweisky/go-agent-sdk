@@ -113,7 +113,7 @@ func (r *runtime) hooksFor(sessionID string) *SessionHooks {
 	return r.hooks[sessionID]
 }
 
-func newRuntime(opts *ClientOptions) (*runtime, error) {
+func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	workingDir := opts.WorkingDirectory
 	if workingDir == "" {
 		workingDir, _ = os.Getwd()
@@ -231,7 +231,7 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 	rt.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
 		return rt.runner.Run(runner.RunInput{SessionID: id, Force: force})
 	})
-	if err := rt.connectMCP(opts.MCP); err != nil {
+	if err := rt.connectMCP(ctx, opts.MCP); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -240,12 +240,11 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 
 // connectMCP connects the configured MCP servers and registers their tools as
 // application tools on the base registry.
-func (r *runtime) connectMCP(configs []MCPConfig) error {
+func (r *runtime) connectMCP(ctx context.Context, configs []MCPConfig) error {
 	if len(configs) == 0 {
 		return nil
 	}
 	client := mcp.NewClient(string(r.location.Directory), installation.InstallationVersion, mcp.WithEvents(mcpEventPublisher{events: r.events}))
-	ctx := context.Background()
 	for _, cfg := range configs {
 		client.Connect(ctx, cfg.Name, cfg.Server)
 	}

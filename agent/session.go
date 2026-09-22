@@ -100,7 +100,9 @@ func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event,
 						}
 					default:
 						if err != nil {
-							yield(ErrorEvent{SessionID: s.ID(), Err: err}, nil)
+							// Carry the error on both channels: the event for On
+							// subscribers, the second value for range callers.
+							yield(ErrorEvent{SessionID: s.ID(), Err: err}, err)
 						}
 						yield(Idle{SessionID: s.ID()}, nil)
 						return
@@ -163,6 +165,7 @@ func (s *Session) Close() error {
 	}
 	s.client.rt.dispatcher.remove(s.ID())
 	s.client.rt.permission.removeHandler(s.ID())
+	s.client.untrackSession(s)
 	if s.hooks != nil && s.hooks.OnSessionEnd != nil {
 		_, _ = s.hooks.OnSessionEnd(SessionEndInput{SessionID: s.ID(), Reason: "closed"})
 	}
@@ -195,7 +198,21 @@ func eventSessionID(event Event) string {
 		return value.SessionID
 	case ReasoningEnded:
 		return value.SessionID
+	case ToolInputStarted:
+		return value.SessionID
+	case ToolProgress:
+		return value.SessionID
 	case ToolCalled:
+		return value.SessionID
+	case ReasoningStarted:
+		return value.SessionID
+	case Retried:
+		return value.SessionID
+	case CompactionStarted:
+		return value.SessionID
+	case ShellStarted:
+		return value.SessionID
+	case ShellEnded:
 		return value.SessionID
 	case ToolSuccess:
 		return value.SessionID

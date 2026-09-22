@@ -137,6 +137,7 @@ func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.Perm
 			return inner(ctx, input)
 		}
 		args := input.Call.Input
+		var preContext string
 		if hooks.OnPreToolUse != nil {
 			out, err := hooks.OnPreToolUse(PreToolUseInput{
 				SessionID: input.SessionID, ToolCallID: input.Call.ID,
@@ -153,6 +154,7 @@ func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.Perm
 					input.Call.Input = out.ModifiedArgs
 					args = out.ModifiedArgs
 				}
+				preContext = out.AdditionalContext
 			}
 		}
 		settlement, err := inner(ctx, input)
@@ -161,20 +163,34 @@ func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.Perm
 		}
 		if settlement.Result.Type == "error" {
 			if hooks.OnPostToolUseFailure != nil {
-				_, _ = hooks.OnPostToolUseFailure(PostToolUseFailureInput{
+				if out, _ := hooks.OnPostToolUseFailure(PostToolUseFailureInput{
 					SessionID: input.SessionID, ToolCallID: input.Call.ID, ToolName: input.Call.Name,
 					Args: args, Error: stringify(settlement.Result.Value),
-				})
+				}); out != nil {
+					appendSettlementContext(settlement, out.AdditionalContext)
+				}
 			}
 		} else if hooks.OnPostToolUse != nil {
-			_, _ = hooks.OnPostToolUse(PostToolUseInput{
+			if out, _ := hooks.OnPostToolUse(PostToolUseInput{
 				SessionID: input.SessionID, ToolCallID: input.Call.ID, ToolName: input.Call.Name,
 				Args: args, Result: settlement.Result.Value,
-			})
+			}); out != nil {
+				appendSettlementContext(settlement, out.AdditionalContext)
+			}
 		}
+		appendSettlementContext(settlement, preContext)
 		return settlement, nil
 	}
 	return mat
+}
+
+// appendSettlementContext adds hook-provided context to a tool result so it
+// reaches the model.
+func appendSettlementContext(settlement *tool.Settlement, text string) {
+	if settlement == nil || text == "" || settlement.Output == nil {
+		return
+	}
+	settlement.Output.Content = append(settlement.Output.Content, llmschema.ToolTextContent{Type: "text", Text: text})
 }
 
 func hookError(message string) *tool.Settlement {

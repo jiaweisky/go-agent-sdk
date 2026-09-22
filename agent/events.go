@@ -93,6 +93,71 @@ type ToolFailed struct {
 
 func (ToolFailed) eventKind() string { return "tool-failed" }
 
+// ToolInputStarted reports that a tool call's input started streaming.
+type ToolInputStarted struct {
+	SessionID string
+	MessageID string
+	CallID    string
+	Name      string
+}
+
+func (ToolInputStarted) eventKind() string { return "tool-input-started" }
+
+// ToolProgress reports a tool's incremental progress.
+type ToolProgress struct {
+	SessionID  string
+	MessageID  string
+	CallID     string
+	Structured any
+	Content    any
+}
+
+func (ToolProgress) eventKind() string { return "tool-progress" }
+
+// ReasoningStarted reports the start of a reasoning part.
+type ReasoningStarted struct {
+	SessionID   string
+	MessageID   string
+	ReasoningID string
+}
+
+func (ReasoningStarted) eventKind() string { return "reasoning-started" }
+
+// Retried reports a provider retry.
+type Retried struct {
+	SessionID string
+	Attempt   any
+	Error     any
+}
+
+func (Retried) eventKind() string { return "retried" }
+
+// CompactionStarted reports that context compaction started.
+type CompactionStarted struct {
+	SessionID string
+	MessageID string
+	Reason    any
+}
+
+func (CompactionStarted) eventKind() string { return "compaction-started" }
+
+// ShellStarted reports a shell command started.
+type ShellStarted struct {
+	SessionID string
+	CallID    string
+}
+
+func (ShellStarted) eventKind() string { return "shell-started" }
+
+// ShellEnded reports a shell command finished.
+type ShellEnded struct {
+	SessionID string
+	CallID    string
+	Output    any
+}
+
+func (ShellEnded) eventKind() string { return "shell-ended" }
+
 // StepStarted reports the start of an agent step.
 type StepStarted struct {
 	SessionID string
@@ -187,6 +252,28 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
 			Error: data["error"], Result: data["result"],
 		}, true
+	case schema.SessionEventToolInputStarted.Type:
+		return ToolInputStarted{
+			SessionID: sessionID, MessageID: messageID,
+			CallID: fieldString(data, "callID"), Name: fieldString(data, "name"),
+		}, true
+	case schema.SessionEventToolProgress.Type:
+		return ToolProgress{
+			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
+			Structured: data["structured"], Content: data["content"],
+		}, true
+	case schema.SessionEventReasoningStarted.Type:
+		return ReasoningStarted{
+			SessionID: sessionID, MessageID: messageID, ReasoningID: fieldString(data, "reasoningID"),
+		}, true
+	case schema.SessionEventRetried.Type:
+		return Retried{SessionID: sessionID, Attempt: data["attempt"], Error: data["error"]}, true
+	case schema.SessionEventCompactionStarted.Type:
+		return CompactionStarted{SessionID: sessionID, MessageID: messageID, Reason: data["reason"]}, true
+	case schema.SessionEventShellStarted.Type:
+		return ShellStarted{SessionID: sessionID, CallID: fieldString(data, "callID")}, true
+	case schema.SessionEventShellEnded.Type:
+		return ShellEnded{SessionID: sessionID, CallID: fieldString(data, "callID"), Output: data["output"]}, true
 	case schema.SessionEventStepStarted.Type:
 		return StepStarted{
 			SessionID: sessionID, MessageID: messageID, Agent: fieldString(data, "agent"),
