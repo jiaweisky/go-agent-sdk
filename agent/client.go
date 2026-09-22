@@ -132,26 +132,55 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 	if agentID == "" {
 		agentID = string(core.AgentDefaultID)
 	}
-	if cfg.SystemPrompt != nil {
+	modelID := cfg.Model
+	if modelID == "" {
+		modelID = c.opts.Model
+	}
+	sessionID := schema.NewSessionID()
+
+	// Per-session system prompt customization is applied to a derived agent so
+	// it does not mutate the shared agent used by other sessions.
+	effectiveAgent := agentID
+	derivedAgent := false
+	var startContext string
+	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
+		if out, _ := cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: string(sessionID), Agent: agentID, Model: modelID}); out != nil {
+			startContext = out.AdditionalContext
+		}
+	}
+	if cfg.SystemPrompt != nil || startContext != "" {
+		base := c.rt.agents.Get(schema.AgentID(agentID))
+		if base == nil {
+			return nil, fmt.Errorf("unknown agent: %s", agentID)
+		}
+		effectiveAgent = agentID + "#" + string(sessionID)
+		copied := *base
+		applySystemPrompt(&copied, cfg.SystemPrompt)
+		if startContext != "" {
+			system := ""
+			if copied.System != nil {
+				system = *copied.System
+			}
+			combined := joinSections(system, startContext)
+			copied.System = &combined
+		}
 		if _, err := c.rt.agents.Transform(func(draft core.AgentDraft) error {
-			draft.Update(schema.AgentID(agentID), func(info *schema.AgentInfo) {
-				applySystemPrompt(info, cfg.SystemPrompt)
+			draft.Update(schema.AgentID(effectiveAgent), func(target *schema.AgentInfo) {
+				*target = copied
 			})
 			return nil
 		}); err != nil {
 			return nil, err
 		}
+		derivedAgent = true
 	}
+
 	sessionRegistry, err := c.rt.newSessionRegistry(cfg.Tools)
 	if err != nil {
+		c.removeDerivedAgent(effectiveAgent, derivedAgent)
 		return nil, err
 	}
 
-	sessionID := schema.NewSessionID()
-	modelID := cfg.Model
-	if modelID == "" {
-		modelID = c.opts.Model
-	}
 	providerID := c.opts.Provider.Type
 	if providerID == "" {
 		providerID = "openai"
@@ -165,43 +194,41 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 		"INSERT INTO `session` (`id`,`project_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`revert`,`time_created`,`time_updated`) "+
 			"VALUES (?,?,?,?,?,?,?,?,?,?,?)",
 		string(sessionID), string(c.rt.projectID), "session", string(c.rt.location.Directory),
-		title, "1", agentID, fmt.Sprintf(`{"id":%q,"providerID":%q}`, modelID, providerID), `null`, now, now,
+		title, "1", effectiveAgent, fmt.Sprintf(`{"id":%q,"providerID":%q}`, modelID, providerID), `null`, now, now,
 	); err != nil {
+		c.removeDerivedAgent(effectiveAgent, derivedAgent)
 		return nil, err
 	}
-	c.rt.sessions.Set(string(sessionID), agentID)
+	c.rt.sessions.Set(string(sessionID), effectiveAgent)
 	c.rt.dispatcher.set(string(sessionID), sessionRegistry)
 	c.rt.setHooks(string(sessionID), cfg.Hooks)
 	c.rt.permission.setHandler(string(sessionID), cfg.OnPermissionRequest)
 
-	session := &Session{client: c, id: sessionID, hooks: cfg.Hooks, listeners: map[int]func(Event){}}
+	session := &Session{
+		client: c, id: sessionID, agentID: effectiveAgent, derivedAgent: derivedAgent,
+		hooks: cfg.Hooks, listeners: map[int]func(Event){},
+	}
 	unsub, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
 		session.dispatch(payload)
 		return nil
 	})
 	if err != nil {
+		c.removeDerivedAgent(effectiveAgent, derivedAgent)
 		return nil, err
 	}
 	session.unsub = unsub
-
 	c.trackSession(session)
-	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
-		if out, _ := cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: string(sessionID), Agent: agentID, Model: modelID}); out != nil && out.AdditionalContext != "" {
-			context := out.AdditionalContext
-			_, _ = c.rt.agents.Transform(func(draft core.AgentDraft) error {
-				draft.Update(schema.AgentID(agentID), func(info *schema.AgentInfo) {
-					base := ""
-					if info.System != nil {
-						base = *info.System
-					}
-					combined := base + "\n\n" + context
-					info.System = &combined
-				})
-				return nil
-			})
-		}
-	}
 	return session, nil
+}
+
+func (c *Client) removeDerivedAgent(agentID string, derived bool) {
+	if !derived {
+		return
+	}
+	_, _ = c.rt.agents.Transform(func(draft core.AgentDraft) error {
+		draft.Remove(schema.AgentID(agentID))
+		return nil
+	})
 }
 
 // MCP returns the MCP client, or nil when no MCP servers are configured.

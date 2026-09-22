@@ -433,3 +433,34 @@ func TestDefineToolSchema(t *testing.T) {
 		t.Fatalf("required = %#v", required)
 	}
 }
+
+func TestSessionSystemPromptIsolation(t *testing.T) {
+	client := newTestClient(t)
+	first, err := client.CreateSession(context.Background(), &SessionConfig{
+		Agent: "build", SystemPrompt: &SystemPromptConfig{Mode: SystemPromptReplace, Content: "S1"},
+	})
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	defer first.Close()
+	second, err := client.CreateSession(context.Background(), &SessionConfig{
+		Agent: "build", SystemPrompt: &SystemPromptConfig{Mode: SystemPromptReplace, Content: "S2"},
+	})
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	defer second.Close()
+
+	base := client.rt.agents.Get(schema.AgentID("build"))
+	if base == nil || base.System == nil || *base.System != "You are a test." {
+		t.Fatalf("base agent system = %v", valueOr(base.System))
+	}
+	firstAgent := client.rt.agents.Get(schema.AgentID(first.agentID))
+	secondAgent := client.rt.agents.Get(schema.AgentID(second.agentID))
+	if firstAgent == nil || firstAgent.System == nil || *firstAgent.System != "S1" {
+		t.Fatalf("first agent = %+v", firstAgent)
+	}
+	if secondAgent == nil || secondAgent.System == nil || *secondAgent.System != "S2" {
+		t.Fatalf("second agent = %+v", secondAgent)
+	}
+}

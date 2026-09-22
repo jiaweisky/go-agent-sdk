@@ -144,7 +144,9 @@ func (CompactionStarted) eventKind() string { return "compaction-started" }
 // ShellStarted reports a shell command started.
 type ShellStarted struct {
 	SessionID string
+	MessageID string
 	CallID    string
+	Command   string
 }
 
 func (ShellStarted) eventKind() string { return "shell-started" }
@@ -271,7 +273,10 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 	case schema.SessionEventCompactionStarted.Type:
 		return CompactionStarted{SessionID: sessionID, MessageID: messageID, Reason: data["reason"]}, true
 	case schema.SessionEventShellStarted.Type:
-		return ShellStarted{SessionID: sessionID, CallID: fieldString(data, "callID")}, true
+		return ShellStarted{
+			SessionID: sessionID, MessageID: messageID,
+			CallID: fieldString(data, "callID"), Command: fieldString(data, "command"),
+		}, true
 	case schema.SessionEventShellEnded.Type:
 		return ShellEnded{SessionID: sessionID, CallID: fieldString(data, "callID"), Output: data["output"]}, true
 	case schema.SessionEventStepStarted.Type:

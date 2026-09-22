@@ -38,7 +38,11 @@ type MessageOptions struct {
 type Session struct {
 	client *Client
 	id     schema.SessionID
-	hooks  *SessionHooks
+	// agentID is the effective agent (a derived agent when the session
+	// customizes the system prompt).
+	agentID      string
+	derivedAgent bool
+	hooks        *SessionHooks
 
 	mu        sync.Mutex
 	listeners map[int]func(Event)
@@ -165,6 +169,7 @@ func (s *Session) Close() error {
 	}
 	s.client.rt.dispatcher.remove(s.ID())
 	s.client.rt.permission.removeHandler(s.ID())
+	s.client.removeDerivedAgent(s.agentID, s.derivedAgent)
 	s.client.untrackSession(s)
 	if s.hooks != nil && s.hooks.OnSessionEnd != nil {
 		_, _ = s.hooks.OnSessionEnd(SessionEndInput{SessionID: s.ID(), Reason: "closed"})
