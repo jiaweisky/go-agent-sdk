@@ -5,6 +5,7 @@ import (
 	"iter"
 	"reflect"
 	"testing"
+	"time"
 
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
@@ -71,6 +72,95 @@ func TestClientOpenAICompatibleProvider(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 	defer client.Close()
+}
+
+type toolCallLLM struct {
+	calls    *int
+	toolName string
+	reply    string
+}
+
+func (f toolCallLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
+	return nil, nil
+}
+
+func (f toolCallLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
+	return nil, nil
+}
+
+func (f toolCallLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+	*f.calls++
+	var events []llmschema.LLMEvent
+	if *f.calls == 1 {
+		events = []llmschema.LLMEvent{
+			llmschema.NewStepStart(0),
+			llmschema.NewToolCall("call-1", f.toolName, map[string]any{}),
+			llmschema.NewStepFinish(0, llmschema.ReasonToolCalls),
+			llmschema.NewFinish(llmschema.ReasonToolCalls),
+		}
+	} else {
+		events = []llmschema.LLMEvent{
+			llmschema.NewStepStart(0),
+			llmschema.NewTextStart("t1"),
+			llmschema.NewTextDelta("t1", f.reply),
+			llmschema.NewTextEnd("t1"),
+			llmschema.NewStepFinish(0, llmschema.ReasonStop),
+			llmschema.NewFinish(llmschema.ReasonStop),
+		}
+	}
+	return func(yield func(llmschema.LLMEvent, error) bool) {
+		for _, event := range events {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+func TestSessionPermissionHandlerIsWired(t *testing.T) {
+	calls := 0
+	permissionCalls := 0
+	executed := false
+	client, err := NewClient(&ClientOptions{
+		Provider: ProviderConfig{Type: "openai", APIKey: "k"},
+		Model:    "test-model",
+		DataDir:  t.TempDir(),
+		Permission: func(request PermissionRequest) (PermissionDecision, error) {
+			permissionCalls++
+			return PermissionDecision{Allow: true}, nil
+		},
+		llm: toolCallLLM{calls: &calls, toolName: "echo", reply: "done"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+	if err := client.RegisterAgent("build", AgentConfig{System: "s"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	echo := DefineTool("echo", "echo", func(struct{}, ToolContext) (string, error) {
+		executed = true
+		return "ok", nil
+	})
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build", Tools: []Tool{echo}})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer session.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, err := range session.Send(ctx, MessageOptions{Prompt: "hi"}) {
+		if err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+	if !executed {
+		t.Fatal("tool was not executed")
+	}
+	if permissionCalls == 0 {
+		t.Fatal("permission handler was not called")
+	}
 }
 
 func TestModelResolverUsesSessionModel(t *testing.T) {

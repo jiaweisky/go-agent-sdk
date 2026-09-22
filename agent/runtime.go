@@ -162,13 +162,20 @@ func newRuntime(opts *ClientOptions) (*runtime, error) {
 
 	agents := core.NewAgent()
 	agentSessions := newPermissionSessions()
-	permission := core.NewPermission(core.PermissionConfig{
-		Sessions:  agentSessions,
-		Agents:    permissionAgents{agents: agents},
-		Saved:     &permissionSaved{},
-		Events:    permissionEvents{events: events},
-		ProjectID: string(projectID),
-	})
+	handler := opts.Permission
+	if handler == nil {
+		handler = ApproveAll
+	}
+	permission := handlerPermission{
+		inner: core.NewPermission(core.PermissionConfig{
+			Sessions:  agentSessions,
+			Agents:    permissionAgents{agents: agents},
+			Saved:     &permissionSaved{},
+			Events:    permissionEvents{events: events},
+			ProjectID: string(projectID),
+		}),
+		handler: handler,
+	}
 	question := core.NewQuestion(core.QuestionConfig{Events: events})
 
 	global := core.NewGlobal()
