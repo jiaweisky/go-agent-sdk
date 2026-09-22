@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/user/go-agent-sdk/schema"
@@ -13,10 +14,12 @@ const (
 	SystemPromptCustomize = "customize"
 )
 
-// System prompt section identifiers. Sections are a coarser model than
-// copilot-sdk: this SDK composes the system prompt from the agent's system text
-// plus the location context, so the addressable sections are the agent system
-// text and the additional instructions block.
+// Built-in system prompt section identifiers.
+//
+// The SDK composes the system prompt from the agent's system text plus
+// additional instructions; callers may also define arbitrary named sections via
+// SystemPromptConfig.Sections. In customize mode the SDK renders sections in the
+// order: agent_system, any custom sections (sorted by id), then instructions.
 const (
 	SectionAgentSystem  = "agent_system"
 	SectionInstructions = "instructions"
@@ -37,7 +40,9 @@ type SystemPromptConfig struct {
 	Mode string
 	// Content is appended (append/customize) or used as the whole prompt (replace).
 	Content string
-	// Sections selectively overrides named sections in customize mode.
+	// Sections selectively overrides named sections in customize mode. The
+	// built-in ids are agent_system and instructions; any other id defines a
+	// custom section whose override content is rendered between them.
 	Sections map[string]SectionOverride
 }
 
@@ -61,22 +66,31 @@ func applySystemPrompt(info *schema.AgentInfo, cfg *SystemPromptConfig) {
 		system := cfg.Content
 		info.System = &system
 	case SystemPromptCustomize:
-		sections := map[string]string{
+		values := map[string]string{
 			SectionAgentSystem:  base,
 			SectionInstructions: cfg.Content,
 		}
+		extras := make([]string, 0, len(cfg.Sections))
 		for name, override := range cfg.Sections {
-			current, ok := sections[name]
-			if !ok {
-				continue
+			values[name] = applySection(values[name], override)
+			if name != SectionAgentSystem && name != SectionInstructions {
+				extras = append(extras, name)
 			}
-			sections[name] = applySection(current, override)
 		}
-		combined := joinSections(sections[SectionAgentSystem], sections[SectionInstructions])
-		info.System = &combined
+		sort.Strings(extras)
+		order := append([]string{SectionAgentSystem}, extras...)
+		order = append(order, SectionInstructions)
+		parts := make([]string, 0, len(order))
+		for _, name := range order {
+			if values[name] != "" {
+				parts = append(parts, values[name])
+			}
+		}
+		system := strings.Join(parts, "\n\n")
+		info.System = &system
 	default: // append
-		combined := joinSections(base, cfg.Content)
-		info.System = &combined
+		system := joinSections(base, cfg.Content)
+		info.System = &system
 	}
 }
 

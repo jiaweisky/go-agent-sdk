@@ -655,7 +655,7 @@ type SessionConfig struct {
     Agent        string
     Model        string
     Title        string
-    SystemPrompt *SystemPromptConfig           // append | replace | customize(sections)
+    SystemPrompt *SystemPromptConfig           // append | replace | customize（内置 agent_system/instructions + 自定义 section）
     Tools        []Tool
     OnPermissionRequest PermissionHandlerFunc  // 覆盖 client 级权限回调
     Hooks        *SessionHooks

@@ -163,6 +163,43 @@ func TestSessionPermissionHandlerIsWired(t *testing.T) {
 	}
 }
 
+func TestSystemPromptCustomize(t *testing.T) {
+	base := "base"
+	info := &schema.AgentInfo{System: &base}
+	applySystemPrompt(info, &SystemPromptConfig{
+		Mode:    SystemPromptCustomize,
+		Content: "extra",
+		Sections: map[string]SectionOverride{
+			SectionAgentSystem: {Action: SectionReplace, Content: "REPLACED"},
+			"guidelines":       {Action: SectionReplace, Content: "guide"},
+			"tone":             {Action: SectionAppend, Content: "be nice"},
+		},
+	})
+	want := "REPLACED\n\nguide\n\nbe nice\n\nextra"
+	if info.System == nil || *info.System != want {
+		t.Fatalf("customize system = %q, want %q", valueOr(info.System), want)
+	}
+
+	replace := &schema.AgentInfo{System: &base}
+	applySystemPrompt(replace, &SystemPromptConfig{Mode: SystemPromptReplace, Content: "only"})
+	if replace.System == nil || *replace.System != "only" {
+		t.Fatalf("replace system = %q", valueOr(replace.System))
+	}
+
+	appendInfo := &schema.AgentInfo{System: &base}
+	applySystemPrompt(appendInfo, &SystemPromptConfig{Content: "more"})
+	if appendInfo.System == nil || *appendInfo.System != "base\n\nmore" {
+		t.Fatalf("append system = %q", valueOr(appendInfo.System))
+	}
+}
+
+func valueOr(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func TestSessionPermissionOverride(t *testing.T) {
 	calls := 0
 	executed := false
