@@ -12,7 +12,7 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 - **Agent 定义** — 可配置的 agent 元信息、system prompt、权限规则、模型覆盖。
 - **Skill** — 从 markdown 文件加载专业知识，注入系统上下文。
 - **MCP 集成** — 原生 Model Context Protocol 客户端，支持本地和远程 MCP 服务器。
-- **内置工具** — read, write, edit, apply_patch, shell, glob, grep, webfetch, websearch, task (subagent), question, todo, lsp 等。
+- **内置工具** — read, write, edit, apply_patch, bash, glob, grep, webfetch, websearch, question, skill, todowrite（12 个，见 §7.4）。
 - **权限系统** — 基于规则的 allow/deny/ask 权限模型。
 - **Subagent** — agent 内通过 task tool 递归创建独立子会话。
 
@@ -32,7 +32,7 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 | `llm/provider/` | Provider Facades（openai, anthropic, openrouter, ...） | 预配置默认值 |
 | `agent/`（已实现） | 高层公开 API（Client/Session/Send/On/DefineTool/Hooks） | 组装 core/session + llm + tool |
 | `core/tool/` | ToolRegistry + `registry.go` / `tool.go` | 注册、查询、权限过滤 |
-| 内置工具 | 目前仅 `write`（`core/tool/write.go`） | 核心文件操作 |
+| 内置工具 | 12 个（`core/tool/`，见 §7.4） | read/write/edit/apply_patch/bash/glob/grep/webfetch/websearch/question/skill/todowrite |
 | `core/permission.go` | 规则引擎（allow / deny / ask） | 权限评估 |
 | `core/` | file-mutation / location-mutation / git / database / process ... | 支撑模块 |
 | `agent/` | `NewClient` / `CreateSession` / `Send` / `On` / `RegisterAgent` | 公开 API（已实现，见 §11） |
@@ -45,7 +45,7 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 | MCP 集成 | 独立于 agent 循环，可后续增量加入 |
 | Skill 系统 | 不影响核心 agent 能力 |
 | Config frontmatter 加载 | MVP 无需用户自定义 agent 文件 |
-| task/subagent、websearch、lsp、todo 工具 | 非核心路径，后续追加 |
+| task/subagent、lsp 工具 | 非核心路径，后续追加 |
 | 上下文压缩（compaction） | MVP 假设上下文窗口够用 |
 | Steer/Queue 输入 | 第一版仅支持同步 `Send` |
 | `weak` 包、`os.Root` 等安全特性 | 后续加固 |
@@ -518,12 +518,12 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 | Grep | `grep` | ✅ 已移植（`core/tool/grep.go`） |
 | WebFetch | `webfetch` | ✅ 已移植（`core/tool/webfetch.go`） |
 | WebSearch | `websearch` | ✅ 已移植（`core/tool/websearch.go`） |
-| Task | `task` | 待移植 |
+| Task | `task` | 待移植（v2 core 无对应实现） |
 | Question | `question` | ✅ 已移植（`core/tool/question.go`） |
 | Skill | `skill` | ✅ 已移植（`core/tool/skill.go`） |
-| Todo | `todo` | ✅ 已移植（`core/tool/todowrite.go`） |
-| LSP | `lsp` | 待移植 |
-| ApplyPatch | `apply_patch` | 待移植 |
+| TodoWrite | `todowrite` | ✅ 已移植（`core/tool/todowrite.go`） |
+| LSP | `lsp` | 待移植（位于 opencode v1 层） |
+| ApplyPatch | `apply_patch` | ✅ 已移植（`core/tool/apply_patch.go`） |
 
 ## 8. MCP 集成
 
