@@ -2,8 +2,8 @@
 
 ## 项目文档
 
-- **`DESIGN.md`** — 架构设计、模块详细设计、MVP 范围、SDK 公开 API（**项目范围与公开 API 以本文档为准**）
-- **`PORTING-STRATEGY.md`** — TS/Effect → Go 的移植策略与决策树
+- **`docs/DESIGN.md`** — 架构设计、模块详细设计、MVP 范围、SDK 公开 API（**项目范围与公开 API 以本文档为准**）
+- **`docs/PORTING-STRATEGY.md`** — TS/Effect → Go 的移植策略与决策树
 
 ## 文档中的 Go 代码
 
@@ -34,7 +34,7 @@ opencode 中**面向 CLI 的基础设施模块默认不照搬移植**，例如 `
 
 做法：**只移植其纯转换逻辑**，把数据源换成 SDK 原生窄输入（构造器注入）。
 - 例：`session/runner/model.ts` 的 `fromCatalogModel` / `withDefaults` / `withVariant` 只依赖 `schema.ModelInfo` + API key + `llm` 的 route/protocol/Auth。移植时用「`ModelInfo` provider + API key」构造器替代 `Catalog.Service` / `Integration.Service` / `Credential.Value`，不必移植三个服务。
-- 参考：DESIGN.md 公开 API 直接传 `ProviderConfig{APIKey}` + `Model`，SDK 走 `llm/provider` facade + `llm/route`，不引入 catalog/credential/integration。
+- 参考：docs/DESIGN.md 公开 API 直接传 `ProviderConfig{APIKey}` + `Model`，SDK 走 `llm/provider` facade + `llm/route`，不引入 catalog/credential/integration。
 
 若确认某基础设施确实是必需依赖，**先与用户确认**再移植。
 
