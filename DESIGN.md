@@ -227,7 +227,7 @@ go-agent-sdk/                            opencode TS
     └── workspace_id.go              workspace-id.ts
 ```
 
-> 已实现：高层 `agent/` 公开 API、core/session 主循环、12 个内置工具、Skill、MCP。尚未移植：Plugin、task/lsp 工具、reference 服务。
+> 已实现：高层 `agent/` 公开 API、core/session 主循环、12 个内置工具、Skill、MCP、Plugin（窄化）。尚未移植：task/lsp 工具、reference 服务。
 
 ---
 
