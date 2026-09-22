@@ -1,5 +1,5 @@
-// Package sampleutil provides shared setup for the go-agent-sdk examples.
-package sampleutil
+// Package setup provides shared setup for the go-agent-sdk examples.
+package setup
 
 import (
 	"os"

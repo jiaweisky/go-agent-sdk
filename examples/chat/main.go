@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/user/go-agent-sdk/agent"
-	"github.com/user/go-agent-sdk/examples/internal/sampleutil"
+	"github.com/user/go-agent-sdk/examples/internal/setup"
 )
 
 const blue = "\033[34m"
@@ -17,7 +17,7 @@ const reset = "\033[0m"
 
 func main() {
 	ctx := context.Background()
-	client, err := sampleutil.Client()
+	client, err := setup.Client()
 	if err != nil {
 		panic(err)
 	}

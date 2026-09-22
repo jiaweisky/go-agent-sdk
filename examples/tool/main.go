@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/user/go-agent-sdk/agent"
-	"github.com/user/go-agent-sdk/examples/internal/sampleutil"
+	"github.com/user/go-agent-sdk/examples/internal/setup"
 )
 
 type statusInput struct {
@@ -16,7 +16,7 @@ type statusInput struct {
 
 func main() {
 	ctx := context.Background()
-	client, err := sampleutil.Client()
+	client, err := setup.Client()
 	if err != nil {
 		panic(err)
 	}
