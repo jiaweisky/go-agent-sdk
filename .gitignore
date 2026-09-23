@@ -5,5 +5,10 @@
 *.test
 *.out
 
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
 # opencode runtime state
 .opencode/opencode-loop/

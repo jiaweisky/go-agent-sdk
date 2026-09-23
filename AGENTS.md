@@ -153,12 +153,11 @@ go-agent-sdk/                       opencode TS
 | `packages/core/src/project/directories.ts` | `core/project/directories.go` |
 | `packages/schema/src/identifier.ts` | `schema/identifier.go` |
 | `packages/opencode/src/id/id.ts` | `opencode/id/id.go` |
-| `packages/opencode/src/tool/json-schema.ts` | `opencode/tool/json_schema.go` |
 
 **易错点：**
 - 平铺文件不要建同名子包：`core/src/file-mutation.ts` → `core/file_mutation.go`（package `core`），**不是** `core/filemutation/filemutation.go`
 - 同一 Go 包内类型名会冲突，用模块名前缀区分（如 `FileMutationTarget` vs `LocationMutationTarget`、`OpenAIChatProtocol` vs `OpenAIResponsesProtocol`）
-- `packages/core/src/tool/` 和 `packages/opencode/src/tool/` 是两个不同的 Go 包：`core/tool` vs `opencode/tool`
+- `packages/opencode/src/tool/json-schema.ts` **不移植**：它只服务 CLI 工具 schema 的 `$ref` 内联，Go 侧没有消费者；曾移植的 `opencode/tool` 包已作为死代码删除。工具框架只有 `core/tool`
 - `packages/core/src/effect/app-node.ts`、`layer-node.ts` 是 Effect DI 基础设施，不移植
 - Go 无循环依赖；TS module 循环（如 `protocols/` ↔ `protocols/utils/`）需重构打破（如把 `utils` 反向依赖的 `ValidateMedia` 移入 `utils`）
 - `packages/llm/src/route/transport/index.ts` 的 `Transport`/`TransportRuntime`/`TransportPrepareInput` 放在 `llm/route/transport.go`（package `route`），因为 `transport` 包反向依赖 `route`（`Framing`），放进 `transport/` 会循环

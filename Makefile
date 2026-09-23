@@ -12,14 +12,15 @@ endif
 
 EXAMPLES := chat tool
 BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(EXAMPLES)))
+GO_SOURCES := $(shell find . -name '*.go' -not -path './bin/*')
 
-.PHONY: all examples fmt fmt-check vet lint golangci clean
+.PHONY: all examples fmt fmt-check vet test lint golangci clean
 
 all: examples
 
 examples: $(BINARIES)
 
-$(BIN)/%$(EXE):
+$(BIN)/%$(EXE): $(GO_SOURCES) go.mod go.sum
 	@mkdir -p $(BIN)
 	$(GO) build -o $@ ./examples/$*
 
@@ -36,6 +37,10 @@ fmt-check:
 
 vet:
 	$(GO) vet ./...
+
+# Run all Go tests.
+test:
+	$(GO) test ./...
 
 # Always-available lint: formatting check plus go vet.
 lint: fmt-check vet
