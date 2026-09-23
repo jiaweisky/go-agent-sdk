@@ -144,3 +144,22 @@ func TestInteractivePermissionDefaultsToAllow(t *testing.T) {
 		}
 	}
 }
+
+func TestYoloSkipsInteractivePermission(t *testing.T) {
+	cases := []struct {
+		yolo           bool
+		wantPermission bool
+	}{
+		{false, true},
+		{true, false},
+	}
+	for _, tc := range cases {
+		var opts agent.ClientOptions
+		for _, option := range clientOptions(&console{out: io.Discard}, tc.yolo) {
+			option(&opts)
+		}
+		if got := opts.Permission != nil; got != tc.wantPermission {
+			t.Fatalf("yolo=%v: permission handler set = %v, want %v", tc.yolo, got, tc.wantPermission)
+		}
+	}
+}

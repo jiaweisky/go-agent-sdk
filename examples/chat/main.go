@@ -27,6 +27,7 @@ func main() {
 	// -C runs as if started in the given directory (like git -C), so the
 	// config directory and workspace do not depend on where chat was launched.
 	dir := flag.String("C", "", "run as if started in this directory")
+	yolo := flag.Bool("yolo", false, "skip all permission prompts (approve every tool call)")
 	flag.Parse()
 	if *dir != "" {
 		if err := os.Chdir(*dir); err != nil {
@@ -45,30 +46,28 @@ func main() {
 	}
 	defer restore()
 
-	client, err := util.Client(
-		util.WithPermission(interactivePermission(console)),
-		util.WithQuestion(interactiveQuestion(console)),
-		util.WithMCP(weatherMCP()...),
-	)
+	client, err := util.Client(clientOptions(console, *yolo)...)
 	if err != nil {
 		panic(err)
 	}
 	defer client.Close()
 
-	// The built-in "build" agent allows every tool, so nothing would ever ask.
-	// Append an "ask" rule for bash to demonstrate interactive approval.
-	if err := client.Plugin().Add("chat-permission-demo", func(pluginCtx *core.PluginContext) (func(), error) {
-		_, err := pluginCtx.Agents.Transform(func(draft core.AgentDraft) error {
-			draft.Update(schema.AgentID("build"), func(info *schema.AgentInfo) {
-				info.Permissions = append(info.Permissions, schema.PermissionRule{
-					Action: "bash", Resource: "*", Effect: schema.PermissionEffectAsk,
+	if !*yolo {
+		// The built-in "build" agent allows every tool, so nothing would ever ask.
+		// Append an "ask" rule for bash to demonstrate interactive approval.
+		if err := client.Plugin().Add("chat-permission-demo", func(pluginCtx *core.PluginContext) (func(), error) {
+			_, err := pluginCtx.Agents.Transform(func(draft core.AgentDraft) error {
+				draft.Update(schema.AgentID("build"), func(info *schema.AgentInfo) {
+					info.Permissions = append(info.Permissions, schema.PermissionRule{
+						Action: "bash", Resource: "*", Effect: schema.PermissionEffectAsk,
+					})
 				})
+				return nil
 			})
-			return nil
-		})
-		return func() {}, err
-	}); err != nil {
-		panic(err)
+			return func() {}, err
+		}); err != nil {
+			panic(err)
+		}
 	}
 
 	session, err := client.CreateSession(ctx, &agent.SessionConfig{Agent: "build"})
@@ -84,6 +83,9 @@ func main() {
 
 	if wd, err := os.Getwd(); err == nil {
 		console.write(dim + "(directory: " + wd + ")" + reset + "\n")
+	}
+	if *yolo {
+		console.write(yellow + "warning: --yolo skips all permission prompts" + reset + "\n")
 	}
 	console.write("Chat with go-agent-sdk (Esc or Ctrl+C to exit; interrupts a running turn)\n")
 	console.write(dim + "Commands: /skills  /agents  /mcps  /task [<#n>]" + reset + "\n\n")
@@ -144,6 +146,20 @@ func send(ctx context.Context, console *console, session *agent.Session, prompt 
 			break
 		}
 	}
+}
+
+// clientOptions builds the chat's client options. With yolo the interactive
+// permission handler is omitted, so util.Client falls back to agent.ApproveAll
+// and every "ask" is approved without a prompt. Questions stay interactive.
+func clientOptions(console *console, yolo bool) []util.Option {
+	options := []util.Option{
+		util.WithQuestion(interactiveQuestion(console)),
+		util.WithMCP(weatherMCP()...),
+	}
+	if !yolo {
+		options = append(options, util.WithPermission(interactivePermission(console)))
+	}
+	return options
 }
 
 // interactivePermission prompts for each "ask" permission request.
