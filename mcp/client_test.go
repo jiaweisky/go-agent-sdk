@@ -173,6 +173,9 @@ func TestAdaptMCPToolEndToEnd(t *testing.T) {
 	if !ok {
 		t.Fatalf("tools = %+v", tools)
 	}
+	if adapted.Timeout != 5*time.Second {
+		t.Fatalf("adapted.Timeout = %v, want the connect timeout 5s", adapted.Timeout)
+	}
 
 	coreTool := adapted.CoreTool()
 	output, err := tool.Settle(coreTool, ctx, llmschema.ToolCallPart{

@@ -48,6 +48,9 @@ type Client struct {
 	sessions   map[string]*sdk.ClientSession
 	status     map[string]Status
 	defs       map[string][]*sdk.Tool
+	// timeouts holds the per-server call timeout so Client.Tools can pass it to
+	// the adapted tools (mirrors convertTool's `timeout`).
+	timeouts map[string]time.Duration
 }
 
 // NewClient creates an MCP client rooted at directory.
@@ -58,6 +61,7 @@ func NewClient(directory, version string, options ...Option) *Client {
 		sessions:  map[string]*sdk.ClientSession{},
 		status:    map[string]Status{},
 		defs:      map[string][]*sdk.Tool{},
+		timeouts:  map[string]time.Duration{},
 	}
 	for _, option := range options {
 		option(client)
@@ -128,6 +132,7 @@ func (c *Client) ConnectTransport(ctx context.Context, name string, transport sd
 	c.mu.Lock()
 	c.sessions[name] = session
 	c.status[name] = Status{Status: "connected"}
+	c.timeouts[name] = timeout
 	c.mu.Unlock()
 	go c.watch(name, session)
 	return Status{Status: "connected"}
@@ -142,6 +147,7 @@ func (c *Client) watch(name string, session *sdk.ClientSession) {
 	if closed {
 		delete(c.sessions, name)
 		delete(c.defs, name)
+		delete(c.timeouts, name)
 		c.status[name] = Status{Status: "failed", Error: "Connection closed"}
 	}
 	c.mu.Unlock()
@@ -244,6 +250,10 @@ func (c *Client) Tools(ctx context.Context) (map[string]AdaptedTool, error) {
 	for name, session := range c.sessions {
 		sessions[name] = session
 	}
+	timeouts := make(map[string]time.Duration, len(c.timeouts))
+	for name, timeout := range c.timeouts {
+		timeouts[name] = timeout
+	}
 	c.mu.Unlock()
 	for server, session := range sessions {
 		c.mu.Lock()
@@ -261,7 +271,9 @@ func (c *Client) Tools(ctx context.Context) (map[string]AdaptedTool, error) {
 			c.mu.Unlock()
 		}
 		for _, def := range tools {
-			result[ToolName(server, def.Name)] = AdaptedTool{Def: def, Session: session, Server: server}
+			result[ToolName(server, def.Name)] = AdaptedTool{
+				Def: def, Session: session, Server: server, Timeout: timeouts[server],
+			}
 		}
 	}
 	return result, nil
