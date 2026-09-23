@@ -18,11 +18,17 @@ type SessionConfig struct {
 	Title string
 	// SystemPrompt customizes the system prompt.
 	SystemPrompt *SystemPromptConfig
+	// Permissions are merged over the agent's permissions for this session
+	// (session rules win). Use it for per-session rules without registering a
+	// separate agent.
+	Permissions schema.PermissionRuleset
 	// Tools are session-scoped user tools.
 	Tools []Tool
 	// OnPermissionRequest overrides the client permission handler for this
 	// session.
 	OnPermissionRequest PermissionHandlerFunc
+	// OnQuestion overrides the client question handler for this session.
+	OnQuestion QuestionHandlerFunc
 	// Hooks intercepts session and tool lifecycle events.
 	Hooks *SessionHooks
 }
@@ -106,13 +112,18 @@ func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event,
 						if err != nil {
 							// Carry the error on both channels: the event for On
 							// subscribers, the second value for range callers.
-							yield(ErrorEvent{SessionID: s.ID(), Err: err}, err)
+							if !yield(ErrorEvent{SessionID: s.ID(), Err: err}, err) {
+								return
+							}
 						}
 						yield(Idle{SessionID: s.ID()}, nil)
 						return
 					}
 				}
 			case <-ctx.Done():
+				// Mirrors the TS coordinator's uninterruptibleMask: cancelling
+				// the caller's context only stops waiting; the active turn keeps
+				// running until it finishes or Abort is called.
 				return
 			}
 		}
@@ -169,6 +180,7 @@ func (s *Session) Close() error {
 	}
 	s.client.rt.dispatcher.remove(s.ID())
 	s.client.rt.permission.removeHandler(s.ID())
+	s.client.rt.question.removeHandler(s.ID())
 	s.client.removeDerivedAgent(s.agentID, s.derivedAgent)
 	s.client.untrackSession(s)
 	if s.hooks != nil && s.hooks.OnSessionEnd != nil {
@@ -178,8 +190,8 @@ func (s *Session) Close() error {
 }
 
 func (s *Session) dispatch(payload schema.EventPayload) {
-	event, ok := mapEvent(payload)
-	if !ok || eventSessionID(event) != s.ID() {
+	events := mapEvents(payload)
+	if len(events) == 0 {
 		return
 	}
 	s.mu.Lock()
@@ -188,10 +200,18 @@ func (s *Session) dispatch(payload schema.EventPayload) {
 		handlers = append(handlers, handler)
 	}
 	s.mu.Unlock()
-	for _, handler := range handlers {
-		handler(event)
+	for _, event := range events {
+		if eventSessionID(event) != s.ID() {
+			continue
+		}
+		for _, handler := range handlers {
+			handler(event)
+		}
 	}
 }
+
+// SessionIDOf returns the session id an event belongs to ("" when unknown).
+func SessionIDOf(event Event) string { return eventSessionID(event) }
 
 func eventSessionID(event Event) string {
 	switch value := event.(type) {
@@ -212,6 +232,10 @@ func eventSessionID(event Event) string {
 	case ReasoningStarted:
 		return value.SessionID
 	case Retried:
+		return value.SessionID
+	case SessionStatus:
+		return value.SessionID
+	case Usage:
 		return value.SessionID
 	case CompactionStarted:
 		return value.SessionID

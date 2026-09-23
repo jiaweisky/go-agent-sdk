@@ -2,8 +2,11 @@ package agent
 
 import (
 	"sync"
+	"time"
 
 	"github.com/user/go-agent-sdk/core"
+	"github.com/user/go-agent-sdk/core/database"
+	"github.com/user/go-agent-sdk/core/session"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -13,13 +16,20 @@ type PermissionRequest struct {
 	Agent     string
 	Action    string
 	Resources []string
-	Metadata  map[string]any
+	// Save lists the resources the tool offers to remember if the handler
+	// approves with Always. Empty when the request cannot be remembered.
+	Save     []string
+	Metadata map[string]any
 }
 
 // PermissionDecision is the handler's answer.
 type PermissionDecision struct {
 	// Allow approves the request for this invocation.
 	Allow bool
+	// Always also remembers the approval (saving the request's Save rules) so
+	// the same action is allowed without asking again. Ignored when Allow is
+	// false or the request has no Save rules.
+	Always bool
 	// Message is optional feedback returned to the model on denial.
 	Message string
 }
@@ -86,7 +96,9 @@ func (p *handlerPermission) Assert(input core.PermissionAssertInput) error {
 	case core.PermissionEffectAllow:
 		return nil
 	case core.PermissionEffectDeny:
-		return &core.PermissionDeclinedError{}
+		// A rule-based deny is a blocked tool, not a user decline: it must not
+		// halt the turn (mirrors TS BlockedError vs DeclinedError).
+		return &core.PermissionBlockedError{}
 	}
 	agent := ""
 	if input.Agent != nil {
@@ -97,13 +109,18 @@ func (p *handlerPermission) Assert(input core.PermissionAssertInput) error {
 		Agent:     agent,
 		Action:    input.Action,
 		Resources: input.Resources,
+		Save:      input.Save,
 		Metadata:  input.Metadata,
 	})
 	if err != nil {
 		return err
 	}
 	if decision.Allow {
-		_ = p.inner.Reply(core.PermissionReplyInput{RequestID: result.ID, Reply: core.PermissionReplyOnce})
+		reply := core.PermissionReplyOnce
+		if decision.Always && len(input.Save) > 0 {
+			reply = core.PermissionReplyAlways
+		}
+		_ = p.inner.Reply(core.PermissionReplyInput{RequestID: result.ID, Reply: reply})
 		return nil
 	}
 	reply := core.PermissionReplyInput{RequestID: result.ID, Reply: core.PermissionReplyReject}
@@ -135,30 +152,33 @@ func (p *handlerPermission) Close() error {
 	return p.inner.Close()
 }
 
-// permissionSessions is an in-memory PermissionSessionStore.
-type permissionSessions struct {
-	mu     sync.RWMutex
-	agents map[string]string
+// permissionSessionStore adapts the session store so permission asserts and
+// tool materialization read the same session row (a single source of truth).
+type permissionSessionStore struct {
+	store *session.Store
 }
 
-func newPermissionSessions() *permissionSessions {
-	return &permissionSessions{agents: map[string]string{}}
-}
-
-func (s *permissionSessions) Set(sessionID, agent string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.agents[sessionID] = agent
-}
-
-func (s *permissionSessions) Get(sessionID string) (*core.PermissionSessionInfo, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	agent, ok := s.agents[sessionID]
-	if !ok {
-		return nil, false
+func (s permissionSessionStore) Get(sessionID string) (*core.PermissionSessionInfo, bool, error) {
+	info, err := s.store.Get(schema.SessionID(sessionID))
+	if err != nil {
+		return nil, false, err
 	}
-	return &core.PermissionSessionInfo{ID: sessionID, Agent: agent}, true
+	if info == nil {
+		return nil, false, nil
+	}
+	agent := ""
+	if info.Agent != nil {
+		agent = string(*info.Agent)
+	}
+	var permissions schema.PermissionRuleset
+	if info.Permission != nil {
+		permissions = *info.Permission
+	}
+	return &core.PermissionSessionInfo{
+		ID:          sessionID,
+		Agent:       agent,
+		Permissions: permissions,
+	}, true, nil
 }
 
 // permissionAgents adapts core.Agent to PermissionAgentResolver.
@@ -172,34 +192,43 @@ func (a permissionAgents) Resolve(agentID string) (*core.PermissionAgentInfo, bo
 	return &core.PermissionAgentInfo{ID: string(info.ID), Permissions: info.Permissions}, true
 }
 
-// permissionSaved is an in-memory PermissionSavedStore.
-type permissionSaved struct {
-	mu    sync.Mutex
-	rules []core.PermissionSaved
-}
+// permissionSaved persists "always allow" rules so they survive restarts
+// (mirrors the TS PermissionSaved table).
+type permissionSaved struct{ db *database.Database }
 
 func (s *permissionSaved) List(projectID string) ([]core.PermissionSaved, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var result []core.PermissionSaved
-	for _, rule := range s.rules {
-		if rule.ProjectID == projectID {
-			result = append(result, rule)
-		}
+	rows, err := s.db.DB.Query(
+		"SELECT `id`,`project_id`,`action`,`resource` FROM `permission` WHERE `project_id` = ?",
+		projectID,
+	)
+	if err != nil {
+		return nil, err
 	}
-	return result, nil
+	defer rows.Close()
+	var result []core.PermissionSaved
+	for rows.Next() {
+		var item core.PermissionSaved
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Action, &item.Resource); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func (s *permissionSaved) Add(projectID, action string, resources []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if len(resources) == 0 {
+		return nil
+	}
+	now := time.Now().UnixMilli()
 	for _, resource := range resources {
-		s.rules = append(s.rules, core.PermissionSaved{
-			ID:        string(schema.NewPermissionID()),
-			ProjectID: projectID,
-			Action:    action,
-			Resource:  resource,
-		})
+		if _, err := s.db.DB.Exec(
+			"INSERT INTO `permission` (`id`,`project_id`,`action`,`resource`,`time_created`,`time_updated`) "+
+				"VALUES (?,?,?,?,?,?) ON CONFLICT(`project_id`,`action`,`resource`) DO NOTHING",
+			string(schema.NewPermissionID()), projectID, action, resource, now, now,
+		); err != nil {
+			return err
+		}
 	}
 	return nil
 }

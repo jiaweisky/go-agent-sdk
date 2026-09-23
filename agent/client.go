@@ -2,12 +2,14 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/llm/route"
+	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/mcp"
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -21,6 +23,10 @@ type ProviderConfig struct {
 	// Provider is the provider id for openai-compatible endpoints; it defaults
 	// to "openai-compatible".
 	Provider string
+	// Limits describes the model's context/output token limits. When set, the
+	// runner compacts history before a request overflows; when nil, automatic
+	// compaction is disabled and oversized requests fail at the provider.
+	Limits *llmschema.ModelLimits
 }
 
 // ClientOptions configures a Client.
@@ -42,11 +48,25 @@ type ClientOptions struct {
 	References map[string]core.ReferenceSource
 	// Permission is the default permission handler. Defaults to ApproveAll.
 	Permission PermissionHandlerFunc
+	// Question is the default question handler. Defaults to RejectQuestions.
+	Question QuestionHandlerFunc
 
 	// LLM overrides the default LLM client (route.LLMClient). When nil, a client
 	// is built from Provider/Model over the default HTTP transport.
 	LLM route.LLMClient
+
+	// ModelInfo resolves a model id to catalog-style metadata (limits, endpoint,
+	// headers, variants). When set, it replaces the Provider.Type facade path,
+	// so callers can feed models.dev (or their own) metadata. Provider.APIKey is
+	// still used as the credential. Build the value with NewModelInfo for the
+	// SDK's supported APIs.
+	ModelInfo ModelInfoProvider
 }
+
+// ModelInfoProvider resolves a model id to catalog-style metadata. It is the
+// SDK's narrow replacement for the models.dev catalog: the caller supplies the
+// data (limits, endpoint, headers, variants) it already has.
+type ModelInfoProvider func(modelID string) (schema.ModelInfo, error)
 
 // MCPConfig names an MCP server and its connection config.
 type MCPConfig struct {
@@ -64,9 +84,13 @@ type PluginConfig struct {
 type AgentConfig struct {
 	System      string
 	Description string
-	// Mode is "primary", "subagent", or "all" (default).
-	Mode        string
-	Hidden      bool
+	// Mode is "primary", "subagent", or "all". When nil the agent keeps its
+	// current mode; a newly created agent defaults to "all" (matching
+	// opencode's Agent.Info.empty).
+	Mode *string
+	// Hidden hides the agent from default selection. When nil the agent keeps
+	// its current value.
+	Hidden      *bool
 	Steps       int
 	Model       string
 	Permissions schema.PermissionRuleset
@@ -111,12 +135,12 @@ func (c *Client) RegisterAgent(name string, cfg AgentConfig) error {
 				description := cfg.Description
 				info.Description = &description
 			}
-			if cfg.Mode != "" {
-				info.Mode = cfg.Mode
-			} else {
-				info.Mode = schema.AgentModePrimary
+			if cfg.Mode != nil {
+				info.Mode = *cfg.Mode
 			}
-			info.Hidden = cfg.Hidden
+			if cfg.Hidden != nil {
+				info.Hidden = *cfg.Hidden
+			}
 			if cfg.Steps > 0 {
 				steps := schema.PositiveInt(cfg.Steps)
 				info.Steps = &steps
@@ -125,7 +149,7 @@ func (c *Client) RegisterAgent(name string, cfg AgentConfig) error {
 				info.Model = &schema.ModelRef{ID: schema.ModelID(cfg.Model)}
 			}
 			if cfg.Permissions != nil {
-				info.Permissions = cfg.Permissions
+				info.Permissions = core.PermissionMerge(info.Permissions, cfg.Permissions)
 			}
 		})
 		return nil
@@ -185,7 +209,7 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 		derivedAgent = true
 	}
 
-	sessionRegistry, err := c.rt.newSessionRegistry(cfg.Tools)
+	sessionRegistry, err := c.rt.newSessionRegistry(effectiveAgent, cfg.Permissions, cfg.Tools)
 	if err != nil {
 		c.removeDerivedAgent(effectiveAgent, derivedAgent)
 		return nil, err
@@ -200,19 +224,25 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 	if title == "" {
 		title = "Session"
 	}
+	permissionJSON := "null"
+	if len(cfg.Permissions) > 0 {
+		if encoded, err := json.Marshal(cfg.Permissions); err == nil {
+			permissionJSON = string(encoded)
+		}
+	}
 	if _, err := c.rt.db.DB.Exec(
-		"INSERT INTO `session` (`id`,`project_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`revert`,`time_created`,`time_updated`) "+
-			"VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+		"INSERT INTO `session` (`id`,`project_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`revert`,`time_created`,`time_updated`) "+
+			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 		string(sessionID), string(c.rt.projectID), "session", string(c.rt.location.Directory),
-		title, "1", effectiveAgent, fmt.Sprintf(`{"id":%q,"providerID":%q}`, modelID, providerID), `null`, now, now,
+		title, "1", effectiveAgent, fmt.Sprintf(`{"id":%q,"providerID":%q}`, modelID, providerID), permissionJSON, `null`, now, now,
 	); err != nil {
 		c.removeDerivedAgent(effectiveAgent, derivedAgent)
 		return nil, err
 	}
-	c.rt.sessions.Set(string(sessionID), effectiveAgent)
 	c.rt.dispatcher.set(string(sessionID), sessionRegistry)
 	c.rt.setHooks(string(sessionID), cfg.Hooks)
 	c.rt.permission.setHandler(string(sessionID), cfg.OnPermissionRequest)
+	c.rt.question.setHandler(string(sessionID), cfg.OnQuestion)
 
 	session := &Session{
 		client: c, id: sessionID, agentID: effectiveAgent, derivedAgent: derivedAgent,
@@ -249,6 +279,27 @@ func (c *Client) MCP() *mcp.Client {
 // Plugin returns the plugin manager.
 func (c *Client) Plugin() *core.Plugin {
 	return c.rt.plugin
+}
+
+// Skills returns the skill service.
+func (c *Client) Skills() *core.Skill {
+	return c.rt.skills
+}
+
+// On subscribes to every session event, including subagent child sessions.
+// Use it to observe task/subagent activity that Session.On (which filters by
+// session) does not surface. The returned function unsubscribes.
+func (c *Client) On(handler func(Event)) func() {
+	unsubscribe, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
+		for _, event := range mapEvents(payload) {
+			handler(event)
+		}
+		return nil
+	})
+	if err != nil {
+		return func() {}
+	}
+	return unsubscribe
 }
 
 // Reference returns the reference service.
@@ -293,13 +344,29 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *Sessi
 	if stored == nil {
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
-	registry, err := c.rt.newSessionRegistry(cfg.Tools)
+	// A per-session ruleset passed on resume replaces the stored one.
+	sessionRules := schema.PermissionRuleset{}
+	if stored.Permission != nil {
+		sessionRules = *stored.Permission
+	}
+	if len(cfg.Permissions) > 0 {
+		encoded, err := json.Marshal(cfg.Permissions)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := c.rt.db.DB.Exec("UPDATE `session` SET `permission` = ? WHERE `id` = ?", string(encoded), sessionID); err != nil {
+			return nil, err
+		}
+		sessionRules = cfg.Permissions
+	}
+	registry, err := c.rt.newSessionRegistry(agentIDOf(stored), sessionRules, cfg.Tools)
 	if err != nil {
 		return nil, err
 	}
 	c.rt.dispatcher.set(sessionID, registry)
 	c.rt.setHooks(sessionID, cfg.Hooks)
 	c.rt.permission.setHandler(sessionID, cfg.OnPermissionRequest)
+	c.rt.question.setHandler(sessionID, cfg.OnQuestion)
 
 	session := &Session{client: c, id: schema.SessionID(sessionID), hooks: cfg.Hooks, listeners: map[int]func(Event){}}
 	unsubscribe, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
@@ -330,6 +397,12 @@ func (c *Client) untrackSession(session *Session) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.sessions, session)
+}
+
+// SessionMessages returns the stored messages of any session, including
+// subagent child sessions.
+func (c *Client) SessionMessages(sessionID string) ([]schema.SessionMessage, error) {
+	return c.rt.store.Context(schema.SessionID(sessionID))
 }
 
 // ListSessions returns the sessions in the client's project, newest first.

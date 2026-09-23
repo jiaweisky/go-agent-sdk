@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,7 +12,9 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/database"
+	coreflag "github.com/user/go-agent-sdk/core/flag"
 	"github.com/user/go-agent-sdk/core/installation"
+	coreproject "github.com/user/go-agent-sdk/core/project"
 	"github.com/user/go-agent-sdk/core/reference"
 	"github.com/user/go-agent-sdk/core/session"
 	"github.com/user/go-agent-sdk/core/session/runner"
@@ -23,24 +27,28 @@ import (
 	"github.com/user/go-agent-sdk/llm/route"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/mcp"
+	opencodeconfig "github.com/user/go-agent-sdk/opencode/config"
+	opencodeskill "github.com/user/go-agent-sdk/opencode/skill"
 	"github.com/user/go-agent-sdk/schema"
 )
 
 // runtime holds the process-wide services shared by all sessions.
 type runtime struct {
-	db         *database.Database
-	events     core.Event
-	store      *session.Store
-	agents     *core.Agent
-	tools      *tool.Registry
-	permission *handlerPermission
-	question   core.Question
-	runner     *runner.LLMRunner
-	coord      *session.Coordinator[schema.SessionID]
-	location   core.Location
-	projectID  schema.ProjectID
-	models     runner.ModelResolver
-	sessions   *permissionSessions
+	db            *database.Database
+	events        core.Event
+	store         *session.Store
+	agents        *core.Agent
+	skills        *core.Skill
+	outputStore   tool.OutputStore
+	mcpTools      map[string]tool.Tool
+	permission    *handlerPermission
+	question      *handlerQuestion
+	runner        *runner.LLMRunner
+	coord         *session.Coordinator[schema.SessionID]
+	location      core.Location
+	projectID     schema.ProjectID
+	models        runner.ModelResolver
+	subagentDepth int
 
 	hooksMu sync.Mutex
 	hooks   map[string]*SessionHooks
@@ -53,10 +61,11 @@ type runtime struct {
 	reference   *core.Reference
 }
 
-// toolDispatcher routes materialization to a session-scoped registry when one
-// exists, falling back to the base registry.
+// toolDispatcher routes materialization to the session-scoped registry. Every
+// session has one (set on create/resume and for subagent children), so there is
+// no session-agnostic fallback: materializing an unknown session yields no tools
+// rather than a registry built with the wrong permission rules.
 type toolDispatcher struct {
-	base     *tool.Registry
 	mu       sync.Mutex
 	sessions map[string]*tool.Registry
 }
@@ -66,7 +75,7 @@ func (d *toolDispatcher) MaterializeFor(sessionID string, permissions []core.Per
 	registry := d.sessions[sessionID]
 	d.mu.Unlock()
 	if registry == nil {
-		registry = d.base
+		return &tool.Materialization{}
 	}
 	return registry.Materialize(permissions)
 }
@@ -85,10 +94,22 @@ func (d *toolDispatcher) remove(sessionID string) {
 
 // newSessionRegistry builds a registry with the built-ins plus the client and
 // session user tools, isolating session-scoped tools from other sessions.
-func (r *runtime) newSessionRegistry(sessionTools []Tool) (*tool.Registry, error) {
-	registry := tool.NewRegistry()
-	if err := registerBuiltins(registry, r.builtin); err != nil {
+func (r *runtime) newSessionRegistry(agentID string, sessionRules schema.PermissionRuleset, sessionTools []Tool) (*tool.Registry, error) {
+	registry := tool.NewRegistry(tool.WithOutputStore(r.outputStore))
+	var permissions schema.PermissionRuleset
+	if agent := r.agents.Get(schema.AgentID(agentID)); agent != nil {
+		permissions = agent.Permissions
+	}
+	if len(sessionRules) > 0 {
+		permissions = core.PermissionMerge(permissions, sessionRules)
+	}
+	if err := registerBuiltins(registry, r.builtin, permissions); err != nil {
 		return nil, err
+	}
+	if len(r.mcpTools) > 0 {
+		if _, err := registry.Register(r.mcpTools); err != nil {
+			return nil, err
+		}
 	}
 	tools := make([]Tool, 0, len(r.clientTools)+len(sessionTools))
 	tools = append(tools, r.clientTools...)
@@ -99,6 +120,16 @@ func (r *runtime) newSessionRegistry(sessionTools []Tool) (*tool.Registry, error
 		}
 	}
 	return registry, nil
+}
+
+// publishSessionStatus emits the live session.status event so subscribers (and
+// the agent event stream) can tell when a session is busy or idle. Mirrors
+// SessionStatus.set; the SDK publishes it from its own drain lifecycle.
+func (r *runtime) publishSessionStatus(id schema.SessionID, status schema.SessionStatusInfo) {
+	_, _ = r.events.Publish(schema.SessionStatusEventStatus, map[string]any{
+		"sessionID": id,
+		"status":    status,
+	}, nil)
 }
 
 func (r *runtime) setHooks(sessionID string, hooks *SessionHooks) {
@@ -148,38 +179,99 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		return nil, err
 	}
 
-	projectID := schema.ProjectIDGlobal
+	global := core.NewGlobal()
+
+	git := core.NewGit(core.NewAppProcess())
+	projectService := core.NewProject(core.ProjectConfig{
+		Git:         git,
+		Directories: coreproject.NewDirectories(db),
+	})
+	location, err := core.NewLocation(schema.LocationRef{Directory: schema.AbsolutePath(directory)}, projectService)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	projectID := location.Project.ID
+	now := time.Now().UnixMilli()
 	if _, err := db.DB.Exec(
-		"INSERT INTO `project` (`id`,`worktree`,`sandboxes`,`time_created`,`time_updated`) VALUES (?,?,?,?,?)",
-		string(projectID), directory, "[]", time.Now().UnixMilli(), time.Now().UnixMilli(),
+		"INSERT INTO `project` (`id`,`worktree`,`sandboxes`,`time_created`,`time_updated`) VALUES (?,?,?,?,?) "+
+			"ON CONFLICT(`id`) DO NOTHING",
+		string(projectID), string(location.Project.Directory), "[]", now, now,
 	); err != nil {
 		db.Close()
 		return nil, err
 	}
 
-	location := core.Location{LocationInfo: schema.LocationInfo{
-		Directory: schema.AbsolutePath(directory),
-		Project:   schema.LocationProject{ID: projectID, Directory: schema.AbsolutePath(directory)},
-	}}
+	config, err := core.NewConfig(core.ConfigDeps{
+		Global:   global,
+		Location: location,
+		Policy:   core.NewPolicy(),
+	})
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	// Bound oversized tool results (see core.ToolOutputStore) before they are
+	// sent to the model; without this a single large grep/read can overflow the
+	// provider context window.
+	outputStore := tool.NewCoreOutputStore(core.NewToolOutputStore(global, config))
+
+	subagentDepth := 1
+	if depth := core.Latest(config.Entries(), func(info core.ConfigInfo) *schema.NonNegativeInt {
+		return info.SubagentDepth
+	}); depth != nil {
+		subagentDepth = int(*depth)
+	}
 
 	agents := core.NewAgent()
-	agentSessions := newPermissionSessions()
+	if err := core.ApplyDefaultAgents(agents, location, global); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := opencodeconfig.ApplyConfigAgents(agents, config.Entries(), global); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	store := session.NewStore(db)
+	agentSessions := permissionSessionStore{store: store}
 	permission := &handlerPermission{
 		inner: core.NewPermission(core.PermissionConfig{
 			Sessions:  agentSessions,
 			Agents:    permissionAgents{agents: agents},
-			Saved:     &permissionSaved{},
+			Saved:     &permissionSaved{db: db},
 			Events:    permissionEvents{events: events},
 			ProjectID: string(projectID),
 		}),
 		def:      opts.Permission,
 		handlers: map[string]PermissionHandlerFunc{},
 	}
-	question := core.NewQuestion(core.QuestionConfig{Events: events})
+	question := newHandlerQuestion(core.NewQuestion(core.QuestionConfig{Events: events}), opts.Question)
 
-	global := core.NewGlobal()
-	skills := core.NewSkill(core.NewSkillDiscovery(filepath.Join(global.Cache, "skills"), http.DefaultClient))
-	referenceCache := core.NewRepositoryCache(core.NewGit(core.NewAppProcess()), global.Repos)
+	discovery := core.NewSkillDiscovery(filepath.Join(global.Cache, "skills"), http.DefaultClient)
+	skills := core.NewSkill(discovery)
+	if _, err := skills.Transform(func(draft core.SkillDraft) error {
+		discovered := opencodeskill.DiscoverSkills(opencodeskill.DiscoverConfig{
+			Directory:               string(location.Directory),
+			Worktree:                string(location.Project.Directory),
+			Home:                    global.Home,
+			ConfigDirs:              configDirectories(config.Entries()),
+			Skills:                  configSkills(config.Entries()),
+			DisableExternalSkills:   coreflag.Flag.OPENCODE_DISABLE_EXTERNAL_SKILLS(),
+			DisableClaudeCodeSkills: coreflag.Flag.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS(),
+			Discovery:               discovery,
+		})
+		for _, dir := range discovered.Roots {
+			draft.Source(schema.SkillDirectorySource{Type: "directory", Path: schema.AbsolutePath(dir)})
+		}
+		return nil
+	}); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	referenceCache := core.NewRepositoryCache(git, global.Repos)
 	referenceService := core.NewReference(global, events, referenceCache)
 	if len(opts.References) > 0 {
 		if _, err := referenceService.Transform(func(draft core.ReferenceDraft) error {
@@ -199,36 +291,28 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		return nil, err
 	}
 
+	task := &taskRunner{}
 	builtin := builtinDeps{
 		db: db, events: events, permission: permission, question: question,
-		location: location, config: emptyConfig{}, skills: skills,
+		location: *location, config: config, skills: skills,
+		agents: agents, task: task,
 	}
-	registry := tool.NewRegistry()
-	if err := registerBuiltins(registry, builtin); err != nil {
-		db.Close()
-		return nil, err
-	}
-	for _, userTool := range opts.Tools {
-		if _, err := registry.Register(map[string]tool.Tool{userTool.Name: userTool.build(permission)}); err != nil {
-			db.Close()
-			return nil, err
-		}
-	}
-
 	snapshots := runner.Snapshotter(noopSnapshots{})
-	if snapshot, err := core.NewSnapshot(core.NewGit(core.NewAppProcess()), emptyConfig{}, global, &location); err == nil {
+	if snapshot, err := core.NewSnapshot(git, config, global, location); err == nil {
 		snapshots = snapshot
 	}
 
-	store := session.NewStore(db)
 	rt := &runtime{
-		db: db, events: events, store: store, agents: agents, tools: registry,
-		permission: permission, question: question, location: location,
-		projectID: projectID, models: models, sessions: agentSessions,
-		hooks: map[string]*SessionHooks{}, builtin: builtin, clientTools: opts.Tools,
-		dispatcher: &toolDispatcher{base: registry, sessions: map[string]*tool.Registry{}},
+		db: db, events: events, store: store, agents: agents, skills: skills,
+		outputStore: outputStore,
+		permission:  permission, question: question, location: *location,
+		projectID: projectID, models: models,
+		subagentDepth: subagentDepth,
+		hooks:         map[string]*SessionHooks{}, builtin: builtin, clientTools: opts.Tools,
+		dispatcher: &toolDispatcher{sessions: map[string]*tool.Registry{}},
 		reference:  referenceService,
 	}
+	task.rt = rt
 	rt.runner = runner.NewLLMRunner(runner.LLMRunner{
 		Events:            appEvents{events: events},
 		LLM:               chooseLLM(opts),
@@ -236,16 +320,18 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		Tools:             hookedRegistry{inner: rt.dispatcher, hooksFor: rt.hooksFor},
 		Models:            models,
 		Store:             store,
-		Location:          location,
+		Location:          *location,
 		SystemContext:     systemcontext.NewRegistry(),
 		SkillGuidance:     skill.NewGuidance(skills, allowAllEvaluator{}),
 		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: referenceService}),
-		Config:            emptyConfig{},
+		Config:            config,
 		Snapshots:         snapshots,
 		DB:                db,
 	})
 	rt.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
-		return rt.runner.Run(runner.RunInput{SessionID: id, Force: force})
+		rt.publishSessionStatus(id, schema.SessionStatusBusy{Type: "busy"})
+		defer rt.publishSessionStatus(id, schema.SessionStatusIdle{Type: "idle"})
+		return rt.runner.Run(ctx, runner.RunInput{SessionID: id, Force: force})
 	})
 	if err := rt.connectMCP(ctx, opts.MCP); err != nil {
 		db.Close()
@@ -261,8 +347,8 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	return rt, nil
 }
 
-// connectMCP connects the configured MCP servers and registers their tools as
-// application tools on the base registry.
+// connectMCP connects the configured MCP servers and collects their tools; each
+// session registry picks them up from r.mcpTools.
 func (r *runtime) connectMCP(ctx context.Context, configs []MCPConfig) error {
 	if len(configs) == 0 {
 		return nil
@@ -276,11 +362,11 @@ func (r *runtime) connectMCP(ctx context.Context, configs []MCPConfig) error {
 		client.Close()
 		return err
 	}
+	if r.mcpTools == nil {
+		r.mcpTools = map[string]tool.Tool{}
+	}
 	for name, adapted := range tools {
-		if _, err := r.tools.Register(map[string]tool.Tool{name: adapted.CoreTool()}); err != nil {
-			client.Close()
-			return err
-		}
+		r.mcpTools[name] = adapted.CoreTool()
 	}
 	r.mcp = client
 	return nil
@@ -344,20 +430,38 @@ func (e appEvents) PublishWithCommit(
 // buildModelResolver maps a provider config to a model resolver.
 func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
 	apiKey := opts.Provider.APIKey
+	// A ModelInfo provider supplies catalog metadata directly (models.dev or the
+	// caller's own), which takes precedence over the built-in facades.
+	if opts.ModelInfo != nil {
+		var credential *string
+		if apiKey != "" {
+			credential = &apiKey
+		}
+		return func(stored schema.SessionInfo) (route.Model, error) {
+			id := opts.Model
+			if stored.Model != nil && stored.Model.ID != "" {
+				id = string(stored.Model.ID)
+			}
+			info, err := opts.ModelInfo(id)
+			if err != nil {
+				return route.Model{}, err
+			}
+			return runner.ResolveModel(stored, info, credential)
+		}, nil
+	}
 	var build func(id string) route.Model
 	switch opts.Provider.Type {
 	case "", "openai":
 		facade := provider.NewOpenAI(
 			protocols.OpenAIResponsesHTTPRoute,
-			protocols.OpenAIResponsesHTTPRoute,
 			protocols.OpenAIChatHTTPRoute,
-			provider.OpenAIConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL},
+			provider.OpenAIConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL, Limits: opts.Provider.Limits},
 		)
 		build = func(id string) route.Model { return facade.Model(id) }
 	case "anthropic":
 		facade := provider.NewAnthropic(
 			protocols.AnthropicMessagesHTTPRoute,
-			provider.AnthropicConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL},
+			provider.AnthropicConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL, Limits: opts.Provider.Limits},
 		)
 		build = func(id string) route.Model { return facade.Model(id) }
 	case "openai-compatible":
@@ -367,15 +471,15 @@ func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
 				APIKey:   &apiKey,
 				BaseURL:  opts.Provider.BaseURL,
 				Provider: opts.Provider.Provider,
+				Limits:   opts.Provider.Limits,
 			},
 		)
 		build = func(id string) route.Model { return facade.Model(id) }
 	default:
 		facade := provider.NewOpenAI(
 			protocols.OpenAIResponsesHTTPRoute,
-			protocols.OpenAIResponsesHTTPRoute,
 			protocols.OpenAIChatHTTPRoute,
-			provider.OpenAIConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL},
+			provider.OpenAIConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL, Limits: opts.Provider.Limits},
 		)
 		build = func(id string) route.Model { return facade.Model(id) }
 	}
@@ -388,11 +492,206 @@ func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
 	}, nil
 }
 
+// configDirectories collects the config directories from the loaded entries.
+func configDirectories(entries []core.ConfigEntry) []string {
+	var directories []string
+	for _, entry := range entries {
+		if directory, ok := entry.(core.ConfigDirectory); ok {
+			directories = append(directories, string(directory.Path))
+		}
+	}
+	return directories
+}
+
+// configSkills collects the flat `skills` entries from config documents.
+func configSkills(entries []core.ConfigEntry) []string {
+	var skills []string
+	for _, entry := range entries {
+		if document, ok := entry.(core.ConfigDocument); ok {
+			skills = append(skills, document.Info.Skills...)
+		}
+	}
+	return skills
+}
+
+// --- task tool (subagent delegation) ---
+
+// taskRunner defers to the runtime once it is constructed; registerBuiltins
+// runs before the runtime value exists.
+type taskRunner struct{ rt *runtime }
+
+func (t *taskRunner) RunTask(ctx context.Context, input TaskRunInput) (TaskRunOutput, error) {
+	return t.rt.runTask(ctx, input)
+}
+
+func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (out TaskRunOutput, err error) {
+	parent, err := r.store.Get(schema.SessionID(input.ParentSessionID))
+	if err != nil {
+		return TaskRunOutput{}, err
+	}
+	if parent == nil {
+		return TaskRunOutput{}, fmt.Errorf("parent session not found: %s", input.ParentSessionID)
+	}
+	if err := r.checkSubagentDepth(parent); err != nil {
+		return TaskRunOutput{}, err
+	}
+	subagent := r.agents.Get(schema.AgentID(input.SubagentType))
+	if subagent == nil {
+		return TaskRunOutput{}, fmt.Errorf("Unknown agent type: %s is not a valid agent type", input.SubagentType)
+	}
+	var parentPermission schema.PermissionRuleset
+	if parent.Permission != nil {
+		parentPermission = *parent.Permission
+	}
+	derived := DeriveSubagentSessionPermission(parentPermission, *subagent)
+
+	childID, reused, err := r.resolveChildSession(input, parent, subagent, derived)
+	if err != nil {
+		return TaskRunOutput{}, err
+	}
+	// A resumed session keeps its stored agent and permission ruleset.
+	childAgent := input.SubagentType
+	childRules := derived
+	if reused {
+		if existing, getErr := r.store.Get(childID); getErr == nil && existing != nil {
+			if existing.Agent != nil {
+				childAgent = string(*existing.Agent)
+			}
+			if existing.Permission != nil {
+				childRules = *existing.Permission
+			}
+		}
+	}
+	registry, err := r.newSessionRegistry(childAgent, childRules, nil)
+	if err != nil {
+		return TaskRunOutput{}, err
+	}
+	r.dispatcher.set(string(childID), registry)
+	defer r.dispatcher.remove(string(childID))
+
+	// Publish the running task state (durable) on the parent session, mirroring
+	// the tool's progress metadata. The child session id links the subagent's
+	// events to this task.
+	if input.Progress != nil {
+		_ = input.Progress(map[string]any{
+			"sessionId":       string(childID),
+			"parentSessionId": input.ParentSessionID,
+			"subagentType":    input.SubagentType,
+			"description":     input.Description,
+			"prompt":          input.Prompt,
+			"model":           childModelJSON(subagent, parent),
+		}, nil)
+	}
+
+	if _, err := session.Admit(r.db.DB, appEvents{events: r.events}, session.AdmitInput{
+		ID:        schema.NewMessageID(),
+		SessionID: childID,
+		Prompt:    schema.Prompt{Text: input.Prompt},
+		Delivery:  schema.SessionDeliveryQueue,
+	}); err != nil {
+		return TaskRunOutput{}, err
+	}
+	runErr := r.coord.Run(ctx, childID)
+	if ctx.Err() != nil {
+		r.coord.Interrupt(childID)
+	}
+	if runErr != nil {
+		return TaskRunOutput{}, runErr
+	}
+	text, err := r.lastAssistantText(childID)
+	if err != nil {
+		return TaskRunOutput{}, err
+	}
+	return TaskRunOutput{SessionID: string(childID), Text: text}, nil
+}
+
+// checkSubagentDepth counts the parent chain; nesting beyond the limit fails.
+func (r *runtime) checkSubagentDepth(parent *schema.SessionInfo) error {
+	depth := 0
+	current := parent
+	for current.ParentID != nil {
+		depth++
+		next, err := r.store.Get(*current.ParentID)
+		if err != nil {
+			return err
+		}
+		if next == nil {
+			break
+		}
+		current = next
+	}
+	if depth >= r.subagentDepth {
+		return fmt.Errorf("Subagent depth limit reached (%d). Increase subagent depth to allow nested subagents", r.subagentDepth)
+	}
+	return nil
+}
+
+// resolveChildSession reuses the session named by task_id, or inserts a new
+// child session carrying parent_id and the derived permission ruleset.
+func (r *runtime) resolveChildSession(
+	input TaskRunInput,
+	parent *schema.SessionInfo,
+	subagent *schema.AgentInfo,
+	derived schema.PermissionRuleset,
+) (schema.SessionID, bool, error) {
+	if input.TaskID != nil && *input.TaskID != "" {
+		existing, err := r.store.Get(schema.SessionID(*input.TaskID))
+		if err == nil && existing != nil {
+			return existing.ID, true, nil
+		}
+	}
+	childID := schema.NewSessionID()
+	now := time.Now().UnixMilli()
+	title := input.Description + " (@" + input.SubagentType + " subagent)"
+	permissionJSON := "null"
+	if len(derived) > 0 {
+		if encoded, err := json.Marshal(derived); err == nil {
+			permissionJSON = string(encoded)
+		}
+	}
+	if _, err := r.db.DB.Exec(
+		"INSERT INTO `session` (`id`,`project_id`,`parent_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`time_created`,`time_updated`) "+
+			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+		string(childID), string(r.projectID), input.ParentSessionID, "session", string(r.location.Directory),
+		title, "1", input.SubagentType, childModelJSON(subagent, parent), permissionJSON, now, now,
+	); err != nil {
+		return "", false, err
+	}
+	return childID, false, nil
+}
+
+func childModelJSON(subagent *schema.AgentInfo, parent *schema.SessionInfo) string {
+	ref := subagent.Model
+	if ref == nil {
+		ref = parent.Model
+	}
+	if ref == nil || ref.ID == "" {
+		return "null"
+	}
+	return fmt.Sprintf(`{"id":%q,"providerID":%q}`, string(ref.ID), string(ref.ProviderID))
+}
+
+// lastAssistantText returns the last text part of the last assistant message.
+func (r *runtime) lastAssistantText(sessionID schema.SessionID) (string, error) {
+	messages, err := r.store.Context(sessionID)
+	if err != nil {
+		return "", err
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		assistant, ok := messages[i].(schema.SessionMessageAssistant)
+		if !ok {
+			continue
+		}
+		for j := len(assistant.Content) - 1; j >= 0; j-- {
+			if text, ok := assistant.Content[j].(schema.SessionMessageAssistantText); ok {
+				return text.Text, nil
+			}
+		}
+	}
+	return "", nil
+}
+
 // --- narrow no-op adapters ---
-
-type emptyConfig struct{}
-
-func (emptyConfig) Entries() []core.ConfigEntry { return nil }
 
 type noopSnapshots struct{}
 

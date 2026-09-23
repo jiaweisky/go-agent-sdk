@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/user/go-agent-sdk/schema"
@@ -132,6 +133,16 @@ type Retried struct {
 
 func (Retried) eventKind() string { return "retried" }
 
+// SessionStatus reports a session's run status ("busy" or "idle"). It mirrors
+// the TS session.status event and lets callers animate a spinner only while a
+// session is actually running.
+type SessionStatus struct {
+	SessionID string
+	Status    string
+}
+
+func (SessionStatus) eventKind() string { return "session-status" }
+
 // CompactionStarted reports that context compaction started.
 type CompactionStarted struct {
 	SessionID string
@@ -174,10 +185,20 @@ type StepEnded struct {
 	SessionID string
 	MessageID string
 	Finish    any
-	Tokens    any
 }
 
 func (StepEnded) eventKind() string { return "step-ended" }
+
+// Usage carries the provider's original usage payload for one turn, verbatim
+// (keyed by provider name), so provider-specific billing buckets survive. The
+// SDK does not parse, normalize, or total it: subscribe via
+// Client.On/Session.On and interpret the provider's own fields yourself.
+type Usage struct {
+	SessionID        string
+	ProviderMetadata map[string]map[string]any
+}
+
+func (Usage) eventKind() string { return "usage" }
 
 // StepFailed reports a failed agent step.
 type StepFailed struct {
@@ -270,8 +291,10 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 		}, true
 	case schema.SessionEventRetried.Type:
 		return Retried{SessionID: sessionID, Attempt: data["attempt"], Error: data["error"]}, true
+	case schema.SessionStatusEventStatus.Type:
+		return SessionStatus{SessionID: sessionID, Status: sessionStatusType(data["status"])}, true
 	case schema.SessionEventCompactionStarted.Type:
-		return CompactionStarted{SessionID: sessionID, MessageID: messageID, Reason: data["reason"]}, true
+		return CompactionStarted{SessionID: sessionID, MessageID: fieldString(data, "messageID"), Reason: data["reason"]}, true
 	case schema.SessionEventShellStarted.Type:
 		return ShellStarted{
 			SessionID: sessionID, MessageID: messageID,
@@ -286,7 +309,7 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 	case schema.SessionEventStepEnded.Type:
 		return StepEnded{
 			SessionID: sessionID, MessageID: messageID,
-			Finish: data["finish"], Tokens: data["tokens"],
+			Finish: data["finish"],
 		}, true
 	case schema.SessionEventStepFailed.Type:
 		return StepFailed{
@@ -294,10 +317,47 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 		}, true
 	case schema.SessionEventCompactionEnded.Type:
 		return CompactionEnded{
-			SessionID: sessionID, MessageID: messageID, Text: fieldString(data, "text"),
+			SessionID: sessionID, MessageID: fieldString(data, "messageID"), Text: fieldString(data, "text"),
 		}, true
 	}
 	return nil, false
+}
+
+// mapEvents converts a payload into every high-level event it carries. Most
+// payloads map to one event; step.ended also yields a Usage event.
+func mapEvents(payload schema.EventPayload) []Event {
+	event, ok := mapEvent(payload)
+	if !ok {
+		return nil
+	}
+	events := []Event{event}
+	if payload.Type == schema.SessionEventStepEnded.Type {
+		data, _ := payload.Data.(map[string]any)
+		events = append(events, Usage{
+			SessionID:        fieldString(data, "sessionID"),
+			ProviderMetadata: usageProviderMetadataFrom(data["tokens"]),
+		})
+	}
+	return events
+}
+
+// usageProviderMetadataFrom extracts the provider's original usage payload from
+// a step's tokens value (a runner.LLMEventTokens struct or a JSON map).
+func usageProviderMetadataFrom(value any) map[string]map[string]any {
+	if value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var decoded struct {
+		ProviderMetadata map[string]map[string]any `json:"providerMetadata"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil
+	}
+	return decoded.ProviderMetadata
 }
 
 func fieldString(data map[string]any, key string) string {
@@ -314,4 +374,18 @@ func fieldString(data map[string]any, key string) string {
 	default:
 		return fmt.Sprint(value)
 	}
+}
+
+// sessionStatusType reads the "type" of a session.status payload, which is the
+// tagged SessionStatusInfo union (or a plain map after JSON round-trips).
+func sessionStatusType(value any) string {
+	switch v := value.(type) {
+	case schema.SessionStatusInfo:
+		return v.SessionStatusInfoType()
+	case map[string]any:
+		if t, ok := v["type"].(string); ok {
+			return t
+		}
+	}
+	return ""
 }

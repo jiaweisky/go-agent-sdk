@@ -7,6 +7,7 @@ import (
 	"github.com/user/go-agent-sdk/core/database"
 	"github.com/user/go-agent-sdk/core/ripgrep"
 	"github.com/user/go-agent-sdk/core/tool"
+	"github.com/user/go-agent-sdk/schema"
 )
 
 type builtinDeps struct {
@@ -17,10 +18,15 @@ type builtinDeps struct {
 	location   core.Location
 	config     core.Config
 	skills     tool.SkillLister
+	agents     *core.Agent
+	task       TaskRunner
 }
 
 // registerBuiltins registers the shipped built-in tools into a registry.
-func registerBuiltins(tools tool.Tools, deps builtinDeps) error {
+// agentPermissions are the calling agent's rules (used to filter the task
+// tool's advertised subagent types); pass nil for the session-agnostic base
+// registry.
+func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schema.PermissionRuleset) error {
 	mutation := core.NewLocationMutation(&deps.location)
 	files := core.NewFileMutation()
 	process := core.NewAppProcess()
@@ -69,6 +75,12 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps) error {
 		},
 		func() (func(), error) {
 			return tool.RegisterSkill(tools, tool.SkillToolDeps{Skills: deps.skills, Permission: deps.permission})
+		},
+		func() (func(), error) {
+			return RegisterTask(tools, TaskToolDeps{
+				Permission: deps.permission, Agents: deps.agents, Runner: deps.task,
+				AgentPermissions: agentPermissions,
+			})
 		},
 	}
 	for _, register := range registrations {
