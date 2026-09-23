@@ -58,7 +58,7 @@ type Route struct {
 	With             func(patch RoutePatch) Route
 	Model            func(input RouteModelInput) Model
 	PrepareTransport func(body any, request *schema.LLMRequest) (any, error)
-	StreamPrepared   func(prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error]
+	StreamPrepared   func(ctx context.Context, prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error]
 }
 
 type MakeTransportInput struct {
@@ -144,14 +144,14 @@ func MakeFromTransport(input MakeTransportInput) Route {
 					Headers: ri.Headers,
 				})
 			},
-			StreamPrepared: func(prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error] {
+			StreamPrepared: func(ctx context.Context, prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error] {
 				stream := ri.Protocol.Stream
 				if stream.DecodeEvent == nil {
-					return ri.Transport.Frames(prepared, request, runtime)
+					return ri.Transport.Frames(ctx, prepared, request, runtime)
 				}
 				return func(yield func(any, error) bool) {
 					state := stream.Initial(request)
-					for frame, err := range ri.Transport.Frames(prepared, request, runtime) {
+					for frame, err := range ri.Transport.Frames(ctx, prepared, request, runtime) {
 						if err != nil {
 							yield(nil, err)
 							return

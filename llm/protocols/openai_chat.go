@@ -65,7 +65,26 @@ type openaiChatUsage struct {
 	TotalTokens             *int                         `json:"total_tokens,omitempty"`
 	PromptTokensDetails     *openaiChatTokensDetails     `json:"prompt_tokens_details,omitempty"`
 	CompletionTokensDetails *openaiChatCompletionDetails `json:"completion_tokens_details,omitempty"`
+	// ProviderMetadata keeps the provider's original usage object so
+	// provider-specific billing fields (e.g. DeepSeek's
+	// prompt_cache_hit_tokens) survive.
+	ProviderMetadata schema.ProviderMetadata `json:"-"`
 }
+
+func (u *openaiChatUsage) UnmarshalJSON(data []byte) error {
+	type plain openaiChatUsage
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*u = openaiChatUsage(decoded)
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err == nil {
+		u.ProviderMetadata = schema.ProviderMetadata{"openai": raw}
+	}
+	return nil
+}
+
 type openaiChatTokensDetails struct {
 	CachedTokens *int `json:"cached_tokens,omitempty"`
 }
@@ -306,11 +325,7 @@ func openaiChatLowerMessages(request *schema.LLMRequest) ([]openaiChatMessage, e
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
-			parts := make([]struct{ Text string }, len(msg.Content))
-			for i := range msg.Content {
-				parts[i].Text = fmt.Sprint(msg.Content[i])
-			}
-			update := WrapSystemUpdate(parts)
+			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
 			if len(pendingImages) > 0 {
 				content := []openaiChatUserContent{{Type: "text", Text: update}}
 				for _, img := range pendingImages {
@@ -413,6 +428,7 @@ func openaiChatMapUsage(usage *openaiChatUsage) *schema.Usage {
 		CacheReadInputTokens: cached,
 		ReasoningTokens:      reasoning,
 		TotalTokens:          openaiChatIntVal(TotalTokens(usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)),
+		ProviderMetadata:     usage.ProviderMetadata,
 	}
 }
 

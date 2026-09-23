@@ -7,7 +7,10 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
-func parseToolInput(route, name, raw string) (any, error) {
+// ParseToolInput decodes a tool call's JSON input. This is the canonical
+// implementation (mirrors provider-error.ts's parseToolInput in shared.ts);
+// llm/protocols re-exports it because utils is the leaf package.
+func ParseToolInput(route, name, raw string) (any, error) {
 	input := raw
 	if input == "" {
 		input = "{}"
@@ -19,13 +22,14 @@ func parseToolInput(route, name, raw string) (any, error) {
 	return result, nil
 }
 
-func eventError(route, message string, raw ...string) *schema.LLMError {
+// EventError builds the shared invalid-provider-output error.
+func EventError(route, message string, raw ...string) *schema.LLMError {
 	opts := []schema.ReasonOption{schema.WithRoute(route)}
 	if len(raw) > 0 {
 		opts = append(opts, schema.WithRaw(raw[0]))
 	}
 	return &schema.LLMError{
-		Module: "ToolStream",
+		Module: "ProviderShared",
 		Method: "stream",
 		Reason: schema.NewInvalidProviderOutputReason(message, opts...),
 	}
@@ -90,7 +94,7 @@ func toolCall(route string, tool *PendingTool, inputOverride ...string) (schema.
 	if len(inputOverride) > 0 {
 		input = inputOverride[0]
 	}
-	parsed, err := parseToolInput(route, tool.Name, input)
+	parsed, err := ParseToolInput(route, tool.Name, input)
 	if err != nil {
 		return schema.LLMEvent{}, err
 	}
@@ -144,7 +148,7 @@ func AppendOrStart(
 		name = current.Name
 	}
 	if id == "" || name == "" {
-		return AppendOutcome{}, eventError(route, missingToolMessage)
+		return AppendOutcome{}, EventError(route, missingToolMessage)
 	}
 	tool := &PendingTool{
 		ID:               id,
@@ -176,7 +180,7 @@ func AppendExisting(
 ) (AppendOutcome, *schema.LLMError) {
 	current := tools[key]
 	if current == nil {
-		return AppendOutcome{}, eventError(route, missingToolMessage)
+		return AppendOutcome{}, EventError(route, missingToolMessage)
 	}
 	if len(text) == 0 {
 		return AppendOutcome{Tools: tools, Tool: current, Events: nil}, nil

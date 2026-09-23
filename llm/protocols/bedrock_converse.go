@@ -1,6 +1,7 @@
 package protocols
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -86,11 +87,26 @@ type bedrockConverseToolConfig struct {
 }
 
 type bedrockConverseBedrockUsage struct {
-	InputTokens           *int `json:"inputTokens,omitempty"`
-	OutputTokens          *int `json:"outputTokens,omitempty"`
-	TotalTokens           *int `json:"totalTokens,omitempty"`
-	CacheReadInputTokens  *int `json:"cacheReadInputTokens,omitempty"`
-	CacheWriteInputTokens *int `json:"cacheWriteInputTokens,omitempty"`
+	InputTokens           *int                    `json:"inputTokens,omitempty"`
+	OutputTokens          *int                    `json:"outputTokens,omitempty"`
+	TotalTokens           *int                    `json:"totalTokens,omitempty"`
+	CacheReadInputTokens  *int                    `json:"cacheReadInputTokens,omitempty"`
+	CacheWriteInputTokens *int                    `json:"cacheWriteInputTokens,omitempty"`
+	ProviderMetadata      schema.ProviderMetadata `json:"-"`
+}
+
+func (u *bedrockConverseBedrockUsage) UnmarshalJSON(data []byte) error {
+	type plain bedrockConverseBedrockUsage
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*u = bedrockConverseBedrockUsage(decoded)
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err == nil {
+		u.ProviderMetadata = schema.ProviderMetadata{"bedrock": raw}
+	}
+	return nil
 }
 
 type bedrockConverseContentBlockStartEvent struct {
@@ -231,6 +247,7 @@ func bedrockConverseMapUsage(u *bedrockConverseBedrockUsage) *schema.Usage {
 		CacheReadInputTokens:  bedrockConverseIntVal(u.CacheReadInputTokens),
 		CacheWriteInputTokens: bedrockConverseIntVal(u.CacheWriteInputTokens),
 		TotalTokens:           bedrockConverseIntVal(TotalTokens(u.InputTokens, u.OutputTokens, u.TotalTokens)),
+		ProviderMetadata:      u.ProviderMetadata,
 	}
 }
 
@@ -326,7 +343,7 @@ func bedrockConverseLowerMessages(request *schema.LLMRequest, bp *utils.Breakpoi
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
-			update := WrapSystemUpdate([]struct{ Text string }{{Text: fmt.Sprint(msg.Content)}})
+			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
 			blocks := bedrockConverseTextWithCache(bp, update, nil)
 			if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
 				last := &msgs[len(msgs)-1]
@@ -624,7 +641,7 @@ func (bedrockConverseBedrockTransport) Prepare(input route.TransportPrepareInput
 	}{URL: u, Method: "POST", Body: string(bodyText), Headers: headers}, nil
 }
 
-func (bedrockConverseBedrockTransport) Frames(prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
+func (bedrockConverseBedrockTransport) Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
 	p := prepared.(struct {
 		URL     string
 		Method  string
@@ -632,7 +649,7 @@ func (bedrockConverseBedrockTransport) Frames(prepared any, request *schema.LLMR
 		Headers map[string]string
 	})
 	return func(yield func(any, error) bool) {
-		req, err := http.NewRequest("POST", p.URL, strings.NewReader(p.Body))
+		req, err := http.NewRequestWithContext(ctx, "POST", p.URL, strings.NewReader(p.Body))
 		if err != nil {
 			yield(nil, err)
 			return
@@ -642,6 +659,10 @@ func (bedrockConverseBedrockTransport) Frames(prepared any, request *schema.LLMR
 		}
 		resp, llmErr := runtime.HTTP.DoWithRetries(req)
 		if llmErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				yield(nil, ctxErr)
+				return
+			}
 			yield(nil, llmErr)
 			return
 		}

@@ -44,7 +44,7 @@ func (c *testClient) Stream(ctx context.Context, req *schema.LLMRequest) (iter.S
 		return nil, err
 	}
 	return func(yield func(schema.LLMEvent, error) bool) {
-		for evt, streamErr := range c.Route.StreamPrepared(prepared, req, c.RT) {
+		for evt, streamErr := range c.Route.StreamPrepared(ctx, prepared, req, c.RT) {
 			if streamErr != nil {
 				yield(schema.LLMEvent{}, streamErr)
 				return
@@ -145,7 +145,7 @@ func TestProvider_OpenAI_Chat(t *testing.T) {
 		t.Skip("set DEEPSEEK_API_KEY to run this test")
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	prov := provider.NewOpenAI(protocols.OpenAIChatHTTPRoute, protocols.OpenAIChatHTTPRoute, protocols.OpenAIChatHTTPRoute, provider.OpenAIConfig{
+	prov := provider.NewOpenAI(protocols.OpenAIChatHTTPRoute, protocols.OpenAIChatHTTPRoute, provider.OpenAIConfig{
 		APIKey:  &apiKey,
 		BaseURL: "https://api.deepseek.com/v1",
 	})

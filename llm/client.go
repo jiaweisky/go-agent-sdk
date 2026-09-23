@@ -42,12 +42,12 @@ func (c *Client) Prepare(_ context.Context, request *schema.LLMRequest) (*schema
 }
 
 // Stream mirrors LLMClient.stream.
-func (c *Client) Stream(_ context.Context, request *schema.LLMRequest) (iter.Seq2[schema.LLMEvent, error], error) {
+func (c *Client) Stream(ctx context.Context, request *schema.LLMRequest) (iter.Seq2[schema.LLMEvent, error], error) {
 	resolved, r, _, prepared, err := c.compile(request)
 	if err != nil {
 		return nil, err
 	}
-	raw := r.StreamPrepared(prepared, resolved, c.runtime)
+	raw := r.StreamPrepared(ctx, prepared, resolved, c.runtime)
 	return func(yield func(schema.LLMEvent, error) bool) {
 		for event, err := range raw {
 			if err != nil {

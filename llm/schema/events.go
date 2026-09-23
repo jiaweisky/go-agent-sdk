@@ -8,7 +8,10 @@ type Usage struct {
 	CacheWriteInputTokens int
 	ReasoningTokens       int
 	TotalTokens           int
-	ProviderMetadata      ProviderMetadata
+	// ProviderMetadata carries the provider's original usage payload keyed by
+	// provider name (e.g. {"openai": {...raw usage...}}), for fields we don't
+	// normalize and for billing-level audit trails. Mirrors provider-error.ts.
+	ProviderMetadata ProviderMetadata
 }
 
 func (u *Usage) VisibleOutputTokens() int {

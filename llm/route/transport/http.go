@@ -1,9 +1,9 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"iter"
 	"net/http"
 	"net/url"
@@ -86,7 +86,11 @@ func bodyWithOverlay(body any, request *schema.LLMRequest, encodeBody func(any) 
 }
 
 func jsonRequestParts(input route.TransportPrepareInput) (JsonRequestParts, error) {
-	u := input.Endpoint.BaseURL + input.Endpoint.Path(route.EndpointInput{Request: input.Request})
+	rendered, err := route.RenderEndpoint(input.Endpoint, route.EndpointInput{Request: input.Request, Body: input.Body})
+	if err != nil {
+		return JsonRequestParts{}, err
+	}
+	u := rendered.String()
 	if input.Request.Http != nil {
 		u = applyQuery(u, input.Request.Http.Query)
 	}
@@ -137,7 +141,7 @@ type HttpJsonTransport struct {
 	id      string
 	withFn  func(patch HttpJsonInput) *HttpJsonTransport
 	prepare func(input route.TransportPrepareInput) (HttpPrepared, error)
-	frames  func(prepared HttpPrepared, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error]
+	frames  func(ctx context.Context, prepared HttpPrepared, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error]
 }
 
 func (t *HttpJsonTransport) ID() string { return t.id }
@@ -146,9 +150,9 @@ func (t *HttpJsonTransport) Prepare(input route.TransportPrepareInput) (any, err
 	return t.prepare(input)
 }
 
-func (t *HttpJsonTransport) Frames(prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
+func (t *HttpJsonTransport) Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
 	p := prepared.(HttpPrepared)
-	return t.frames(p, request, runtime)
+	return t.frames(ctx, p, request, runtime)
 }
 
 func NewHttpJsonTransport(input HttpJsonInput) *HttpJsonTransport {
@@ -174,9 +178,9 @@ func NewHttpJsonTransport(input HttpJsonInput) *HttpJsonTransport {
 				Framing: input.Framing,
 			}, nil
 		},
-		frames: func(prepared HttpPrepared, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
+		frames: func(ctx context.Context, prepared HttpPrepared, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
 			return func(yield func(any, error) bool) {
-				req, err := http.NewRequest("POST", prepared.URL, strings.NewReader(prepared.Body))
+				req, err := http.NewRequestWithContext(ctx, "POST", prepared.URL, strings.NewReader(prepared.Body))
 				if err != nil {
 					yield(nil, err)
 					return
@@ -186,17 +190,15 @@ func NewHttpJsonTransport(input HttpJsonInput) *HttpJsonTransport {
 				}
 				resp, llmErr := runtime.HTTP.DoWithRetries(req)
 				if llmErr != nil {
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						yield(nil, ctxErr)
+						return
+					}
 					yield(nil, llmErr)
 					return
 				}
-				body, err := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				if err != nil {
-					yield(nil, err)
-					return
-				}
-				reader := io.NopCloser(strings.NewReader(string(body)))
-				for frame, err := range prepared.Framing.Frame(reader) {
+				defer resp.Body.Close()
+				for frame, err := range prepared.Framing.Frame(resp.Body) {
 					if !yield(frame, err) {
 						return
 					}

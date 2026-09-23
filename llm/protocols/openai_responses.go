@@ -102,7 +102,23 @@ type openaiResponsesResponsesUsage struct {
 	OutputTokens        *int                                `json:"output_tokens,omitempty"`
 	OutputTokensDetails *openaiResponsesOutputTokensDetails `json:"output_tokens_details,omitempty"`
 	TotalTokens         *int                                `json:"total_tokens,omitempty"`
+	ProviderMetadata    schema.ProviderMetadata             `json:"-"`
 }
+
+func (u *openaiResponsesResponsesUsage) UnmarshalJSON(data []byte) error {
+	type plain openaiResponsesResponsesUsage
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*u = openaiResponsesResponsesUsage(decoded)
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err == nil {
+		u.ProviderMetadata = schema.ProviderMetadata{"openai": raw}
+	}
+	return nil
+}
+
 type openaiResponsesInputTokensDetails struct {
 	CachedTokens *int `json:"cached_tokens,omitempty"`
 }
@@ -345,11 +361,7 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
-			parts := make([]struct{ Text string }, len(msg.Content))
-			for i := range msg.Content {
-				parts[i].Text = fmt.Sprint(msg.Content[i])
-			}
-			update := WrapSystemUpdate(parts)
+			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
 			if len(input) > 0 {
 				if last, ok := input[len(input)-1].(openaiResponsesUserItem); ok {
 					last.Content = append(last.Content, openaiResponsesInputText{Type: "input_text", Text: update})
@@ -568,6 +580,7 @@ func openaiResponsesMapUsage(u *openaiResponsesResponsesUsage) *schema.Usage {
 		CacheReadInputTokens: cached,
 		ReasoningTokens:      reasoning,
 		TotalTokens:          openaiResponsesIntVal(TotalTokens(u.InputTokens, u.OutputTokens, u.TotalTokens)),
+		ProviderMetadata:     u.ProviderMetadata,
 	}
 }
 

@@ -21,12 +21,11 @@ type OpenAIConfig struct {
 }
 
 type OpenAIProvider struct {
-	ID                 schema.ProviderID
-	Routes             []route.Route
-	Model              func(id string, opts ...llm.ModelOptions) route.Model
-	Responses          func(id string, opts ...llm.ModelOptions) route.Model
-	ResponsesWebSocket func(id string, opts ...llm.ModelOptions) route.Model
-	Chat               func(id string, opts ...llm.ModelOptions) route.Model
+	ID        schema.ProviderID
+	Routes    []route.Route
+	Model     func(id string, opts ...llm.ModelOptions) route.Model
+	Responses func(id string, opts ...llm.ModelOptions) route.Model
+	Chat      func(id string, opts ...llm.ModelOptions) route.Model
 }
 
 func openAIAuth(input OpenAIConfig) *route.Auth {
@@ -73,23 +72,19 @@ func modelFactory(r route.Route, modelID string, baseOpts route.RouteDefaultsInp
 	return r.With(route.RoutePatch{Defaults: &merged}).Model(modelInput)
 }
 
-func NewOpenAI(responsesRoute, responsesWebSocketRoute, chatRoute route.Route, input OpenAIConfig) OpenAIProvider {
+func NewOpenAI(responsesRoute, chatRoute route.Route, input OpenAIConfig) OpenAIProvider {
 	responsesRoute = configureOpenAIRoute(responsesRoute, input)
-	responsesWebSocketRoute = configureOpenAIRoute(responsesWebSocketRoute, input)
 	chatRoute = configureOpenAIRoute(chatRoute, input)
 	base := openAIDefaults(input)
 
 	return OpenAIProvider{
 		ID:     OpenAIProviderID,
-		Routes: []route.Route{responsesRoute, responsesWebSocketRoute, chatRoute},
+		Routes: []route.Route{responsesRoute, chatRoute},
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(responsesRoute, id, base, ptr(true), opts...)
 		},
 		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(responsesRoute, id, base, ptr(true), opts...)
-		},
-		ResponsesWebSocket: func(id string, opts ...llm.ModelOptions) route.Model {
-			return modelFactory(responsesWebSocketRoute, id, base, ptr(true), opts...)
 		},
 		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
 			return modelFactory(chatRoute, id, base, nil, opts...)

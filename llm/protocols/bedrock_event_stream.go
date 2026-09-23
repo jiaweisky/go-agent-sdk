@@ -59,23 +59,23 @@ func ParseEventStreamHeaders(data []byte) map[string]string {
 		switch kind {
 		case 7:
 			if i+2 > len(data) {
-				break
+				return result
 			}
 			strLen := int(binary.BigEndian.Uint16(data[i:]))
 			i += 2
 			if i+strLen > len(data) {
-				break
+				return result
 			}
 			result[name] = string(data[i : i+strLen])
 			i += strLen
 		case 6:
 			if i+4 > len(data) {
-				break
+				return result
 			}
 			binLen := int(binary.BigEndian.Uint32(data[i:]))
 			i += 4
 			if i+binLen > len(data) {
-				break
+				return result
 			}
 			result[name] = string(data[i : i+binLen])
 			i += binLen
@@ -95,6 +95,9 @@ func DecodeEventStreamFrames(fb *FrameBufferState, chunk []byte) ([]DecodedFrame
 		totalLen := int(binary.BigEndian.Uint32(fb.Buffer[fb.Offset:]))
 		if fb.Offset+totalLen > len(fb.Buffer) {
 			break
+		}
+		if totalLen < 16 {
+			return out, fmt.Errorf("Bedrock event stream: invalid frame length %d", totalLen)
 		}
 		preludeCRC := binary.BigEndian.Uint32(fb.Buffer[fb.Offset+8:])
 		if crc32.ChecksumIEEE(fb.Buffer[fb.Offset:fb.Offset+8]) != preludeCRC {

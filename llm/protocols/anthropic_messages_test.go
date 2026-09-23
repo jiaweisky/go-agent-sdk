@@ -46,3 +46,13 @@ func TestAnthropicMessagesOutputLimitPrefersModelDefaults(t *testing.T) {
 		t.Fatalf("max_tokens = %d, want model default 7", request.MaxTokens)
 	}
 }
+
+func TestAnthropicMergeUsageMergesProviderMetadata(t *testing.T) {
+	left := &schema.Usage{ProviderMetadata: schema.ProviderMetadata{"anthropic": map[string]any{"input_tokens": 1}}}
+	right := &schema.Usage{ProviderMetadata: schema.ProviderMetadata{"anthropic": map[string]any{"output_tokens": 2}}}
+	merged := anthropicMessagesMergeUsage(left, right)
+	got := merged.ProviderMetadata["anthropic"]
+	if got["input_tokens"] != 1 || got["output_tokens"] != 2 {
+		t.Fatalf("merged providerMetadata = %+v", got)
+	}
+}

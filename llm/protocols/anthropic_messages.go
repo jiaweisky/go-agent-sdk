@@ -110,10 +110,25 @@ type anthropicMessagesBody struct {
 }
 
 type anthropicMessagesAnthropicUsage struct {
-	InputTokens          *int `json:"input_tokens,omitempty"`
-	OutputTokens         *int `json:"output_tokens,omitempty"`
-	CacheCreationInput   *int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens *int `json:"cache_read_input_tokens,omitempty"`
+	InputTokens          *int                    `json:"input_tokens,omitempty"`
+	OutputTokens         *int                    `json:"output_tokens,omitempty"`
+	CacheCreationInput   *int                    `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens *int                    `json:"cache_read_input_tokens,omitempty"`
+	ProviderMetadata     schema.ProviderMetadata `json:"-"`
+}
+
+func (u *anthropicMessagesAnthropicUsage) UnmarshalJSON(data []byte) error {
+	type plain anthropicMessagesAnthropicUsage
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*u = anthropicMessagesAnthropicUsage(decoded)
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err == nil {
+		u.ProviderMetadata = schema.ProviderMetadata{"anthropic": raw}
+	}
+	return nil
 }
 
 type anthropicMessagesStreamBlock struct {
@@ -485,7 +500,7 @@ func anthropicMessagesLowerMessages(request *schema.LLMRequest, bp *anthropicMes
 				msgs = append(msgs, ns)
 				continue
 			}
-			update := WrapSystemUpdate([]struct{ Text string }{{Text: fmt.Sprint(msg.Content)}})
+			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
 			block := anthropicMessagesTextBlock{Type: "text", Text: update}
 			if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
 				last := &msgs[len(msgs)-1]
@@ -640,6 +655,7 @@ func anthropicMessagesMapUsage(u *anthropicMessagesAnthropicUsage) *schema.Usage
 		CacheReadInputTokens:  cacheRead,
 		CacheWriteInputTokens: cacheWrite,
 		TotalTokens:           anthropicMessagesIntVal(TotalTokens(&inputTokens, u.OutputTokens, nil)),
+		ProviderMetadata:      u.ProviderMetadata,
 	}
 }
 
@@ -674,7 +690,38 @@ func anthropicMessagesMergeUsage(left, right *schema.Usage) *schema.Usage {
 		CacheReadInputTokens:  cacheRead,
 		CacheWriteInputTokens: cacheWrite,
 		TotalTokens:           anthropicMessagesIntVal(TotalTokens(&inputTokens, &outputTokens, nil)),
+		ProviderMetadata:      mergeProviderMetadata(left.ProviderMetadata, right.ProviderMetadata),
 	}
+}
+
+// mergeProviderMetadata right-biased merges provider usage payloads, shallow
+// merging the inner map per provider (mirrors the TS anthropic mergeUsage).
+func mergeProviderMetadata(left, right map[string]map[string]any) map[string]map[string]any {
+	if len(left) == 0 {
+		return right
+	}
+	if len(right) == 0 {
+		return left
+	}
+	merged := make(map[string]map[string]any, len(left)+len(right))
+	for provider, values := range left {
+		merged[provider] = values
+	}
+	for provider, values := range right {
+		if existing, ok := merged[provider]; ok {
+			inner := make(map[string]any, len(existing)+len(values))
+			for k, v := range existing {
+				inner[k] = v
+			}
+			for k, v := range values {
+				inner[k] = v
+			}
+			merged[provider] = inner
+		} else {
+			merged[provider] = values
+		}
+	}
+	return merged
 }
 
 func anthropicMessagesStep(state any, event any) (any, []schema.LLMEvent, error) {

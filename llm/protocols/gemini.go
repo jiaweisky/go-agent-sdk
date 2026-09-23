@@ -13,13 +13,7 @@ import (
 const geminiAdapter = "gemini"
 const GeminiDefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
-var geminiMediaMIMEs = map[string]struct{}{}
-
-func geminiInit() {
-	for _, m := range MediaMIMEs {
-		geminiMediaMIMEs[m] = struct{}{}
-	}
-}
+var geminiMediaMIMEs = mediaMIMESet(MediaMIMEs)
 
 type geminiTextPart struct {
 	Text             string  `json:"text"`
@@ -88,11 +82,26 @@ type geminiBody struct {
 }
 
 type geminiUsage struct {
-	CachedContentTokenCount *int `json:"cachedContentTokenCount,omitempty"`
-	ThoughtsTokenCount      *int `json:"thoughtsTokenCount,omitempty"`
-	PromptTokenCount        *int `json:"promptTokenCount,omitempty"`
-	CandidatesTokenCount    *int `json:"candidatesTokenCount,omitempty"`
-	TotalTokenCount         *int `json:"totalTokenCount,omitempty"`
+	CachedContentTokenCount *int                    `json:"cachedContentTokenCount,omitempty"`
+	ThoughtsTokenCount      *int                    `json:"thoughtsTokenCount,omitempty"`
+	PromptTokenCount        *int                    `json:"promptTokenCount,omitempty"`
+	CandidatesTokenCount    *int                    `json:"candidatesTokenCount,omitempty"`
+	TotalTokenCount         *int                    `json:"totalTokenCount,omitempty"`
+	ProviderMetadata        schema.ProviderMetadata `json:"-"`
+}
+
+func (u *geminiUsage) UnmarshalJSON(data []byte) error {
+	type plain geminiUsage
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*u = geminiUsage(decoded)
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err == nil {
+		u.ProviderMetadata = schema.ProviderMetadata{"google": raw}
+	}
+	return nil
 }
 
 type geminiCandidate struct {
@@ -188,7 +197,7 @@ func geminiLowerMessages(request *schema.LLMRequest) ([]geminiContent, error) {
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
-			update := WrapSystemUpdate([]struct{ Text string }{{Text: fmt.Sprint(msg.Content)}})
+			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
 			if len(contents) > 0 && contents[len(contents)-1].Role == "user" {
 				last := &contents[len(contents)-1]
 				last.Parts = append(last.Parts, geminiTextPart{Text: update})
@@ -309,6 +318,9 @@ func geminiLowerOptions(request *schema.LLMRequest) *geminiThinkingConfig {
 
 func geminiFromRequest(request *schema.LLMRequest) (any, error) {
 	gen := request.Generation
+	if gen == nil {
+		gen = &schema.GenerationOptions{}
+	}
 	toolsEnabled := len(request.Tools) > 0 && (request.ToolChoice == nil || request.ToolChoice.Type != "none")
 
 	contents, err := geminiLowerMessages(request)
@@ -405,6 +417,7 @@ func geminiMapUsage(u *geminiUsage) *schema.Usage {
 		CacheReadInputTokens: cached,
 		ReasoningTokens:      geminiIntVal(u.ThoughtsTokenCount),
 		TotalTokens:          total,
+		ProviderMetadata:     u.ProviderMetadata,
 	}
 }
 

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"testing"
@@ -33,7 +34,7 @@ func TestAnthropic_BasicText(t *testing.T) {
 		t.Fatalf("PrepareTransport: %v", err)
 	}
 	var events []schema.LLMEvent
-	for evt, err := range r.StreamPrepared(prepared, req, rt) {
+	for evt, err := range r.StreamPrepared(context.Background(), prepared, req, rt) {
 		if err != nil {
 			t.Fatalf("StreamPrepared: %v", err)
 		}
@@ -98,7 +99,7 @@ func TestAnthropic_MultiTurn(t *testing.T) {
 		t.Fatalf("PrepareTransport: %v", err)
 	}
 	var events []schema.LLMEvent
-	for evt, err := range r.StreamPrepared(prepared, req, rt) {
+	for evt, err := range r.StreamPrepared(context.Background(), prepared, req, rt) {
 		if err != nil {
 			t.Fatalf("StreamPrepared: %v", err)
 		}
@@ -160,7 +161,7 @@ func TestAnthropic_ToolCall(t *testing.T) {
 		t.Fatalf("PrepareTransport: %v", err)
 	}
 	var events []schema.LLMEvent
-	for evt, err := range r.StreamPrepared(prepared, req, rt) {
+	for evt, err := range r.StreamPrepared(context.Background(), prepared, req, rt) {
 		if err != nil {
 			t.Fatalf("StreamPrepared: %v", err)
 		}

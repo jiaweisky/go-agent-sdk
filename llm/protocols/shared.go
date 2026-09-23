@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/user/go-agent-sdk/llm/protocols/utils"
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
@@ -70,6 +71,36 @@ func JoinText(parts []struct{ Text string }) string {
 	return strings.Join(texts, "\n")
 }
 
+// PartText extracts the text of a content part for system-update lowering.
+// Content parts are structs, so formatting them directly would emit Go struct
+// dumps; only text/reasoning parts carry text.
+func PartText(part schema.ContentPart) string {
+	switch v := part.(type) {
+	case schema.TextPart:
+		return v.Text
+	case *schema.TextPart:
+		if v != nil {
+			return v.Text
+		}
+	case schema.ReasoningPart:
+		return v.Text
+	case *schema.ReasoningPart:
+		if v != nil {
+			return v.Text
+		}
+	}
+	return ""
+}
+
+// SystemUpdateParts lowers a system message's content parts to text parts.
+func SystemUpdateParts(content []schema.ContentPart) []struct{ Text string } {
+	parts := make([]struct{ Text string }, len(content))
+	for i := range content {
+		parts[i].Text = PartText(content[i])
+	}
+	return parts
+}
+
 func escapeSystemUpdateText(text string) string {
 	text = strings.ReplaceAll(text, "&", "&amp;")
 	text = strings.ReplaceAll(text, "<", "&lt;")
@@ -104,28 +135,17 @@ func ErrorText(err error) string {
 	return "Unknown stream error"
 }
 
+// ParseToolInput decodes a tool call's JSON input. It delegates to the canonical
+// implementation in llm/protocols/utils: TS keeps this in shared.ts and imports
+// it from tool-stream.ts, but Go cannot have utils import protocols, so the
+// leaf package owns it and this re-exports it.
 func ParseToolInput(route, name, raw string) (any, error) {
-	input := raw
-	if input == "" {
-		input = "{}"
-	}
-	var result any
-	if err := json.Unmarshal([]byte(input), &result); err != nil {
-		return nil, fmt.Errorf("Invalid JSON input for %s tool call %s: %w", route, name, err)
-	}
-	return result, nil
+	return utils.ParseToolInput(route, name, raw)
 }
 
+// EventError builds the shared invalid-provider-output error.
 func EventError(route, message string, raw ...string) *schema.LLMError {
-	opts := []schema.ReasonOption{schema.WithRoute(route)}
-	if len(raw) > 0 {
-		opts = append(opts, schema.WithRaw(raw[0]))
-	}
-	return &schema.LLMError{
-		Module: "ProviderShared",
-		Method: "stream",
-		Reason: schema.NewInvalidProviderOutputReason(message, opts...),
-	}
+	return utils.EventError(route, message, raw...)
 }
 
 func InvalidRequest(message string) *schema.LLMError {
@@ -140,6 +160,15 @@ var ImageMIMEs = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
 var VideoMIMEs = []string{"video/mp4", "video/webm", "video/quicktime"}
 var AudioMIMEs = []string{"audio/wav", "audio/mp3", "audio/aiff", "audio/aac", "audio/ogg", "audio/flac"}
 var MediaMIMEs = append(append([]string{}, ImageMIMEs...), append(VideoMIMEs, AudioMIMEs...)...)
+
+// mediaMIMESet builds a lookup set from a MIME list.
+func mediaMIMESet(values []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		set[value] = struct{}{}
+	}
+	return set
+}
 
 func SupportsContent(part schema.ContentPart, types []string) bool {
 	switch part.(type) {

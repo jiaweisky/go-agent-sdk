@@ -2,6 +2,7 @@ package route
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -201,54 +202,6 @@ func providerMessage(status int, body string) string {
 	return "Provider request failed with HTTP " + strconv.Itoa(status)
 }
 
-func isContextOverflow(body string) bool {
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)prompt is too long`),
-		regexp.MustCompile(`(?i)request_too_large`),
-		regexp.MustCompile(`(?i)input is too long for requested model`),
-		regexp.MustCompile(`(?i)exceeds the context window`),
-		regexp.MustCompile(`(?i)exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))`),
-		regexp.MustCompile(`(?i)input token count.*exceeds the maximum`),
-		regexp.MustCompile(`(?i)tokens in request more than max tokens allowed`),
-		regexp.MustCompile(`(?i)maximum prompt length is \d+`),
-		regexp.MustCompile(`(?i)reduce the length of the messages`),
-		regexp.MustCompile(`(?i)maximum context length is \d+ tokens`),
-		regexp.MustCompile(`(?i)exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?`),
-		regexp.MustCompile(`(?i)input \(\d+ tokens\) is longer than the model'?s context length \(\d+ tokens\)`),
-		regexp.MustCompile(`(?i)exceeds the limit of \d+`),
-		regexp.MustCompile(`(?i)exceeds the available context size`),
-		regexp.MustCompile(`(?i)greater than the context length`),
-		regexp.MustCompile(`(?i)context window exceeds limit`),
-		regexp.MustCompile(`(?i)exceeded model token limit`),
-		regexp.MustCompile(`(?i)context[_ ]length[_ ]exceeded`),
-		regexp.MustCompile(`(?i)request entity too large`),
-		regexp.MustCompile(`(?i)context length is only \d+ tokens`),
-		regexp.MustCompile(`(?i)input length.*exceeds.*context length`),
-		regexp.MustCompile(`(?i)prompt too long; exceeded (?:max )?context length`),
-		regexp.MustCompile(`(?i)too large for model with \d+ maximum context length`),
-		regexp.MustCompile(`(?i)prompt has [\d,]+ tokens?, but the configured context size is [\d,]+ tokens?`),
-		regexp.MustCompile(`(?i)model_context_window_exceeded`),
-		regexp.MustCompile(`(?i)too many tokens`),
-		regexp.MustCompile(`(?i)token limit exceeded`),
-	}
-	exclusions := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)^(throttling error|service unavailable):`),
-		regexp.MustCompile(`(?i)rate limit`),
-		regexp.MustCompile(`(?i)too many requests`),
-	}
-	for _, excl := range exclusions {
-		if excl.MatchString(body) {
-			return false
-		}
-	}
-	for _, pat := range patterns {
-		if pat.MatchString(body) {
-			return true
-		}
-	}
-	return false
-}
-
 func classifyResponse(status int, body string, headers map[string]string) *schema.LLMError {
 	if status < 400 {
 		return nil
@@ -293,7 +246,7 @@ func classifyStatusReason(status int, body, msg string, retryAfterMs *int, rateL
 	}
 	if status == 400 || status == 404 || status == 409 || status == 413 || status == 422 {
 		opts := []schema.ReasonOption{schema.WithHttpContext(*httpCtx)}
-		if isContextOverflow(body) {
+		if schema.IsContextOverflow(body) {
 			opts = append(opts, schema.WithClassification(schema.ClassificationContextOverflow))
 		}
 		return schema.NewInvalidRequestReason(msg, opts...)
@@ -344,6 +297,31 @@ func retryDelay(attempt int, retryAfterMs *int) time.Duration {
 	return time.Duration(actual) * time.Millisecond
 }
 
+// canceledTransportError reports a request aborted by its context so callers can
+// detect an interrupt via errors.Is(err, context.Canceled).
+func canceledTransportError(err error) *schema.LLMError {
+	return &schema.LLMError{
+		Module: "RequestExecutor",
+		Method: "execute",
+		Reason: schema.NewTransportReason(fmt.Sprintf("HTTP request canceled: %v", err)),
+	}
+}
+
+// sleepContext waits for d, returning false if ctx is cancelled first.
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 type Executor struct {
 	client *http.Client
 }
@@ -376,24 +354,37 @@ func (e *Executor) DoWithRetries(req *http.Request) (*http.Response, *schema.LLM
 
 	var lastErr *schema.LLMError
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if err := req.Context().Err(); err != nil {
+			return nil, canceledTransportError(err)
+		}
 		if attempt > 0 {
 			var ra *int
 			if lastErr != nil {
 				ra = lastErr.RetryAfterMs()
 			}
-			time.Sleep(retryDelay(attempt-1, ra))
+			if !sleepContext(req.Context(), retryDelay(attempt-1, ra)) {
+				return nil, canceledTransportError(req.Context().Err())
+			}
 		}
 		if reqBody != nil {
 			req.Body = io.NopCloser(bytes.NewReader(reqBody))
 		}
 		resp, err := e.client.Do(req)
 		if err != nil {
+			if ctxErr := req.Context().Err(); ctxErr != nil {
+				return nil, canceledTransportError(ctxErr)
+			}
 			lastErr = &schema.LLMError{
 				Module: "RequestExecutor",
 				Method: "execute",
 				Reason: schema.NewTransportReason(fmt.Sprintf("HTTP request failed: %v", err)),
 			}
 			continue
+		}
+		if resp.StatusCode < 400 {
+			// Success: hand the response back with its body unread so the
+			// caller can stream it (SSE and friends).
+			return resp, nil
 		}
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()

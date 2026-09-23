@@ -1,20 +1,20 @@
 package route
 
 import (
+	"context"
 	"iter"
 
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
 type TransportRuntime struct {
-	HTTP      *Executor
-	WebSocket any
+	HTTP *Executor
 }
 
 type Transport interface {
 	ID() string
 	Prepare(input TransportPrepareInput) (any, error)
-	Frames(prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error]
+	Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error]
 }
 
 type TransportPrepareInput struct {

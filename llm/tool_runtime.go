@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/user/go-agent-sdk/llm/schema"
@@ -17,7 +18,7 @@ type DispatchResult struct {
 	Events []schema.LLMEvent
 }
 
-func Dispatch(tools Tools, call schema.ToolCallPart) *DispatchResult {
+func Dispatch(ctx context.Context, tools Tools, call schema.ToolCallPart) *DispatchResult {
 	tool := tools[call.Name]
 	if tool == nil {
 		return buildResult(call, schema.ToolResultValue{Type: "error", Value: fmt.Sprintf("Unknown tool: %s", call.Name)}, nil)
@@ -29,7 +30,7 @@ func Dispatch(tools Tools, call schema.ToolCallPart) *DispatchResult {
 	if err != nil {
 		return buildResult(call, schema.ToolResultValue{Type: "error", Value: err.Error()}, err)
 	}
-	value, err := tool.Execute(nil, decoded, &ToolExecuteContext{ID: call.ID, Name: call.Name})
+	value, err := tool.Execute(ctx, decoded, &ToolExecuteContext{ID: call.ID, Name: call.Name})
 	if err != nil {
 		return buildResult(call, schema.ToolResultValue{Type: "error", Value: err.Error()}, err)
 	}
