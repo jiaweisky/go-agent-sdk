@@ -25,7 +25,6 @@ import (
 	"github.com/user/go-agent-sdk/llm/protocols"
 	"github.com/user/go-agent-sdk/llm/provider"
 	"github.com/user/go-agent-sdk/llm/route"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/mcp"
 	opencodeconfig "github.com/user/go-agent-sdk/opencode/config"
 	opencodeskill "github.com/user/go-agent-sdk/opencode/skill"
@@ -717,5 +716,3 @@ func (l referenceLister) List() ([]reference.Info, error) {
 	}
 	return result, nil
 }
-
-var _ = llmschema.ToolResultValue{}
