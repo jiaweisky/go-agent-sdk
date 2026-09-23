@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/user/go-agent-sdk/agent"
 )
 
 func TestEditorEscExits(t *testing.T) {
@@ -116,5 +118,29 @@ func TestConsoleStatusLine(t *testing.T) {
 	c.setStatus("")
 	if got := out.String(); got != "\r\x1b[2K" {
 		t.Fatalf("clear status = %q", got)
+	}
+}
+
+func TestInteractivePermissionDefaultsToAllow(t *testing.T) {
+	cases := []struct {
+		input string
+		want  bool
+	}{
+		{"\n", true}, // empty answer defaults to yes
+		{"y\n", true},
+		{"yes\n", true},
+		{"n\n", false},
+		{"no\n", false},
+	}
+	for _, tc := range cases {
+		var out strings.Builder
+		c := &console{reader: bufio.NewReader(strings.NewReader(tc.input)), out: &out}
+		decision, err := interactivePermission(c)(agent.PermissionRequest{Action: "bash", Resources: []string{"ls"}})
+		if err != nil {
+			t.Fatalf("input %q: %v", tc.input, err)
+		}
+		if decision.Allow != tc.want {
+			t.Fatalf("input %q: allow = %v, want %v", tc.input, decision.Allow, tc.want)
+		}
 	}
 }

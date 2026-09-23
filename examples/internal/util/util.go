@@ -4,10 +4,12 @@ package util
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/user/go-agent-sdk/agent"
+	"github.com/user/go-agent-sdk/core"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 )
 
@@ -51,8 +53,9 @@ func WithMCP(configs ...agent.MCPConfig) Option {
 //	OPENCODE_MODEL        model id (required; provider-specific, so no default)
 //
 // Credentials are passed in explicitly; the SDK does not read them from
-// ~/.config/opencode. A .env file in the working directory is loaded at package
-// init (without overriding variables already set in the environment).
+// ~/.config/opencode. Call LoadDotEnv from main to read a .env file in the
+// working directory (without overriding variables already set in the
+// environment).
 //
 // Note on openai-compatible: unlike openai/anthropic it has no env fallback, so
 // OPENCODE_API_KEY is required — without it the request fails with "Missing auth
@@ -141,18 +144,21 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// init loads .env before main, so examples can read the environment while
-// building options (arguments are evaluated before Client runs).
-func init() { LoadDotEnv() }
-
-// LoadDotEnv loads KEY=VALUE pairs from .env in the working directory, without
-// overriding variables already present in the environment. Best-effort: a
-// missing or malformed file is ignored.
+// LoadDotEnv loads KEY=VALUE pairs from the first .env found searching the
+// working directory and its ancestors up to the project root (the nearest .git,
+// or the filesystem root when not in a git repository), without overriding
+// variables already present in the environment. Best-effort: a missing or
+// malformed file is ignored.
 //
-// It runs once at package init, before main and before any environment variable
-// is read (e.g. when building MCP configs).
+// Call it explicitly from main before building options (arguments are evaluated
+// before Client runs), after any os.Chdir, so the file is read from the intended
+// directory.
 func LoadDotEnv() {
-	data, err := os.ReadFile(".env")
+	path, ok := findDotEnv()
+	if !ok {
+		return
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
@@ -174,6 +180,39 @@ func LoadDotEnv() {
 			_ = os.Setenv(key, value)
 		}
 	}
+}
+
+// findDotEnv returns the nearest .env at or above the working directory, stopping
+// at the project root. The boundary mirrors config discovery (core/config.go).
+func findDotEnv() (string, bool) {
+	start, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	stop := projectRoot(start)
+	for current := start; ; {
+		candidate := filepath.Join(current, ".env")
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, true
+		}
+		if current == stop {
+			return "", false
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", false
+		}
+		current = parent
+	}
+}
+
+// projectRoot mirrors core's project boundary (core/project.go): the directory
+// holding the nearest .git, else the filesystem root.
+func projectRoot(start string) string {
+	if matches := core.Up([]string{".git"}, start); len(matches) > 0 {
+		return filepath.Dir(matches[0])
+	}
+	return filepath.VolumeName(start) + string(filepath.Separator)
 }
 
 // envLimits reads OPENCODE_CONTEXT_LIMIT / OPENCODE_OUTPUT_LIMIT so the runner

@@ -14,7 +14,7 @@ EXAMPLES := chat tool
 BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(EXAMPLES)))
 GO_SOURCES := $(shell find . -name '*.go' -not -path './bin/*')
 
-.PHONY: all examples fmt fmt-check vet test lint golangci clean
+.PHONY: all examples chat fmt fmt-check vet test lint golangci clean
 
 all: examples
 
@@ -23,6 +23,11 @@ examples: $(BINARIES)
 $(BIN)/%$(EXE): $(GO_SOURCES) go.mod go.sum
 	@mkdir -p $(BIN)
 	$(GO) build -o $@ ./examples/$*
+
+# Run the chat example with examples/chat as its working directory, so its .env
+# and .opencode stay under examples/chat instead of the launch directory.
+chat: $(BIN)/chat$(EXE)
+	$(BIN)/chat$(EXE) -C examples/chat
 
 # Format all Go sources in place.
 fmt:

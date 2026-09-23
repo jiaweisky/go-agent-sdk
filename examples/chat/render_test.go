@@ -211,3 +211,49 @@ func TestUpdateStatusShowsParentTool(t *testing.T) {
 		t.Fatalf("status = %q", c.console.status)
 	}
 }
+
+// TestSkillCallIsLogged guards that a skill load is visible: unlike ordinary
+// tool calls, it changes how the model behaves for the rest of the turn.
+func TestSkillCallIsLogged(t *testing.T) {
+	var out strings.Builder
+	c := newChat(&console{out: &out}, nil, "ses_parent", "")
+	c.handle(agent.ToolCalled{
+		SessionID: "ses_parent", CallID: "c1", Name: "skill",
+		Input: map[string]any{"name": "code-review"},
+	})
+
+	if got := out.String(); !strings.Contains(got, "[skill] code-review") {
+		t.Fatalf("out = %q, want the skill line", got)
+	}
+}
+
+// TestOrdinaryToolCallIsNotLogged guards that read/grep-style calls stay quiet.
+func TestOrdinaryToolCallIsNotLogged(t *testing.T) {
+	var out strings.Builder
+	c := newChat(&console{out: &out}, nil, "ses_parent", "")
+	c.handle(agent.ToolCalled{
+		SessionID: "ses_parent", CallID: "c1", Name: "read",
+		Input: map[string]any{"path": "x"},
+	})
+
+	if got := out.String(); got != "" {
+		t.Fatalf("out = %q, want nothing", got)
+	}
+}
+
+func TestSkillName(t *testing.T) {
+	cases := []struct {
+		input any
+		want  string
+	}{
+		{map[string]any{"name": "code-review"}, "code-review"},
+		{"release-notes", "release-notes"},
+		{map[string]any{"other": 1}, "?"},
+		{nil, "?"},
+	}
+	for _, tc := range cases {
+		if got := skillName(tc.input); got != tc.want {
+			t.Fatalf("skillName(%v) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

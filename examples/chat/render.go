@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/user/go-agent-sdk/agent"
+	coretool "github.com/user/go-agent-sdk/core/tool"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -166,6 +167,20 @@ func taskHandle(record *taskRecord) string {
 		return "#?"
 	}
 	return fmt.Sprintf("#%d", record.index)
+}
+
+// skillName extracts the requested skill from the skill tool's input (the
+// provider-parsed arguments object, e.g. {"name": "code-review"}).
+func skillName(input any) string {
+	switch value := input.(type) {
+	case map[string]any:
+		if name, ok := value["name"].(string); ok {
+			return name
+		}
+	case string:
+		return value
+	}
+	return "?"
 }
 
 // formatToolcalls mirrors TS formatSubagentToolcalls.
@@ -352,6 +367,11 @@ func (c *chat) handleParent(event agent.Event, sessionID string) {
 	case agent.ToolCalled:
 		c.flushStream(sessionID)
 		c.calls[e.CallID] = e.Name
+		if e.Name == coretool.SkillName {
+			// Skills are worth surfacing: unlike read/grep, a loaded skill
+			// changes how the model behaves for the rest of the turn.
+			c.console.write(fmt.Sprintf("%s[skill] %s%s\n", cyan, skillName(e.Input), reset))
+		}
 		if e.Name != agent.TaskName {
 			c.parentTool = e.Name
 		}

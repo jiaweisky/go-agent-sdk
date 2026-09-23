@@ -15,6 +15,7 @@ type statusInput struct {
 }
 
 func main() {
+	util.LoadDotEnv()
 	ctx := context.Background()
 	client, err := util.Client()
 	if err != nil {

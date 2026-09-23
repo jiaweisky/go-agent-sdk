@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -23,6 +24,20 @@ const (
 )
 
 func main() {
+	// -C runs as if started in the given directory (like git -C), so the
+	// config directory and workspace do not depend on where chat was launched.
+	dir := flag.String("C", "", "run as if started in this directory")
+	flag.Parse()
+	if *dir != "" {
+		if err := os.Chdir(*dir); err != nil {
+			fmt.Fprintf(os.Stderr, "chat: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	// Load .env from the (possibly changed) working directory; util no longer
+	// loads it at package init so that -C takes effect first.
+	util.LoadDotEnv()
+
 	ctx := context.Background()
 	console, restore, err := newConsole()
 	if err != nil {
@@ -67,7 +82,11 @@ func main() {
 	renderer := newChat(console, client, session.ID(), os.Getenv("OPENCODE_MODEL"))
 	client.On(renderer.handle)
 
-	console.write("Chat with go-agent-sdk (Esc or Ctrl+C to exit; interrupts a running turn)\n\n")
+	if wd, err := os.Getwd(); err == nil {
+		console.write(dim + "(directory: " + wd + ")" + reset + "\n")
+	}
+	console.write("Chat with go-agent-sdk (Esc or Ctrl+C to exit; interrupts a running turn)\n")
+	console.write(dim + "Commands: /skills  /agents  /mcps  /task [<#n>]" + reset + "\n\n")
 	for {
 		input, err := console.prompt("You: ")
 		if input == "" {
@@ -77,7 +96,20 @@ func main() {
 			continue
 		}
 		console.write("\n")
-		if input == "/task" || strings.HasPrefix(input, "/task ") {
+		switch {
+		case input == "/skills":
+			renderer.skillsCommand()
+			console.write("\n")
+			continue
+		case input == "/agents":
+			renderer.agentsCommand()
+			console.write("\n")
+			continue
+		case input == "/mcps":
+			renderer.mcpsCommand()
+			console.write("\n")
+			continue
+		case input == "/task" || strings.HasPrefix(input, "/task "):
 			renderer.taskCommand(input)
 			console.write("\n")
 			continue
@@ -119,12 +151,16 @@ func interactivePermission(console *console) agent.PermissionHandlerFunc {
 	return func(request agent.PermissionRequest) (agent.PermissionDecision, error) {
 		console.write(fmt.Sprintf("\n%s[permission] %s: %s%s\n",
 			yellow, request.Action, strings.Join(request.Resources, ", "), reset))
-		answer, _ := console.prompt("Allow? [y/N] ")
-		switch strings.ToLower(answer) {
-		case "y", "yes":
-			return agent.PermissionDecision{Allow: true}, nil
-		default:
+		answer, err := console.prompt("Allow? [Y/n] ")
+		if err != nil {
+			// EOF (e.g. Ctrl+D): fail safe rather than allow.
 			return agent.PermissionDecision{Allow: false, Message: "User denied this action."}, nil
+		}
+		switch strings.ToLower(strings.TrimSpace(answer)) {
+		case "n", "no":
+			return agent.PermissionDecision{Allow: false, Message: "User denied this action."}, nil
+		default:
+			return agent.PermissionDecision{Allow: true}, nil
 		}
 	}
 }
