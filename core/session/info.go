@@ -140,6 +140,12 @@ func FromRow(row SessionRow) schema.SessionInfo {
 			info.Revert = &revert
 		}
 	}
+	if truthy(row.Permission) && *row.Permission != "null" {
+		var permission schema.PermissionRuleset
+		if err := json.Unmarshal([]byte(*row.Permission), &permission); err == nil {
+			info.Permission = &permission
+		}
+	}
 	return info
 }
 

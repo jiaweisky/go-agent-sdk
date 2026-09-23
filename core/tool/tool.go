@@ -16,6 +16,10 @@ type Context struct {
 	Agent              string
 	AssistantMessageID string
 	ToolCallID         string
+	// Progress publishes bounded running-tool state as a durable
+	// session.next.tool.progress event, mirroring the v2 tool invocation
+	// progress context.
+	Progress func(structured map[string]any, content []Content) error
 }
 
 type Content interface {
@@ -292,23 +296,28 @@ func decodeAndValidate(input any, target any, schemas ...*jsonschema6.Schema) er
 	return nil
 }
 
-func toToolOutput(structured any, content []Content) schema.ToolOutput {
-	if len(content) == 0 {
-		return schema.NewToolOutput(structured)
-	}
-	schemaContent := make([]schema.ToolContent, len(content))
-	for i, c := range content {
+// ToToolContent converts tool content into the event-facing representation.
+func ToToolContent(content []Content) []schema.ToolContent {
+	result := make([]schema.ToolContent, 0, len(content))
+	for _, c := range content {
 		switch v := c.(type) {
 		case TextContent:
-			schemaContent[i] = schema.ToolTextContent{Type: "text", Text: v.Text}
+			result = append(result, schema.ToolTextContent{Type: "text", Text: v.Text})
 		case FileContent:
-			schemaContent[i] = schema.ToolFileContent{
+			result = append(result, schema.ToolFileContent{
 				Type: "file",
 				URI:  fmt.Sprintf("data:%s;base64,%s", v.MIME, v.Data),
 				Mime: v.MIME,
 				Name: v.Name,
-			}
+			})
 		}
 	}
-	return schema.NewToolOutput(structured, schemaContent...)
+	return result
+}
+
+func toToolOutput(structured any, content []Content) schema.ToolOutput {
+	if len(content) == 0 {
+		return schema.NewToolOutput(structured)
+	}
+	return schema.NewToolOutput(structured, ToToolContent(content)...)
 }

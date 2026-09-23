@@ -15,18 +15,19 @@ type SessionTime struct {
 
 // SessionInfo mirrors SessionV2.Info.
 type SessionInfo struct {
-	ID        SessionID     `json:"id"`
-	ParentID  *SessionID    `json:"parentID,omitempty"`
-	ProjectID ProjectID     `json:"projectID"`
-	Agent     *AgentID      `json:"agent,omitempty"`
-	Model     *ModelRef     `json:"model,omitempty"`
-	Cost      float64       `json:"cost"`
-	Tokens    SessionTokens `json:"tokens"`
-	Time      SessionTime   `json:"time"`
-	Title     string        `json:"title"`
-	Location  LocationRef   `json:"location"`
-	Subpath   *RelativePath `json:"subpath,omitempty"`
-	Revert    *RevertState  `json:"revert,omitempty"`
+	ID         SessionID          `json:"id"`
+	ParentID   *SessionID         `json:"parentID,omitempty"`
+	ProjectID  ProjectID          `json:"projectID"`
+	Agent      *AgentID           `json:"agent,omitempty"`
+	Model      *ModelRef          `json:"model,omitempty"`
+	Permission *PermissionRuleset `json:"permission,omitempty"`
+	Cost       float64            `json:"cost"`
+	Tokens     SessionTokens      `json:"tokens"`
+	Time       SessionTime        `json:"time"`
+	Title      string             `json:"title"`
+	Location   LocationRef        `json:"location"`
+	Subpath    *RelativePath      `json:"subpath,omitempty"`
+	Revert     *RevertState       `json:"revert,omitempty"`
 }
 
 // SessionListAnchor mirrors Session.ListAnchor.

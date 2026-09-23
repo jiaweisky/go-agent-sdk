@@ -9,8 +9,8 @@ import (
 
 type permTestSessions struct{ agent string }
 
-func (s permTestSessions) Get(sessionID string) (*PermissionSessionInfo, bool) {
-	return &PermissionSessionInfo{ID: sessionID, Agent: s.agent}, true
+func (s permTestSessions) Get(sessionID string) (*PermissionSessionInfo, bool, error) {
+	return &PermissionSessionInfo{ID: sessionID, Agent: s.agent}, true, nil
 }
 
 type permTestAgents struct{ rules PermissionRuleset }
@@ -175,5 +175,22 @@ func TestPermission_ReplyApproves(t *testing.T) {
 	}
 	if list := p.List(); len(list) != 0 {
 		t.Fatalf("expected no pending after reply, got %d", len(list))
+	}
+}
+
+type permTestErrorSessions struct{ err error }
+
+func (s permTestErrorSessions) Get(sessionID string) (*PermissionSessionInfo, bool, error) {
+	return nil, false, s.err
+}
+
+func TestPermission_AssertPropagatesSessionStoreError(t *testing.T) {
+	want := errors.New("session store unavailable")
+	cfg := permTestConfig(&permTestEvents{})
+	cfg.Sessions = permTestErrorSessions{err: want}
+
+	err := NewPermission(cfg).Assert(permTestAssertInput())
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
 	}
 }

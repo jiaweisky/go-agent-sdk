@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"iter"
@@ -88,7 +89,7 @@ type CompactionConfigEntry interface {
 // CompactionDependencies mirrors SessionCompaction.Dependencies.
 type CompactionDependencies struct {
 	Events EventPublisher
-	LLM    func(request llm.LLMRequest) iter.Seq2[llm.LLMEvent, error]
+	LLM    func(ctx context.Context, request llm.LLMRequest) iter.Seq2[llm.LLMEvent, error]
 	Config []CompactionConfigEntry
 }
 
@@ -98,6 +99,9 @@ type CompactionInput struct {
 	Entries   []CompactionEntry
 	Model     route.Model
 	Request   llm.LLMRequest
+	// Context carries the caller's cancellation context into the summary
+	// provider call. A nil Context behaves as context.Background().
+	Context context.Context
 }
 
 // CompactionPromptInput mirrors the buildPrompt argument.
@@ -109,7 +113,7 @@ type CompactionPromptInput struct {
 // Compaction mirrors the object returned by SessionCompaction.make.
 type Compaction struct {
 	events EventPublisher
-	llm    func(request llm.LLMRequest) iter.Seq2[llm.LLMEvent, error]
+	llm    func(ctx context.Context, request llm.LLMRequest) iter.Seq2[llm.LLMEvent, error]
 	config CompactionSettings
 }
 
@@ -211,7 +215,11 @@ func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
 	var chunks []string
 	failed := false
 	summarized := true
-	for event, err := range c.llm(*request) {
+	ctx := input.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for event, err := range c.llm(ctx, *request) {
 		if err != nil {
 			var llmError *llm.LLMError
 			if errors.As(err, &llmError) {

@@ -15,6 +15,7 @@ type ExecuteInput struct {
 	Agent              string
 	AssistantMessageID string
 	Call               schema.ToolCallPart
+	Progress           func(structured map[string]any, content []Content) error
 }
 
 type Settlement struct {
@@ -204,6 +205,7 @@ func (r *Registry) settle(execCtx context.Context, input ExecuteInput, identitie
 		Agent:              input.Agent,
 		AssistantMessageID: input.AssistantMessageID,
 		ToolCallID:         input.Call.ID,
+		Progress:           input.Progress,
 	})
 	if err != nil {
 		if failure, ok := err.(*Failure); ok {

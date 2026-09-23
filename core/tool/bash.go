@@ -119,7 +119,7 @@ func MakeBash(deps BashDeps) *Def[BashInput, BashOutput, BashStructuredOutput] {
 		Execute: func(execCtx context.Context, input BashInput, ctx Context) (BashOutput, error) {
 			result, err := executeBash(deps, execCtx, input, ctx)
 			if err != nil {
-				return BashOutput{}, &Failure{Message: fmt.Sprintf("Unable to execute command: %s", input.Command)}
+				return BashOutput{}, failure(fmt.Sprintf("Unable to execute command: %s", input.Command), err)
 			}
 			return result, nil
 		},

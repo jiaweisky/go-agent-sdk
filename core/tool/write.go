@@ -72,7 +72,7 @@ func MakeWrite(deps WriteDeps) *Def[WriteInput, WriteOutput, WriteOutput] {
 			}
 			result, err := executeWrite(deps, input, ctx)
 			if err != nil {
-				return WriteOutput{}, &Failure{Message: fmt.Sprintf("Unable to write %s", input.Path)}
+				return WriteOutput{}, failure(fmt.Sprintf("Unable to write %s", input.Path), err)
 			}
 			return result, nil
 		},

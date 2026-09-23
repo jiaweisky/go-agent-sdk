@@ -32,6 +32,9 @@ type LLMEventTokens struct {
 	Output    int                `json:"output"`
 	Reasoning int                `json:"reasoning"`
 	Cache     LLMEventTokenCache `json:"cache"`
+	// ProviderMetadata carries the provider's original usage payload keyed by
+	// provider name, passed through verbatim for billing/audit.
+	ProviderMetadata map[string]map[string]any `json:"providerMetadata,omitempty"`
 }
 
 // LLMEventStepSettlement mirrors the stepSettlement record.
@@ -559,6 +562,7 @@ func llmTokensFromUsage(usage *llmschema.Usage) LLMEventTokens {
 			Read:  llmSafe(usage.CacheReadInputTokens),
 			Write: llmSafe(usage.CacheWriteInputTokens),
 		},
+		ProviderMetadata: usage.ProviderMetadata,
 	}
 }
 

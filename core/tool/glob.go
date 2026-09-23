@@ -90,7 +90,7 @@ func MakeGlob(deps GlobDeps) *Def[GlobInput, GlobOutput, GlobOutput] {
 			}
 			result, err := executeGlob(deps, input, ctx)
 			if err != nil {
-				return nil, &Failure{Message: "Unable to find files matching " + input.Pattern}
+				return nil, failure("Unable to find files matching "+input.Pattern, err)
 			}
 			return result, nil
 		},

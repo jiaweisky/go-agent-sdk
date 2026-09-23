@@ -199,6 +199,9 @@ func (r *applyPatchRun) run(input ApplyPatchInput) (ApplyPatchOutput, error) {
 			Source:    source,
 			Agent:     &ctx.Agent,
 		}); err != nil {
+			if decline := userDecline(err); decline != nil {
+				return ApplyPatchOutput{}, decline
+			}
 			return ApplyPatchOutput{}, r.fail("patch")
 		}
 	}
@@ -219,6 +222,9 @@ func (r *applyPatchRun) run(input ApplyPatchInput) (ApplyPatchOutput, error) {
 		Source:    source,
 		Agent:     &ctx.Agent,
 	}); err != nil {
+		if decline := userDecline(err); decline != nil {
+			return ApplyPatchOutput{}, decline
+		}
 		return ApplyPatchOutput{}, r.fail("patch")
 	}
 

@@ -103,7 +103,7 @@ func MakeRead(deps ReadDeps) *Def[ReadInput, any, any] {
 			}
 			result, err := executeRead(deps, input, ctx)
 			if err != nil {
-				return nil, &Failure{Message: readToolErrorMessage(err, input.Path)}
+				return nil, failure(readToolErrorMessage(err, input.Path), err)
 			}
 			return result, nil
 		},

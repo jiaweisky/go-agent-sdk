@@ -154,6 +154,16 @@ func migrate(db *sql.DB) error {
 			")",
 		"CREATE INDEX IF NOT EXISTS `part_message_id_id_idx` ON `part` (`message_id`, `id`)",
 		"CREATE INDEX IF NOT EXISTS `part_session_idx` ON `part` (`session_id`)",
+		"CREATE TABLE IF NOT EXISTS `permission` (" +
+			"`id` text PRIMARY KEY," +
+			"`project_id` text NOT NULL," +
+			"`action` text NOT NULL," +
+			"`resource` text NOT NULL," +
+			"`time_created` integer NOT NULL," +
+			"`time_updated` integer NOT NULL," +
+			"CONSTRAINT `fk_permission_project_id_project_id_fk` FOREIGN KEY (`project_id`) REFERENCES `project`(`id`) ON DELETE CASCADE" +
+			")",
+		"CREATE UNIQUE INDEX IF NOT EXISTS `permission_project_action_resource_idx` ON `permission` (`project_id`, `action`, `resource`)",
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {

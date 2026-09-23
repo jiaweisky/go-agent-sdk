@@ -192,7 +192,7 @@ func TestLLMRunnerTextTurn(t *testing.T) {
 	}}}
 	runner := newRunnerTestRunner(t, db, llm)
 
-	if err := runner.Run(RunInput{SessionID: "ses_1", Force: true}); err != nil {
+	if err := runner.Run(context.Background(), RunInput{SessionID: "ses_1", Force: true}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -229,7 +229,7 @@ func TestLLMRunnerToolCallContinuation(t *testing.T) {
 	}}
 	runner := newRunnerTestRunner(t, db, llm)
 
-	if err := runner.Run(RunInput{SessionID: "ses_1", Force: true}); err != nil {
+	if err := runner.Run(context.Background(), RunInput{SessionID: "ses_1", Force: true}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	if llm.calls != 2 {
@@ -251,7 +251,7 @@ func TestLLMRunnerProviderErrorFailsStep(t *testing.T) {
 	}}}
 	runner := newRunnerTestRunner(t, db, llm)
 
-	if err := runner.Run(RunInput{SessionID: "ses_1", Force: true}); err != nil {
+	if err := runner.Run(context.Background(), RunInput{SessionID: "ses_1", Force: true}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 

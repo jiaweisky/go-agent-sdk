@@ -109,7 +109,7 @@ func MakeQuestion(deps QuestionDeps) *Def[QuestionInput, QuestionOutput, Questio
 				Source:    source,
 				Agent:     &ctx.Agent,
 			}); err != nil {
-				return QuestionOutput{}, &Failure{Message: "Permission denied: question"}
+				return QuestionOutput{}, failure("Permission denied: question", err)
 			}
 
 			answers, err := deps.Question.Ask(execCtx, core.QuestionAskInput{

@@ -247,7 +247,7 @@ func MakeWebFetch(deps WebFetchDeps) *Def[WebFetchInput, WebFetchOutput, WebFetc
 		Execute: func(execCtx context.Context, input WebFetchInput, ctx Context) (WebFetchOutput, error) {
 			result, err := executeWebFetch(deps, execCtx, input, ctx)
 			if err != nil {
-				return WebFetchOutput{}, &Failure{Message: "Unable to fetch " + input.URL}
+				return WebFetchOutput{}, failure("Unable to fetch "+input.URL, err)
 			}
 			return result, nil
 		},

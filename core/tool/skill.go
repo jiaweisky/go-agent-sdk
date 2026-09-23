@@ -153,7 +153,7 @@ func MakeSkill(deps SkillToolDeps) *Def[SkillInput, SkillOutput, SkillOutput] {
 			}
 			result, err := executeSkill(deps, *found, ctx)
 			if err != nil {
-				return SkillOutput{}, &Failure{Message: "Unable to load skill " + input.Name}
+				return SkillOutput{}, failure("Unable to load skill "+input.Name, err)
 			}
 			return result, nil
 		},

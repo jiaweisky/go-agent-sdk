@@ -216,8 +216,13 @@ func executeEdit(deps EditDeps, input EditInput, ctx Context) (EditOutput, error
 }
 
 func editUnableToEdit(err error, path string) error {
-	var failure *Failure
-	if errors.As(err, &failure) {
+	var declined *core.PermissionDeclinedError
+	var rejected *core.QuestionRejectedError
+	if errors.As(err, &declined) || errors.As(err, &rejected) {
+		return err
+	}
+	var existing *Failure
+	if errors.As(err, &existing) {
 		return err
 	}
 	var stale *core.FileMutationStaleContentError

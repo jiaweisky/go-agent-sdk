@@ -2,6 +2,7 @@ package util
 
 import (
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -25,7 +26,13 @@ func Match(input, pattern string) bool {
 		escaped = escaped[:len(escaped)-3] + "( .*)?"
 	}
 
-	re := regexp.MustCompile("^" + escaped + "$")
+	// Mirrors TS Wildcard.match: the `s` (dotAll) flag always, plus `i`
+	// (case-insensitive) on Windows.
+	flags := "(?s)"
+	if runtime.GOOS == "windows" {
+		flags = "(?is)"
+	}
+	re := regexp.MustCompile(flags + "^" + escaped + "$")
 	matchCache.Store(key, re)
 	return re.MatchString(normalized)
 }

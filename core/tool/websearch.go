@@ -417,7 +417,7 @@ func MakeWebSearch(deps WebSearchDeps) *Def[WebSearchInput, WebSearchOutput, Web
 		Execute: func(execCtx context.Context, input WebSearchInput, ctx Context) (WebSearchOutput, error) {
 			result, err := executeWebSearch(deps, execCtx, input, ctx)
 			if err != nil {
-				return WebSearchOutput{}, &Failure{Message: "Unable to search the web for " + input.Query}
+				return WebSearchOutput{}, failure("Unable to search the web for "+input.Query, err)
 			}
 			return result, nil
 		},

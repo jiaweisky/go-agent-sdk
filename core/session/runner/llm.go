@@ -83,8 +83,8 @@ func NewLLMRunner(runner LLMRunner) *LLMRunner {
 	return result
 }
 
-func (r *LLMRunner) compactionStream(request llmschema.LLMRequest) iter.Seq2[llmschema.LLMEvent, error] {
-	stream, err := r.LLM.Stream(context.Background(), &request)
+func (r *LLMRunner) compactionStream(ctx context.Context, request llmschema.LLMRequest) iter.Seq2[llmschema.LLMEvent, error] {
+	stream, err := r.LLM.Stream(ctx, &request)
 	if err != nil {
 		return func(yield func(llmschema.LLMEvent, error) bool) { yield(llmschema.LLMEvent{}, err) }
 	}
@@ -116,7 +116,7 @@ func isInterrupt(err error) bool {
 }
 
 // Run mirrors SessionRunner.run.
-func (r *LLMRunner) Run(input RunInput) error {
+func (r *LLMRunner) Run(ctx context.Context, input RunInput) error {
 	hasSteer, err := session.HasPending(r.DB.DB, input.SessionID, schema.SessionDeliverySteer)
 	if err != nil {
 		return err
@@ -148,7 +148,7 @@ func (r *LLMRunner) Run(input RunInput) error {
 		needsContinuation := true
 		step := 1
 		for needsContinuation {
-			result, err := r.runTurn(input.SessionID, promotion, step)
+			result, err := r.runTurn(ctx, input.SessionID, promotion, step)
 			if err != nil {
 				return err
 			}
@@ -217,17 +217,17 @@ func (r *LLMRunner) failInterruptedTools(sessionID schema.SessionID) error {
 	return nil
 }
 
-func (r *LLMRunner) runTurn(sessionID schema.SessionID, promotion *schema.SessionDelivery, step int) (turnResult, error) {
-	return r.runTurnLoop(sessionID, promotion, step, true)
+func (r *LLMRunner) runTurn(ctx context.Context, sessionID schema.SessionID, promotion *schema.SessionDelivery, step int) (turnResult, error) {
+	return r.runTurnLoop(ctx, sessionID, promotion, step, true)
 }
 
-func (r *LLMRunner) runTurnLoop(sessionID schema.SessionID, promotion *schema.SessionDelivery, step int, recoverOverflow bool) (turnResult, error) {
+func (r *LLMRunner) runTurnLoop(ctx context.Context, sessionID schema.SessionID, promotion *schema.SessionDelivery, step int, recoverOverflow bool) (turnResult, error) {
 	for {
 		var recover func(session.CompactionInput) (bool, error)
 		if recoverOverflow {
 			recover = r.compaction.CompactAfterOverflow
 		}
-		result, err := r.runTurnAttempt(sessionID, promotion, step, recover)
+		result, err := r.runTurnAttempt(ctx, sessionID, promotion, step, recover)
 		if err == nil {
 			return result, nil
 		}
@@ -266,6 +266,7 @@ func (r *LLMRunner) loadSystemContext(agent core.AgentSelection) (systemcontext.
 }
 
 func (r *LLMRunner) runTurnAttempt(
+	ctx context.Context,
 	sessionID schema.SessionID,
 	promotion *schema.SessionDelivery,
 	step int,
@@ -362,6 +363,9 @@ func (r *LLMRunner) runTurnAttempt(
 		if agent.Info != nil {
 			permissions = agent.Info.Permissions
 		}
+		if stored.Permission != nil {
+			permissions = core.PermissionMerge(permissions, *stored.Permission)
+		}
 		toolMaterialization = r.Tools.MaterializeFor(string(sessionID), permissions)
 	}
 
@@ -402,7 +406,7 @@ func (r *LLMRunner) runTurnAttempt(
 	})
 
 	if compacted, err := r.compaction.CompactIfNeeded(session.CompactionInput{
-		SessionID: sessionID, Entries: compactionEntries(entries), Model: model, Request: *request,
+		SessionID: sessionID, Entries: compactionEntries(entries), Model: model, Request: *request, Context: ctx,
 	}); err != nil {
 		return turnResult{}, err
 	} else if compacted {
@@ -427,11 +431,11 @@ func (r *LLMRunner) runTurnAttempt(
 
 	guard := &publishGuard{}
 	withPublication := func(fn func() error) error { return guard.run(fn) }
-	toolCtx, toolCancel := context.WithCancel(context.Background())
+	toolCtx, toolCancel := context.WithCancel(ctx)
 	defer toolCancel()
 
 	var overflowFailure *llmschema.LLMEvent
-	stream, streamErr := r.LLM.Stream(context.Background(), request)
+	stream, streamErr := r.LLM.Stream(ctx, request)
 	var toolWait sync.WaitGroup
 	var toolErrs []error
 	var toolErrMu sync.Mutex
@@ -485,6 +489,19 @@ func (r *LLMRunner) runTurnAttempt(
 					Agent:              string(agent.ID),
 					AssistantMessageID: string(assistantMessageID),
 					Call:               toolCallPart(call),
+					Progress: func(structured map[string]any, content []tool.Content) error {
+						return withPublication(func() error {
+							_, pubErr := r.Events.Publish(schema.SessionEventToolProgress, map[string]any{
+								"sessionID":          string(sessionID),
+								"timestamp":          time.Now().UnixMilli(),
+								"assistantMessageID": string(assistantMessageID),
+								"callID":             call.ID,
+								"structured":         structured,
+								"content":            tool.ToToolContent(content),
+							})
+							return pubErr
+						})
+					},
 				})
 				if err != nil {
 					toolErrMu.Lock()
@@ -521,7 +538,7 @@ func (r *LLMRunner) runTurnAttempt(
 	if recoverOverflow != nil && !publisher.HasAssistantStarted() &&
 		overflowContextFailure(overflowFailure, streamErr) {
 		recovered, recoverErr := recoverOverflow(session.CompactionInput{
-			SessionID: sessionID, Entries: compactionEntries(entries), Model: model, Request: *request,
+			SessionID: sessionID, Entries: compactionEntries(entries), Model: model, Request: *request, Context: ctx,
 		})
 		if recoverErr != nil {
 			return turnResult{}, recoverErr
@@ -562,18 +579,29 @@ func (r *LLMRunner) runTurnAttempt(
 		settledErr = collected[0]
 	}
 
-	if settledErr != nil && isUserDeclined(settledErr) {
+	// A user decline anywhere in the batch halts the turn (TS inspects every
+	// fiber's cause), even when another tool failed first.
+	if declined := firstDeclined(collected); declined != nil {
 		toolCancel()
 		if err := withPublication(func() error {
-			return publisher.FailUnsettledTools("Tool execution interrupted", false)
+			return publisher.FailUnsettledTools("Tool execution declined", false)
 		}); err != nil {
 			return turnResult{}, err
 		}
-		return turnResult{}, errInterrupted
+		// Surface the actual decline (e.g. "permission declined" / "The user
+		// dismissed this question") instead of a generic interrupt.
+		return turnResult{}, declined
 	}
 
 	streamInterrupted := streamErr != nil && isInterrupt(streamErr)
-	settledInterrupted := settledErr != nil && isInterrupt(settledErr)
+	var settledInterrupt error
+	for _, err := range collected {
+		if isInterrupt(err) {
+			settledInterrupt = err
+			break
+		}
+	}
+	settledInterrupted := settledInterrupt != nil
 	if streamInterrupted || settledInterrupted {
 		toolCancel()
 		if err := withPublication(func() error {
@@ -649,7 +677,7 @@ func (r *LLMRunner) runTurnAttempt(
 		return turnResult{}, streamErr
 	}
 	if settledInterrupted {
-		return turnResult{}, settledErr
+		return turnResult{}, settledInterrupt
 	}
 	return turnResult{NeedsContinuation: !publisher.HasProviderError() && needsContinuation, Step: currentStep}, nil
 }
@@ -660,6 +688,16 @@ func isUserDeclined(err error) bool {
 	var declined *core.PermissionDeclinedError
 	var rejected *core.QuestionRejectedError
 	return errors.As(err, &declined) || errors.As(err, &rejected)
+}
+
+// firstDeclined returns the first user decline among errs, or nil.
+func firstDeclined(errs []error) error {
+	for _, err := range errs {
+		if isUserDeclined(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 type publishGuard struct {

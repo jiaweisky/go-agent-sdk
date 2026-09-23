@@ -13,8 +13,8 @@ import (
 
 type testSessions struct{ agent string }
 
-func (s testSessions) Get(sessionID string) (*core.PermissionSessionInfo, bool) {
-	return &core.PermissionSessionInfo{ID: sessionID, Agent: s.agent}, true
+func (s testSessions) Get(sessionID string) (*core.PermissionSessionInfo, bool, error) {
+	return &core.PermissionSessionInfo{ID: sessionID, Agent: s.agent}, true, nil
 }
 
 type testAgents struct{ rules core.PermissionRuleset }

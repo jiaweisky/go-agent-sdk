@@ -143,6 +143,9 @@ func permissionRelevant(action string, rules PermissionRuleset) PermissionRulese
 type PermissionSessionInfo struct {
 	ID    string
 	Agent string
+	// Permissions is an optional session-level ruleset merged after the
+	// agent's permissions (used for task-tool subagent sessions).
+	Permissions PermissionRuleset
 }
 
 type PermissionAgentInfo struct {
@@ -158,7 +161,7 @@ type PermissionSaved struct {
 }
 
 type PermissionSessionStore interface {
-	Get(sessionID string) (*PermissionSessionInfo, bool)
+	Get(sessionID string) (*PermissionSessionInfo, bool, error)
 }
 
 type PermissionAgentResolver interface {
@@ -233,7 +236,10 @@ type permissionEvalResult struct {
 }
 
 func (s *permissionService) configured(sessionID string, agentID *string) (PermissionRuleset, error) {
-	session, ok := s.cfg.Sessions.Get(sessionID)
+	session, ok, err := s.cfg.Sessions.Get(sessionID)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, &PermissionSessionNotFoundError{SessionID: sessionID}
 	}
@@ -243,9 +249,9 @@ func (s *permissionService) configured(sessionID string, agentID *string) (Permi
 	}
 	agent, ok := s.cfg.Agents.Resolve(id)
 	if !ok {
-		return missingAgentPermissions, nil
+		return PermissionMerge(missingAgentPermissions, session.Permissions), nil
 	}
-	return agent.Permissions, nil
+	return PermissionMerge(agent.Permissions, session.Permissions), nil
 }
 
 func (s *permissionService) savedRules() (PermissionRuleset, error) {

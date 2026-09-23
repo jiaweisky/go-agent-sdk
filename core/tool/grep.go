@@ -117,7 +117,7 @@ func MakeGrep(deps GrepDeps) *Def[GrepInput, GrepOutput, GrepOutput] {
 			}
 			result, err := executeGrep(deps, input, ctx)
 			if err != nil {
-				return nil, &Failure{Message: "Unable to grep for " + input.Pattern}
+				return nil, failure("Unable to grep for "+input.Pattern, err)
 			}
 			return result, nil
 		},

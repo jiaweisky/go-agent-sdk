@@ -94,10 +94,10 @@ func MakeTodoWrite(deps TodoWriteDeps) *Def[TodoWriteInput, TodoWriteOutput, Tod
 				Source:    source,
 				Agent:     &ctx.Agent,
 			}); err != nil {
-				return TodoWriteOutput{}, &Failure{Message: "Unable to update todos"}
+				return TodoWriteOutput{}, failure("Unable to update todos", err)
 			}
 			if err := deps.Todos.Update(rootschema.SessionID(ctx.SessionID), input.Todos); err != nil {
-				return TodoWriteOutput{}, &Failure{Message: "Unable to update todos"}
+				return TodoWriteOutput{}, failure("Unable to update todos", err)
 			}
 			return TodoWriteOutput{Todos: input.Todos}, nil
 		},

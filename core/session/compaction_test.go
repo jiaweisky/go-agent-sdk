@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"iter"
 	"strings"
 	"testing"
@@ -47,8 +48,8 @@ func compactionTestRequest(model llm.ModelSchema, maxTokens *int) llm.LLMRequest
 	})
 }
 
-func compactionTextLLM(text string) func(llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
-	return func(request llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
+func compactionTextLLM(text string) func(context.Context, llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
+	return func(_ context.Context, request llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
 		return func(yield func(llm.LLMEvent, error) bool) {
 			yield(llmschema.NewTextDelta("t1", text), nil)
 		}
@@ -315,18 +316,18 @@ func TestCompactionCompactAfterOverflowHandlesLLMFailure(t *testing.T) {
 	}
 	input := CompactionInput{SessionID: "ses_1", Entries: entries, Model: model}
 
-	failing := func(err error) func(llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
-		return func(llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
+	failing := func(err error) func(context.Context, llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
+		return func(context.Context, llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
 			return func(yield func(llm.LLMEvent, error) bool) { yield(llm.LLMEvent{}, err) }
 		}
 	}
-	providerFailure := func(llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
+	providerFailure := func(context.Context, llm.LLMRequest) iter.Seq2[llm.LLMEvent, error] {
 		return func(yield func(llm.LLMEvent, error) bool) {
 			yield(llmschema.NewProviderErrorEvent("boom"), nil)
 		}
 	}
 
-	for name, stream := range map[string]func(llm.LLMRequest) iter.Seq2[llm.LLMEvent, error]{
+	for name, stream := range map[string]func(context.Context, llm.LLMRequest) iter.Seq2[llm.LLMEvent, error]{
 		"llm error":      failing(&llm.LLMError{Module: "test", Method: "stream"}),
 		"provider error": providerFailure,
 	} {

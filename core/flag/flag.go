@@ -150,3 +150,13 @@ func (flagValues) OPENCODE_CLIENT() string {
 	}
 	return "cli"
 }
+
+func (flagValues) OPENCODE_DISABLE_EXTERNAL_SKILLS() bool {
+	return envBoolean("OPENCODE_DISABLE_EXTERNAL_SKILLS")
+}
+
+// OPENCODE_DISABLE_CLAUDE_CODE_SKILLS mirrors RuntimeFlags.disableClaudeCodeSkills:
+// the broad OPENCODE_DISABLE_CLAUDE_CODE flag or the skills-specific flag.
+func (flagValues) OPENCODE_DISABLE_CLAUDE_CODE_SKILLS() bool {
+	return envBoolean("OPENCODE_DISABLE_CLAUDE_CODE") || envBoolean("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS")
+}

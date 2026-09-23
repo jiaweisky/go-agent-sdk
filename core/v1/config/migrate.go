@@ -51,6 +51,9 @@ func V1Migrate(info V1Info) map[string]any {
 	if info.DefaultAgent != nil {
 		out["default_agent"] = *info.DefaultAgent
 	}
+	if info.SubagentDepth != nil {
+		out["subagent_depth"] = *info.SubagentDepth
+	}
 	if len(info.Autoupdate) > 0 {
 		out["autoupdate"] = info.Autoupdate
 	}
