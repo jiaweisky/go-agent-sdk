@@ -281,6 +281,11 @@ func (c *Client) Plugin() *core.Plugin {
 	return c.rt.plugin
 }
 
+// Agents returns the agent registry (built-ins plus config-registered agents).
+func (c *Client) Agents() *core.Agent {
+	return c.rt.agents
+}
+
 // Skills returns the skill service.
 func (c *Client) Skills() *core.Skill {
 	return c.rt.skills

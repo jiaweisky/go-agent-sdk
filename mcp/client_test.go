@@ -193,3 +193,29 @@ func TestAdaptMCPToolEndToEnd(t *testing.T) {
 		t.Fatalf("content = %+v", output.Content)
 	}
 }
+
+func TestServerInfoFromInitialize(t *testing.T) {
+	ctx := context.Background()
+	server := sdk.NewServer(&sdk.Implementation{
+		Name: "weather", Title: "Weather", Description: "A demo weather server", Version: "1.0.0",
+	}, nil)
+	clientTransport, serverTransport := sdk.NewInMemoryTransports()
+	go func() { _ = server.Run(ctx, serverTransport) }()
+
+	client := NewClient("", "test")
+	defer client.Close()
+	if status := client.ConnectTransport(ctx, "weather", clientTransport, 5*time.Second); status.Status != "connected" {
+		t.Fatalf("connect status = %+v", status)
+	}
+
+	info, ok := client.ServerInfo("weather")
+	if !ok {
+		t.Fatal("ServerInfo(weather) not found")
+	}
+	if info.Name != "weather" || info.Title != "Weather" || info.Description != "A demo weather server" || info.Version != "1.0.0" {
+		t.Fatalf("info = %+v", info)
+	}
+	if _, ok := client.ServerInfo("missing"); ok {
+		t.Fatal("ServerInfo(missing) should be false")
+	}
+}

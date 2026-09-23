@@ -450,6 +450,37 @@ func (c *Client) Instructions() []ServerInstructions {
 	return result
 }
 
+// ServerInfo is a connected server's initialize metadata (the protocol's
+// serverInfo / Implementation).
+type ServerInfo struct {
+	Name        string
+	Title       string
+	Description string
+	Version     string
+}
+
+// ServerInfo returns the initialize metadata of a connected server. The second
+// result is false when the server is not connected or reported no serverInfo.
+func (c *Client) ServerInfo(name string) (ServerInfo, bool) {
+	c.mu.Lock()
+	session := c.sessions[name]
+	c.mu.Unlock()
+	if session == nil {
+		return ServerInfo{}, false
+	}
+	initialized := session.InitializeResult()
+	if initialized == nil || initialized.ServerInfo == nil {
+		return ServerInfo{}, false
+	}
+	info := initialized.ServerInfo
+	return ServerInfo{
+		Name:        info.Name,
+		Title:       info.Title,
+		Description: info.Description,
+		Version:     info.Version,
+	}, true
+}
+
 func (c *Client) setStatus(name string, status Status) {
 	c.mu.Lock()
 	c.status[name] = status
