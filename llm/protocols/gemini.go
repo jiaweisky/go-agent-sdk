@@ -383,7 +383,49 @@ func geminiDecodeEvent(frame string) (any, error) {
 	if err := json.Unmarshal([]byte(frame), &evt); err != nil {
 		return nil, fmt.Errorf("Gemini: invalid event: %w", err)
 	}
+	// Response parts arrive as raw JSON objects; geminiStep switches on typed
+	// parts, so decode them here.
+	for i := range evt.Candidates {
+		if evt.Candidates[i].Content != nil {
+			evt.Candidates[i].Content.Parts = geminiDecodeParts(evt.Candidates[i].Content.Parts)
+		}
+	}
 	return evt, nil
+}
+
+// geminiDecodeParts converts raw response part objects into the typed parts the
+// stream step handles. Parts with neither text nor functionCall are passed
+// through unchanged.
+func geminiDecodeParts(parts []any) []any {
+	decoded := make([]any, 0, len(parts))
+	for _, part := range parts {
+		raw, ok := part.(map[string]any)
+		if !ok {
+			decoded = append(decoded, part)
+			continue
+		}
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			decoded = append(decoded, part)
+			continue
+		}
+		if _, isCall := raw["functionCall"]; isCall {
+			var call geminiFunctionCallPart
+			if json.Unmarshal(encoded, &call) == nil {
+				decoded = append(decoded, call)
+				continue
+			}
+		}
+		if _, hasText := raw["text"]; hasText {
+			var text geminiTextPart
+			if json.Unmarshal(encoded, &text) == nil {
+				decoded = append(decoded, text)
+				continue
+			}
+		}
+		decoded = append(decoded, part)
+	}
+	return decoded
 }
 
 func geminiMapUsage(u *geminiUsage) *schema.Usage {
