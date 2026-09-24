@@ -13,7 +13,6 @@ Runnable examples for the go-agent-sdk high-level `agent` package.
 | `OPENCODE_API_KEY` | Provider API key (falls back to `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) | — |
 | `OPENCODE_CONTEXT_LIMIT` | Model context limit; with `OPENCODE_OUTPUT_LIMIT` it enables automatic compaction | — |
 | `OPENCODE_OUTPUT_LIMIT` | Model output limit | — |
-| `OPENCODE_DATA` | State root (`data/`, `cache/`, `state/`, `tmp/` live under it) | `$XDG_DATA_HOME/go-agent-sdk` or `~/.local/share/go-agent-sdk` |
 
 Example:
 
@@ -36,7 +35,9 @@ export OPENCODE_MODEL=deepseek-chat
 ## chat
 
 Interactive multi-turn chat. Streams reasoning/tool notifications and prints the
-assistant reply.
+assistant reply. State goes to `examples/chat/.data` (git-ignored) and the
+sample agents and skills come from the committed `examples/chat/.config`; a
+`.config` in the working directory is scanned after it and overrides them.
 
 ```sh
 go run ./examples/chat

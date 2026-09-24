@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -34,6 +35,39 @@ func WithQuestion(handler agent.QuestionHandlerFunc) Option {
 			opts.Question = handler
 		}
 	}
+}
+
+// WithRoot overrides the state root. Defaults to ExampleDir()/.data.
+func WithRoot(root string) Option {
+	return func(opts *agent.ClientOptions) {
+		if root != "" {
+			opts.Root = root
+		}
+	}
+}
+
+// WithExampleDir makes an example self-contained: state goes to <dir>/.data and
+// <dir>/.config is scanned for the sample agents and skills. Pass ExampleDir(),
+// which also prepends it to any explicit ConfigDirs.
+func WithExampleDir(dir string) Option {
+	return func(opts *agent.ClientOptions) {
+		if dir == "" {
+			return
+		}
+		opts.Root = filepath.Join(dir, ".data")
+		opts.ConfigDirs = append([]string{filepath.Join(dir, ".config")}, opts.ConfigDirs...)
+	}
+}
+
+// ExampleDir is the directory of the file that calls it, so an example's state
+// and sample config live next to the example instead of in the user's home (and
+// stay put when -C changes the working directory). Call it from the example's
+// own main or from a function defined there.
+func ExampleDir() string {
+	if _, file, _, ok := runtime.Caller(1); ok {
+		return filepath.Dir(file)
+	}
+	return "."
 }
 
 // WithMCP adds MCP servers whose tools are exposed to every session.
@@ -91,7 +125,6 @@ func Client(options ...Option) (*agent.Client, error) {
 		limit = schema.ModelLimit{Context: value.Context, Output: value.Output}
 	}
 	opts := &agent.ClientOptions{
-		Root:     dataRoot(),
 		Model:    model,
 		Protocol: protocol,
 		ModelInfo: func(id string) (schema.ModelInfo, error) {
@@ -106,9 +139,9 @@ func Client(options ...Option) (*agent.Client, error) {
 		},
 		Credentials: agent.APIKey(apiKey),
 		Permission:  agent.ApproveAll,
-		// Load agents and skills from .opencode in the working directory (the
-		// examples pin it with -C).
-		ConfigDirs: []string{".opencode"},
+		// The example's sample agents/skills, then .config in the working
+		// directory (-C pins it) so a project can override them.
+		ConfigDirs: []string{".config"},
 	}
 	for _, option := range options {
 		option(opts)
@@ -124,21 +157,6 @@ func Client(options ...Option) (*agent.Client, error) {
 		return nil, err
 	}
 	return client, nil
-}
-
-// dataRoot is this host's state root. The SDK never picks one, so the host
-// decides: OPENCODE_DATA overrides, otherwise a directory of the example's own
-// ($XDG_DATA_HOME/go-agent-sdk, else ~/.local/share/go-agent-sdk). It is a demo,
-// not the opencode CLI, so it must not write into the CLI's directory.
-func dataRoot() string {
-	if dir := os.Getenv("OPENCODE_DATA"); dir != "" {
-		return dir
-	}
-	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
-		return filepath.Join(dir, "go-agent-sdk")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "go-agent-sdk")
 }
 
 // protocolFor maps the OPENCODE_PROVIDER value to a native protocol id.

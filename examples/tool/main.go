@@ -17,7 +17,7 @@ type statusInput struct {
 func main() {
 	util.LoadDotEnv()
 	ctx := context.Background()
-	client, err := util.Client()
+	client, err := util.Client(util.WithExampleDir(util.ExampleDir()))
 	if err != nil {
 		panic(err)
 	}

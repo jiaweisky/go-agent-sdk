@@ -153,6 +153,7 @@ func send(ctx context.Context, console *console, session *agent.Session, prompt 
 // and every "ask" is approved without a prompt. Questions stay interactive.
 func clientOptions(console *console, yolo bool) []util.Option {
 	options := []util.Option{
+		util.WithExampleDir(util.ExampleDir()),
 		util.WithQuestion(interactiveQuestion(console)),
 		util.WithMCP(weatherMCP()...),
 	}

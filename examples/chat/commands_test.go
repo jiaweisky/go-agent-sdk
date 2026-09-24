@@ -8,6 +8,7 @@ import (
 
 	"github.com/user/go-agent-sdk/agent"
 	"github.com/user/go-agent-sdk/core"
+	"github.com/user/go-agent-sdk/examples/internal/util"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -68,13 +69,13 @@ func TestMCPsCommandWithoutServers(t *testing.T) {
 	}
 }
 
-// TestDemoConfigDiscovered loads the demo config from the package's .opencode
+// TestDemoConfigDiscovered loads the demo config from the package's .config
 // directory (go test runs with the package directory as the working directory).
 func TestDemoConfigDiscovered(t *testing.T) {
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
 		Model:      "test-model",
-		ConfigDirs: []string{".opencode"},
+		ConfigDirs: []string{".config"},
 		Root:       t.TempDir(),
 	})
 	if err != nil {
@@ -116,5 +117,24 @@ func TestDemoConfigDiscovered(t *testing.T) {
 	}
 	if got := core.PermissionEvaluate("edit", "main.go", docs.Permissions).Effect; got != schema.PermissionEffectDeny {
 		t.Fatalf("docs-writer edit main.go = %q, want deny", got)
+	}
+}
+
+// TestExampleDirIsSelfContained: the example's state and sample config resolve
+// next to the example, not in the user's home.
+func TestExampleDirIsSelfContained(t *testing.T) {
+	dir := util.ExampleDir()
+	if _, err := os.Stat(filepath.Join(dir, ".config", "skill", "code-review", "SKILL.md")); err != nil {
+		t.Fatalf("sample skill next to the example: %v", err)
+	}
+
+	opts := &agent.ClientOptions{ConfigDirs: []string{".config"}}
+	util.WithExampleDir(dir)(opts)
+	if want := filepath.Join(dir, ".data"); opts.Root != want {
+		t.Fatalf("Root = %q, want %q", opts.Root, want)
+	}
+	if len(opts.ConfigDirs) != 2 ||
+		opts.ConfigDirs[0] != filepath.Join(dir, ".config") || opts.ConfigDirs[1] != ".config" {
+		t.Fatalf("ConfigDirs = %v", opts.ConfigDirs)
 	}
 }
