@@ -204,17 +204,13 @@ func bedrockConverseTextWithCache(bp *utils.Breakpoints, text string, cache *sch
 	return blocks
 }
 
-func bedrockConverseLowerToolChoice(tc schema.ToolChoice) any {
-	switch tc.Type {
-	case "auto":
-		return map[string]any{"auto": struct{}{}}
-	case "none":
-		return nil
-	case "required":
-		return map[string]any{"any": struct{}{}}
-	default:
-		return map[string]any{"tool": map[string]any{"name": *tc.Name}}
-	}
+func bedrockConverseLowerToolChoice(tc schema.ToolChoice) (any, error) {
+	return MatchToolChoice("Bedrock Converse", tc,
+		map[string]any{"auto": struct{}{}},
+		nil,
+		map[string]any{"any": struct{}{}},
+		func(name string) any { return map[string]any{"tool": map[string]any{"name": name}} },
+	)
 }
 
 func bedrockConverseBedrockFinishReason(reason string) schema.FinishReason {
@@ -300,7 +296,11 @@ func bedrockConverseFromRequest(request *schema.LLMRequest) (any, error) {
 
 	var toolChoice any
 	if request.ToolChoice != nil {
-		toolChoice = bedrockConverseLowerToolChoice(*request.ToolChoice)
+		choice, err := bedrockConverseLowerToolChoice(*request.ToolChoice)
+		if err != nil {
+			return nil, err
+		}
+		toolChoice = choice
 	}
 	var tools []any
 	if len(request.Tools) > 0 && (request.ToolChoice == nil || request.ToolChoice.Type != "none") {

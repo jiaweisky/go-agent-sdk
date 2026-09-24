@@ -152,7 +152,7 @@ func geminiLowerTool(td schema.ToolDefinition, inputSchema any) geminiFunctionDe
 	}
 }
 
-func geminiLowerToolConfig(tc schema.ToolChoice) *geminiToolConfig {
+func geminiLowerToolConfig(tc schema.ToolChoice) (*geminiToolConfig, error) {
 	cfg := &geminiToolConfig{}
 	switch tc.Type {
 	case "auto":
@@ -162,10 +162,13 @@ func geminiLowerToolConfig(tc schema.ToolChoice) *geminiToolConfig {
 	case "required":
 		cfg.FunctionCallingConfig.Mode = "ANY"
 	default:
+		if tc.Name == nil || *tc.Name == "" {
+			return nil, InvalidRequest("Gemini tool choice requires a tool name")
+		}
 		cfg.FunctionCallingConfig.Mode = "ANY"
 		cfg.FunctionCallingConfig.AllowedFunctionNames = []string{*tc.Name}
 	}
-	return cfg
+	return cfg, nil
 }
 
 func geminiLowerUserPart(part schema.ContentPart) (any, error) {
@@ -351,7 +354,11 @@ func geminiFromRequest(request *schema.LLMRequest) (any, error) {
 	}
 	var toolCfg *geminiToolConfig
 	if toolsEnabled && request.ToolChoice != nil {
-		toolCfg = geminiLowerToolConfig(*request.ToolChoice)
+		cfg, err := geminiLowerToolConfig(*request.ToolChoice)
+		if err != nil {
+			return nil, err
+		}
+		toolCfg = cfg
 	}
 
 	gc := &geminiGenerationConfig{

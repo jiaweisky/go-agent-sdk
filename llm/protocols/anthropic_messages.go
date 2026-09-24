@@ -256,17 +256,13 @@ func anthropicMessagesLowerTool(bp *anthropicMessagesBreakpointTracker, td schem
 	}
 }
 
-func anthropicMessagesLowerToolChoice(tc schema.ToolChoice) any {
-	if tc.Type == "auto" {
-		return anthropicMessagesAnthropicToolChoice{Type: "auto"}
-	}
-	if tc.Type == "none" {
-		return nil
-	}
-	if tc.Type == "required" {
-		return anthropicMessagesAnthropicToolChoice{Type: "any"}
-	}
-	return anthropicMessagesAnthropicToolChoice{Type: "tool", Name: *tc.Name}
+func anthropicMessagesLowerToolChoice(tc schema.ToolChoice) (any, error) {
+	return MatchToolChoice("Anthropic Messages", tc,
+		anthropicMessagesAnthropicToolChoice{Type: "auto"},
+		nil,
+		anthropicMessagesAnthropicToolChoice{Type: "any"},
+		func(name string) any { return anthropicMessagesAnthropicToolChoice{Type: "tool", Name: name} },
+	)
 }
 
 func anthropicMessagesLowerToolCall(part schema.ToolCallPart) anthropicMessagesToolUseBlock {
@@ -331,7 +327,7 @@ func anthropicMessagesLowerToolResultContent(part schema.ToolResultPart) (any, e
 	if !ok {
 		return ToolResultText(part), nil
 	}
-	var items []any
+	items := []any{}
 	for _, c := range content {
 		item, err := anthropicMessagesLowerToolResultContentItem(c)
 		if err != nil {
@@ -340,6 +336,16 @@ func anthropicMessagesLowerToolResultContent(part schema.ToolResultPart) (any, e
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func anthropicMessagesThinkingBudget(m map[string]any) (int, bool) {
+	if b, ok := m["budgetTokens"].(float64); ok {
+		return int(b), true
+	}
+	if b, ok := m["budget_tokens"].(float64); ok {
+		return int(b), true
+	}
+	return 0, false
 }
 
 func anthropicMessagesSupportsNativeSystemUpdate(request *schema.LLMRequest) bool {
@@ -356,24 +362,20 @@ func anthropicMessagesEndsInServerToolUse(msg schema.Message) bool {
 }
 
 func anthropicMessagesCanUseNativeSystemUpdate(messages []schema.Message, index int) bool {
-	if index <= 0 || index >= len(messages)-1 {
+	if index <= 0 || index >= len(messages) {
 		return false
 	}
 	prev := messages[index-1]
-	next := messages[index+1]
 	if prev.Role == "system" {
 		return false
 	}
 	if prev.Role != "user" && prev.Role != "tool" && !anthropicMessagesEndsInServerToolUse(prev) {
 		return false
 	}
-	if next.Role == "system" {
-		return false
+	if index+1 == len(messages) {
+		return true
 	}
-	if next.Role != "assistant" {
-		return false
-	}
-	return true
+	return messages[index+1].Role == "assistant"
 }
 
 func anthropicMessagesSplitsLocalToolResults(messages []schema.Message, index int) bool {
@@ -402,7 +404,11 @@ func anthropicMessagesFromRequest(request *schema.LLMRequest) (any, error) {
 
 	var toolChoice any
 	if request.ToolChoice != nil {
-		toolChoice = anthropicMessagesLowerToolChoice(*request.ToolChoice)
+		choice, err := anthropicMessagesLowerToolChoice(*request.ToolChoice)
+		if err != nil {
+			return nil, err
+		}
+		toolChoice = choice
 	}
 	outputLimit := 4096
 	if defaults := request.Model.GetDefaults(); defaults != nil && defaults.Limits != nil {
@@ -443,15 +449,11 @@ func anthropicMessagesFromRequest(request *schema.LLMRequest) (any, error) {
 	if raw := request.ProviderOptions["anthropic"]; len(raw) > 0 {
 		if m, ok := raw["thinking"].(map[string]any); ok {
 			if t, _ := m["type"].(string); t == "enabled" {
-				budget := 0
-				if b, _ := m["budgetTokens"].(float64); b > 0 {
-					budget = int(b)
-				} else if b, _ := m["budget_tokens"].(float64); b > 0 {
-					budget = int(b)
+				budget, ok := anthropicMessagesThinkingBudget(m)
+				if !ok {
+					return nil, InvalidRequest("Anthropic thinking provider option requires budgetTokens")
 				}
-				if budget > 0 {
-					thinking = &anthropicMessagesAnthropicThinking{Type: "enabled", BudgetTokens: budget}
-				}
+				thinking = &anthropicMessagesAnthropicThinking{Type: "enabled", BudgetTokens: budget}
 			}
 		}
 	}

@@ -231,11 +231,13 @@ func openaiResponsesLowerTool(td schema.ToolDefinition, inputSchema any) openaiR
 	}
 }
 
-func openaiResponsesLowerToolChoice(tc schema.ToolChoice) any {
-	if tc.Name != nil {
-		return map[string]any{"type": "function", "name": *tc.Name}
-	}
-	return tc.Type
+func openaiResponsesLowerToolChoice(tc schema.ToolChoice) (any, error) {
+	return MatchToolChoice("OpenAI Responses", tc,
+		"auto",
+		"none",
+		"required",
+		func(name string) any { return map[string]any{"type": "function", "name": name} },
+	)
 }
 
 func openaiResponsesLowerToolCall(part schema.ToolCallPart) openaiResponsesFunctionCallItem {
@@ -551,7 +553,11 @@ func openaiResponsesFromRequest(request *schema.LLMRequest) (any, error) {
 		body["tools"] = tools
 	}
 	if request.ToolChoice != nil {
-		body["tool_choice"] = openaiResponsesLowerToolChoice(*request.ToolChoice)
+		choice, err := openaiResponsesLowerToolChoice(*request.ToolChoice)
+		if err != nil {
+			return nil, err
+		}
+		body["tool_choice"] = choice
 	}
 	if gen != nil {
 		body["max_output_tokens"] = gen.MaxTokens

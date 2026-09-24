@@ -223,25 +223,19 @@ func UnsupportedContent(route string, role schema.MessageRole, types []string) *
 	return InvalidRequest(fmt.Sprintf("%s %s messages only support %s content for now", route, role, FormatContentTypes(types)))
 }
 
-func MatchToolChoice(route string, toolChoice schema.ToolChoice, cases struct {
-	Auto     func() any
-	None     func() any
-	Required func() any
-	Tool     func(name string) any
-}) (any, error) {
+// MatchToolChoice mirrors ProviderShared.matchToolChoice: the mode choices map
+// to their case and any other type is a named tool, which requires a name.
+func MatchToolChoice(route string, toolChoice schema.ToolChoice, auto, none, required any, tool func(name string) any) (any, error) {
 	switch toolChoice.Type {
 	case "auto":
-		return cases.Auto(), nil
+		return auto, nil
 	case "none":
-		return cases.None(), nil
+		return none, nil
 	case "required":
-		return cases.Required(), nil
-	case "tool":
-		if toolChoice.Name == nil || *toolChoice.Name == "" {
-			return nil, InvalidRequest(fmt.Sprintf("%s tool choice requires a tool name", route))
-		}
-		return cases.Tool(*toolChoice.Name), nil
-	default:
-		return nil, InvalidRequest(fmt.Sprintf("%s unknown tool choice type: %s", route, toolChoice.Type))
+		return required, nil
 	}
+	if toolChoice.Name == nil || *toolChoice.Name == "" {
+		return nil, InvalidRequest(fmt.Sprintf("%s tool choice requires a tool name", route))
+	}
+	return tool(*toolChoice.Name), nil
 }

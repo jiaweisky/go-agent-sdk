@@ -152,14 +152,15 @@ func openaiChatLowerTool(tool schema.ToolDefinition, inputSchema any) openaiChat
 	}
 }
 
-func openaiChatLowerToolChoice(tc schema.ToolChoice) any {
-	if tc.Name != nil {
-		return openaiChatToolChoice{
-			Type:     "function",
-			Function: &openaiChatToolChoiceFunc{Name: *tc.Name},
-		}
-	}
-	return tc.Type
+func openaiChatLowerToolChoice(tc schema.ToolChoice) (any, error) {
+	return MatchToolChoice("OpenAI Chat", tc,
+		"auto",
+		"none",
+		"required",
+		func(name string) any {
+			return openaiChatToolChoice{Type: "function", Function: &openaiChatToolChoiceFunc{Name: name}}
+		},
+	)
 }
 
 func openaiChatLowerToolCall(part schema.ToolCallPart) openaiChatAssistantToolCall {
@@ -289,7 +290,11 @@ func openaiChatFromRequest(request *schema.LLMRequest) (any, error) {
 		body.Tools = tools
 	}
 	if request.ToolChoice != nil {
-		body.ToolChoice = openaiChatLowerToolChoice(*request.ToolChoice)
+		choice, err := openaiChatLowerToolChoice(*request.ToolChoice)
+		if err != nil {
+			return nil, err
+		}
+		body.ToolChoice = choice
 	}
 	if raw := request.ProviderOptions["openai"]; len(raw) > 0 {
 		if s, ok := raw["store"].(bool); ok {
