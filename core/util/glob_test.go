@@ -115,6 +115,25 @@ func TestGlobScanSymlink(t *testing.T) {
 	if containsPath(unfollowed, filepath.Join(link, "b.md")) {
 		t.Fatalf("expected no-follow to exclude linked/b.md: %v", unfollowed)
 	}
+
+	// npm glob only treats a symlink as a directory when it follows it, so a
+	// non-followed link to a directory still matches a nodir pattern while a
+	// followed one is excluded as a directory.
+	unfollowedAll, err := GlobScan("**/*", GlobOptions{Cwd: dir, Absolute: true, Include: "file", Dot: true, Symlink: false})
+	if err != nil {
+		t.Fatalf("glob no-follow all: %v", err)
+	}
+	if !containsPath(unfollowedAll, link) {
+		t.Fatalf("expected a non-followed directory symlink to match include:file: %v", unfollowedAll)
+	}
+
+	followedAll, err := GlobScan("**/*", GlobOptions{Cwd: dir, Absolute: true, Include: "file", Dot: true, Symlink: true})
+	if err != nil {
+		t.Fatalf("glob follow all: %v", err)
+	}
+	if containsPath(followedAll, link) {
+		t.Fatalf("expected a followed directory symlink to be excluded by include:file: %v", followedAll)
+	}
 }
 
 func containsPath(paths []string, target string) bool {

@@ -110,7 +110,10 @@ func globPattern(pattern, cwd string, options GlobOptions) ([]string, error) {
 				if statErr != nil {
 					continue
 				}
-				isDir = target.IsDir()
+				// npm glob only treats a symlink as a directory when it follows
+				// it: with follow:false a symlink is a leaf, so a link to a
+				// directory still matches a nodir (include:"file") pattern.
+				isDir = target.IsDir() && options.Symlink
 			}
 
 			candidate := childRel
