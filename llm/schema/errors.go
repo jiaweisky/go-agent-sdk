@@ -135,12 +135,16 @@ func WithRaw(raw string) ReasonOption {
 	return func(r *LLMErrorReason) { r.Raw = &raw }
 }
 
-func NewInvalidRequestReason(message string, opts ...ReasonOption) LLMErrorReason {
-	r := LLMErrorReason{Kind: ReasonInvalidRequest, Message: message}
+// applyReasons applies the reason options to a base reason.
+func applyReasons(r LLMErrorReason, opts []ReasonOption) LLMErrorReason {
 	for _, opt := range opts {
 		opt(&r)
 	}
 	return r
+}
+
+func NewInvalidRequestReason(message string, opts ...ReasonOption) LLMErrorReason {
+	return applyReasons(LLMErrorReason{Kind: ReasonInvalidRequest, Message: message}, opts)
 }
 
 func NewNoRouteReason(route RouteID, provider ProviderID, model ModelID) LLMErrorReason {
@@ -154,67 +158,35 @@ func NewNoRouteReason(route RouteID, provider ProviderID, model ModelID) LLMErro
 }
 
 func NewAuthenticationReason(message string, kind AuthenticationKind, opts ...ReasonOption) LLMErrorReason {
-	r := LLMErrorReason{Kind: ReasonAuthentication, Message: message, AuthKind: &kind}
-	for _, opt := range opts {
-		opt(&r)
-	}
-	return r
+	return applyReasons(LLMErrorReason{Kind: ReasonAuthentication, Message: message, AuthKind: &kind}, opts)
 }
 
 func NewRateLimitReason(message string, opts ...ReasonOption) LLMErrorReason {
-	r := LLMErrorReason{Kind: ReasonRateLimit, Message: message}
-	for _, opt := range opts {
-		opt(&r)
-	}
-	return r
+	return applyReasons(LLMErrorReason{Kind: ReasonRateLimit, Message: message}, opts)
 }
 
 func NewQuotaExceededReason(message string, opts ...ReasonOption) LLMErrorReason {
-	r := LLMErrorReason{Kind: ReasonQuotaExceeded, Message: message}
-	for _, opt := range opts {
-		opt(&r)
-	}
-	return r
+	return applyReasons(LLMErrorReason{Kind: ReasonQuotaExceeded, Message: message}, opts)
 }
 
 func NewContentPolicyReason(message string, opts ...ReasonOption) LLMErrorReason {
-	r := LLMErrorReason{Kind: ReasonContentPolicy, Message: message}
-	for _, opt := range opts {
-		opt(&r)
-	}
-	return r
+	return applyReasons(LLMErrorReason{Kind: ReasonContentPolicy, Message: message}, opts)
 }
 
 func NewProviderInternalReason(message string, status int, opts ...ReasonOption) LLMErrorReason {
-	r := LLMErrorReason{Kind: ReasonProviderInternal, Message: message, Status: &status}
-	for _, opt := range opts {
-		opt(&r)
-	}
-	return r
+	return applyReasons(LLMErrorReason{Kind: ReasonProviderInternal, Message: message, Status: &status}, opts)
 }
 
 func NewTransportReason(message string, opts ...ReasonOption) LLMErrorReason {
-	r := LLMErrorReason{Kind: ReasonTransport, Message: message}
-	for _, opt := range opts {
-		opt(&r)
-	}
-	return r
+	return applyReasons(LLMErrorReason{Kind: ReasonTransport, Message: message}, opts)
 }
 
 func NewInvalidProviderOutputReason(message string, opts ...ReasonOption) LLMErrorReason {
-	r := LLMErrorReason{Kind: ReasonInvalidProviderOutput, Message: message}
-	for _, opt := range opts {
-		opt(&r)
-	}
-	return r
+	return applyReasons(LLMErrorReason{Kind: ReasonInvalidProviderOutput, Message: message}, opts)
 }
 
 func NewUnknownProviderReason(message string, opts ...ReasonOption) LLMErrorReason {
-	r := LLMErrorReason{Kind: ReasonUnknownProvider, Message: message}
-	for _, opt := range opts {
-		opt(&r)
-	}
-	return r
+	return applyReasons(LLMErrorReason{Kind: ReasonUnknownProvider, Message: message}, opts)
 }
 
 func (r *LLMErrorReason) Retryable() bool {

@@ -59,12 +59,20 @@ func openAIOptions(request *schema.LLMRequest) map[string]any {
 	return request.ProviderOptions["openai"]
 }
 
-func Store(request *schema.LLMRequest) *bool {
+// openAIOption returns the request's openai provider option for key, when the
+// request carries one of the expected type.
+func openAIOption[T any](request *schema.LLMRequest, key string) (T, bool) {
 	opts := openAIOptions(request)
 	if opts == nil {
-		return nil
+		var zero T
+		return zero, false
 	}
-	v, ok := opts["store"].(bool)
+	value, ok := opts[key].(T)
+	return value, ok
+}
+
+func Store(request *schema.LLMRequest) *bool {
+	v, ok := openAIOption[bool](request, "store")
 	if !ok {
 		return nil
 	}
@@ -72,11 +80,7 @@ func Store(request *schema.LLMRequest) *bool {
 }
 
 func ReasoningEffort(request *schema.LLMRequest) *string {
-	opts := openAIOptions(request)
-	if opts == nil {
-		return nil
-	}
-	v, ok := opts["reasoningEffort"].(string)
+	v, ok := openAIOption[string](request, "reasoningEffort")
 	if !ok {
 		return nil
 	}
@@ -87,11 +91,7 @@ func ReasoningEffort(request *schema.LLMRequest) *string {
 }
 
 func ReasoningSummary(request *schema.LLMRequest) *string {
-	opts := openAIOptions(request)
-	if opts == nil {
-		return nil
-	}
-	v, ok := opts["reasoningSummary"].(string)
+	v, ok := openAIOption[string](request, "reasoningSummary")
 	if !ok || v != "auto" {
 		return nil
 	}
@@ -99,11 +99,7 @@ func ReasoningSummary(request *schema.LLMRequest) *string {
 }
 
 func Include(request *schema.LLMRequest) []string {
-	opts := openAIOptions(request)
-	if opts == nil {
-		return nil
-	}
-	raw, ok := opts["include"].([]any)
+	raw, ok := openAIOption[[]any](request, "include")
 	if !ok {
 		return nil
 	}
@@ -124,11 +120,7 @@ func Include(request *schema.LLMRequest) []string {
 }
 
 func PromptCacheKey(request *schema.LLMRequest) *string {
-	opts := openAIOptions(request)
-	if opts == nil {
-		return nil
-	}
-	v, ok := opts["promptCacheKey"].(string)
+	v, ok := openAIOption[string](request, "promptCacheKey")
 	if !ok {
 		return nil
 	}
@@ -136,11 +128,7 @@ func PromptCacheKey(request *schema.LLMRequest) *string {
 }
 
 func TextVerbosity(request *schema.LLMRequest) *string {
-	opts := openAIOptions(request)
-	if opts == nil {
-		return nil
-	}
-	v, ok := opts["textVerbosity"].(string)
+	v, ok := openAIOption[string](request, "textVerbosity")
 	if !ok {
 		return nil
 	}
@@ -151,11 +139,7 @@ func TextVerbosity(request *schema.LLMRequest) *string {
 }
 
 func ServiceTier(request *schema.LLMRequest) *string {
-	opts := openAIOptions(request)
-	if opts == nil {
-		return nil
-	}
-	v, ok := opts["serviceTier"].(string)
+	v, ok := openAIOption[string](request, "serviceTier")
 	if !ok {
 		return nil
 	}
@@ -166,11 +150,7 @@ func ServiceTier(request *schema.LLMRequest) *string {
 }
 
 func Instructions(request *schema.LLMRequest) *string {
-	opts := openAIOptions(request)
-	if opts == nil {
-		return nil
-	}
-	v, ok := opts["instructions"].(string)
+	v, ok := openAIOption[string](request, "instructions")
 	if !ok {
 		return nil
 	}
