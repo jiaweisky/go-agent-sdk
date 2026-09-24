@@ -5,7 +5,6 @@ go 1.27.1
 require (
 	github.com/bmatcuk/doublestar v1.3.4
 	github.com/funnyfactor/mimetype v1.0.2
-	github.com/gorilla/websocket v1.5.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/image v0.46.0
