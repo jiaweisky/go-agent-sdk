@@ -28,15 +28,11 @@ type ClientOptions struct {
 	// Pointing each instance at its own Root isolates it (tests, sandboxes,
 	// multiple tenants).
 	//
-	//	{Root}/data/   snapshots, references, tool output, logs
+	//	{Root}/data/   session database, snapshots, references, tool output, logs
 	//	{Root}/cache/  downloaded binaries and skill content
-	//	{Root}/db/     session database
 	//	{Root}/state/  runtime state (reserved)
 	//	{Root}/tmp/    scratch space
 	Root string
-	// DataDir overrides the directory holding the session database. Empty uses
-	// {Root}/db. It is independent of Root, which covers all the other state.
-	DataDir string
 	// Home is the user's home directory, used to expand ~ in agent permission
 	// rules. Empty uses the OS home directory.
 	Home string

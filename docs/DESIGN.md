@@ -545,7 +545,7 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 
 > **工具输出限额**：`core.ToolOutputStore`（`MAX_LINES=2000` / `MAX_BYTES=50KB`）会把超限的 tool result 落盘为 `tool-output/tool_*`，只把 head/tail 预览发给模型（`core/tool/output_store.go` 适配 `tool.OutputStore`，由 `agent/runtime.go` 通过 `tool.WithOutputStore` 注入）。**未注入时 registry 的 `store == nil`，限额被跳过**，一次大 `grep`/`read` 就能撑爆上下文窗口。
 >
-> 落盘目录是 `{Global.Data}/tool-output`，即 `{ClientOptions.Root}/data/tool-output`；`ClientOptions.Root` 必填（`ClientOptions.DataDir` 只管 SQLite，不影响这里）。`ToolOutputStore.Cleanup` 按文件 mtime 清理超过 7 天（`ToolOutputStoreRetention`）的文件：`agent` 层在 `newRuntime` 时起一个 goroutine，启动时跑一次、之后每小时一次，`Client.Close()` 时随 runtime 的 lifetime context 退出；也可用 `Client.CleanupToolOutput()` 手动触发（对齐 v2 `tool-output-store.ts` 的 `cleanupLayer` + `cleanupNode`）。
+> 落盘目录是 `{Global.Data}/tool-output`，即 `{ClientOptions.Root}/data/tool-output`；`ClientOptions.Root` 必填。`ToolOutputStore.Cleanup` 按文件 mtime 清理超过 7 天（`ToolOutputStoreRetention`）的文件：`agent` 层在 `newRuntime` 时起一个 goroutine，启动时跑一次、之后每小时一次，`Client.Close()` 时随 runtime 的 lifetime context 退出；也可用 `Client.CleanupToolOutput()` 手动触发（对齐 v2 `tool-output-store.ts` 的 `cleanupLayer` + `cleanupNode`）。
 
 ### 7.4 内置工具
 
@@ -679,8 +679,7 @@ type ClientOptions struct {
     ModelInfo        ModelInfoProvider         // 可选：catalog 元数据（protocol/endpoint/limits/headers）
     Credentials      CredentialProvider        // provider → 秘密（APIKey / AWS）
     WorkingDirectory string
-    Root             string                    // SDK 状态根（data/cache/db/state/tmp）；**必填**，库不选默认位置
-    DataDir          string                    // 覆盖会话数据库目录；空则用 {Root}/db
+    Root             string                    // SDK 状态根（data/cache/state/tmp）；**必填**，库不选默认位置
     Home             string                    // ~ 展开用；空则用 OS home
     ConfigDirs       []string                  // 内容配置目录（见「配置模型」）
     SubagentDepth    int                       // task 子会话最大深度（默认 1）
@@ -775,9 +774,8 @@ SDK **不使用 `opencode.json`**，也不做目录发现（无 `OPENCODE_CONFIG
 TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR` 等 env。**SDK 刻意偏离**——可嵌入的库不该读宿主进程的 env 来定位自己的状态，只保留「宿主事实」类输入（`$HOME`、Windows 的 `COMSPEC`、`LC_*`/`LANG` 作为 locale 默认）。全部状态由 `ClientOptions.Root` 派生（`core.NewGlobal(root, home)` 是纯函数，不读 env）：
 
 ```
-{Root}/data/    snapshot、reference clone、plans、tool-output、log
+{Root}/data/    agent.db、snapshot、reference clone、plans、tool-output、log
 {Root}/cache/   下载的二进制（ripgrep）、skill 内容缓存
-{Root}/db/      agent.db
 {Root}/state/   运行期状态（保留，对齐 TS 的 flock）
 {Root}/tmp/     临时文件
 ```

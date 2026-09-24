@@ -165,15 +165,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	}
 	global := core.NewGlobal(root, home)
 
-	dbPath := opts.DataDir
-	if dbPath == "" {
-		dbPath = filepath.Join(root, "db", "agent.db")
-	} else {
-		if err := os.MkdirAll(dbPath, 0o755); err != nil {
-			return nil, err
-		}
-		dbPath = filepath.Join(dbPath, "agent.db")
-	}
+	dbPath := filepath.Join(global.Data, "agent.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}

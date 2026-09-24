@@ -1865,6 +1865,23 @@ func TestNewClientRequiresProtocolOrModelInfo(t *testing.T) {
 	}
 }
 
+// TestClientStateLayout pins the {Root} layout: the session database lives in
+// data/ alongside the other state, not in a directory of its own.
+func TestClientStateLayout(t *testing.T) {
+	root := t.TempDir()
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("k"),
+		Model: "test-model", Root: root, LLM: fakeLLM{reply: "x"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+	if _, err := os.Stat(filepath.Join(root, "data", "agent.db")); err != nil {
+		t.Fatalf("session database: %v", err)
+	}
+}
+
 func TestNewClientRequiresRoot(t *testing.T) {
 	_, err := NewClient(&ClientOptions{
 		Model:    "test-model",

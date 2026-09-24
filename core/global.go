@@ -28,7 +28,7 @@ type Global struct {
 // The root is required: no default is applied, so the caller always decides
 // what the SDK reads and writes.
 //
-//	data/   snapshots, references, plans, tool output, logs, session database
+//	data/   session database, snapshots, references, plans, tool output, logs
 //	cache/  downloaded binaries and skill content (disposable)
 //	state/  runtime state (reserved; TS uses it for flock)
 //	tmp/    scratch space
