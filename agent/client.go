@@ -30,8 +30,9 @@ type ClientOptions struct {
 	//	{Root}/state/  runtime state (reserved)
 	//	{Root}/tmp/    scratch space
 	//
-	// Empty uses ~/.local/share/opencode. Nothing is read from the environment,
-	// so setting Root isolates an instance (tests, sandboxes, multiple tenants).
+	// Empty uses ~/.local/share/opencode, derived from the OS home directory
+	// (os.UserHomeDir). No XDG_* or OPENCODE_* variable is consulted, so setting
+	// Root isolates an instance (tests, sandboxes, multiple tenants).
 	Root string
 	// DataDir overrides the directory holding the session database. Empty uses
 	// {Root}/db. It is independent of Root, which covers all the other state.

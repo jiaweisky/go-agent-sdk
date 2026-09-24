@@ -770,9 +770,9 @@ type SessionHooks struct { /* Pre/PostToolUse, UserPromptSubmitted,
 
 SDK **不使用 `opencode.json`**，也不做目录发现（无 `OPENCODE_CONFIG_DIR` / `XDG_*` / 向上查找 `.opencode`）。所有**设置**都由代码通过 `ClientOptions` 传入（见上）。
 
-### 11.2 状态目录（一个 Root，不读 env）
+### 11.2 状态目录（一个 Root，不读 XDG/OPENCODE env）
 
-TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR` 等 env。**SDK 刻意偏离**——可嵌入的库不该读宿主进程的 env 来定位自己的状态。全部状态由 `ClientOptions.Root` 派生（`core.NewGlobal(root, home)` 是纯函数，不读 env）：
+TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR` 等 env。**SDK 刻意偏离**——可嵌入的库不该读宿主进程的 env 来定位自己的状态，只保留「宿主事实」类输入（`$HOME`、Windows 的 `COMSPEC`、`LC_*`/`LANG` 作为 locale 默认）。全部状态由 `ClientOptions.Root` 派生（`core.NewGlobal(root, home)` 是纯函数，不读 env）：
 
 ```
 {Root}/data/    snapshot、reference clone、plans、tool-output、log
@@ -782,7 +782,7 @@ TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR`
 {Root}/tmp/     临时文件
 ```
 
-`Root` 为空时用 `~/.local/share/opencode`。因为不再读 env，设置 `Root` 即可完全隔离实例（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
+`Root` 为空时用 `~/.local/share/opencode`（`~` 来自 `os.UserHomeDir`，即 `$HOME`/`%USERPROFILE%`，这是宿主事实）。不读任何 `XDG_*` / `OPENCODE_*`；设置 `Root`（配合 `Home`）后连 `$HOME` 都不参与，实例即可完全隔离（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
 
 同一原则也适用于仓库：`core/repository.go` 不再读 `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`，改为显式输入：
 
