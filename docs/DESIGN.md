@@ -353,6 +353,8 @@ type LLMEvent struct {
 
 ### 5.4 Provider Facades
 
+> SDK 的 `agent` 层**不直接使用**这些 facade：它按 `ModelInfo.API.Protocol` 查 `llm/protocols` 注册表（协议 id → route + 认证方案）并自行套 `schema.Credential`。facade 供直接使用 `llm` 包的调用方。
+
 ```go
 // llm/provider/openai.go —— 传入预配置的 route（见 llm/protocols/）
 openai := provider.NewOpenAI(responsesRoute, chatRoute, provider.OpenAIConfig{

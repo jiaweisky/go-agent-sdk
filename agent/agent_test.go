@@ -1789,3 +1789,14 @@ func TestNewClientRequiresProtocolOrModelInfo(t *testing.T) {
 		t.Fatalf("err = %v, want a missing-protocol error", err)
 	}
 }
+
+func TestNewClientRejectsUnknownProtocol(t *testing.T) {
+	_, err := NewClient(&ClientOptions{
+		Model:    "test-model",
+		Protocol: "bogus",
+		DataDir:  t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
+		t.Fatalf("err = %v, want an unknown-protocol error", err)
+	}
+}

@@ -9,7 +9,6 @@ import (
 
 func TestModelInfoProvider(t *testing.T) {
 	resolve, err := buildModelResolver(&ClientOptions{
-		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model: "gpt-4o",
 		ModelInfo: func(id string) (schema.ModelInfo, error) {
 			return NewModelInfo("openai-responses", id, "", schema.ModelLimit{Context: 128_000, Output: 8_192})
@@ -31,7 +30,6 @@ func TestModelInfoProvider(t *testing.T) {
 func TestModelInfoProviderUsesSessionModel(t *testing.T) {
 	var seen string
 	resolve, err := buildModelResolver(&ClientOptions{
-		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model: "default",
 		ModelInfo: func(id string) (schema.ModelInfo, error) {
 			seen = id
