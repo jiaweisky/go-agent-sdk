@@ -90,7 +90,11 @@ func Client(options ...Option) (*agent.Client, error) {
 	if value := envLimits(); value != nil {
 		limit = schema.ModelLimit{Context: value.Context, Output: value.Output}
 	}
+	// Root is required: the SDK never chooses a data directory. This host
+	// follows the opencode CLI convention so the example reuses its state.
+	home, _ := os.UserHomeDir()
 	opts := &agent.ClientOptions{
+		Root:     core.DefaultGlobalRoot(home),
 		Model:    model,
 		Protocol: protocol,
 		ModelInfo: func(id string) (schema.ModelInfo, error) {

@@ -1865,6 +1865,16 @@ func TestNewClientRequiresProtocolOrModelInfo(t *testing.T) {
 	}
 }
 
+func TestNewClientRequiresRoot(t *testing.T) {
+	_, err := NewClient(&ClientOptions{
+		Model:    "test-model",
+		Protocol: "openai-responses", Credentials: APIKey("k"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "Root is required") {
+		t.Fatalf("err = %v, want a missing-Root error", err)
+	}
+}
+
 func TestNewClientRejectsUnknownProtocol(t *testing.T) {
 	_, err := NewClient(&ClientOptions{
 		Model:    "test-model",

@@ -24,22 +24,22 @@ type Global struct {
 	Repos string
 }
 
-// DefaultGlobalRoot is the state root used when a caller supplies none.
+// DefaultGlobalRoot is the opencode CLI's state root. A host that wants to
+// follow that convention passes it as ClientOptions.Root; the SDK itself has no
+// default location.
 func DefaultGlobalRoot(home string) string {
 	return filepath.Join(home, ".local", "share", "opencode")
 }
 
 // NewGlobal derives the layout from an explicit state root and home directory.
-// An empty root falls back to DefaultGlobalRoot(home).
+// The root is required: no default is applied, so the caller always decides
+// what the SDK reads and writes.
 //
 //	data/   snapshots, references, plans, tool output, logs, session database
 //	cache/  downloaded binaries and skill content (disposable)
 //	state/  runtime state (reserved; TS uses it for flock)
 //	tmp/    scratch space
 func NewGlobal(root, home string) Global {
-	if root == "" {
-		root = DefaultGlobalRoot(home)
-	}
 	data := filepath.Join(root, "data")
 	cache := filepath.Join(root, "cache")
 	return Global{

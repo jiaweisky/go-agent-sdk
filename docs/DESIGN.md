@@ -545,7 +545,7 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 
 > **工具输出限额**：`core.ToolOutputStore`（`MAX_LINES=2000` / `MAX_BYTES=50KB`）会把超限的 tool result 落盘为 `tool-output/tool_*`，只把 head/tail 预览发给模型（`core/tool/output_store.go` 适配 `tool.OutputStore`，由 `agent/runtime.go` 通过 `tool.WithOutputStore` 注入）。**未注入时 registry 的 `store == nil`，限额被跳过**，一次大 `grep`/`read` 就能撑爆上下文窗口。
 >
-> 落盘目录是 `{Global.Data}/tool-output`，即 `{ClientOptions.Root}/data/tool-output`（默认 `~/.local/share/opencode/data/tool-output`）；`ClientOptions.Root` 可整体重定向（`ClientOptions.DataDir` 只管 SQLite，不影响这里）。`ToolOutputStore.Cleanup` 按文件 mtime 清理超过 7 天（`ToolOutputStoreRetention`）的文件：`agent` 层在 `newRuntime` 时起一个 goroutine，启动时跑一次、之后每小时一次，`Client.Close()` 时随 runtime 的 lifetime context 退出；也可用 `Client.CleanupToolOutput()` 手动触发（对齐 v2 `tool-output-store.ts` 的 `cleanupLayer` + `cleanupNode`）。
+> 落盘目录是 `{Global.Data}/tool-output`，即 `{ClientOptions.Root}/data/tool-output`；`ClientOptions.Root` 必填（`ClientOptions.DataDir` 只管 SQLite，不影响这里）。`ToolOutputStore.Cleanup` 按文件 mtime 清理超过 7 天（`ToolOutputStoreRetention`）的文件：`agent` 层在 `newRuntime` 时起一个 goroutine，启动时跑一次、之后每小时一次，`Client.Close()` 时随 runtime 的 lifetime context 退出；也可用 `Client.CleanupToolOutput()` 手动触发（对齐 v2 `tool-output-store.ts` 的 `cleanupLayer` + `cleanupNode`）。
 
 ### 7.4 内置工具
 
@@ -679,7 +679,7 @@ type ClientOptions struct {
     ModelInfo        ModelInfoProvider         // 可选：catalog 元数据（protocol/endpoint/limits/headers）
     Credentials      CredentialProvider        // provider → 秘密（APIKey / AWS）
     WorkingDirectory string
-    Root             string                    // SDK 状态根（data/cache/db/state/tmp）；空则用 ~/.local/share/opencode
+    Root             string                    // SDK 状态根（data/cache/db/state/tmp）；**必填**，库不选默认位置
     DataDir          string                    // 覆盖会话数据库目录；空则用 {Root}/db
     Home             string                    // ~ 展开用；空则用 OS home
     ConfigDirs       []string                  // 内容配置目录（见「配置模型」）
@@ -782,7 +782,7 @@ TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR`
 {Root}/tmp/     临时文件
 ```
 
-`Root` 为空时用 `~/.local/share/opencode`（`~` 来自 `os.UserHomeDir`，即 `$HOME`/`%USERPROFILE%`，这是宿主事实）。不读任何 `XDG_*` / `OPENCODE_*`；设置 `Root`（配合 `Home`）后连 `$HOME` 都不参与，实例即可完全隔离（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
+`Root` **必填**：库不选默认位置，否则会往宿主没指定的目录（例如 opencode CLI 的 `~/.local/share/opencode`）读写，且行为会被机器上已有的 DB / clone / snapshot 影响。想沿用 CLI 约定的宿主自己传 `core.DefaultGlobalRoot(home)`（`~` 来自 `os.UserHomeDir`，是宿主事实）。除 `$HOME` / `COMSPEC` / locale 默认外，SDK 不读任何 `XDG_*` / `OPENCODE_*`；每个实例指向自己的 `Root` 即可完全隔离（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
 
 同一原则也适用于仓库：`core/repository.go` 不再读 `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`，改为显式输入：
 

@@ -22,7 +22,11 @@ type ClientOptions struct {
 	Protocol schema.ProtocolID
 	// WorkingDirectory is the project/worktree root. Defaults to the process cwd.
 	WorkingDirectory string
-	// Root is the base directory for every piece of SDK-managed state:
+	// Root is the base directory for every piece of SDK-managed state. It is
+	// required: the SDK never picks a location (and never reads the environment
+	// to find one), so the host always knows what it is reading and writing.
+	// Pointing each instance at its own Root isolates it (tests, sandboxes,
+	// multiple tenants).
 	//
 	//	{Root}/data/   snapshots, references, tool output, logs
 	//	{Root}/cache/  downloaded binaries and skill content
@@ -30,9 +34,8 @@ type ClientOptions struct {
 	//	{Root}/state/  runtime state (reserved)
 	//	{Root}/tmp/    scratch space
 	//
-	// Empty uses ~/.local/share/opencode, derived from the OS home directory
-	// (os.UserHomeDir). No XDG_* or OPENCODE_* variable is consulted, so setting
-	// Root isolates an instance (tests, sandboxes, multiple tenants).
+	// core.DefaultGlobalRoot(home) returns the opencode CLI's root for hosts that
+	// want to follow that convention.
 	Root string
 	// DataDir overrides the directory holding the session database. Empty uses
 	// {Root}/db. It is independent of Root, which covers all the other state.

@@ -161,10 +161,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	}
 	root := opts.Root
 	if root == "" {
-		if home == "" {
-			return nil, fmt.Errorf("ClientOptions.Root is required when the home directory cannot be determined")
-		}
-		root = core.DefaultGlobalRoot(home)
+		return nil, fmt.Errorf("ClientOptions.Root is required: the SDK does not choose a data directory")
 	}
 	global := core.NewGlobal(root, home)
 

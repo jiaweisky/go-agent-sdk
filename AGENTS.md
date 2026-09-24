@@ -98,7 +98,7 @@ Go 1.27.1，以下特性可放心使用：
 | `Schema.Codec` | `santhosh-tekuri/jsonschema/v6` 验证 |
 | 工具 schema（`Schema.Struct` 等） | `jsonschema.Schema` 类型化 AST：`Model()` 发给模型 + `Validation()` 校验 |
 | MCP（`@modelcontextprotocol/sdk`） | 官方 Go SDK `github.com/modelcontextprotocol/go-sdk` |
-| CLI 的 env/XDG 默认（`global.ts`、`flag.ts`） | **刻意偏离**：库不读 `XDG_*`/`OPENCODE_*` 等宿主 env（只保留 `$HOME`/`COMSPEC`/`LC_*` 这类宿主事实）；状态目录由 `ClientOptions.Root` 派生（`core.NewGlobal(root, home)` 纯函数），配置由 `ConfigDirs` 显式声明 |
+| CLI 的 env/XDG 默认（`global.ts`、`flag.ts`） | **刻意偏离**：库不读 `XDG_*`/`OPENCODE_*` 等宿主 env（只保留 `$HOME`/`COMSPEC`/`LC_*` 这类宿主事实）；状态目录由**必填**的 `ClientOptions.Root` 派生（`core.NewGlobal(root, home)` 纯函数），配置由 `ConfigDirs` 显式声明 |
 
 ## 包架构
 
