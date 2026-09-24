@@ -144,10 +144,15 @@ func (fm *fileMutation) WriteTextPreservingBom(input FileMutationTextWriteInput)
 	var err error
 	fm.locks.WithLock(input.Target.Canonical, func() {
 		next := splitBom(input.Content)
+		// Mirror fs.readFile(...).catchReason(NotFound => undefined): only a
+		// missing file is treated as absent, other read failures propagate.
 		current, readErr := ReadFileBytes(input.Target.Canonical)
 		var currentBytes []byte
 		if readErr == nil {
 			currentBytes = current
+		} else if !os.IsNotExist(readErr) {
+			err = readErr
+			return
 		}
 
 		content := joinBom(next.Text, (currentBytes != nil && hasUtf8Bom(currentBytes)) || next.Bom)
