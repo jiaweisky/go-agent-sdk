@@ -15,9 +15,10 @@ type PluginID = schema.PluginID
 // host also exposes aisdk/catalog/integration/command transforms; those are CLI
 // infrastructure and intentionally not ported.
 type PluginContext struct {
-	Agents *Agent
-	Skills *Skill
-	Plugin *Plugin
+	Agents    *Agent
+	Skills    *Skill
+	Reference *Reference
+	Plugin    *Plugin
 }
 
 // PluginEffect loads a plugin. It returns an optional cleanup function invoked
@@ -38,7 +39,7 @@ type Plugin struct {
 }
 
 // NewPlugin builds a plugin manager. events may be nil (no plugin.added event).
-func NewPlugin(events Event, agents *Agent, skills *Skill) *Plugin {
+func NewPlugin(events Event, agents *Agent, skills *Skill, reference *Reference) *Plugin {
 	plugin := &Plugin{
 		events:   events,
 		locks:    effect.MakeUnsafe[schema.PluginID](),
@@ -47,7 +48,7 @@ func NewPlugin(events Event, agents *Agent, skills *Skill) *Plugin {
 		failures: map[schema.PluginID]error{},
 		waiters:  map[schema.PluginID][]chan error{},
 	}
-	plugin.context = &PluginContext{Agents: agents, Skills: skills, Plugin: plugin}
+	plugin.context = &PluginContext{Agents: agents, Skills: skills, Reference: reference, Plugin: plugin}
 	return plugin
 }
 

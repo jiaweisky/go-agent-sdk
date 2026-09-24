@@ -6,7 +6,7 @@ import (
 )
 
 func TestPluginLifecycle(t *testing.T) {
-	plugin := NewPlugin(nil, NewAgent(), NewSkill(nil))
+	plugin := NewPlugin(nil, NewAgent(), NewSkill(nil), NewReference(Global{}, nil, nil))
 	loaded := 0
 	cleaned := 0
 
@@ -49,7 +49,7 @@ func TestPluginLifecycle(t *testing.T) {
 }
 
 func TestPluginWaitFailure(t *testing.T) {
-	plugin := NewPlugin(nil, NewAgent(), NewSkill(nil))
+	plugin := NewPlugin(nil, NewAgent(), NewSkill(nil), NewReference(Global{}, nil, nil))
 	loadErr := errors.New("boom")
 	if err := plugin.Add("bad", func(*PluginContext) (func(), error) {
 		return nil, loadErr

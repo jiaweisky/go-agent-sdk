@@ -325,7 +325,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db.Close()
 		return nil, err
 	}
-	rt.plugin = core.NewPlugin(events, agents, skills)
+	rt.plugin = core.NewPlugin(events, agents, skills, referenceService)
 	for _, config := range opts.Plugins {
 		if err := rt.plugin.Add(schema.PluginID(config.ID), core.PluginEffect(config.Effect)); err != nil {
 			cancel()
