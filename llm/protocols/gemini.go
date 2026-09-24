@@ -3,6 +3,7 @@ package protocols
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/user/go-agent-sdk/llm/protocols/utils"
 	"github.com/user/go-agent-sdk/llm/route"
@@ -251,11 +252,11 @@ func geminiLowerMessages(request *schema.LLMRequest) ([]geminiContent, error) {
 						})
 					} else {
 						content, ok := part.Result.Value.([]schema.ToolContent)
-						var text string
+						var texts []string
 						if ok {
 							for _, c := range content {
 								if tc, ok := c.(schema.ToolTextContent); ok {
-									text += tc.Text + "\n"
+									texts = append(texts, tc.Text)
 								}
 							}
 						}
@@ -263,7 +264,7 @@ func geminiLowerMessages(request *schema.LLMRequest) ([]geminiContent, error) {
 							FunctionResponse: struct {
 								Name     string `json:"name"`
 								Response any    `json:"response"`
-							}{Name: part.Name, Response: map[string]any{"name": part.Name, "content": text}},
+							}{Name: part.Name, Response: map[string]any{"name": part.Name, "content": strings.Join(texts, "\n")}},
 						})
 						if ok {
 							for _, c := range content {

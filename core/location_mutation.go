@@ -68,7 +68,7 @@ type locationMutation struct {
 func (lm *locationMutation) Resolve(input LocationMutationResolveInput) (*LocationMutationTarget, error) {
 	locationDir := string(lm.location.Directory)
 	relative := !filepath.IsAbs(input.Path)
-	absolute := input.Path
+	var absolute string
 	if relative {
 		absolute = filepath.Join(locationDir, input.Path)
 	} else {
