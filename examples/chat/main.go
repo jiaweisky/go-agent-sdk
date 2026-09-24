@@ -16,13 +16,6 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-const (
-	blue   = "\033[34m"
-	yellow = "\033[33m"
-	dim    = "\033[2m"
-	reset  = "\033[0m"
-)
-
 // agentName is the primary agent the chat session runs. util.Client registers it
 // with a system prompt; the permission demo below extends the same agent.
 const agentName = "build"
