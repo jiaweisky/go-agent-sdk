@@ -118,6 +118,9 @@ func MakeFromTransport(input MakeTransportInput) Route {
 				if prov == "" {
 					panic(fmt.Sprintf("Route.Model(%s) requires a provider", ri.ID))
 				}
+				if ri.Endpoint.BaseURL == "" {
+					panic(fmt.Sprintf("Route.Model(%s) requires an endpoint baseURL — configure it on the route first", ri.ID))
+				}
 				return Model{
 					Model: schema.NewModel(schema.ModelInput{
 						ID:            input.ID,

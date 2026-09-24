@@ -102,15 +102,21 @@ func TestToolSchemaIsSentForEveryProtocol(t *testing.T) {
 		name  string
 		route route.Route
 	}{
-		{"openai-chat", OpenAIChatHTTPRoute},
-		{"openai-compatible-chat", OpenAICompatibleChatHTTPRoute},
-		{"openai-responses", OpenAIResponsesHTTPRoute},
-		{"anthropic", AnthropicMessagesHTTPRoute},
-		{"gemini", GeminiHTTPRoute},
-		{"bedrock", BedrockConverseRoute(BedrockConverseProtocol)},
+		{"openai-chat", OpenAIChatHTTPRoute.With(route.RoutePatch{Provider: "test"})},
+		{"openai-compatible-chat", OpenAICompatibleChatHTTPRoute.With(route.RoutePatch{
+			Provider: "test",
+			Endpoint: &route.EndpointPatch{BaseURL: new("https://compatible.test")},
+		})},
+		{"openai-responses", OpenAIResponsesHTTPRoute.With(route.RoutePatch{Provider: "test"})},
+		{"anthropic", AnthropicMessagesHTTPRoute.With(route.RoutePatch{Provider: "test"})},
+		{"gemini", GeminiHTTPRoute.With(route.RoutePatch{Provider: "test"})},
+		{"bedrock", BedrockConverseRoute(BedrockConverseProtocol).With(route.RoutePatch{
+			Provider: "test",
+			Endpoint: &route.EndpointPatch{BaseURL: new("https://bedrock.test")},
+		})},
 	}
 	for _, tc := range cases {
-		r := tc.route.With(route.RoutePatch{Provider: "test"})
+		r := tc.route
 		body, err := r.Body.From(&schema.LLMRequest{
 			Model: r.Model(route.RouteModelInput{ID: "test-model"}),
 			Tools: []schema.ToolDefinition{{Name: "lookup", Description: "Look up", InputSchema: inputSchema}},

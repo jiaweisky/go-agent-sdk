@@ -474,7 +474,7 @@ func TestModelResolverCarriesLimits(t *testing.T) {
 		Model:    "default-model",
 		Protocol: "openai-compatible-chat",
 		ModelInfo: func(id string) (schema.ModelInfo, error) {
-			return NewModelInfo("openai-compatible-chat", id, "", schema.ModelLimit{Context: 1_000_000, Output: 32_000})
+			return NewModelInfo("openai-compatible-chat", id, "https://api.test/v1", schema.ModelLimit{Context: 1_000_000, Output: 32_000})
 		},
 	})
 	if err != nil {
@@ -494,6 +494,9 @@ func TestModelResolverUsesSessionModel(t *testing.T) {
 	resolve, err := buildModelResolver(&ClientOptions{
 		Model:    "default-model",
 		Protocol: "openai-compatible-chat",
+		ModelInfo: func(id string) (schema.ModelInfo, error) {
+			return NewModelInfo("openai-compatible-chat", id, "https://api.test/v1", schema.ModelLimit{})
+		},
 	})
 	if err != nil {
 		t.Fatalf("build resolver: %v", err)

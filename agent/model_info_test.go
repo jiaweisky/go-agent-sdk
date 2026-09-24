@@ -120,6 +120,9 @@ func TestBedrockSigV4Credential(t *testing.T) {
 	resolve, err := buildModelResolver(&ClientOptions{
 		Model:    "claude-3",
 		Protocol: "bedrock-converse",
+		ModelInfo: func(id string) (schema.ModelInfo, error) {
+			return NewModelInfo("bedrock-converse", id, "https://bedrock-runtime.us-east-1.amazonaws.com", schema.ModelLimit{})
+		},
 		Credentials: func(schema.ProviderID) (schema.Credential, error) {
 			return schema.Credential{AWS: &schema.AWSCredentials{
 				Region: "us-east-1", AccessKeyID: "AKIA", SecretAccessKey: "secret",
