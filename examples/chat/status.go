@@ -23,7 +23,7 @@ func (c *chat) drawStatusLocked(frame int) {
 	if len(spinnerFrames) > 0 {
 		spinner = spinnerFrames[frame%len(spinnerFrames)]
 	}
-	parts := make([]string, 0, len(c.order))
+	parts := make([]string, 0, len(c.tasks.order))
 	for childID, record := range c.records() {
 		if !c.busy[childID] {
 			continue

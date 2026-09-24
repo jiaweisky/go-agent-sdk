@@ -136,7 +136,7 @@ func TestChildToolCallsAreNotLogged(t *testing.T) {
 		t.Fatalf("child tool calls should not be logged: %q", out.String())
 	}
 	// The current tool is still tracked for the status line.
-	if record := c.tasks["ses_child"]; record.lastTool != "read" || record.tools != 25 {
+	if record := c.tasks.byID["ses_child"]; record.lastTool != "read" || record.tools != 25 {
 		t.Fatalf("task not tracked: %+v", record)
 	}
 }
@@ -163,7 +163,7 @@ func TestUpdateStatusShowsBusyTasks(t *testing.T) {
 	c := newChat(&console{out: &strings.Builder{}}, nil, "ses_parent", "")
 	c.handle(taskProgress("call_1", "ses_child"))
 	c.handle(agent.SessionStatus{SessionID: "ses_child", Status: "busy"})
-	c.tasks["ses_child"].lastTool = "read"
+	c.tasks.byID["ses_child"].lastTool = "read"
 
 	c.updateStatus(0)
 	got := c.console.status
@@ -281,13 +281,13 @@ func TestNestedSubagentIsTrackedButNotRendered(t *testing.T) {
 	if got := out.String(); got != "" {
 		t.Fatalf("nested subagent output leaked into the transcript: %q", got)
 	}
-	if c.tasks["ses_grandchild"] == nil {
+	if c.tasks.byID["ses_grandchild"] == nil {
 		t.Fatal("nested task was not registered")
 	}
-	if record := c.tasks["ses_grandchild"]; record.tools != 1 || record.lastTool != "read" {
+	if record := c.tasks.byID["ses_grandchild"]; record.tools != 1 || record.lastTool != "read" {
 		t.Fatalf("nested task not tracked: %+v", record)
 	}
-	if record := c.tasks["ses_child"]; record.tools != 0 {
+	if record := c.tasks.byID["ses_child"]; record.tools != 0 {
 		t.Fatalf("nested calls counted against the parent task: %+v", record)
 	}
 }

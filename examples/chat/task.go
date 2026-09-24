@@ -10,6 +10,24 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
+// taskSet tracks the subagent tasks of one chat: byCall maps an open task tool
+// call to its session, byID and order list the tasks, and answers caches the
+// final text of the tasks that finished.
+type taskSet struct {
+	byCall  map[string]string
+	byID    map[string]*taskRecord
+	order   []string
+	answers map[string]string
+}
+
+func newTaskSet() taskSet {
+	return taskSet{
+		byCall:  map[string]string{},
+		byID:    map[string]*taskRecord{},
+		answers: map[string]string{},
+	}
+}
+
 // taskRecord tracks one subagent task for the lifecycle log and drill-down.
 type taskRecord struct {
 	index       int
@@ -68,8 +86,8 @@ func formatToolCalls(count int) string {
 // records iterates the tracked tasks in start order.
 func (c *chat) records() iter.Seq2[string, *taskRecord] {
 	return func(yield func(string, *taskRecord) bool) {
-		for _, childID := range c.order {
-			if record := c.tasks[childID]; record != nil {
+		for _, childID := range c.tasks.order {
+			if record := c.tasks.byID[childID]; record != nil {
 				if !yield(childID, record) {
 					return
 				}
@@ -91,14 +109,14 @@ func (c *chat) handleProgress(event agent.ToolProgress) {
 		return
 	}
 	description := stringField(structured, "description")
-	c.tasksByCall[event.CallID] = childID
-	if _, seen := c.tasks[childID]; !seen {
+	c.tasks.byCall[event.CallID] = childID
+	if _, seen := c.tasks.byID[childID]; !seen {
 		record := &taskRecord{
-			index: len(c.order) + 1, callID: event.CallID, subagent: subagent,
+			index: len(c.tasks.order) + 1, callID: event.CallID, subagent: subagent,
 			description: description, started: time.Now(),
 		}
-		c.tasks[childID] = record
-		c.order = append(c.order, childID)
+		c.tasks.byID[childID] = record
+		c.tasks.order = append(c.tasks.order, childID)
 		c.console.write(taskOpenLine(record))
 	}
 }
@@ -107,13 +125,13 @@ func (c *chat) handleProgress(event agent.ToolProgress) {
 // shows the current tool); a task result prints the result preview.
 func (c *chat) finishTool(callID, failure string) {
 	c.endCall(callID)
-	childID, isTask := c.tasksByCall[callID]
+	childID, isTask := c.tasks.byCall[callID]
 	if !isTask {
 		return
 	}
-	delete(c.tasksByCall, callID)
+	delete(c.tasks.byCall, callID)
 
-	record := c.tasks[childID]
+	record := c.tasks.byID[childID]
 	elapsed, tools := time.Duration(0), 0
 	if record != nil {
 		elapsed, tools = time.Since(record.started), record.tools
@@ -123,7 +141,7 @@ func (c *chat) finishTool(callID, failure string) {
 		// Read fresh: a resumed task reuses its session, so a cached answer would
 		// be the previous run's.
 		answer = c.subagentAnswer(childID)
-		c.answers[childID] = answer
+		c.tasks.answers[childID] = answer
 	}
 	mark := "✓"
 	if failure != "" {
@@ -143,7 +161,7 @@ func (c *chat) taskCommand(input string) {
 	defer c.mu.Unlock()
 	arg := strings.TrimSpace(strings.TrimPrefix(input, "/task"))
 	if arg == "" {
-		if len(c.order) == 0 {
+		if len(c.tasks.order) == 0 {
 			c.console.write("(no tasks)\n")
 			return
 		}
@@ -173,7 +191,7 @@ func (c *chat) taskCommand(input string) {
 // answerFor returns a subagent's final text: the answer cached when its task
 // finished, or a read of its session when the task is still running.
 func (c *chat) answerFor(childID string) string {
-	if answer := c.answers[childID]; answer != "" {
+	if answer := c.tasks.answers[childID]; answer != "" {
 		return answer
 	}
 	return c.subagentAnswer(childID)

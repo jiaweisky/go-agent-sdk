@@ -22,40 +22,36 @@ type chat struct {
 	usage      chatUsage
 	busy       map[string]bool
 	parentBusy bool
+	// tasks tracks the subagent tasks this chat started.
+	tasks taskSet
 	// calls maps an open parent tool call to its tool name, and running holds
 	// the ids of its non-task calls in start order: the tool calls of one step
 	// run in parallel, so the status line names the most recent call that is
 	// still running rather than one field that any finishing call would clear.
-	calls       map[string]string
-	running     []string
-	tasksByCall map[string]string
-	tasks       map[string]*taskRecord
-	order       []string
-	answers     map[string]string
-	streams     map[string]*markdownStream
-	labeled     map[string]bool
+	calls   map[string]string
+	running []string
+	// stream is the parent's assistant text stream; labeled records whether its
+	// "Assistant:" prefix was printed for this turn.
+	stream  *markdownStream
+	labeled bool
 }
 
 func newChat(console *console, client *agent.Client, parent, model string) *chat {
 	return &chat{
-		console:     console,
-		client:      client,
-		parent:      parent,
-		model:       model,
-		busy:        map[string]bool{},
-		calls:       map[string]string{},
-		tasksByCall: map[string]string{},
-		tasks:       map[string]*taskRecord{},
-		answers:     map[string]string{},
-		streams:     map[string]*markdownStream{},
-		labeled:     map[string]bool{},
+		console: console,
+		client:  client,
+		parent:  parent,
+		model:   model,
+		busy:    map[string]bool{},
+		tasks:   newTaskSet(),
+		calls:   map[string]string{},
 	}
 }
 
 func (c *chat) beginTurn() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.labeled[c.parent] = false
+	c.labeled = false
 }
 
 func (c *chat) handle(event agent.Event) {
@@ -67,10 +63,13 @@ func (c *chat) handle(event agent.Event) {
 		return
 	}
 	sessionID := agent.SessionIDOf(event)
-	// Events without a session id (usage, retries) belong to the parent's turn,
-	// as do the parent session's own events.
-	if sessionID == "" || sessionID == c.parent {
-		c.handleParent(event, sessionID)
+	if sessionID == "" {
+		// Events without a session id (retries, steps) belong to the parent's
+		// turn.
+		sessionID = c.parent
+	}
+	if sessionID == c.parent {
+		c.handleParent(event)
 		return
 	}
 	// Every other session is a subagent's: a task's session, or the session of a
@@ -90,7 +89,7 @@ func (c *chat) handleChild(event agent.Event, sessionID string) {
 	case agent.ToolProgress:
 		c.handleProgress(e)
 	case agent.ToolCalled:
-		record := c.tasks[sessionID]
+		record := c.tasks.byID[sessionID]
 		if record == nil || e.Name == agent.TaskName {
 			return
 		}
@@ -112,19 +111,19 @@ func (c *chat) handleChild(event agent.Event, sessionID string) {
 
 // flushStream writes any buffered (partial) assistant text so a following tool
 // or task line does not appear before text that streamed earlier.
-func (c *chat) flushStream(sessionID string) {
-	if stream := c.streams[sessionID]; stream != nil {
-		stream.Flush()
+func (c *chat) flushStream() {
+	if c.stream != nil {
+		c.stream.Flush()
 	}
 }
 
-func (c *chat) handleParent(event agent.Event, sessionID string) {
+func (c *chat) handleParent(event agent.Event) {
 	switch e := event.(type) {
 	case agent.ToolProgress:
-		c.flushStream(sessionID)
+		c.flushStream()
 		c.handleProgress(e)
 	case agent.ToolCalled:
-		c.flushStream(sessionID)
+		c.flushStream()
 		c.openCall(e.CallID, e.Name)
 		if e.Name == coretool.SkillName {
 			// Skills are worth surfacing: unlike read/grep, a loaded skill
@@ -132,10 +131,10 @@ func (c *chat) handleParent(event agent.Event, sessionID string) {
 			c.console.write(fmt.Sprintf("%s[skill] %s%s\n", cyan, skillName(e.Input), reset))
 		}
 	case agent.ToolSuccess:
-		c.flushStream(sessionID)
+		c.flushStream()
 		c.finishTool(e.CallID, "")
 	case agent.ToolFailed:
-		c.flushStream(sessionID)
+		c.flushStream()
 		c.finishTool(e.CallID, errorMessage(e.Error))
 	case agent.SessionStatus:
 		c.parentBusy = e.Status == "busy"
@@ -151,19 +150,17 @@ func (c *chat) handleParent(event agent.Event, sessionID string) {
 		if e.Delta == "" {
 			return
 		}
-		if !c.labeled[sessionID] {
+		if !c.labeled {
 			c.console.write("Assistant: ")
-			c.labeled[sessionID] = true
+			c.labeled = true
 		}
-		stream := c.streams[sessionID]
-		if stream == nil {
-			stream = newMarkdownStream(c.console.write)
-			c.streams[sessionID] = stream
+		if c.stream == nil {
+			c.stream = newMarkdownStream(c.console.write)
 		}
-		stream.Write(e.Delta)
+		c.stream.Write(e.Delta)
 	case agent.TextEnded:
-		if stream := c.streams[sessionID]; stream != nil {
-			stream.Flush()
+		if c.stream != nil {
+			c.stream.Flush()
 		}
 		c.console.write("\n")
 	}
