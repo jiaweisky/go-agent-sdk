@@ -29,6 +29,46 @@ func TestRepositoryParse(t *testing.T) {
 	}
 }
 
+func TestRepositoryParseGitHubMirror(t *testing.T) {
+	// A shorthand is routed through the mirror when the caller asks for one.
+	mirrored := RepositoryParse("github:owner/repo", WithGitHubBaseURL("https://mirror.example.com/"))
+	if mirrored == nil || mirrored.Remote != "https://mirror.example.com/owner/repo.git" {
+		t.Fatalf("mirrored remote = %+v", mirrored)
+	}
+	// An explicit github.com URL is mirrored too (TS routes every github.com
+	// host through githubRemote), so origin and clone target stay consistent.
+	explicit := RepositoryParse("https://github.com/owner/repo.git", WithGitHubBaseURL("https://mirror.example.com/"))
+	if explicit == nil || explicit.Remote != "https://mirror.example.com/owner/repo.git" {
+		t.Fatalf("explicit remote = %+v", explicit)
+	}
+	// Other hosts are never rewritten.
+	other := RepositoryParse("https://gitlab.com/owner/repo.git", WithGitHubBaseURL("https://mirror.example.com/"))
+	if other == nil || other.Remote != "https://gitlab.com/owner/repo.git" {
+		t.Fatalf("other remote = %+v", other)
+	}
+	// Without the option the canonical URL is used.
+	if got := RepositoryParse("github:owner/repo").Remote; got != "https://github.com/owner/repo.git" {
+		t.Fatalf("canonical remote = %q", got)
+	}
+}
+
+func TestRepositoryCacheForwardsParseOptions(t *testing.T) {
+	cache := NewRepositoryCache(Git{}, t.TempDir(), WithGitHubBaseURL("https://mirror.example.com/"))
+	options := cache.repositoryOptions()
+	if len(options) != 1 {
+		t.Fatalf("options = %v", options)
+	}
+	config := RepositoryOptions{}
+	options[0](&config)
+	if config.GitHubBaseURL != "https://mirror.example.com/" {
+		t.Fatalf("GitHubBaseURL = %q", config.GitHubBaseURL)
+	}
+	var nilCache *RepositoryCache
+	if options := nilCache.repositoryOptions(); options != nil {
+		t.Fatalf("nil cache options = %v", options)
+	}
+}
+
 func TestRepositoryValidateBranch(t *testing.T) {
 	if err := RepositoryValidateBranch("feature/x"); err != nil {
 		t.Fatalf("valid branch rejected: %v", err)

@@ -29,13 +29,28 @@ type RepositoryCacheEnsureInput struct {
 // RepositoryCache mirrors RepositoryCache.Service: per-remote/branch local
 // tracking checkouts. Locking is in-process (cross-process flock is not ported).
 type RepositoryCache struct {
-	git   Git
-	repos string
-	locks *effect.KeyedMutex[string]
+	git     Git
+	repos   string
+	options RepositoryOptions
+	locks   *effect.KeyedMutex[string]
 }
 
-func NewRepositoryCache(git Git, repos string) *RepositoryCache {
-	return &RepositoryCache{git: git, repos: repos, locks: effect.MakeUnsafe[string]()}
+func NewRepositoryCache(git Git, repos string, options ...RepositoryOption) *RepositoryCache {
+	config := RepositoryOptions{}
+	for _, option := range options {
+		option(&config)
+	}
+	return &RepositoryCache{git: git, repos: repos, options: config, locks: effect.MakeUnsafe[string]()}
+}
+
+// repositoryOptions re-applies the cache's parse options; a nil cache yields
+// none, so callers can forward them unconditionally.
+func (c *RepositoryCache) repositoryOptions() []RepositoryOption {
+	if c == nil {
+		return nil
+	}
+	options := c.options
+	return []RepositoryOption{func(target *RepositoryOptions) { *target = options }}
 }
 
 // Ensure mirrors RepositoryCache.ensure.
@@ -50,7 +65,7 @@ func (c *RepositoryCache) Ensure(input RepositoryCacheEnsureInput) (RepositoryCa
 		}
 	}
 	localPath := RepositoryCachePath(c.repos, reference, input.Branch)
-	cloneTarget := RepositoryParse(reference.Remote)
+	cloneTarget := RepositoryParse(reference.Remote, c.repositoryOptions()...)
 	if cloneTarget == nil {
 		cloneTarget = reference
 	}
@@ -79,7 +94,7 @@ func (c *RepositoryCache) ensureLocked(reference, cloneTarget *RepositoryReferen
 	}
 	var originReference *RepositoryReference
 	if origin != "" {
-		originReference = RepositoryParse(origin)
+		originReference = RepositoryParse(origin, c.repositoryOptions()...)
 	}
 
 	worktree := ""

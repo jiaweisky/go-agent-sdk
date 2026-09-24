@@ -3,7 +3,6 @@ package core
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -29,25 +28,52 @@ var (
 	repositorySegmentInvalid  = regexp.MustCompile(`[\s/\\]`)
 )
 
+// RepositoryOptions configures repository parsing.
+//
+// TS's repository.ts builds github.com clone URLs through the
+// OPENCODE_REPO_CLONE_GITHUB_BASE_URL environment variable. The SDK never reads
+// the host environment, so a caller behind a mirror passes it here.
+type RepositoryOptions struct {
+	// GitHubBaseURL routes github.com clone URLs through a mirror, for example
+	// "https://github.example.com/". Empty uses https://github.com/.
+	GitHubBaseURL string
+}
+
+// RepositoryOption customizes repository parsing.
+type RepositoryOption func(*RepositoryOptions)
+
+// WithGitHubBaseURL routes github.com clone URLs through a mirror.
+func WithGitHubBaseURL(baseURL string) RepositoryOption {
+	return func(options *RepositoryOptions) { options.GitHubBaseURL = baseURL }
+}
+
 // RepositoryParse mirrors Repository.parse.
-func RepositoryParse(input string) *RepositoryReference {
+func RepositoryParse(input string, options ...RepositoryOption) *RepositoryReference {
+	config := RepositoryOptions{}
+	for _, option := range options {
+		option(&config)
+	}
+	return repositoryParse(input, config)
+}
+
+func repositoryParse(input string, options RepositoryOptions) *RepositoryReference {
 	cleaned := repositoryNormalizeInput(input)
 	if cleaned == "" {
 		return nil
 	}
 	if match := repositoryGitHubShorthand.FindStringSubmatch(cleaned); match != nil {
-		return repositoryBuildRemote("github.com", []string{match[1], match[2]}, "", "")
+		return repositoryBuildRemote("github.com", []string{match[1], match[2]}, "", "", options)
 	}
 	if !strings.Contains(cleaned, "://") {
 		if match := repositorySCP.FindStringSubmatch(cleaned); match != nil {
-			return repositoryBuildRemote(match[1], repositoryParts(match[2]), cleaned, "")
+			return repositoryBuildRemote(match[1], repositoryParts(match[2]), cleaned, "", options)
 		}
 		direct := repositoryParts(cleaned)
 		if len(direct) >= 2 && repositoryHostLike(direct[0]) {
-			return repositoryBuildRemote(direct[0], direct[1:], "", "")
+			return repositoryBuildRemote(direct[0], direct[1:], "", "", options)
 		}
 		if len(direct) == 2 {
-			return repositoryBuildRemote("github.com", direct, "", "")
+			return repositoryBuildRemote("github.com", direct, "", "", options)
 		}
 	}
 	parsed, err := url.Parse(cleaned)
@@ -60,9 +86,9 @@ func RepositoryParse(input string) *RepositoryReference {
 	segments := repositoryParts(parsed.Path)
 	remote := cleaned
 	if parsed.Host == "github.com" {
-		remote = repositoryGitHubRemote(strings.Join(segments, "/"))
+		remote = repositoryGitHubRemote(strings.Join(segments, "/"), options.GitHubBaseURL)
 	}
-	return repositoryBuildRemote(parsed.Host, segments, remote, parsed.Scheme)
+	return repositoryBuildRemote(parsed.Host, segments, remote, parsed.Scheme, options)
 }
 
 // RepositoryIsFile mirrors Repository.isFile.
@@ -149,23 +175,27 @@ func repositoryWithSlash(input string) string {
 	return input + "/"
 }
 
-func repositoryGitHubRemote(pathname string) string {
-	base := os.Getenv("OPENCODE_REPO_CLONE_GITHUB_BASE_URL")
-	if base == "" {
+func repositoryGitHubRemote(pathname, baseURL string) string {
+	if baseURL == "" {
 		return "https://github.com/" + pathname + ".git"
 	}
 	reference, err := url.Parse(pathname + ".git")
 	if err != nil {
 		return "https://github.com/" + pathname + ".git"
 	}
-	root, err := url.Parse(repositoryWithSlash(base))
+	root, err := url.Parse(repositoryWithSlash(baseURL))
 	if err != nil {
 		return "https://github.com/" + pathname + ".git"
 	}
 	return root.ResolveReference(reference).String()
 }
 
-func repositoryBuildRemote(host string, segments []string, remote, protocol string) *RepositoryReference {
+func repositoryBuildRemote(
+	host string,
+	segments []string,
+	remote, protocol string,
+	options RepositoryOptions,
+) *RepositoryReference {
 	filtered := make([]string, 0, len(segments))
 	for _, segment := range segments {
 		trimmed := repositoryTrimGitSuffix(segment)
@@ -189,7 +219,7 @@ func repositoryBuildRemote(host string, segments []string, remote, protocol stri
 	}
 	if remote == "" {
 		if lowerHost == "github.com" {
-			remote = repositoryGitHubRemote(repositoryPath)
+			remote = repositoryGitHubRemote(repositoryPath, options.GitHubBaseURL)
 		} else {
 			remote = "https://" + lowerHost + "/" + repositoryPath + ".git"
 		}

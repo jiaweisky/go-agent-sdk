@@ -96,9 +96,14 @@ type WebSearchConfig struct {
 	ParallelAPIKey string
 }
 
-// DefaultWebSearchConfig ports websearch.ts defaultConfigLayer. The product
-// environment contract is isolated here from the generic tool implementation.
-func DefaultWebSearchConfig() WebSearchConfig {
+// WebSearchConfigFromEnv reads the product environment contract that TS's
+// websearch.ts defaultConfigLayer encodes (OPENCODE_WEBSEARCH_PROVIDER,
+// EXA_API_KEY, PARALLEL_API_KEY and the OPENCODE_*_EXA/PARALLEL flags).
+//
+// It is a host-side helper, not a default: the SDK never reads the environment
+// on its own, so a caller that wants the CLI convention opts in by calling this
+// and passing the result to ClientOptions.WebSearch.
+func WebSearchConfigFromEnv() WebSearchConfig {
 	config := WebSearchConfig{
 		EnableExa: flag.Truthy("OPENCODE_EXPERIMENTAL") ||
 			flag.Truthy("OPENCODE_ENABLE_EXA") ||

@@ -290,7 +290,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	builtin := builtinDeps{
 		db: db, events: events, permission: permission, question: question,
 		location: *location, global: global, shell: opts.Shell, skills: skills,
-		agents: agents, task: task,
+		webSearch: opts.WebSearch, agents: agents, task: task,
 	}
 	snapshots := runner.Snapshotter(noopSnapshots{})
 	if snapshot, err := core.NewSnapshot(git, global, location); err == nil {

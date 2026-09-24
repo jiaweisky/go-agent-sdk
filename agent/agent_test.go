@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/user/go-agent-sdk/core"
+	coretool "github.com/user/go-agent-sdk/core/tool"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -719,6 +720,55 @@ func sharedToolDescription(definitions []llmschema.ToolDefinition) string {
 		}
 	}
 	return ""
+}
+
+func hasToolDefinition(definitions []llmschema.ToolDefinition, name string) bool {
+	for _, definition := range definitions {
+		if definition.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// TestWebSearchToolRequiresExplicitConfig: the SDK never reads EXA_API_KEY or
+// PARALLEL_API_KEY from the environment, so websearch is only registered when
+// the host supplies a config.
+func TestWebSearchToolRequiresExplicitConfig(t *testing.T) {
+	configured := coretool.WebSearchConfig{EnableExa: true, ExaAPIKey: "k"}
+	for _, tc := range []struct {
+		name   string
+		config *coretool.WebSearchConfig
+		want   bool
+	}{
+		{"unconfigured", nil, false},
+		{"configured", &configured, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := NewClient(&ClientOptions{
+				Protocol: "openai-responses", Credentials: APIKey("k"),
+				Model: "test-model", Root: t.TempDir(),
+				WebSearch: tc.config, LLM: fakeLLM{reply: "x"},
+			})
+			if err != nil {
+				t.Fatalf("new client: %v", err)
+			}
+			defer client.Close()
+			if err := client.RegisterAgent("build", AgentConfig{System: "s"}); err != nil {
+				t.Fatalf("register: %v", err)
+			}
+			session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			defer session.Close()
+
+			definitions := client.rt.dispatcher.MaterializeFor(session.ID(), nil).Definitions
+			if got := hasToolDefinition(definitions, coretool.WebSearchName); got != tc.want {
+				t.Fatalf("websearch registered = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestDefineToolSchema(t *testing.T) {

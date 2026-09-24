@@ -82,7 +82,7 @@ func (r *Reference) materialize(global Global, cache *RepositoryCache, draft Ref
 				Name: entry.Name, Path: source.Path, Description: source.Description, Hidden: source.Hidden, Source: source,
 			}
 		case schema.ReferenceGitSource:
-			repository := RepositoryParse(source.Repository)
+			repository := RepositoryParse(source.Repository, cache.repositoryOptions()...)
 			if repository == nil || !RepositoryIsRemote(repository) {
 				continue
 			}

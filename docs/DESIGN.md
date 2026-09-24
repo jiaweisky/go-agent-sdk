@@ -690,6 +690,7 @@ type ClientOptions struct {
     Compaction       *CompactionConfig         // 上下文压缩（Auto / PreserveRecentTokens / Reserved）
     Policies         []schema.PolicyInfo       // allow/deny 策略
     Tools            []Tool                    // 应用级工具
+    WebSearch        *tool.WebSearchConfig     // 内置 websearch 配置；nil 则不注册该工具
     MCP              []MCPConfig               // MCP servers（工具注册为应用级）
     Plugins          []PluginConfig            // 启动时加载的插件
     References       map[string]core.ReferenceSource // 命名 reference 源
@@ -783,6 +784,11 @@ TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR`
 ```
 
 `Root` 为空时用 `~/.local/share/opencode`。因为不再读 env，设置 `Root` 即可完全隔离实例（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
+
+同一原则也适用于工具与仓库：`core/tool/websearch.go` 不再读 `EXA_API_KEY` / `PARALLEL_API_KEY` / `OPENCODE_WEBSEARCH_PROVIDER`，`core/repository.go` 不再读 `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`。两者都改为显式输入：
+
+- websearch：`ClientOptions.WebSearch`；nil 时**不注册**该工具（模型不会看到一个必然失败的工具）。想沿用 CLI 约定的宿主调用 `tool.WebSearchConfigFromEnv()` 自己读 env 再传入。
+- github 镜像：`core.WithGitHubBaseURL(base)` 传给 `RepositoryParse` / `NewRepositoryCache`（TS 对**所有** github.com host 都走 `githubRemote`，显式 URL 同样被改写，以保证 origin 与 clone target 一致）。
 
 文件只承载**内容**（agent / mode / skill 的 markdown），且来源必须**显式**声明：`ClientOptions.ConfigDirs`。每个目录按以下模式扫描：
 

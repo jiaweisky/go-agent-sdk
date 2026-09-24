@@ -19,6 +19,7 @@ type builtinDeps struct {
 	global     core.Global
 	shell      string
 	skills     tool.SkillLister
+	webSearch  *tool.WebSearchConfig
 	agents     *core.Agent
 	task       TaskRunner
 }
@@ -70,11 +71,6 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 			return tool.RegisterWebFetch(tools, tool.WebFetchDeps{HTTPClient: http.DefaultClient, Permission: deps.permission})
 		},
 		func() (func(), error) {
-			return tool.RegisterWebSearch(tools, tool.WebSearchDeps{
-				HTTPClient: http.DefaultClient, Permission: deps.permission, Config: tool.DefaultWebSearchConfig(),
-			})
-		},
-		func() (func(), error) {
 			return tool.RegisterSkill(tools, tool.SkillToolDeps{Skills: deps.skills, Permission: deps.permission})
 		},
 		func() (func(), error) {
@@ -83,6 +79,15 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 				AgentPermissions: agentPermissions,
 			})
 		},
+	}
+	// websearch is registered only when the host supplies a config, because the
+	// SDK does not read the provider keys from the environment.
+	if deps.webSearch != nil {
+		registrations = append(registrations, func() (func(), error) {
+			return tool.RegisterWebSearch(tools, tool.WebSearchDeps{
+				HTTPClient: http.DefaultClient, Permission: deps.permission, Config: *deps.webSearch,
+			})
+		})
 	}
 	for _, register := range registrations {
 		if _, err := register(); err != nil {
