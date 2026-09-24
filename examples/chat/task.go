@@ -31,7 +31,6 @@ func newTaskSet() taskSet {
 // taskRecord tracks one subagent task for the lifecycle log and drill-down.
 type taskRecord struct {
 	index       int
-	callID      string
 	subagent    string
 	description string
 	started     time.Time
@@ -112,7 +111,7 @@ func (c *chat) handleProgress(event agent.ToolProgress) {
 	c.tasks.byCall[event.CallID] = childID
 	if _, seen := c.tasks.byID[childID]; !seen {
 		record := &taskRecord{
-			index: len(c.tasks.order) + 1, callID: event.CallID, subagent: subagent,
+			index: len(c.tasks.order) + 1, subagent: subagent,
 			description: description, started: time.Now(),
 		}
 		c.tasks.byID[childID] = record
@@ -151,8 +150,9 @@ func (c *chat) finishTool(callID, failure string) {
 	if tools > 0 {
 		detail = formatToolCalls(tools) + " · " + detail
 	}
+	handle := taskHandle(record)
 	c.console.write(fmt.Sprintf("%s└ %s %s %s · %s (%s for the full text)%s\n",
-		yellow, taskHandle(record), mark, detail, summarize(answer, failure), "/task "+taskHandle(record), reset))
+		yellow, handle, mark, detail, summarize(answer, failure), "/task "+handle, reset))
 }
 
 // taskCommand handles "/task" (list) and "/task <#n|description>" (full answer).

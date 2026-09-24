@@ -51,6 +51,10 @@ func newChat(console *console, client *agent.Client, parent, model string) *chat
 func (c *chat) beginTurn() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Flush text an aborted turn left buffered, then start a fresh stream so its
+	// markdown state (an open fence, say) cannot leak into this turn.
+	c.flushStream()
+	c.stream = nil
 	c.labeled = false
 }
 
@@ -168,7 +172,7 @@ func (c *chat) handleParent(event agent.Event) {
 }
 
 // openCall records a running tool call of the parent session. Task calls are
-// excluded: the status line names the task itself (see tasks).
+// excluded: the status line names the task itself (see taskSet).
 func (c *chat) openCall(callID, name string) {
 	if name == agent.TaskName {
 		return
