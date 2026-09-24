@@ -32,7 +32,7 @@ func TestSSEFramingSkipsDone(t *testing.T) {
 }
 
 func TestSSEFramingJoinsMultipleDataLines(t *testing.T) {
-	// The SSE spec joins `data:` lines with a newline, as the TS decoder does.
+	// The SSE spec joins `data:` lines with a newline.
 	frames := collectFrames(t, "data: {\"a\":\ndata: 1}\n\n")
 	if len(frames) != 1 || frames[0] != "{\"a\":\n1}" {
 		t.Fatalf("frames = %q, want [{\"a\":\n1}]", frames)

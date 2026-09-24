@@ -14,7 +14,7 @@ func TestExecutorRetriesRetryableStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
-			// A 500 maps to ProviderInternalReason, which TS marks retryable.
+			// A 500 maps to ProviderInternalReason, which is retryable.
 			w.Header().Set("Retry-After-Ms", "0")
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"error":"boom"}`))
