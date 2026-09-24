@@ -32,11 +32,10 @@ func TestSSEFramingSkipsDone(t *testing.T) {
 }
 
 func TestSSEFramingJoinsMultipleDataLines(t *testing.T) {
-	// The payload is concatenated across `data:` lines (no separator); JSON is
-	// whitespace-insensitive so this is fine for the providers we speak to.
+	// The SSE spec joins `data:` lines with a newline, as the TS decoder does.
 	frames := collectFrames(t, "data: {\"a\":\ndata: 1}\n\n")
-	if len(frames) != 1 || frames[0] != "{\"a\":1}" {
-		t.Fatalf("frames = %q, want [{\"a\":1}]", frames)
+	if len(frames) != 1 || frames[0] != "{\"a\":\n1}" {
+		t.Fatalf("frames = %q, want [{\"a\":\n1}]", frames)
 	}
 }
 
@@ -80,5 +79,12 @@ func TestSSEFramingStopsWhenYieldReturnsFalse(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("iterated %d frames after break, want 1", count)
+	}
+}
+
+func TestSSEFramingAcceptsDataWithoutSpace(t *testing.T) {
+	frames := collectFrames(t, "data:{\"a\":1}\n\n")
+	if len(frames) != 1 || frames[0] != `{"a":1}` {
+		t.Fatalf("frames = %q, want [{\"a\":1}]", frames)
 	}
 }

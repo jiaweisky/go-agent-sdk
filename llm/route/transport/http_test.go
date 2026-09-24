@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -138,5 +139,52 @@ func TestHTTPTransportCancelStopsStream(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("stream did not stop after context cancellation")
+	}
+}
+
+func TestJSONRequestPartsOverlaysStructBody(t *testing.T) {
+	body := struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+	}{Model: "test-model", Stream: true}
+	request := &schema.LLMRequest{Http: &schema.HttpOptions{Body: schema.JsonSchema{"safety_settings": float64(5)}}}
+
+	parts, err := jsonRequestParts(route.TransportPrepareInput{
+		Body:    body,
+		Request: request,
+		Endpoint: route.Endpoint{
+			BaseURL: "https://example.test",
+			Path:    func(route.EndpointInput) string { return "/v1/chat" },
+		},
+		EncodeBody: func(b any) string { return "{}" },
+	})
+	if err != nil {
+		t.Fatalf("jsonRequestParts: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(parts.BodyText), &decoded); err != nil {
+		t.Fatalf("unmarshal %q: %v", parts.BodyText, err)
+	}
+	if decoded["model"] != "test-model" || decoded["stream"] != true || decoded["safety_settings"] != float64(5) {
+		t.Fatalf("body = %s", parts.BodyText)
+	}
+	if parts.Headers["content-type"] != "application/json" {
+		t.Fatalf("content-type = %q", parts.Headers["content-type"])
+	}
+}
+
+func TestJSONRequestPartsRejectsProtocolOwnedOverlay(t *testing.T) {
+	request := &schema.LLMRequest{Http: &schema.HttpOptions{Body: schema.JsonSchema{"model": "other"}}}
+	_, err := jsonRequestParts(route.TransportPrepareInput{
+		Body:    map[string]any{"model": "test"},
+		Request: request,
+		Endpoint: route.Endpoint{
+			BaseURL: "https://example.test",
+			Path:    func(route.EndpointInput) string { return "/v1/chat" },
+		},
+		EncodeBody: func(b any) string { return "{}" },
+	})
+	if err == nil {
+		t.Fatal("want an error for overlaying a protocol-owned field")
 	}
 }

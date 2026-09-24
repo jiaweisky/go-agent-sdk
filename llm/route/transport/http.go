@@ -74,15 +74,36 @@ func bodyWithOverlay(body any, request *schema.LLMRequest, encodeBody func(any) 
 	if forbidden := forbiddenBodyOverlayKeys(overlay); len(forbidden) > 0 {
 		return nil, "", fmt.Errorf("http.body cannot overlay protocol-owned field(s): %s", strings.Join(forbidden, ", "))
 	}
-	if m, ok := body.(map[string]any); ok {
-		merged := schema.MergeJsonRecords(m, overlay)
-		if merged == nil {
-			merged = map[string]any{}
-		}
-		b, _ := json.Marshal(merged)
-		return merged, string(b), nil
+	base, ok := jsonRecord(body)
+	if !ok {
+		return nil, "", fmt.Errorf("http.body can only overlay JSON object request bodies")
 	}
-	return nil, "", fmt.Errorf("http.body can only overlay JSON object request bodies")
+	merged := schema.MergeJsonRecords(base, overlay)
+	if merged == nil {
+		merged = map[string]any{}
+	}
+	b, err := json.Marshal(merged)
+	if err != nil {
+		return nil, "", err
+	}
+	return merged, string(b), nil
+}
+
+// jsonRecord mirrors ProviderShared.isRecord: any JSON object body, whether it
+// is already a map or a typed struct, becomes a map so it can be overlaid.
+func jsonRecord(body any) (map[string]any, bool) {
+	if m, ok := body.(map[string]any); ok {
+		return m, true
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, false
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, false
+	}
+	return m, true
 }
 
 func jsonRequestParts(input route.TransportPrepareInput) (JsonRequestParts, error) {
@@ -122,9 +143,7 @@ func jsonRequestParts(input route.TransportPrepareInput) (JsonRequestParts, erro
 		}
 		headers = authHeaders
 	}
-	if _, exists := headers["content-type"]; !exists {
-		headers["content-type"] = "application/json"
-	}
+	headers["content-type"] = "application/json"
 	return JsonRequestParts{
 		URL:      u,
 		JSONBody: jsonBody,

@@ -31,20 +31,30 @@ func sseFraming(reader io.Reader) iter.Seq2[string, error] {
 		var data strings.Builder
 		for scanner.Scan() {
 			line := scanner.Text()
-			if strings.HasPrefix(line, "data: ") {
-				data.WriteString(line[6:])
-			} else if line == "" {
-				if data.Len() > 0 {
-					msg := data.String()
-					data.Reset()
-					if msg == "[DONE]" {
-						continue
-					}
-					if !yield(msg, nil) {
-						return
-					}
+			if line == "" {
+				if data.Len() == 0 {
+					continue
 				}
+				msg := strings.TrimSuffix(data.String(), "\n")
+				data.Reset()
+				if msg == "" || msg == "[DONE]" {
+					continue
+				}
+				if !yield(msg, nil) {
+					return
+				}
+				continue
 			}
+			// An SSE field is `name: value` with an optional single space after
+			// the colon; `data` lines accumulate joined by newlines.
+			field, value, found := strings.Cut(line, ":")
+			if field != "data" {
+				continue
+			}
+			if found {
+				data.WriteString(strings.TrimPrefix(value, " "))
+			}
+			data.WriteString("\n")
 		}
 		if err := scanner.Err(); err != nil {
 			yield("", err)
