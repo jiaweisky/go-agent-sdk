@@ -674,27 +674,34 @@ import "github.com/user/go-agent-sdk/agent"
 
 // ─── Client ─────────────────────────────────────────────
 type ClientOptions struct {
+    // 位置
+    WorkingDirectory string                    // 项目/worktree 根；空则用进程 cwd
+    Root             string                    // SDK 状态根（data/cache/state/tmp）；**必填**，库不选默认位置
+    ConfigDirs       []string                  // 内容配置目录（agent/skill markdown，见「配置模型」）
+    Home             string                    // ~ 展开用；空则用 OS home
+
+    // 模型与 provider
     Model            string                    // 默认模型
     Protocol         schema.ProtocolID         // 协议 id（"openai-responses"|"anthropic-messages"|"gemini"|...）
     ModelInfo        ModelInfoProvider         // 可选：catalog 元数据（protocol/endpoint/limits/headers）
     Credentials      CredentialProvider        // provider → 秘密（APIKey / AWS）
-    WorkingDirectory string
-    Root             string                    // SDK 状态根（data/cache/state/tmp）；**必填**，库不选默认位置
-    Home             string                    // ~ 展开用；空则用 OS home
-    ConfigDirs       []string                  // 内容配置目录（见「配置模型」）
-    SubagentDepth    int                       // task 子会话最大深度（默认 1）
-    Shell            string                    // bash 工具使用的 shell（默认 sh）
-    Locale           string                    // 列表排序 locale；空则用 LC_ALL/LC_COLLATE/LANG
-    ToolOutput       *ToolOutputConfig         // 工具输出落盘上限（MaxLines / MaxBytes）
-    Compaction       *CompactionConfig         // 上下文压缩（Auto / PreserveRecentTokens / Reserved）
-    Policies         []schema.PolicyInfo       // allow/deny 策略
+    LLM              route.LLMClient           // 可选：注入自定义 LLM client
+
+    // 工具与扩展
     Tools            []Tool                    // 应用级工具
     MCP              []MCPConfig               // MCP servers（工具注册为应用级）
     Plugins          []PluginConfig            // 启动时加载的插件
     References       map[string]core.ReferenceSource // 命名 reference 源
+    Policies         []schema.PolicyInfo       // allow/deny 策略
+    ToolOutput       *ToolOutputConfig         // 工具输出落盘上限（MaxLines / MaxBytes）
+
+    // 运行行为
     Permission       PermissionHandlerFunc     // 默认权限回调（默认 ApproveAll）
     Question         QuestionHandlerFunc       // 默认 question 回调（默认 RejectQuestions）
-    LLM              route.LLMClient           // 可选：注入自定义 LLM client
+    SubagentDepth    int                       // task 子会话最大深度（默认 1）
+    Shell            string                    // bash 工具使用的 shell（默认 sh）
+    Locale           string                    // 列表排序 locale；空则用 LC_ALL/LC_COLLATE/LANG
+    Compaction       *CompactionConfig         // 上下文压缩（Auto / PreserveRecentTokens / Reserved）
 }
 // 用 NewModelInfo(protocol, modelID, baseURL, limit) 构造受支持的 ModelInfo。
 // ModelInfo 是 models.dev catalog 的窄输入替代：调用方提供 limits/endpoint/headers/variants，

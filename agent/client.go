@@ -15,11 +15,6 @@ import (
 
 // ClientOptions configures a Client.
 type ClientOptions struct {
-	// Model is the default model id used when a session does not override it.
-	Model string
-	// Protocol selects the wire protocol when ModelInfo is not set, for
-	// example "openai-responses", "anthropic-messages" or "gemini".
-	Protocol schema.ProtocolID
 	// WorkingDirectory is the project/worktree root. Defaults to the process cwd.
 	WorkingDirectory string
 	// Root is the base directory for every piece of SDK-managed state. It is
@@ -33,9 +28,32 @@ type ClientOptions struct {
 	//	{Root}/state/  runtime state (reserved)
 	//	{Root}/tmp/    scratch space
 	Root string
+	// ConfigDirs are explicit directories to load agents and skills from. Each
+	// is scanned for {agent,agents}/**/*.md, {mode,modes}/*.md and
+	// {skill,skills}/**/SKILL.md. No environment, global or project discovery is
+	// performed.
+	ConfigDirs []string
 	// Home is the user's home directory, used to expand ~ in agent permission
 	// rules. Empty uses the OS home directory.
 	Home string
+
+	// Model is the default model id used when a session does not override it.
+	Model string
+	// Protocol selects the wire protocol when ModelInfo is not set, for
+	// example "openai-responses", "anthropic-messages" or "gemini".
+	Protocol schema.ProtocolID
+	// ModelInfo resolves a model id to catalog-style metadata (protocol, limits,
+	// endpoint, headers, variants), so callers can feed models.dev (or their
+	// own) metadata. When set it takes precedence over Protocol. Build the value
+	// with NewModelInfo for the SDK's supported protocols.
+	ModelInfo ModelInfoProvider
+	// Credentials supplies the provider secret used to authenticate requests.
+	// The protocol decides how it is applied, so callers supply only the secret.
+	Credentials CredentialProvider
+	// LLM overrides the default LLM client (route.LLMClient). When nil, a client
+	// is built from ModelInfo/Protocol over the default HTTP transport.
+	LLM route.LLMClient
+
 	// Tools are application-level tools exposed to every session.
 	Tools []Tool
 	// MCP configures MCP servers whose tools are registered as application tools.
@@ -44,30 +62,15 @@ type ClientOptions struct {
 	Plugins []PluginConfig
 	// References are named reference sources injected into the system context.
 	References map[string]core.ReferenceSource
+	// Policies are policy statements evaluated for tool access.
+	Policies []schema.PolicyInfo
+	// ToolOutput bounds oversized tool results. Nil uses the defaults.
+	ToolOutput *ToolOutputConfig
+
 	// Permission is the default permission handler. Defaults to ApproveAll.
 	Permission PermissionHandlerFunc
 	// Question is the default question handler. Defaults to RejectQuestions.
 	Question QuestionHandlerFunc
-
-	// LLM overrides the default LLM client (route.LLMClient). When nil, a client
-	// is built from Provider/Model over the default HTTP transport.
-	LLM route.LLMClient
-
-	// ModelInfo resolves a model id to catalog-style metadata (protocol, limits,
-	// endpoint, headers, variants), so callers can feed models.dev (or their
-	// own) metadata. When set it takes precedence over Protocol. Build the value
-	// with NewModelInfo for the SDK's supported protocols.
-	ModelInfo ModelInfoProvider
-
-	// Credentials supplies the provider secret used to authenticate requests.
-	// The protocol decides how it is applied, so callers supply only the secret.
-	Credentials CredentialProvider
-
-	// ConfigDirs are explicit directories to load agents and skills from. Each
-	// is scanned for {agent,agents}/**/*.md, {mode,modes}/*.md and
-	// {skill,skills}/**/SKILL.md. No environment, global or project discovery is
-	// performed.
-	ConfigDirs []string
 	// SubagentDepth limits nested subagent (task) recursion. Defaults to 1.
 	SubagentDepth int
 	// Shell overrides the shell used by the bash tool. Empty uses the platform
@@ -78,12 +81,8 @@ type ClientOptions struct {
 	// String.prototype.localeCompare. Empty uses the environment locale
 	// (LC_ALL, LC_COLLATE, LANG).
 	Locale string
-	// ToolOutput bounds oversized tool results. Nil uses the defaults.
-	ToolOutput *ToolOutputConfig
 	// Compaction controls automatic history compaction. Nil uses the defaults.
 	Compaction *CompactionConfig
-	// Policies are policy statements evaluated for tool access.
-	Policies []schema.PolicyInfo
 }
 
 // ToolOutputConfig bounds oversized tool results. Zero values use the defaults.
