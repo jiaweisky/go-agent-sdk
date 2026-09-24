@@ -35,6 +35,7 @@ var openaiRemainingRE = regexp.MustCompile(`^x-ratelimit-remaining-(.+)$`)
 var openaiResetRE = regexp.MustCompile(`^x-ratelimit-reset-(.+)$`)
 var anthropicRE = regexp.MustCompile(`^anthropic-ratelimit-(.+)-(limit|remaining|reset)$`)
 var contentPolicyRE = regexp.MustCompile(`(?i)content[-_\s]?policy|content_filter|safety`)
+var quotaExceededRE = regexp.MustCompile(`(?i)insufficient[-_\s]?quota|quota[-_\s]?exceeded`)
 
 func isSensitiveHeaderName(name string) bool { return sensitiveNameRE.MatchString(name) }
 func isSensitiveQueryName(name string) bool {
@@ -202,29 +203,29 @@ func providerMessage(status int, body string) string {
 	return "Provider request failed with HTTP " + strconv.Itoa(status)
 }
 
-func classifyResponse(status int, body string, headers map[string]string) *schema.LLMError {
+func classifyResponse(req *http.Request, status int, body string, headers map[string]string) *schema.LLMError {
 	if status < 400 {
 		return nil
 	}
-	msg := providerMessage(status, body)
-	norm := make(map[string]string)
+	norm := make(map[string]string, len(headers))
 	for k, v := range headers {
 		norm[strings.ToLower(k)] = v
 	}
 	ra := retryAfterMs(norm)
 	rl := rateLimitDetails(norm, ra)
 
-	reason := classifyStatusReason(status, body, msg, ra, rl)
+	redactedBody, truncated := responseBody(body, req)
+	msg := providerMessage(status, redactedBody)
+	httpCtx := httpContextFrom(req, status, redactedBody, truncated, headers, requestID(norm), rl)
+
 	return &schema.LLMError{
 		Module: "RequestExecutor",
 		Method: "execute",
-		Reason: reason,
+		Reason: classifyStatusReason(status, redactedBody, msg, ra, rl, httpCtx),
 	}
 }
 
-func classifyStatusReason(status int, body, msg string, retryAfterMs *int, rateLimit *schema.HttpRateLimitDetails) schema.LLMErrorReason {
-	httpCtx := httpContextFrom(status, msg, body, retryAfterMs, rateLimit)
-
+func classifyStatusReason(status int, body, msg string, retryAfterMs *int, rateLimit *schema.HttpRateLimitDetails, httpCtx *schema.HttpContext) schema.LLMErrorReason {
 	if contentPolicyRE.MatchString(body) {
 		return schema.NewContentPolicyReason(msg, schema.WithHttpContext(*httpCtx))
 	}
@@ -235,7 +236,7 @@ func classifyStatusReason(status int, body, msg string, retryAfterMs *int, rateL
 		return schema.NewAuthenticationReason(msg, schema.AuthKindInsufficientPermissions, schema.WithHttpContext(*httpCtx))
 	}
 	if status == 429 {
-		if regexp.MustCompile(`(?i)insufficient[-_\s]?quota|quota[-_\s]?exceeded`).MatchString(body) {
+		if quotaExceededRE.MatchString(body) {
 			return schema.NewQuotaExceededReason(msg, schema.WithHttpContext(*httpCtx))
 		}
 		opts := []schema.ReasonOption{schema.WithHttpContext(*httpCtx)}
@@ -261,21 +262,55 @@ func classifyStatusReason(status int, body, msg string, retryAfterMs *int, rateL
 	return schema.NewUnknownProviderReason(msg, schema.WithStatus(status), schema.WithHttpContext(*httpCtx))
 }
 
-func httpContextFrom(status int, msg, body string, retryAfterMs *int, rateLimit *schema.HttpRateLimitDetails) *schema.HttpContext {
-	hc := &schema.HttpContext{
-		Response:  &schema.HttpResponseDetails{Status: status},
-		RateLimit: rateLimit,
+func requestDetails(req *http.Request) schema.HttpRequestDetails {
+	if req == nil {
+		return schema.HttpRequestDetails{}
 	}
-	if len(body) > 0 {
-		if len(body) > bodyLimit {
-			t := true
-			hc.BodyTruncated = &t
-			hc.Body = strPtr(body[:bodyLimit])
-		} else {
-			hc.Body = strPtr(body)
+	headers := make(map[string]string, len(req.Header))
+	for k, v := range req.Header {
+		if len(v) > 0 {
+			headers[k] = v[0]
 		}
 	}
+	return schema.HttpRequestDetails{
+		Method:  req.Method,
+		URL:     redactURL(req.URL.String()),
+		Headers: redactHeaders(headers),
+	}
+}
+
+func httpContextFrom(req *http.Request, status int, body string, truncated bool, headers map[string]string, reqID string, rateLimit *schema.HttpRateLimitDetails) *schema.HttpContext {
+	hc := &schema.HttpContext{
+		Request:   requestDetails(req),
+		Response:  &schema.HttpResponseDetails{Status: status, Headers: redactHeaders(headers)},
+		RateLimit: rateLimit,
+	}
+	if body != "" {
+		hc.Body = strPtr(body)
+	}
+	if truncated {
+		t := true
+		hc.BodyTruncated = &t
+	}
+	if reqID != "" {
+		hc.RequestID = strPtr(reqID)
+	}
 	return hc
+}
+
+// transportError mirrors toHttpError: it carries the redacted URL and request
+// details alongside the message.
+func transportError(req *http.Request, message string) *schema.LLMError {
+	opts := []schema.ReasonOption{}
+	if req != nil && req.URL != nil {
+		opts = append(opts, schema.WithURL(redactURL(req.URL.String())))
+		opts = append(opts, schema.WithHttpContext(schema.HttpContext{Request: requestDetails(req)}))
+	}
+	return &schema.LLMError{
+		Module: "RequestExecutor",
+		Method: "execute",
+		Reason: schema.NewTransportReason(message, opts...),
+	}
 }
 
 func strPtr(s string) *string { return &s }
@@ -374,11 +409,10 @@ func (e *Executor) DoWithRetries(req *http.Request) (*http.Response, *schema.LLM
 			if ctxErr := req.Context().Err(); ctxErr != nil {
 				return nil, canceledTransportError(ctxErr)
 			}
-			lastErr = &schema.LLMError{
-				Module: "RequestExecutor",
-				Method: "execute",
-				Reason: schema.NewTransportReason(fmt.Sprintf("HTTP request failed: %v", err)),
-			}
+			lastErr = transportError(req, fmt.Sprintf("HTTP request failed: %v", err))
+			// TS TransportReason is not retryable; unlike TS we still retry a
+			// failed transport because a transient network error is worth a
+			// second attempt. Status errors follow the reason's Retryable().
 			continue
 		}
 		if resp.StatusCode < 400 {
@@ -386,32 +420,22 @@ func (e *Executor) DoWithRetries(req *http.Request) (*http.Response, *schema.LLM
 			// caller can stream it (SSE and friends).
 			return resp, nil
 		}
-		body, err := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if err != nil {
-			lastErr = &schema.LLMError{
-				Module: "RequestExecutor",
-				Method: "execute",
-				Reason: schema.NewTransportReason(fmt.Sprintf("failed to read response: %v", err)),
-			}
-			continue
+		bodyStr := ""
+		if readErr == nil {
+			bodyStr = string(body)
 		}
-		bodyStr := string(body)
 		headers := make(map[string]string)
 		for k, v := range resp.Header {
 			if len(v) > 0 {
 				headers[k] = v[0]
 			}
 		}
-		if err := classifyResponse(resp.StatusCode, bodyStr, headers); err != nil {
-			lastErr = err
-			if !retryableStatus(resp.StatusCode) {
-				return nil, err
-			}
-			continue
+		lastErr = classifyResponse(req, resp.StatusCode, bodyStr, headers)
+		if !lastErr.Retryable() {
+			return nil, lastErr
 		}
-		resp.Body = io.NopCloser(strings.NewReader(bodyStr))
-		return resp, nil
 	}
 	return nil, lastErr
 }
