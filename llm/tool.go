@@ -9,17 +9,22 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// ToolExecuteContext identifies the tool call being executed.
 type ToolExecuteContext struct {
 	ID   string
 	Name string
 }
 
+// ToModelOutputInput is what a tool's output mapper receives: the call id, the
+// decoded parameters, and the output.
 type ToModelOutputInput struct {
 	CallID     string
 	Parameters any
 	Output     any
 }
 
+// Tool is a model-facing tool: its schemas, its handler, and how its result
+// reaches the model.
 type Tool struct {
 	description          string
 	paramsSchema         *jsonschema.Schema
@@ -31,8 +36,11 @@ type Tool struct {
 	toStructuredOutput   func(output any) any
 }
 
+// Description returns the tool's description for the model.
 func (t *Tool) Description() string { return t.description }
 
+// InputSchema returns the model-facing schema for the tool's parameters, or nil
+// when the tool takes none.
 func (t *Tool) InputSchema() schema.JsonSchema {
 	if t.paramsSchema == nil {
 		return nil
@@ -40,6 +48,8 @@ func (t *Tool) InputSchema() schema.JsonSchema {
 	return schema.JsonSchema(t.paramsSchema.Model())
 }
 
+// OutputSchema returns the model-facing schema for the tool's output, or nil
+// when it has none.
 func (t *Tool) OutputSchema() schema.JsonSchema {
 	if t.outputSchema == nil {
 		return nil
@@ -47,6 +57,7 @@ func (t *Tool) OutputSchema() schema.JsonSchema {
 	return schema.JsonSchema(t.outputSchema.Model())
 }
 
+// Decode validates raw parameters against the input schema.
 func (t *Tool) Decode(input any) (any, error) {
 	if t.paramsSchemaCompiled == nil {
 		return input, nil
@@ -57,6 +68,7 @@ func (t *Tool) Decode(input any) (any, error) {
 	return input, nil
 }
 
+// Encode validates a handler result against the success schema.
 func (t *Tool) Encode(value any) (any, error) {
 	if t.outputSchemaCompiled == nil {
 		return value, nil
@@ -67,6 +79,7 @@ func (t *Tool) Encode(value any) (any, error) {
 	return value, nil
 }
 
+// Execute runs the tool's handler. info is optional.
 func (t *Tool) Execute(ctx context.Context, params any, info ...*ToolExecuteContext) (any, error) {
 	if t.execute == nil {
 		return nil, nil
@@ -78,6 +91,7 @@ func (t *Tool) Execute(ctx context.Context, params any, info ...*ToolExecuteCont
 	return t.execute(ctx, params, inf)
 }
 
+// ToModelOutput renders a tool result as content for the model.
 func (t *Tool) ToModelOutput(callID string, params any, output any) []schema.ToolContent {
 	if t.toModelOutput == nil {
 		return nil
@@ -85,6 +99,8 @@ func (t *Tool) ToModelOutput(callID string, params any, output any) []schema.Too
 	return t.toModelOutput(ToModelOutputInput{CallID: callID, Parameters: params, Output: output})
 }
 
+// ToStructuredOutput maps a handler result to the structured output, unchanged
+// when the tool has no mapper.
 func (t *Tool) ToStructuredOutput(output any) any {
 	if t.toStructuredOutput == nil {
 		return output
@@ -92,6 +108,8 @@ func (t *Tool) ToStructuredOutput(output any) any {
 	return t.toStructuredOutput(output)
 }
 
+// Project builds the tool output: the structured value plus its model-facing
+// content.
 func (t *Tool) Project(parameters any, callID string, output any) schema.ToolOutput {
 	structured := t.ToStructuredOutput(output)
 	var content []schema.ToolContent
@@ -103,9 +121,8 @@ func (t *Tool) Project(parameters any, callID string, output any) schema.ToolOut
 	return schema.NewToolOutput(structured, content...)
 }
 
-// ToolConfig mirrors the typed Tool.make mode in packages/llm/src/tool.ts: the
-// parameters and success schemas drive both the model-facing definition
-// (Model) and input/output validation (Validation).
+// ToolConfig describes a tool. The parameters and output schemas drive both the
+// model-facing definition and the input/output validation.
 type ToolConfig struct {
 	Description        string
 	Parameters         *jsonschema.Schema
@@ -115,6 +132,8 @@ type ToolConfig struct {
 	ToStructuredOutput func(output any) any
 }
 
+// Make builds a tool from config, compiling its schemas so a malformed call or
+// result fails fast.
 func Make(config ToolConfig) *Tool {
 	t := &Tool{
 		description:        config.Description,
@@ -143,8 +162,10 @@ func mustCompileToolSchema(raw schema.JsonSchema) *jsonschema6.Schema {
 	return compiled
 }
 
+// Tools is a set of tools keyed by name.
 type Tools map[string]*Tool
 
+// ToDefinitions renders the tools as model-facing definitions.
 func ToDefinitions(tools Tools) []schema.ToolDefinition {
 	result := make([]schema.ToolDefinition, 0, len(tools))
 	for name, tool := range tools {
@@ -164,6 +185,11 @@ func ToDefinitions(tools Tools) []schema.ToolDefinition {
 	return result
 }
 
+// ToolDef is the model-facing tool definition.
 type ToolDef = schema.ToolDef
+
+// ToolCallPart is one tool call the model asked for.
 type ToolCallPart = schema.ToolCallPart
+
+// ToolResultPart is one tool result sent back to the model.
 type ToolResultPart = schema.ToolResultPart

@@ -117,6 +117,7 @@ const (
 	ReasonUnknownProvider       = schema.ReasonUnknownProvider
 )
 
+// ToolChoiceMode is a tool-choice value that names a mode rather than a tool.
 type ToolChoiceMode string
 
 const (
@@ -125,6 +126,9 @@ const (
 	ToolChoiceModeRequired ToolChoiceMode = "required"
 )
 
+// RequestInput is the ergonomic form of a request. System, Prompt and
+// ToolChoice accept strings, parts, or the schema types; NewRequest normalizes
+// them.
 type RequestInput struct {
 	ID              string
 	Model           schema.ModelSchema
@@ -141,6 +145,7 @@ type RequestInput struct {
 	Metadata        map[string]any
 }
 
+// RequestInputFrom converts a request back to its input form.
 func RequestInputFrom(r *schema.LLMRequest) RequestInput {
 	return RequestInput{
 		ID:              r.ID,
@@ -158,6 +163,8 @@ func RequestInputFrom(r *schema.LLMRequest) RequestInput {
 	}
 }
 
+// NewRequest normalizes input into a request, converting its messages, tools
+// and tool choice.
 func NewRequest(input RequestInput) *schema.LLMRequest {
 	system := schema.SystemParts(input.System)
 	messages := make([]schema.Message, 0, len(input.Messages))
@@ -196,6 +203,7 @@ func NewRequest(input RequestInput) *schema.LLMRequest {
 	}
 }
 
+// UpdateRequest applies the set fields of patch and returns a new request.
 func UpdateRequest(r *schema.LLMRequest, patch RequestInput) *schema.LLMRequest {
 	base := RequestInputFrom(r)
 	if patch.System != nil {
@@ -235,19 +243,25 @@ func UpdateRequest(r *schema.LLMRequest, patch RequestInput) *schema.LLMRequest 
 const generateObjectToolName = "generate_object"
 const generateObjectToolDescription = "Return the structured result by calling this tool."
 
+// GenerateObjectResponse is a structured generation: the object the model
+// returned and the response it came from.
 type GenerateObjectResponse struct {
 	Object   any
 	Response *schema.LLMResponse
 }
 
+// Events returns the events of the underlying response.
 func (r *GenerateObjectResponse) Events() []schema.LLMEvent {
 	return r.Response.Events
 }
 
+// Usage returns the token usage of the underlying response.
 func (r *GenerateObjectResponse) Usage() *schema.Usage {
 	return r.Response.Usage
 }
 
+// GenerateObjectOptions describes a structured generation: the request, and the
+// schema the returned object must match.
 type GenerateObjectOptions struct {
 	Request    RequestInput
 	Schema     schema.JsonSchema
@@ -277,6 +291,8 @@ func compileSchema(raw schema.JsonSchema) *jsonschema.Schema {
 	return sch
 }
 
+// GenerateObject forces a single tool call and returns its validated input as
+// the object.
 func GenerateObject(ctx context.Context, client route.LLMClient, opts GenerateObjectOptions) (*GenerateObjectResponse, error) {
 	toolInputSchema := opts.JsonSchema
 	if opts.Schema != nil {

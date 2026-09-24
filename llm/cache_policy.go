@@ -152,6 +152,8 @@ func markMessages(messages []schema.Message, strategy any, hint schema.CacheHint
 	return messages
 }
 
+// ApplyCachePolicy adds cache hints to the request for protocols that respect
+// inline hints, returning the request unchanged otherwise.
 func ApplyCachePolicy(request *schema.LLMRequest, protocolID string) *schema.LLMRequest {
 	if _, ok := respectsInlineHints[protocolID]; !ok {
 		return request

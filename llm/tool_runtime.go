@@ -7,17 +7,22 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// ToolSettlement is a finished tool call: its result value and output.
 type ToolSettlement struct {
 	Result schema.ToolResultValue
 	Output *schema.ToolOutput
 }
 
+// DispatchResult is what a dispatched tool call produced.
 type DispatchResult struct {
 	Result schema.ToolResultValue
 	Output *schema.ToolOutput
 	Events []schema.LLMEvent
 }
 
+// Dispatch runs one tool call: it decodes the parameters, executes the handler,
+// encodes the result and builds the events. A failure becomes an error result
+// rather than a Go error.
 func Dispatch(ctx context.Context, tools Tools, call schema.ToolCallPart) *DispatchResult {
 	tool := tools[call.Name]
 	if tool == nil {
