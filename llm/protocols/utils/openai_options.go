@@ -23,6 +23,16 @@ var reasoningEffortSet = map[string]struct{}{
 	"none": {}, "minimal": {}, "low": {}, "medium": {}, "high": {}, "xhigh": {},
 }
 
+var reasoningEffortsSet = map[string]struct{}{
+	"none": {}, "minimal": {}, "low": {}, "medium": {}, "high": {}, "xhigh": {}, "max": {},
+}
+
+// IsReasoningEffort reports whether an effort is supported by OpenAI's API.
+func IsReasoningEffort(value string) bool {
+	_, ok := reasoningEffortSet[value]
+	return ok
+}
+
 var textVerbositySet = map[string]struct{}{
 	"low": {}, "medium": {}, "high": {},
 }
@@ -70,7 +80,7 @@ func ReasoningEffort(request *schema.LLMRequest) *string {
 	if !ok {
 		return nil
 	}
-	if _, valid := reasoningEffortSet[v]; !valid {
+	if _, valid := reasoningEffortsSet[v]; !valid {
 		return nil
 	}
 	return &v

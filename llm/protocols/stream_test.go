@@ -473,3 +473,24 @@ func TestBedrockConverseErrorClassification(t *testing.T) {
 		}
 	}
 }
+
+func TestGeminiMapFinishReasonDefaultsToUnknown(t *testing.T) {
+	if got := geminiMapFinishReason(nil, false); got != schema.ReasonUnknown {
+		t.Fatalf("nil reason = %q, want %q", got, schema.ReasonUnknown)
+	}
+	if got := openaiChatMapFinishReason(nil); got != schema.ReasonUnknown {
+		t.Fatalf("chat nil reason = %q, want %q", got, schema.ReasonUnknown)
+	}
+}
+
+func TestOpenAIResponsesToolCallFallsBackToItemID(t *testing.T) {
+	events := runStream(t, OpenAIResponsesHTTPRoute, []string{
+		`{"type":"response.output_item.added","item":{"type":"function_call","id":"item_1","name":"lookup","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","item_id":"item_1","delta":"{}"}`,
+		`{"type":"response.completed","response":{}}`,
+	})
+	start := firstOfType(events, schema.EventToolInputStart)
+	if start == nil || start.ID != "item_1" {
+		t.Fatalf("tool-input-start = %+v (events %v)", start, eventTypes(events))
+	}
+}

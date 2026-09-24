@@ -337,10 +337,7 @@ func geminiFromRequest(request *schema.LLMRequest) (any, error) {
 		for i, p := range request.System {
 			parts[i].Text = p.Text
 		}
-		text := JoinText(parts)
-		if text != "" {
-			sysInst = map[string]any{"parts": []map[string]any{{"text": text}}}
-		}
+		sysInst = map[string]any{"parts": []map[string]any{{"text": JoinText(parts)}}}
 	}
 
 	var tools []geminiTool
@@ -369,7 +366,7 @@ func geminiFromRequest(request *schema.LLMRequest) (any, error) {
 		ThinkingConfig:  geminiLowerOptions(request),
 	}
 	if gc.MaxOutputTokens == nil && gc.Temperature == nil && gc.TopP == nil && gc.TopK == nil &&
-		len(gc.StopSequences) == 0 && gc.ThinkingConfig == nil {
+		gc.StopSequences == nil && gc.ThinkingConfig == nil {
 		gc = nil
 	}
 
@@ -472,7 +469,7 @@ func geminiMapUsage(u *geminiUsage) *schema.Usage {
 
 func geminiMapFinishReason(reason *string, hasToolCalls bool) schema.FinishReason {
 	if reason == nil {
-		return ""
+		return schema.ReasonUnknown
 	}
 	switch *reason {
 	case "STOP":

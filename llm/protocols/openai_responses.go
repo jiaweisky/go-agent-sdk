@@ -360,10 +360,7 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 		for i, p := range request.System {
 			parts[i].Text = p.Text
 		}
-		text := JoinText(parts)
-		if text != "" {
-			input = append(input, openaiResponsesSystemItem{Role: "system", Content: text})
-		}
+		input = append(input, openaiResponsesSystemItem{Role: "system", Content: JoinText(parts)})
 	}
 	store := utils.Store(request)
 
@@ -383,7 +380,7 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 			}
 
 		case schema.RoleUser:
-			var userContent []any
+			userContent := []any{}
 			for _, p := range msg.Content {
 				c, err := openaiResponsesLowerUserContent(p)
 				if err != nil {
@@ -448,23 +445,27 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 							}
 						}
 					}
+				default:
+					return nil, fmt.Errorf("OpenAI Responses assistant messages only support text, reasoning, tool-call and tool-result content")
 				}
 			}
 			openaiResponsesFlushText(&input, &textParts)
 
 		case schema.RoleTool:
 			for _, p := range msg.Content {
-				if part, ok := p.(schema.ToolResultPart); ok {
-					output, err := openaiResponsesLowerToolResultOutput(part)
-					if err != nil {
-						return nil, err
-					}
-					input = append(input, openaiResponsesFunctionCallOutputItem{
-						Type:   "function_call_output",
-						CallID: part.ID,
-						Output: output,
-					})
+				part, ok := p.(schema.ToolResultPart)
+				if !ok {
+					return nil, fmt.Errorf("OpenAI Responses tool messages only support tool-result content")
 				}
+				output, err := openaiResponsesLowerToolResultOutput(part)
+				if err != nil {
+					return nil, err
+				}
+				input = append(input, openaiResponsesFunctionCallOutputItem{
+					Type:   "function_call_output",
+					CallID: part.ID,
+					Output: output,
+				})
 			}
 		}
 	}
@@ -494,7 +495,7 @@ func openaiResponsesFlushText(input *[]openaiResponsesInputItem, texts *[]string
 	*texts = nil
 }
 
-func openaiResponsesLowerOptions(request *schema.LLMRequest) map[string]any {
+func openaiResponsesLowerOptions(request *schema.LLMRequest) (map[string]any, error) {
 	opts := make(map[string]any)
 	if ins := utils.Instructions(request); ins != nil {
 		opts["instructions"] = *ins
@@ -509,6 +510,9 @@ func openaiResponsesLowerOptions(request *schema.LLMRequest) map[string]any {
 		opts["include"] = inc
 	}
 	effort := utils.ReasoningEffort(request)
+	if effort != nil && !utils.IsReasoningEffort(*effort) {
+		return nil, InvalidRequest(fmt.Sprintf("OpenAI Responses does not support reasoning effort %s", *effort))
+	}
 	summary := utils.ReasoningSummary(request)
 	if effort != nil || summary != nil {
 		r := make(map[string]any)
@@ -526,7 +530,7 @@ func openaiResponsesLowerOptions(request *schema.LLMRequest) map[string]any {
 	if tier := utils.ServiceTier(request); tier != nil {
 		opts["service_tier"] = *tier
 	}
-	return opts
+	return opts, nil
 }
 
 func openaiResponsesFromRequest(request *schema.LLMRequest) (any, error) {
@@ -535,7 +539,10 @@ func openaiResponsesFromRequest(request *schema.LLMRequest) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	opts := openaiResponsesLowerOptions(request)
+	opts, err := openaiResponsesLowerOptions(request)
+	if err != nil {
+		return nil, err
+	}
 	body := map[string]any{
 		"model":  string(request.Model.ModelID()),
 		"input":  messages,
@@ -806,13 +813,17 @@ func openaiResponsesOnOutputItemAdded(s openaiResponsesParserState, evt openaiRe
 	pm := openaiResponsesOpenAIMetadata(map[string]any{"itemId": *item.ID})
 	var events []schema.LLMEvent
 	utils.StepStart(&s.lifecycle, &events)
+	callID := openaiResponsesStrVal(item.CallID)
+	if callID == "" {
+		callID = *item.ID
+	}
 	s.tools = utils.Start(s.tools, *item.ID, utils.PendingTool{
-		ID:               openaiResponsesStrVal(item.CallID),
+		ID:               callID,
 		Name:             openaiResponsesStrVal(item.Name),
 		Input:            openaiResponsesStrVal(item.Arguments),
 		ProviderMetadata: pm,
 	})
-	events = append(events, schema.NewToolInputStart(openaiResponsesStrVal(item.CallID), openaiResponsesStrVal(item.Name), schema.WithEventProviderMetadata(pm)))
+	events = append(events, schema.NewToolInputStart(callID, openaiResponsesStrVal(item.Name), schema.WithEventProviderMetadata(pm)))
 	return s, events, nil
 }
 

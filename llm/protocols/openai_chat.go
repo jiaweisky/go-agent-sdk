@@ -298,9 +298,12 @@ func openaiChatFromRequest(request *schema.LLMRequest) (any, error) {
 		if s, ok := raw["store"].(bool); ok {
 			body.Store = &s
 		}
-		if e, ok := raw["reasoningEffort"].(string); ok {
-			body.ReasoningEffort = &e
+	}
+	if effort := utils.ReasoningEffort(request); effort != nil {
+		if !utils.IsReasoningEffort(*effort) {
+			return nil, InvalidRequest(fmt.Sprintf("OpenAI Chat does not support reasoning effort %s", *effort))
 		}
+		body.ReasoningEffort = effort
 	}
 	if g := request.Generation; g != nil {
 		body.MaxTokens = g.MaxTokens
@@ -322,9 +325,7 @@ func openaiChatLowerMessages(request *schema.LLMRequest) ([]openaiChatMessage, e
 			parts[i].Text = p.Text
 		}
 		sysText := JoinText(parts)
-		if sysText != "" {
-			msgs = append(msgs, openaiChatMessage{Role: "system", Content: sysText})
-		}
+		msgs = append(msgs, openaiChatMessage{Role: "system", Content: sysText})
 	}
 
 	var pendingImages []any
@@ -401,7 +402,7 @@ func openaiChatDecodeOpenAIChatEvent(frame string) (any, error) {
 
 func openaiChatMapFinishReason(reason *string) schema.FinishReason {
 	if reason == nil {
-		return ""
+		return schema.ReasonUnknown
 	}
 	switch *reason {
 	case "stop":
@@ -460,22 +461,20 @@ func openaiChatStep(state any, event any) (any, []schema.LLMEvent, error) {
 	if u != nil {
 		s.usage = u
 	}
-	var finishReason schema.FinishReason
-	if len(evt.Choices) > 0 {
-		finishReason = openaiChatMapFinishReason(evt.Choices[0].FinishReason)
-		if finishReason != "" {
-			s.finishReason = finishReason
-		}
-	}
 	if len(evt.Choices) == 0 {
 		return s, events, nil
 	}
-	delta := evt.Choices[0].Delta
+	choice := evt.Choices[0]
+	prevFinishReason := s.finishReason
+	if choice.FinishReason != nil {
+		s.finishReason = openaiChatMapFinishReason(choice.FinishReason)
+	}
+	delta := choice.Delta
 	if delta != nil {
-		if delta.ReasoningContent != nil {
+		if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
 			utils.ReasoningDelta(&s.lifecycle, &events, "reasoning-0", *delta.ReasoningContent)
 		}
-		if delta.Content != nil {
+		if delta.Content != nil && *delta.Content != "" {
 			utils.ReasoningEnd(&s.lifecycle, &events, "reasoning-0")
 			utils.TextDelta(&s.lifecycle, &events, "text-0", *delta.Content)
 		}
@@ -512,7 +511,7 @@ func openaiChatStep(state any, event any) (any, []schema.LLMEvent, error) {
 			events = append(events, result.Events...)
 		}
 	}
-	if finishReason != "" && len(s.tools) > 0 {
+	if choice.FinishReason != nil && prevFinishReason == "" && len(s.tools) > 0 {
 		outcome, finishErr := utils.FinishAllTools(openaiChatAdapter, s.tools)
 		if finishErr != nil {
 			return state, nil, finishErr
