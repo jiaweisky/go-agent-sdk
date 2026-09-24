@@ -29,10 +29,3 @@ func TestNewGlobalDerivesFromRoot(t *testing.T) {
 		t.Fatalf("Home = %q", global.Home)
 	}
 }
-
-func TestDefaultGlobalRoot(t *testing.T) {
-	want := filepath.Join("/home/user", ".local", "share", "opencode")
-	if got := DefaultGlobalRoot("/home/user"); got != want {
-		t.Fatalf("DefaultGlobalRoot = %q, want %q", got, want)
-	}
-}

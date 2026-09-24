@@ -90,11 +90,8 @@ func Client(options ...Option) (*agent.Client, error) {
 	if value := envLimits(); value != nil {
 		limit = schema.ModelLimit{Context: value.Context, Output: value.Output}
 	}
-	// Root is required: the SDK never chooses a data directory. This host
-	// follows the opencode CLI convention so the example reuses its state.
-	home, _ := os.UserHomeDir()
 	opts := &agent.ClientOptions{
-		Root:     core.DefaultGlobalRoot(home),
+		Root:     dataRoot(),
 		Model:    model,
 		Protocol: protocol,
 		ModelInfo: func(id string) (schema.ModelInfo, error) {
@@ -127,6 +124,17 @@ func Client(options ...Option) (*agent.Client, error) {
 		return nil, err
 	}
 	return client, nil
+}
+
+// dataRoot is this host's state root: the opencode CLI convention
+// ($XDG_DATA_HOME/opencode, else ~/.local/share/opencode), so the example reuses
+// whatever state the CLI already has. The SDK never picks this itself.
+func dataRoot() string {
+	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
+		return filepath.Join(dir, "opencode")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "opencode")
 }
 
 // protocolFor maps the OPENCODE_PROVIDER value to a native protocol id.

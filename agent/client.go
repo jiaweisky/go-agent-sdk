@@ -33,9 +33,6 @@ type ClientOptions struct {
 	//	{Root}/db/     session database
 	//	{Root}/state/  runtime state (reserved)
 	//	{Root}/tmp/    scratch space
-	//
-	// core.DefaultGlobalRoot(home) returns the opencode CLI's root for hosts that
-	// want to follow that convention.
 	Root string
 	// DataDir overrides the directory holding the session database. Empty uses
 	// {Root}/db. It is independent of Root, which covers all the other state.

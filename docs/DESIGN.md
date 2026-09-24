@@ -782,7 +782,7 @@ TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR`
 {Root}/tmp/     临时文件
 ```
 
-`Root` **必填**：库不选默认位置，否则会往宿主没指定的目录（例如 opencode CLI 的 `~/.local/share/opencode`）读写，且行为会被机器上已有的 DB / clone / snapshot 影响。想沿用 CLI 约定的宿主自己传 `core.DefaultGlobalRoot(home)`（`~` 来自 `os.UserHomeDir`，是宿主事实）。除 `$HOME` / `COMSPEC` / locale 默认外，SDK 不读任何 `XDG_*` / `OPENCODE_*`；每个实例指向自己的 `Root` 即可完全隔离（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
+`Root` **必填**：库不选默认位置，否则会往宿主没指定的目录（例如 opencode CLI 的 `~/.local/share/opencode`）读写，且行为会被机器上已有的 DB / clone / snapshot 影响。想沿用 CLI 约定的宿主自己算（`$XDG_DATA_HOME/opencode` 或 `~/.local/share/opencode`，示例里就是 `dataRoot()`；`~` 来自 `os.UserHomeDir`，是宿主事实）。除 `$HOME` / `COMSPEC` / locale 默认外，SDK 不读任何 `XDG_*` / `OPENCODE_*`；每个实例指向自己的 `Root` 即可完全隔离（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
 
 同一原则也适用于仓库：`core/repository.go` 不再读 `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`，改为显式输入：
 

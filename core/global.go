@@ -24,13 +24,6 @@ type Global struct {
 	Repos string
 }
 
-// DefaultGlobalRoot is the opencode CLI's state root. A host that wants to
-// follow that convention passes it as ClientOptions.Root; the SDK itself has no
-// default location.
-func DefaultGlobalRoot(home string) string {
-	return filepath.Join(home, ".local", "share", "opencode")
-}
-
 // NewGlobal derives the layout from an explicit state root and home directory.
 // The root is required: no default is applied, so the caller always decides
 // what the SDK reads and writes.
