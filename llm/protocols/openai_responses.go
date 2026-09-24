@@ -221,12 +221,11 @@ func openaiResponsesStrVal(p *string) string {
 }
 
 func openaiResponsesLowerTool(td schema.ToolDefinition, inputSchema any) openaiResponsesResponsesTool {
-	s, _ := inputSchema.(map[string]any)
 	return openaiResponsesResponsesTool{
 		Type:        "function",
 		Name:        td.Name,
 		Description: td.Description,
-		Parameters:  s,
+		Parameters:  schemaMap(inputSchema),
 		Strict:      false,
 	}
 }
@@ -548,7 +547,7 @@ func openaiResponsesFromRequest(request *schema.LLMRequest) (any, error) {
 	if len(request.Tools) > 0 {
 		tools := make([]openaiResponsesResponsesTool, 0, len(request.Tools))
 		for _, t := range request.Tools {
-			tools = append(tools, openaiResponsesLowerTool(t, t.InputSchema))
+			tools = append(tools, openaiResponsesLowerTool(t, ProjectToolSchema(request.Model, t.InputSchema)))
 		}
 		body["tools"] = tools
 	}

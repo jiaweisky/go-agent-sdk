@@ -144,11 +144,10 @@ func geminiThoughtSignature(md schema.ProviderMetadata) *string {
 }
 
 func geminiLowerTool(td schema.ToolDefinition, inputSchema any) geminiFunctionDeclaration {
-	s, _ := inputSchema.(map[string]any)
 	return geminiFunctionDeclaration{
 		Name:        td.Name,
 		Description: td.Description,
-		Parameters:  utils.Convert(s),
+		Parameters:  utils.Convert(schemaMap(inputSchema)),
 	}
 }
 
@@ -348,7 +347,7 @@ func geminiFromRequest(request *schema.LLMRequest) (any, error) {
 	if toolsEnabled {
 		decls := make([]geminiFunctionDeclaration, 0, len(request.Tools))
 		for _, t := range request.Tools {
-			decls = append(decls, geminiLowerTool(t, t.InputSchema))
+			decls = append(decls, geminiLowerTool(t, ProjectToolSchema(request.Model, t.InputSchema)))
 		}
 		tools = []geminiTool{{FunctionDeclarations: decls}}
 	}

@@ -9,6 +9,44 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// schemaMap normalizes a JSON schema held as `any`. ToolDefinition.InputSchema
+// has the named type JsonSchema, so a plain `.(map[string]any)` assertion fails
+// and would silently drop the schema.
+func schemaMap(inputSchema any) map[string]any {
+	switch v := inputSchema.(type) {
+	case map[string]any:
+		return v
+	case schema.JsonSchema:
+		return v
+	}
+	return nil
+}
+
+// ToolSchemaCompatibility mirrors request.model.compatibility?.toolSchema.
+func ToolSchemaCompatibility(model schema.ModelSchema) string {
+	compatibility := model.GetCompatibility()
+	if compatibility == nil || compatibility.ToolSchema == nil {
+		return ""
+	}
+	return string(*compatibility.ToolSchema)
+}
+
+// ProjectToolSchema mirrors ToolSchemaProjection.modelCompatibility.
+func ProjectToolSchema(model schema.ModelSchema, inputSchema any) any {
+	return projectToolSchema(inputSchema, ToolSchemaCompatibility(model))
+}
+
+func projectToolSchema(inputSchema any, compatibility string) any {
+	if compatibility == "" {
+		return inputSchema
+	}
+	s := schemaMap(inputSchema)
+	if s == nil {
+		return inputSchema
+	}
+	return utils.ModelCompatibility(s, compatibility)
+}
+
 type ToolAccumulator struct {
 	ID    string
 	Name  string

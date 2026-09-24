@@ -247,11 +247,11 @@ func anthropicMessagesIntVal(p *int) int {
 	return *p
 }
 
-func anthropicMessagesLowerTool(bp *anthropicMessagesBreakpointTracker, td schema.ToolDefinition) anthropicMessagesAnthropicTool {
+func anthropicMessagesLowerTool(bp *anthropicMessagesBreakpointTracker, td schema.ToolDefinition, inputSchema any) anthropicMessagesAnthropicTool {
 	return anthropicMessagesAnthropicTool{
 		Name:         td.Name,
 		Description:  td.Description,
-		InputSchema:  td.InputSchema,
+		InputSchema:  inputSchema,
 		CacheControl: bp.next(td.Cache),
 	}
 }
@@ -423,7 +423,7 @@ func anthropicMessagesFromRequest(request *schema.LLMRequest) (any, error) {
 	var tools []anthropicMessagesAnthropicTool
 	if len(request.Tools) > 0 && (request.ToolChoice == nil || request.ToolChoice.Type != "none") {
 		for _, t := range request.Tools {
-			tools = append(tools, anthropicMessagesLowerTool(&bp, t))
+			tools = append(tools, anthropicMessagesLowerTool(&bp, t, ProjectToolSchema(request.Model, t.InputSchema)))
 		}
 	}
 

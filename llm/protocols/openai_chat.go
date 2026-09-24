@@ -140,14 +140,12 @@ type openaiChatParserState struct {
 }
 
 func openaiChatLowerTool(tool schema.ToolDefinition, inputSchema any) openaiChatTool {
-	s, _ := inputSchema.(map[string]any)
-	converted := utils.ModelCompatibility(s, "")
 	return openaiChatTool{
 		Type: "function",
 		Function: openaiChatFunction{
 			Name:        tool.Name,
 			Description: tool.Description,
-			Parameters:  converted,
+			Parameters:  schemaMap(inputSchema),
 		},
 	}
 }
@@ -285,7 +283,7 @@ func openaiChatFromRequest(request *schema.LLMRequest) (any, error) {
 	if len(request.Tools) > 0 {
 		tools := make([]openaiChatTool, 0, len(request.Tools))
 		for _, t := range request.Tools {
-			tools = append(tools, openaiChatLowerTool(t, t.InputSchema))
+			tools = append(tools, openaiChatLowerTool(t, ProjectToolSchema(request.Model, t.InputSchema)))
 		}
 		body.Tools = tools
 	}

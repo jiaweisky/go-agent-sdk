@@ -177,18 +177,18 @@ func bedrockConverseBedrockMetadata(m map[string]any) schema.ProviderMetadata {
 	return schema.ProviderMetadata{"bedrock": m}
 }
 
-func bedrockConverseLowerToolSpec(td schema.ToolDefinition) bedrockConverseBedrockToolSpec {
+func bedrockConverseLowerToolSpec(td schema.ToolDefinition, inputSchema any) bedrockConverseBedrockToolSpec {
 	var spec bedrockConverseBedrockToolSpec
 	spec.ToolSpec.Name = td.Name
 	spec.ToolSpec.Description = td.Description
-	spec.ToolSpec.InputSchema.JSON = td.InputSchema
+	spec.ToolSpec.InputSchema.JSON = inputSchema
 	return spec
 }
 
 func bedrockConverseLowerTools(compatibility string, bp *utils.Breakpoints, tools []schema.ToolDefinition) []any {
 	var result []any
 	for _, t := range tools {
-		result = append(result, bedrockConverseLowerToolSpec(t))
+		result = append(result, bedrockConverseLowerToolSpec(t, projectToolSchema(t.InputSchema, compatibility)))
 		if cp := utils.Block(bp, t.Cache); cp != nil {
 			result = append(result, *cp)
 		}
@@ -304,7 +304,7 @@ func bedrockConverseFromRequest(request *schema.LLMRequest) (any, error) {
 	}
 	var tools []any
 	if len(request.Tools) > 0 && (request.ToolChoice == nil || request.ToolChoice.Type != "none") {
-		tools = bedrockConverseLowerTools("", &bp, request.Tools)
+		tools = bedrockConverseLowerTools(ToolSchemaCompatibility(request.Model), &bp, request.Tools)
 	}
 	var toolCfg *bedrockConverseToolConfig
 	if len(tools) > 0 {
