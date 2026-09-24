@@ -91,8 +91,8 @@ func bodyWithOverlay(body any, request *schema.LLMRequest, encodeBody func(any) 
 	return merged, string(b), nil
 }
 
-// jsonRecord mirrors ProviderShared.isRecord: any JSON object body, whether it
-// is already a map or a typed struct, becomes a map so it can be overlaid.
+// jsonRecord returns a JSON object body as a map, whether it is already one or a
+// typed struct, so it can be overlaid.
 func jsonRecord(body any) (map[string]any, bool) {
 	if m, ok := body.(map[string]any); ok {
 		return m, true

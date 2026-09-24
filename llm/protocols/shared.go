@@ -22,7 +22,8 @@ func schemaMap(inputSchema any) map[string]any {
 	return nil
 }
 
-// ToolSchemaCompatibility mirrors request.model.compatibility?.toolSchema.
+// ToolSchemaCompatibility returns the tool-schema shape the model requires, or
+// "" when it has none.
 func ToolSchemaCompatibility(model schema.ModelSchema) string {
 	compatibility := model.GetCompatibility()
 	if compatibility == nil || compatibility.ToolSchema == nil {
@@ -31,7 +32,7 @@ func ToolSchemaCompatibility(model schema.ModelSchema) string {
 	return string(*compatibility.ToolSchema)
 }
 
-// ProjectToolSchema mirrors ToolSchemaProjection.modelCompatibility.
+// ProjectToolSchema rewrites a tool schema into the shape the model requires.
 func ProjectToolSchema(model schema.ModelSchema, inputSchema any) any {
 	return projectToolSchema(inputSchema, ToolSchemaCompatibility(model))
 }
@@ -283,8 +284,9 @@ func UnsupportedContent(route string, role schema.MessageRole, types []string) *
 	return InvalidRequest(fmt.Sprintf("%s %s messages only support %s content for now", route, role, FormatContentTypes(types)))
 }
 
-// MatchToolChoice mirrors ProviderShared.matchToolChoice: the mode choices map
-// to their case and any other type is a named tool, which requires a name.
+// MatchToolChoice maps a tool choice to the value a protocol sends: the mode
+// choices use auto, none and required, and any other type is a named tool, which
+// needs a name.
 func MatchToolChoice(route string, toolChoice schema.ToolChoice, auto, none, required any, tool func(name string) any) (any, error) {
 	switch toolChoice.Type {
 	case "auto":

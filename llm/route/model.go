@@ -14,8 +14,7 @@ type Model struct {
 	Route Route
 }
 
-// GetRouteDefaults mirrors `model.route.defaults` for consumers that only have
-// the schema.ModelSchema interface.
+// GetRouteDefaults returns the route's defaults, or nil when it carries none.
 func (m Model) GetRouteDefaults() *schema.ModelDefaults {
 	defaults := m.Route.Defaults
 	if defaults.Limits == nil && defaults.Generation == nil && defaults.ProviderOptions == nil && defaults.Http == nil {

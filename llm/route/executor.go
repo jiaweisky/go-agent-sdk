@@ -300,8 +300,8 @@ func httpContextFrom(req *http.Request, status int, body string, truncated bool,
 	return hc
 }
 
-// transportError mirrors toHttpError: it carries the redacted URL and request
-// details alongside the message, and classifies the failure kind.
+// transportError builds the error for a failed request: the redacted URL and
+// request details, and the classified failure kind.
 func transportError(req *http.Request, err error) *schema.LLMError {
 	message := "HTTP transport failed"
 	kind := "TransportError"

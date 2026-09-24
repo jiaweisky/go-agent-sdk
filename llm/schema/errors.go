@@ -146,7 +146,7 @@ func WithRoute(route string) ReasonOption {
 	return func(r *LLMErrorReason) { r.Route = RouteID(route) }
 }
 
-// WithTransportKind mirrors TransportReason.kind.
+// WithTransportKind records the transport failure kind ("Timeout", "TransportError").
 func WithTransportKind(kind string) ReasonOption {
 	return func(r *LLMErrorReason) { r.TransportKind = &kind }
 }

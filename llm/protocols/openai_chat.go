@@ -252,9 +252,8 @@ func openaiChatLowerAssistantMessage(msg schema.Message) (openaiChatMessage, err
 	return m, nil
 }
 
-// openaiChatCompatibleReasoningContent mirrors openAICompatibleReasoningContent:
-// it recovers the reasoning text an OpenAI-compatible provider stored on the
-// message native payload.
+// openaiChatCompatibleReasoningContent recovers the reasoning text an
+// OpenAI-compatible provider stored on the message's native payload.
 func openaiChatCompatibleReasoningContent(native map[string]any) string {
 	compatible, ok := native["openaiCompatible"].(map[string]any)
 	if !ok {

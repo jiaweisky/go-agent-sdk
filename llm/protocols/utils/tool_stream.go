@@ -8,8 +8,8 @@ import (
 )
 
 // ParseToolInput decodes a tool call's JSON input. This is the canonical
-// implementation (mirrors provider-error.ts's parseToolInput in shared.ts);
-// llm/protocols re-exports it because utils is the leaf package.
+// implementation; llm/protocols re-exports it because utils is the leaf package
+// both of them can import.
 func ParseToolInput(route, name, raw string) (any, error) {
 	input := raw
 	if input == "" {
