@@ -256,6 +256,11 @@ func (c *Client) Tools(ctx context.Context) (map[string]AdaptedTool, error) {
 	}
 	c.mu.Unlock()
 	for server, session := range sessions {
+		// Servers that do not advertise the tools capability are skipped rather
+		// than failing the whole listing (index.ts guards defs the same way).
+		if !serverSupportsTools(session) {
+			continue
+		}
 		c.mu.Lock()
 		cached := c.defs[server]
 		c.mu.Unlock()
@@ -304,57 +309,64 @@ type ResourceTemplateInfo struct {
 	Client      string
 }
 
-// Prompts lists the prompts of every connected server.
-func (c *Client) Prompts(ctx context.Context, clientName ...string) (map[string]PromptInfo, error) {
+// Prompts lists the prompts of every connected server, keyed by
+// "<sanitized server>:<sanitized prompt>". A server that lacks the prompts
+// capability or fails to list contributes nothing, mirroring McpCatalog.fetch's
+// per-server error tolerance.
+func (c *Client) Prompts(ctx context.Context, clientName ...string) map[string]PromptInfo {
 	result := map[string]PromptInfo{}
 	for server, session := range c.filteredSessions(clientName) {
 		prompts, err := ListPrompts(ctx, session)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		for _, prompt := range prompts {
-			result[entryKey(server, prompt.Name)] = PromptInfo{
+			result[promptKey(server, prompt.Name)] = PromptInfo{
 				Name: prompt.Name, Description: prompt.Description, Client: server,
 			}
 		}
 	}
-	return result, nil
+	return result
 }
 
-// Resources lists the resources of every connected server.
-func (c *Client) Resources(ctx context.Context, clientName ...string) (map[string]ResourceInfo, error) {
+// Resources lists the resources of every connected server, keyed by
+// "<escaped server>:<resource URI>". A server that lacks the resources
+// capability or fails to list contributes nothing.
+func (c *Client) Resources(ctx context.Context, clientName ...string) map[string]ResourceInfo {
 	result := map[string]ResourceInfo{}
 	for server, session := range c.filteredSessions(clientName) {
 		resources, err := ListResources(ctx, session)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		for _, resource := range resources {
-			result[entryKey(server, resource.Name)] = ResourceInfo{
+			result[resourceKey(server, resource.URI)] = ResourceInfo{
 				Name: resource.Name, URI: resource.URI, Description: resource.Description,
 				MIMEType: resource.MIMEType, Client: server,
 			}
 		}
 	}
-	return result, nil
+	return result
 }
 
-// ResourceTemplates lists the resource templates of every connected server.
-func (c *Client) ResourceTemplates(ctx context.Context, clientName ...string) (map[string]ResourceTemplateInfo, error) {
+// ResourceTemplates lists the resource templates of every connected server,
+// keyed by "<escaped server>:<URI template>". A server that lacks the resources
+// capability or fails to list contributes nothing.
+func (c *Client) ResourceTemplates(ctx context.Context, clientName ...string) map[string]ResourceTemplateInfo {
 	result := map[string]ResourceTemplateInfo{}
 	for server, session := range c.filteredSessions(clientName) {
 		templates, err := ListResourceTemplates(ctx, session)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		for _, template := range templates {
-			result[entryKey(server, template.Name)] = ResourceTemplateInfo{
+			result[resourceKey(server, template.URITemplate)] = ResourceTemplateInfo{
 				Name: template.Name, URITemplate: template.URITemplate, Description: template.Description,
 				MIMEType: template.MIMEType, Client: server,
 			}
 		}
 	}
-	return result, nil
+	return result
 }
 
 func (c *Client) filteredSessions(clientName []string) map[string]*sdk.ClientSession {
@@ -379,8 +391,17 @@ func (c *Client) snapshotSessions() map[string]*sdk.ClientSession {
 	return result
 }
 
-func entryKey(server, name string) string {
+// promptKey mirrors McpCatalog.fetch's key for prompts:
+// sanitize(clientName) + ":" + sanitize(name).
+func promptKey(server, name string) string {
 	return Sanitize(server) + ":" + Sanitize(name)
+}
+
+// resourceKey mirrors McpCatalog.fetch's key for resources and resource
+// templates: the client name with "%" and ":" escaped (so "server:uri" keys
+// stay unambiguous), then the raw URI or URI template.
+func resourceKey(server, uri string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(server, "%", "%25"), ":", "%3A") + ":" + uri
 }
 
 // CallTool invokes a tool on the named server.

@@ -95,10 +95,7 @@ func TestClientCatalogAccessors(t *testing.T) {
 		t.Fatalf("status = %+v", status)
 	}
 
-	prompts, err := client.Prompts(ctx)
-	if err != nil {
-		t.Fatalf("prompts: %v", err)
-	}
+	prompts := client.Prompts(ctx)
 	if got := prompts["srv:greet"]; got.Description != "greeting" || got.Client != "srv" {
 		t.Fatalf("prompt = %+v", got)
 	}
@@ -106,18 +103,15 @@ func TestClientCatalogAccessors(t *testing.T) {
 	if err != nil || prompt == nil || prompt.Description != "hi" {
 		t.Fatalf("get prompt = %+v, %v", prompt, err)
 	}
-	if filtered, err := client.Prompts(ctx, "srv"); err != nil || len(filtered) != 1 {
-		t.Fatalf("filtered prompts = %+v, %v", filtered, err)
+	if filtered := client.Prompts(ctx, "srv"); len(filtered) != 1 {
+		t.Fatalf("filtered prompts = %+v", filtered)
 	}
-	if none, err := client.Prompts(ctx, "other"); err != nil || len(none) != 0 {
-		t.Fatalf("unmatched prompts = %+v, %v", none, err)
+	if none := client.Prompts(ctx, "other"); len(none) != 0 {
+		t.Fatalf("unmatched prompts = %+v", none)
 	}
 
-	resources, err := client.Resources(ctx)
-	if err != nil {
-		t.Fatalf("resources: %v", err)
-	}
-	if got := resources["srv:readme"]; got.URI != "file:///readme" {
+	resources := client.Resources(ctx)
+	if got := resources["srv:file:///readme"]; got.URI != "file:///readme" || got.Name != "readme" {
 		t.Fatalf("resource = %+v", got)
 	}
 	resource, err := client.ReadResource(ctx, "srv", "file:///readme")

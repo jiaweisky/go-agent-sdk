@@ -351,7 +351,6 @@ func (c *Client) Reference() *core.Reference {
 	return c.rt.reference
 }
 
-// Close closes active sessions and releases the runtime and its database.
 // CleanupToolOutput removes tool-output files older than the retention window.
 func (c *Client) CleanupToolOutput() error {
 	if c.rt == nil || c.rt.toolOutput == nil {
@@ -360,6 +359,7 @@ func (c *Client) CleanupToolOutput() error {
 	return c.rt.toolOutput.Cleanup()
 }
 
+// Close closes active sessions and releases the runtime and its database.
 func (c *Client) Close() error {
 	c.mu.Lock()
 	sessions := make([]*Session, 0, len(c.sessions))
@@ -420,7 +420,10 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *Sessi
 	c.rt.permission.setHandler(sessionID, cfg.OnPermissionRequest)
 	c.rt.question.setHandler(sessionID, cfg.OnQuestion)
 
-	session := &Session{client: c, id: schema.SessionID(sessionID), hooks: cfg.Hooks, listeners: map[int]func(Event){}}
+	session := &Session{
+		client: c, id: schema.SessionID(sessionID), agentID: agentIDOf(stored),
+		hooks: cfg.Hooks, listeners: map[int]func(Event){},
+	}
 	unsubscribe, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
 		session.dispatch(payload)
 		return nil
