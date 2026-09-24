@@ -88,7 +88,7 @@ func TestHandleCommandTrimsInput(t *testing.T) {
 	var out strings.Builder
 	c := newChat(&console{out: &out, lineStart: true}, nil, "ses_1", "")
 
-	if !handleCommand(c, c.console, "  /task  ") {
+	if !handleCommand(c, "  /task  ") {
 		t.Fatal("a padded command was not recognised")
 	}
 	if !strings.Contains(out.String(), "(no tasks)") {
@@ -96,7 +96,7 @@ func TestHandleCommandTrimsInput(t *testing.T) {
 	}
 
 	out.Reset()
-	if handleCommand(c, c.console, "/unknown") {
+	if handleCommand(c, "/unknown") {
 		t.Fatal("a non-command was treated as one")
 	}
 	if out.String() != "" {

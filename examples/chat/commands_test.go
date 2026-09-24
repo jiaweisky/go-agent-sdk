@@ -73,7 +73,7 @@ func TestMCPsCommandWithoutServers(t *testing.T) {
 // stop a command from being recognised.
 func TestSkillsCommandWithPaddedInput(t *testing.T) {
 	out := runCommand(t, nil, func(c *chat) {
-		if !handleCommand(c, c.console, "  /skills  ") {
+		if !handleCommand(c, "  /skills  ") {
 			t.Error("a padded command was not recognised")
 		}
 	})

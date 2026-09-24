@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"iter"
 	"strconv"
 	"strings"
 	"sync"
@@ -197,6 +198,17 @@ func taskHandle(record *taskRecord) string {
 	return fmt.Sprintf("#%d", record.index)
 }
 
+// taskOpenLine is the header of a task block, "#N Subagent Task — description".
+func taskOpenLine(record *taskRecord) string {
+	return fmt.Sprintf("\n%s┌ %s %s Task — %s%s\n",
+		yellow, taskHandle(record), titlecase(record.subagent), record.description, reset)
+}
+
+// taskCloseLine is the bare footer of a task block (the result line adds detail).
+func taskCloseLine(record *taskRecord) string {
+	return fmt.Sprintf("%s└ %s%s\n", yellow, taskHandle(record), reset)
+}
+
 // skillName extracts the requested skill from the skill tool's input (the
 // provider-parsed arguments object, e.g. {"name": "code-review"}).
 func skillName(input any) string {
@@ -211,8 +223,8 @@ func skillName(input any) string {
 	return "?"
 }
 
-// formatToolcalls renders a tool-call count for the task result line.
-func formatToolcalls(count int) string {
+// formatToolCalls renders a tool-call count for the task result line.
+func formatToolCalls(count int) string {
 	if count == 1 {
 		return "1 toolcall"
 	}
@@ -339,13 +351,12 @@ func (c *chat) drawStatusLocked(frame int) {
 		spinner = spinnerFrames[frame%len(spinnerFrames)]
 	}
 	parts := make([]string, 0, len(c.order))
-	for _, childID := range c.order {
+	for childID, record := range c.records() {
 		if !c.busy[childID] {
 			continue
 		}
 		label := "working"
-		record := c.tasks[childID]
-		if record != nil && record.lastTool != "" {
+		if record.lastTool != "" {
 			label = record.lastTool
 		}
 		parts = append(parts, fmt.Sprintf("%s %s", taskHandle(record), label))
@@ -459,6 +470,19 @@ func (c *chat) handleParent(event agent.Event, sessionID string) {
 	}
 }
 
+// records iterates the tracked tasks in start order.
+func (c *chat) records() iter.Seq2[string, *taskRecord] {
+	return func(yield func(string, *taskRecord) bool) {
+		for _, childID := range c.order {
+			if record := c.tasks[childID]; record != nil {
+				if !yield(childID, record) {
+					return
+				}
+			}
+		}
+	}
+}
+
 // handleProgress registers a task (from the tool's progress metadata) and prints
 // its start line.
 func (c *chat) handleProgress(event agent.ToolProgress) {
@@ -480,8 +504,7 @@ func (c *chat) handleProgress(event agent.ToolProgress) {
 		}
 		c.tasks[childID] = record
 		c.order = append(c.order, childID)
-		c.console.write(fmt.Sprintf("\n%s┌ %s %s Task — %s%s\n",
-			yellow, taskHandle(record), titlecase(subagent), description, reset))
+		c.console.write(taskOpenLine(record))
 	}
 }
 
@@ -502,6 +525,8 @@ func (c *chat) finishTool(callID, failure string) {
 	}
 	answer := ""
 	if failure == "" {
+		// Read fresh: a resumed task reuses its session, so a cached answer would
+		// be the previous run's.
 		answer = c.subagentAnswer(childID)
 		c.answers[childID] = answer
 	}
@@ -511,7 +536,7 @@ func (c *chat) finishTool(callID, failure string) {
 	}
 	detail := elapsed.Round(100 * time.Millisecond).String()
 	if tools > 0 {
-		detail = formatToolcalls(tools) + " · " + detail
+		detail = formatToolCalls(tools) + " · " + detail
 	}
 	c.console.write(fmt.Sprintf("%s└ %s %s %s · %s (%s for the full text)%s\n",
 		yellow, taskHandle(record), mark, detail, summarize(answer, failure), "/task "+taskHandle(record), reset))
@@ -527,11 +552,7 @@ func (c *chat) taskCommand(input string) {
 			c.console.write("(no tasks)\n")
 			return
 		}
-		for _, childID := range c.order {
-			record := c.tasks[childID]
-			if record == nil {
-				continue
-			}
+		for childID, record := range c.records() {
 			status := "done"
 			if c.busy[childID] {
 				status = "running"
@@ -542,25 +563,25 @@ func (c *chat) taskCommand(input string) {
 		return
 	}
 	arg = strings.TrimPrefix(arg, "#")
-	for _, childID := range c.order {
-		record := c.tasks[childID]
-		if record == nil {
-			continue
-		}
+	for childID, record := range c.records() {
 		if arg != fmt.Sprint(record.index) && !strings.HasPrefix(record.description, arg) {
 			continue
 		}
-		answer := c.answers[childID]
-		if answer == "" {
-			answer = c.subagentAnswer(childID)
-		}
-		c.console.write(fmt.Sprintf("\n%s┌ %s %s Task — %s%s\n",
-			yellow, taskHandle(record), titlecase(record.subagent), record.description, reset))
-		c.console.write(renderMarkdown(answer))
-		c.console.write(fmt.Sprintf("%s└ %s%s\n", yellow, taskHandle(record), reset))
+		c.console.write(taskOpenLine(record))
+		c.console.write(renderMarkdown(c.answerFor(childID)))
+		c.console.write(taskCloseLine(record))
 		return
 	}
 	c.console.write("task not found: " + arg + "\n")
+}
+
+// answerFor returns a subagent's final text: the answer cached when its task
+// finished, or a read of its session when the task is still running.
+func (c *chat) answerFor(childID string) string {
+	if answer := c.answers[childID]; answer != "" {
+		return answer
+	}
+	return c.subagentAnswer(childID)
 }
 
 // subagentAnswer reads the last assistant text of a subagent session.

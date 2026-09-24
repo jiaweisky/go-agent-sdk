@@ -61,12 +61,12 @@ type deepseekPricing struct {
 	output    float64
 }
 
-// deepseekPeakPricing mirrors https://api-docs.deepseek.com/zh-cn/quick_start/pricing
-// (peak hours). Off-peak is half price.
-var deepseekPeakPricing = map[string]deepseekPricing{
-	"flash": {cacheHit: 0.04, cacheMiss: 2.0, output: 8.0},
-	"pro":   {cacheHit: 0.30, cacheMiss: 9.0, output: 27.0},
-}
+// Peak-hour rates from https://api-docs.deepseek.com/zh-cn/quick_start/pricing.
+// Off-peak is half price.
+var (
+	deepseekFlashPricing = deepseekPricing{cacheHit: 0.04, cacheMiss: 2.0, output: 8.0}
+	deepseekProPricing   = deepseekPricing{cacheHit: 0.30, cacheMiss: 9.0, output: 27.0}
+)
 
 // deepseekPricingFor returns the DeepSeek schedule for modelID, if this demo can
 // price it. Only DeepSeek ids from the priced families are matched: keying on
@@ -78,9 +78,9 @@ func deepseekPricingFor(modelID string) (deepseekPricing, bool) {
 	}
 	switch {
 	case strings.Contains(modelID, "pro"):
-		return deepseekPeakPricing["pro"], true
+		return deepseekProPricing, true
 	case strings.Contains(modelID, "flash"):
-		return deepseekPeakPricing["flash"], true
+		return deepseekFlashPricing, true
 	default:
 		return deepseekPricing{}, false
 	}

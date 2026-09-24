@@ -109,7 +109,7 @@ func run() error {
 			continue
 		}
 		console.write("\n")
-		if handleCommand(renderer, console, input) {
+		if handleCommand(renderer, input) {
 			continue
 		}
 
@@ -117,7 +117,7 @@ func run() error {
 		turnDone := make(chan struct{})
 		go func() {
 			defer close(turnDone)
-			send(ctx, console, session, input)
+			sendTurn(ctx, console, session, input)
 		}()
 		// While the turn runs, Esc/Ctrl+C aborts it and exits the chat; the
 		// bottom status line animates a spinner for busy sessions.
@@ -138,25 +138,25 @@ func run() error {
 // handleCommand runs a slash command from the prompt, and reports whether the
 // input was one: the caller must not send it to the model. The input is trimmed
 // here so that "/skills " (or a leading space) is still a command.
-func handleCommand(renderer *chat, console *console, input string) bool {
+func handleCommand(c *chat, input string) bool {
 	switch command := strings.TrimSpace(input); {
 	case command == "/skills":
-		renderer.skillsCommand()
+		c.skillsCommand()
 	case command == "/agents":
-		renderer.agentsCommand()
+		c.agentsCommand()
 	case command == "/mcps":
-		renderer.mcpsCommand()
+		c.mcpsCommand()
 	case command == "/task" || strings.HasPrefix(command, "/task "):
-		renderer.taskCommand(command)
+		c.taskCommand(command)
 	default:
 		return false
 	}
-	console.write("\n")
+	c.console.write("\n")
 	return true
 }
 
-// send drives one turn; rendering happens in the client event handler.
-func send(ctx context.Context, console *console, session *agent.Session, prompt string) {
+// sendTurn drives one turn; rendering happens in the client event handler.
+func sendTurn(ctx context.Context, console *console, session *agent.Session, prompt string) {
 	for _, err := range session.Send(ctx, agent.MessageOptions{Prompt: prompt}) {
 		if err != nil {
 			console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))

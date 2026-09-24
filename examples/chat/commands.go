@@ -23,23 +23,24 @@ func (c *chat) skillsCommand() {
 	}
 	c.console.write(fmt.Sprintf("%sSkills (%d):%s\n", bold, len(skills), reset))
 	for _, skill := range skills {
-		description := "(no description)"
-		if skill.Description != nil && *skill.Description != "" {
-			description = *skill.Description
-		}
-		c.console.write(fmt.Sprintf("  %s%s%s — %s\n", cyan, skill.Name, reset, description))
+		c.console.write(fmt.Sprintf("  %s%s%s — %s\n", cyan, skill.Name, reset, describe(skill.Description)))
 		c.console.write(fmt.Sprintf("    %s%s%s\n", dim, skill.Location, reset))
 	}
+}
+
+// describe renders a skill's or agent's description, or a placeholder when it
+// has none.
+func describe(description *string) string {
+	if description != nil && *description != "" {
+		return *description
+	}
+	return "(no description)"
 }
 
 // agentsCommand lists the subagents the session's agent can delegate to
 // (non-primary agents whose "task" permission is not denied).
 func (c *chat) agentsCommand() {
 	agents := c.client.Agents()
-	if agents == nil {
-		c.console.write("(no agents)\n")
-		return
-	}
 	var permissions schema.PermissionRuleset
 	if info := agents.Get(schema.AgentID(agentName)); info != nil {
 		permissions = info.Permissions
@@ -51,11 +52,7 @@ func (c *chat) agentsCommand() {
 	}
 	c.console.write(fmt.Sprintf("%sSubagents (%d):%s\n", bold, len(subagents), reset))
 	for _, item := range subagents {
-		description := "(no description)"
-		if item.Description != nil && *item.Description != "" {
-			description = *item.Description
-		}
-		c.console.write(fmt.Sprintf("  %s%s%s — %s\n", cyan, item.ID, reset, description))
+		c.console.write(fmt.Sprintf("  %s%s%s — %s\n", cyan, item.ID, reset, describe(item.Description)))
 	}
 }
 

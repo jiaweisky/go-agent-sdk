@@ -51,6 +51,15 @@ const (
 	asciiC1End = 0xa0
 )
 
+// Buffering and refresh intervals.
+const (
+	// stdinQueue is the rune buffer on each stdin stream: enough for typing
+	// ahead, and never a blocking point for the reader.
+	stdinQueue = 64
+	// watchTick is the status-line refresh interval (spinner animation).
+	watchTick = 100 * time.Millisecond
+)
+
 // console owns terminal input and output. On a TTY it runs a raw-mode,
 // width-aware line editor so backspace/delete work for CJK as well as ASCII,
 // independent of the terminal's erase character.
@@ -106,10 +115,6 @@ func newConsole() (*console, func(), error) {
 	return c, func() { _ = term.Restore(fd, state) }, nil
 }
 
-// stdinQueue is the rune buffer on each stdin stream: enough for typing ahead,
-// and never a blocking point for the reader.
-const stdinQueue = 64
-
 // readStdin is the only goroutine that reads stdin, and it routes every rune to
 // exactly one owner: the line editor while a prompt is active, the turn watcher
 // otherwise. Handing out runes here — instead of letting both consumers read the
@@ -140,9 +145,9 @@ func (c *console) deliver(r rune) {
 
 // enqueue queues r, dropping it when the queue is full: stdin must never block
 // the reader, which would also stop interrupts from being delivered.
-func enqueue(runes chan rune, r rune) {
+func enqueue(ch chan rune, r rune) {
 	select {
-	case runes <- r:
+	case ch <- r:
 	default:
 	}
 }
@@ -192,9 +197,6 @@ func (c *console) watchInterrupt(done <-chan struct{}, onInterrupt func(), onTic
 		}
 	}
 }
-
-// watchTick is the status-line refresh interval (spinner animation).
-const watchTick = 100 * time.Millisecond
 
 // keyReader is the rune source the line editor consumes: a bufio.Reader in
 // tests, a channel-backed reader on a TTY.
@@ -364,7 +366,7 @@ func (e *editor) readLine(prompt string) (string, error) {
 		case keyEsc: // escape
 			// A lone Esc has no buffered follow-up rune; a real escape sequence
 			// (arrows, etc.) is sent as one write and shows up shortly after.
-			if !e.hasPending(30 * time.Millisecond) {
+			if !e.waitPending(30 * time.Millisecond) {
 				fmt.Fprint(e.out, "\r\n")
 				return "", io.EOF
 			}
@@ -418,9 +420,9 @@ func (e *editor) readLine(prompt string) (string, error) {
 	}
 }
 
-// hasPending reports whether another rune arrives within timeout. A lone Esc
+// waitPending reports whether another rune arrives within timeout. A lone Esc
 // yields none; an escape sequence's remaining runes arrive within a few ms.
-func (e *editor) hasPending(timeout time.Duration) bool {
+func (e *editor) waitPending(timeout time.Duration) bool {
 	if e.in.Buffered() > 0 {
 		return true
 	}
@@ -516,13 +518,7 @@ func (e *editor) viewport(prompt string, line []rune, pos int) (int, int) {
 	return from, to
 }
 
-func stringWidth(s string) int {
-	total := 0
-	for _, r := range s {
-		total += runeWidth(r)
-	}
-	return total
-}
+func stringWidth(s string) int { return runesWidth([]rune(s)) }
 
 func runesWidth(runes []rune) int {
 	total := 0
