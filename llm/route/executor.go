@@ -3,10 +3,12 @@ package route
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -299,9 +301,20 @@ func httpContextFrom(req *http.Request, status int, body string, truncated bool,
 }
 
 // transportError mirrors toHttpError: it carries the redacted URL and request
-// details alongside the message.
-func transportError(req *http.Request, message string) *schema.LLMError {
-	opts := []schema.ReasonOption{}
+// details alongside the message, and classifies the failure kind.
+func transportError(req *http.Request, err error) *schema.LLMError {
+	message := "HTTP transport failed"
+	kind := "TransportError"
+	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			kind = "Timeout"
+			message = err.Error()
+		} else {
+			message = "HTTP transport failed: " + err.Error()
+		}
+	}
+	opts := []schema.ReasonOption{schema.WithTransportKind(kind)}
 	if req != nil && req.URL != nil {
 		opts = append(opts, schema.WithURL(redactURL(req.URL.String())))
 		opts = append(opts, schema.WithHttpContext(schema.HttpContext{Request: requestDetails(req)}))
@@ -335,10 +348,17 @@ func retryDelay(attempt int, retryAfterMs *int) time.Duration {
 // canceledTransportError reports a request aborted by its context so callers can
 // detect an interrupt via errors.Is(err, context.Canceled).
 func canceledTransportError(err error) *schema.LLMError {
+	kind := "TransportError"
+	if errors.Is(err, context.DeadlineExceeded) {
+		kind = "Timeout"
+	}
 	return &schema.LLMError{
 		Module: "RequestExecutor",
 		Method: "execute",
-		Reason: schema.NewTransportReason(fmt.Sprintf("HTTP request canceled: %v", err)),
+		Reason: schema.NewTransportReason(
+			fmt.Sprintf("HTTP request canceled: %v", err),
+			schema.WithTransportKind(kind),
+		),
 	}
 }
 
@@ -379,11 +399,7 @@ func (e *Executor) DoWithRetries(req *http.Request) (*http.Response, *schema.LLM
 		reqBody, err = io.ReadAll(req.Body)
 		req.Body.Close()
 		if err != nil {
-			return nil, &schema.LLMError{
-				Module: "RequestExecutor",
-				Method: "execute",
-				Reason: schema.NewTransportReason(fmt.Sprintf("failed to read request body: %v", err)),
-			}
+			return nil, transportError(req, fmt.Errorf("failed to read request body: %w", err))
 		}
 	}
 
@@ -409,7 +425,7 @@ func (e *Executor) DoWithRetries(req *http.Request) (*http.Response, *schema.LLM
 			if ctxErr := req.Context().Err(); ctxErr != nil {
 				return nil, canceledTransportError(ctxErr)
 			}
-			lastErr = transportError(req, fmt.Sprintf("HTTP request failed: %v", err))
+			lastErr = transportError(req, err)
 			// TS TransportReason is not retryable; unlike TS we still retry a
 			// failed transport because a transient network error is worth a
 			// second attempt. Status errors follow the reason's Retryable().

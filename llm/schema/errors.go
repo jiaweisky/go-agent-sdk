@@ -76,9 +76,11 @@ type LLMErrorReason struct {
 
 	RateLimit *HttpRateLimitDetails
 
-	URL    *string
-	Raw    *string
-	Route2 *string
+	URL *string
+	Raw *string
+
+	// TransportKind mirrors TransportReason.kind ("Timeout", "TransportError").
+	TransportKind *string
 
 	ProviderMetadata ProviderMetadata
 	Http             *HttpContext
@@ -118,8 +120,15 @@ func WithURL(url string) ReasonOption {
 	return func(r *LLMErrorReason) { r.URL = &url }
 }
 
+// WithRoute sets the route a reason refers to (NoRouteReason.route and
+// InvalidProviderOutputReason.route).
 func WithRoute(route string) ReasonOption {
-	return func(r *LLMErrorReason) { r.Route2 = &route }
+	return func(r *LLMErrorReason) { r.Route = RouteID(route) }
+}
+
+// WithTransportKind mirrors TransportReason.kind.
+func WithTransportKind(kind string) ReasonOption {
+	return func(r *LLMErrorReason) { r.TransportKind = &kind }
 }
 
 func WithRaw(raw string) ReasonOption {

@@ -1,6 +1,8 @@
 package route
 
 import (
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,5 +127,25 @@ func TestExecutorRecordsRequestAndResponseDetails(t *testing.T) {
 	}
 	if !reason.Retryable() {
 		t.Fatal("rate limit must be retryable")
+	}
+}
+
+func TestTransportErrorKind(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://api.test/v1/chat?key=secret", nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+
+	timeout := transportError(req, &net.DNSError{Err: "i/o timeout", IsTimeout: true})
+	if timeout.Reason.TransportKind == nil || *timeout.Reason.TransportKind != "Timeout" {
+		t.Fatalf("timeout kind = %v", timeout.Reason.TransportKind)
+	}
+
+	refused := transportError(req, errors.New("connection refused"))
+	if refused.Reason.TransportKind == nil || *refused.Reason.TransportKind != "TransportError" {
+		t.Fatalf("kind = %v", refused.Reason.TransportKind)
+	}
+	if refused.Reason.URL == nil || strings.Contains(*refused.Reason.URL, "secret") {
+		t.Fatalf("url = %v", refused.Reason.URL)
 	}
 }
