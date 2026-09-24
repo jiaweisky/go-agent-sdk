@@ -9,6 +9,7 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/tool"
+	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/jsonschema"
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -121,7 +122,7 @@ func SubagentTypes(agents *core.Agent, permissions schema.PermissionRuleset) []s
 		}
 		items = append(items, item)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	sort.Slice(items, func(i, j int) bool { return util.CompareLocale(string(items[i].ID), string(items[j].ID)) < 0 })
 	return items
 }
 
