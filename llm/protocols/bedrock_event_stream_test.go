@@ -6,6 +6,9 @@ import (
 	"hash/crc32"
 	"strings"
 	"testing"
+
+	"github.com/user/go-agent-sdk/llm/protocols/utils"
+	"github.com/user/go-agent-sdk/llm/schema"
 )
 
 func bedrockHeaders(fields [][2]string) []byte {
@@ -266,5 +269,87 @@ func TestFrameBufferAppendCompacts(t *testing.T) {
 	fb.Compact()
 	if fb.Buffer != nil || fb.Offset != 0 {
 		t.Fatalf("buffer not reset: %+v", fb)
+	}
+}
+
+func TestBedrockConverseLowerSystemCachePoint(t *testing.T) {
+	bp := utils.NewBedrockBreakpoints()
+	blocks := bedrockConverseLowerSystem(&bp, []schema.SystemPart{
+		{Type: "text", Text: "be brief", Cache: &schema.CacheHint{Type: "ephemeral"}},
+	})
+	if len(blocks) != 2 {
+		t.Fatalf("blocks = %#v, want a text block and a cache point", blocks)
+	}
+	encoded, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(encoded) != `[{"text":"be brief"},{"cachePoint":{"type":"default"}}]` {
+		t.Fatalf("blocks = %s", encoded)
+	}
+}
+
+func TestBedrockConverseLowerToolResultEmptyContent(t *testing.T) {
+	items, err := bedrockConverseLowerToolResultContent(schema.ToolResultPart{
+		Type: "tool-result",
+		ID:   "call_1",
+		Name: "lookup",
+		Result: schema.ToolResultValue{
+			Type:  "content",
+			Value: []schema.ToolContent{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	encoded, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(encoded) != "[]" {
+		t.Fatalf("content = %s, want []", encoded)
+	}
+}
+
+func TestBedrockConverseKeepsUsageWhenMetadataPrecedesMessageStop(t *testing.T) {
+	input, output := 5, 2
+	state := any(bedrockConverseParserState{tools: utils.Empty(), lifecycle: utils.Initial()})
+
+	next, _, err := bedrockConverseStep(state, bedrockConverseBedrockEvent{
+		Metadata: &bedrockConverseMetadataEvent{
+			Usage: &bedrockConverseBedrockUsage{InputTokens: &input, OutputTokens: &output},
+		},
+	})
+	if err != nil {
+		t.Fatalf("metadata: %v", err)
+	}
+	next, _, err = bedrockConverseStep(next, bedrockConverseBedrockEvent{
+		MessageStop: &bedrockConverseMessageStopEvent{StopReason: "end_turn"},
+	})
+	if err != nil {
+		t.Fatalf("messageStop: %v", err)
+	}
+
+	finish := firstOfType(bedrockConverseOnHalt(next), schema.EventFinish)
+	if finish == nil || finish.Usage == nil || finish.Usage.InputTokens != 5 || finish.Usage.OutputTokens != 2 {
+		t.Fatalf("finish = %+v", finish)
+	}
+}
+
+func TestBedrockConverseSkipsEmptyDeltas(t *testing.T) {
+	event, err := bedrockConverseDecodeEvent(`{"contentBlockDelta":{"contentBlockIndex":0,"delta":{"text":""}}}`)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	state := any(bedrockConverseParserState{tools: utils.Empty(), lifecycle: utils.Initial()})
+	next, events, err := bedrockConverseStep(state, event)
+	if err != nil {
+		t.Fatalf("delta: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %v, want none for an empty text delta", eventTypes(events))
+	}
+	if s, ok := next.(bedrockConverseParserState); !ok || len(s.lifecycle.Text) != 0 {
+		t.Fatalf("state = %+v", next)
 	}
 }

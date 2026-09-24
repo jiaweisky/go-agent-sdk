@@ -48,9 +48,6 @@ type bedrockConverseReasoningBlock struct {
 		} `json:"reasoningText,omitempty"`
 	} `json:"reasoningContent"`
 }
-type bedrockConverseCachePointBlock struct {
-	CachePoint struct{} `json:"cachePoint"`
-}
 type bedrockConverseBedrockMessage struct {
 	Role    string `json:"role"`
 	Content []any  `json:"content"`
@@ -70,7 +67,7 @@ type bedrockConverseBedrockToolSpec struct {
 type bedrockConverseBedrockBody struct {
 	ModelID                      string                          `json:"modelId"`
 	Messages                     []bedrockConverseBedrockMessage `json:"messages"`
-	System                       []bedrockConverseSystemBlock    `json:"system,omitempty"`
+	System                       []any                           `json:"system,omitempty"`
 	InferenceConfig              *bedrockConverseInferenceConfig `json:"inferenceConfig,omitempty"`
 	ToolConfig                   *bedrockConverseToolConfig      `json:"toolConfig,omitempty"`
 	AdditionalModelRequestFields any                             `json:"additionalModelRequestFields,omitempty"`
@@ -260,7 +257,7 @@ func bedrockConverseLowerToolResultContent(part schema.ToolResultPart) ([]bedroc
 		t := ToolResultText(part)
 		return []bedrockConverseToolResultContentItem{{Text: &t}}, nil
 	}
-	var items []bedrockConverseToolResultContentItem
+	items := []bedrockConverseToolResultContentItem{}
 	for _, c := range content {
 		switch v := c.(type) {
 		case schema.ToolTextContent:
@@ -282,10 +279,10 @@ func bedrockConverseLowerToolResultContent(part schema.ToolResultPart) ([]bedroc
 	return items, nil
 }
 
-func bedrockConverseLowerSystem(bp *utils.Breakpoints, parts []schema.SystemPart) []bedrockConverseSystemBlock {
-	var blocks []bedrockConverseSystemBlock
+func bedrockConverseLowerSystem(bp *utils.Breakpoints, parts []schema.SystemPart) []any {
+	var blocks []any
 	for _, p := range parts {
-		blocks = append(blocks, bedrockConverseSystemBlock{Text: p.Text})
+		blocks = append(blocks, bedrockConverseTextWithCache(bp, p.Text, p.Cache)...)
 	}
 	return blocks
 }
@@ -462,14 +459,14 @@ func bedrockConverseStep(state any, event any) (any, []schema.LLMEvent, error) {
 	if evt.ContentBlockDelta != nil && evt.ContentBlockDelta.Delta != nil {
 		d := evt.ContentBlockDelta.Delta
 		idx := evt.ContentBlockDelta.ContentBlockIndex
-		if d.Text != nil {
+		if d.Text != nil && *d.Text != "" {
 			var events []schema.LLMEvent
 			utils.TextDelta(&s.lifecycle, &events, fmt.Sprintf("text-%d", idx), *d.Text)
 			return s, events, nil
 		}
 		if d.ReasoningContent != nil {
 			var events []schema.LLMEvent
-			if d.ReasoningContent.Text != nil {
+			if d.ReasoningContent.Text != nil && *d.ReasoningContent.Text != "" {
 				utils.ReasoningDelta(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), *d.ReasoningContent.Text)
 			}
 			if d.ReasoningContent.Signature != nil {
@@ -512,8 +509,8 @@ func bedrockConverseStep(state any, event any) (any, []schema.LLMEvent, error) {
 					pm = bedrockConverseBedrockMetadata(map[string]any{"signature": sig})
 				}
 			}
-			utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), pm)
 			utils.TextEnd(&s.lifecycle, &events, fmt.Sprintf("text-%d", idx))
+			utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), pm)
 		}
 		events = append(events, result.Events...)
 		for _, e := range result.Events {
@@ -528,7 +525,11 @@ func bedrockConverseStep(state any, event any) (any, []schema.LLMEvent, error) {
 		return s, events, nil
 	}
 	if evt.MessageStop != nil {
-		s.pendingFinish = &bedrockConversePendingFinish{Reason: bedrockConverseBedrockFinishReason(evt.MessageStop.StopReason)}
+		pending := &bedrockConversePendingFinish{Reason: bedrockConverseBedrockFinishReason(evt.MessageStop.StopReason)}
+		if s.pendingFinish != nil {
+			pending.Usage = s.pendingFinish.Usage
+		}
+		s.pendingFinish = pending
 		return s, nil, nil
 	}
 	if evt.Metadata != nil {
