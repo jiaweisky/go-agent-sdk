@@ -352,16 +352,6 @@ func MergeHttpOptions(items ...*HttpOptions) *HttpOptions {
 	return NewHttpOptions(body, header, query)
 }
 
-func latestGeneration[T any](items []*GenerationOptions, getter func(*GenerationOptions) T) T {
-	for i := len(items) - 1; i >= 0; i-- {
-		if items[i] != nil {
-			return getter(items[i])
-		}
-	}
-	var zero T
-	return zero
-}
-
 func latestGenerationPtr[T any](items []*GenerationOptions, getter func(*GenerationOptions) *T) *T {
 	for i := len(items) - 1; i >= 0; i-- {
 		if items[i] != nil {
