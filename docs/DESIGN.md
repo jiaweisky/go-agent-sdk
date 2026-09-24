@@ -12,7 +12,7 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 - **Agent 定义** — 可配置的 agent 元信息、system prompt、权限规则、模型覆盖。
 - **Skill** — 从 markdown 文件加载专业知识，注入系统上下文。
 - **MCP 集成** — 原生 Model Context Protocol 客户端，支持本地和远程 MCP 服务器。
-- **内置工具** — read, write, edit, apply_patch, bash, glob, grep, webfetch, websearch, question, skill, todowrite（12 个，见 §7.4）；另有 `task`（subagent 委托，见 §6.3）。
+- **内置工具** — read, write, edit, apply_patch, bash, glob, grep, webfetch, question, skill, todowrite（11 个，见 §7.4）；另有 `task`（subagent 委托，见 §6.3）。
 - **权限系统** — 基于规则的 allow/deny/ask 权限模型。
 - **Subagent** — agent 内通过 task tool 递归创建独立子会话。
 
@@ -32,7 +32,7 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 | `llm/provider/` | Provider Facades（openai, anthropic, openrouter, ...） | 预配置默认值 |
 | `agent/`（已实现） | 高层公开 API（Client/Session/Send/On/DefineTool/Hooks） | 组装 core/session + llm + tool |
 | `core/tool/` | ToolRegistry + `registry.go` / `tool.go` | 注册、查询、权限过滤 |
-| 内置工具 | 12 个（`core/tool/`，见 §7.4） | read/write/edit/apply_patch/bash/glob/grep/webfetch/websearch/question/skill/todowrite |
+| 内置工具 | 11 个（`core/tool/`，见 §7.4） | read/write/edit/apply_patch/bash/glob/grep/webfetch/question/skill/todowrite |
 | `core/permission.go` | 规则引擎（allow / deny / ask） | 权限评估 |
 | `core/` | file-mutation / location-mutation / git / database / process ... | 支撑模块 |
 | `agent/` | `NewClient` / `CreateSession` / `Send` / `On` / `RegisterAgent` | 公开 API（已实现，见 §11） |
@@ -558,7 +558,6 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 | Glob | `glob` | ✅ 已移植（`core/tool/glob.go`） |
 | Grep | `grep` | ✅ 已移植（`core/tool/grep.go`） |
 | WebFetch | `webfetch` | ✅ 已移植（`core/tool/webfetch.go`） |
-| WebSearch | `websearch` | ✅ 已移植（`core/tool/websearch.go`） |
 | Task | `task` | ✅ 已移植（`agent/task.go`；子会话 + 权限派生，见 §6.3） |
 | Question | `question` | ✅ 已移植（`core/tool/question.go`） |
 | Skill | `skill` | ✅ 已移植（`core/tool/skill.go`） |
@@ -691,7 +690,6 @@ type ClientOptions struct {
     Compaction       *CompactionConfig         // 上下文压缩（Auto / PreserveRecentTokens / Reserved）
     Policies         []schema.PolicyInfo       // allow/deny 策略
     Tools            []Tool                    // 应用级工具
-    WebSearch        *tool.WebSearchConfig     // 内置 websearch 配置；nil 则不注册该工具
     MCP              []MCPConfig               // MCP servers（工具注册为应用级）
     Plugins          []PluginConfig            // 启动时加载的插件
     References       map[string]core.ReferenceSource // 命名 reference 源
@@ -786,12 +784,12 @@ TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR`
 
 `Root` 为空时用 `~/.local/share/opencode`。因为不再读 env，设置 `Root` 即可完全隔离实例（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
 
-同一原则也适用于工具与仓库：`core/tool/websearch.go` 不再读 `EXA_API_KEY` / `PARALLEL_API_KEY` / `OPENCODE_WEBSEARCH_PROVIDER`，`core/repository.go` 不再读 `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`。两者都改为显式输入：
+同一原则也适用于仓库：`core/repository.go` 不再读 `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`，改为显式输入：
 
-- websearch：`ClientOptions.WebSearch`；nil 时**不注册**该工具（模型不会看到一个必然失败的工具）。想沿用 CLI 约定的宿主调用 `tool.WebSearchConfigFromEnv()` 自己读 env 再传入。
 - github 镜像：`core.WithGitHubBaseURL(base)` 传给 `RepositoryParse` / `NewRepositoryCache`（TS 对**所有** github.com host 都走 `githubRemote`，显式 URL 同样被改写，以保证 origin 与 clone target 一致）。
 - 排序 locale：`util.CompareLocale(left, right, tag)` 显式接收 tag，`ClientOptions.Locale` 一路传到 read 工具的目录列表、skill/reference guidance 与 task 的 subagent 列表；`util.ResolveLocale(name)` 负责解析，空值回退到 env 推断出的 `util.LocaleTag`（对齐 JS `localeCompare` 的默认行为）。
-- `core/flag` 只保留 `Truthy`：TS 的 `flag.ts` 在 import 时把 ~25 个 `OPENCODE_*` / `OTEL_*` 快照进 `Flag` 表并暴露一堆 accessor，SDK 一个消费者都没有，因此只移植纯 helper（不再在 init 时读 env）。
+- `core/flag` **不移植**：`flag.ts` 是 CLI 的 env 模块（import 时把 ~25 个 `OPENCODE_*` / `OTEL_*` 快照进 `Flag` 表），SDK 没有消费者，唯一用到它的 websearch 工具已按下面的理由删除。
+- **`websearch` 工具不移植**：它硬编码 Exa / Parallel 两家商业后端的 MCP 端点，且必须靠宿主 env 传 provider key —— TS 自己注明这是「retained in V2 core for launch parity」的妥协。宿主想要搜索能力可以用 `agent.DefineTool` 自行接入；通用的 `webfetch`（HTTP + HTML→markdown）保留。
 
 文件只承载**内容**（agent / mode / skill 的 markdown），且来源必须**显式**声明：`ClientOptions.ConfigDirs`。每个目录按以下模式扫描：
 

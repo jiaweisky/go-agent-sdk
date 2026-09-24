@@ -23,7 +23,6 @@ func TestAllToolSchemasCompile(t *testing.T) {
 		"skill.in": SkillInputSchema, "skill.out": SkillOutputSchema,
 		"todowrite.in": TodoWriteInputSchema, "todowrite.out": TodoWriteOutputSchema,
 		"webfetch.in": WebFetchInputSchema, "webfetch.out": WebFetchOutputSchema,
-		"websearch.in": WebSearchInputSchema, "websearch.out": WebSearchOutputSchema,
 		"write.in": WriteInputSchema, "write.out": WriteOutputSchema,
 	}
 	for name, schema := range cases {

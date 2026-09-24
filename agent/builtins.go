@@ -21,7 +21,6 @@ type builtinDeps struct {
 	global     core.Global
 	shell      string
 	skills     tool.SkillLister
-	webSearch  *tool.WebSearchConfig
 	locale     language.Tag
 	agents     *core.Agent
 	task       TaskRunner
@@ -82,15 +81,6 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 				AgentPermissions: agentPermissions, Locale: deps.locale,
 			})
 		},
-	}
-	// websearch is registered only when the host supplies a config, because the
-	// SDK does not read the provider keys from the environment.
-	if deps.webSearch != nil {
-		registrations = append(registrations, func() (func(), error) {
-			return tool.RegisterWebSearch(tools, tool.WebSearchDeps{
-				HTTPClient: http.DefaultClient, Permission: deps.permission, Config: *deps.webSearch,
-			})
-		})
 	}
 	for _, register := range registrations {
 		if _, err := register(); err != nil {

@@ -190,7 +190,7 @@ func TestUpdateStatusParentWorking(t *testing.T) {
 func TestParentToolCallsAreNotLogged(t *testing.T) {
 	var out strings.Builder
 	c := newChat(&console{out: &out}, nil, "ses_parent", "")
-	c.handle(agent.ToolCalled{SessionID: "ses_parent", CallID: "c1", Name: "websearch"})
+	c.handle(agent.ToolCalled{SessionID: "ses_parent", CallID: "c1", Name: "webfetch"})
 	c.handle(agent.ToolFailed{SessionID: "ses_parent", CallID: "c1", Error: map[string]any{"message": "invalid input"}})
 	if out.String() != "" {
 		t.Fatalf("parent tool calls should not be logged: %q", out.String())
@@ -204,10 +204,10 @@ func TestParentToolCallsAreNotLogged(t *testing.T) {
 // parent session is currently running.
 func TestUpdateStatusShowsParentTool(t *testing.T) {
 	c := newChat(&console{out: &strings.Builder{}}, nil, "ses_parent", "")
-	c.handle(agent.ToolCalled{SessionID: "ses_parent", CallID: "c1", Name: "websearch"})
+	c.handle(agent.ToolCalled{SessionID: "ses_parent", CallID: "c1", Name: "webfetch"})
 	c.handle(agent.SessionStatus{SessionID: "ses_parent", Status: "busy"})
 	c.updateStatus(0)
-	if !strings.Contains(c.console.status, "websearch") {
+	if !strings.Contains(c.console.status, "webfetch") {
 		t.Fatalf("status = %q", c.console.status)
 	}
 }

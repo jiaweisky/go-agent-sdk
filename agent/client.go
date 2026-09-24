@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/tool"
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/mcp"
 	"github.com/user/go-agent-sdk/schema"
@@ -42,11 +41,6 @@ type ClientOptions struct {
 	Home string
 	// Tools are application-level tools exposed to every session.
 	Tools []Tool
-	// WebSearch configures the built-in websearch tool. Nil leaves the tool
-	// unregistered: the SDK does not read EXA_API_KEY/PARALLEL_API_KEY from the
-	// environment, so a host that wants the CLI convention calls
-	// tool.WebSearchConfigFromEnv itself.
-	WebSearch *tool.WebSearchConfig
 	// MCP configures MCP servers whose tools are registered as application tools.
 	MCP []MCPConfig
 	// Plugins are loaded at startup and can transform agents and skills.

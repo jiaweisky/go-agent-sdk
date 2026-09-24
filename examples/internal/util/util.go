@@ -10,7 +10,6 @@ import (
 
 	"github.com/user/go-agent-sdk/agent"
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/tool"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -91,9 +90,6 @@ func Client(options ...Option) (*agent.Client, error) {
 	if value := envLimits(); value != nil {
 		limit = schema.ModelLimit{Context: value.Context, Output: value.Output}
 	}
-	// The SDK does not read provider keys for its tools from the environment, so
-	// this host opts into the CLI convention explicitly.
-	webSearch := tool.WebSearchConfigFromEnv()
 	opts := &agent.ClientOptions{
 		Model:    model,
 		Protocol: protocol,
@@ -109,7 +105,6 @@ func Client(options ...Option) (*agent.Client, error) {
 		},
 		Credentials: agent.APIKey(apiKey),
 		Permission:  agent.ApproveAll,
-		WebSearch:   &webSearch,
 		// Load agents and skills from .opencode in the working directory (the
 		// examples pin it with -C).
 		ConfigDirs: []string{".opencode"},
