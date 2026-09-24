@@ -81,16 +81,26 @@ func (s *Session) On(handler func(Event)) func() {
 
 // Send admits a prompt and returns the events produced by the resulting turn.
 // The sequence ends with an Idle event.
+//
+// Events are handed off to the caller with backpressure: core events are
+// dispatched synchronously from the publisher (mirroring Event.listen), so a
+// slow consumer slows the turn instead of losing deltas. The buffer only
+// smooths bursts; closed releases a handler still waiting when the caller stops
+// iterating.
 func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		events := make(chan Event, 256)
+		closed := make(chan struct{})
 		unsubscribe := s.On(func(event Event) {
 			select {
 			case events <- event:
-			default:
+			case <-closed:
 			}
 		})
-		defer unsubscribe()
+		defer func() {
+			close(closed)
+			unsubscribe()
+		}()
 
 		done := make(chan error, 1)
 		go func() { done <- s.run(ctx, msg) }()

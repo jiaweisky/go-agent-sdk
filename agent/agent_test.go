@@ -78,6 +78,43 @@ func (b blockingLLM) Stream(ctx context.Context, req *llmschema.LLMRequest) (ite
 	}, nil
 }
 
+// manyDeltasLLM streams n text deltas in one text part, so a test can exercise
+// event delivery under load.
+type manyDeltasLLM struct{ deltas int }
+
+func (m manyDeltasLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
+	return nil, nil
+}
+
+func (m manyDeltasLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
+	return nil, nil
+}
+
+func (m manyDeltasLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+	return func(yield func(llmschema.LLMEvent, error) bool) {
+		if !yield(llmschema.NewStepStart(0), nil) {
+			return
+		}
+		if !yield(llmschema.NewTextStart("t1"), nil) {
+			return
+		}
+		for i := 0; i < m.deltas; i++ {
+			if !yield(llmschema.NewTextDelta("t1", "x"), nil) {
+				return
+			}
+		}
+		for _, event := range []llmschema.LLMEvent{
+			llmschema.NewTextEnd("t1"),
+			llmschema.NewStepFinish(0, llmschema.ReasonStop),
+			llmschema.NewFinish(llmschema.ReasonStop),
+		} {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
 func newTestClient(t *testing.T) *Client {
 	t.Helper()
 	client, err := NewClient(&ClientOptions{
@@ -543,6 +580,48 @@ func TestSessionSend(t *testing.T) {
 	}
 	if !idle {
 		t.Fatal("expected Idle event")
+	}
+}
+
+// TestSessionSendDoesNotDropEvents guards the backpressure handoff: a consumer
+// slower than the producer must still see every delta, so the buffer only
+// smooths bursts and never drops.
+func TestSessionSendDoesNotDropEvents(t *testing.T) {
+	const deltas = 600
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("k"),
+		Model:      "test-model",
+		DataDir:    t.TempDir(),
+		Permission: ApproveAll,
+		LLM:        manyDeltasLLM{deltas: deltas},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+	if err := client.RegisterAgent("build", AgentConfig{System: "s"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer session.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	seen := 0
+	for event, err := range session.Send(ctx, MessageOptions{Prompt: "hi"}) {
+		if err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		if _, ok := event.(TextDelta); ok {
+			seen++
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if seen != deltas {
+		t.Fatalf("received %d text deltas, want %d (events were dropped)", seen, deltas)
 	}
 }
 
