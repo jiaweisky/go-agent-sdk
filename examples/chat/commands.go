@@ -6,6 +6,7 @@ import (
 
 	"github.com/user/go-agent-sdk/agent"
 	"github.com/user/go-agent-sdk/core/util"
+	"github.com/user/go-agent-sdk/mcp"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -68,40 +69,55 @@ func (c *chat) mcpsCommand() {
 		c.console.write("(no MCP servers connected)\n")
 		return
 	}
+	names := sortedServerNames(statuses)
+	c.console.write(fmt.Sprintf("%sMCP servers (%d):%s\n", bold, len(names), reset))
+	for _, name := range names {
+		c.writeMCPServer(client, name, statuses[name])
+	}
+}
+
+// sortedServerNames returns the connected server names in locale order.
+func sortedServerNames(statuses map[string]mcp.Status) []string {
 	names := make([]string, 0, len(statuses))
 	for name := range statuses {
 		names = append(names, name)
 	}
 	sort.Slice(names, func(i, j int) bool { return util.CompareLocale(names[i], names[j], util.LocaleTag) < 0 })
-	c.console.write(fmt.Sprintf("%sMCP servers (%d):%s\n", bold, len(names), reset))
-	for _, name := range names {
-		status := statuses[name]
-		line := fmt.Sprintf("  %s%s%s — %s", cyan, name, reset, status.Status)
-		if status.Error != "" {
-			line += fmt.Sprintf(" %s(%s)%s", dim, status.Error, reset)
-		}
-		c.console.write(line + "\n")
+	return names
+}
 
-		info, ok := client.ServerInfo(name)
-		if !ok {
-			continue
-		}
-		meta := info.Title
-		if meta == "" {
-			meta = info.Name
-		}
-		if info.Version != "" {
-			if meta != "" {
-				meta += " " + info.Version
-			} else {
-				meta = info.Version
-			}
-		}
-		if meta != "" {
-			c.console.write(fmt.Sprintf("    %s%s%s\n", dim, meta, reset))
-		}
-		if info.Description != "" {
-			c.console.write(fmt.Sprintf("    %s\n", info.Description))
-		}
+// writeMCPServer prints one server: its status line, then its metadata.
+func (c *chat) writeMCPServer(client *mcp.Client, name string, status mcp.Status) {
+	line := fmt.Sprintf("  %s%s%s — %s", cyan, name, reset, status.Status)
+	if status.Error != "" {
+		line += fmt.Sprintf(" %s(%s)%s", dim, status.Error, reset)
 	}
+	c.console.write(line + "\n")
+
+	info, ok := client.ServerInfo(name)
+	if !ok {
+		return
+	}
+	if meta := serverMeta(info); meta != "" {
+		c.console.write(fmt.Sprintf("    %s%s%s\n", dim, meta, reset))
+	}
+	if info.Description != "" {
+		c.console.write(fmt.Sprintf("    %s\n", info.Description))
+	}
+}
+
+// serverMeta renders a server's "Title Name Version" metadata, dropping the
+// parts it does not report.
+func serverMeta(info mcp.ServerInfo) string {
+	meta := info.Title
+	if meta == "" {
+		meta = info.Name
+	}
+	if info.Version == "" {
+		return meta
+	}
+	if meta == "" {
+		return info.Version
+	}
+	return meta + " " + info.Version
 }

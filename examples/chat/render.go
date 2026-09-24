@@ -118,12 +118,15 @@ func (c *chat) flushStream() {
 }
 
 func (c *chat) handleParent(event agent.Event) {
+	// A tool or task line must not appear before text that streamed earlier.
+	switch event.(type) {
+	case agent.ToolProgress, agent.ToolCalled, agent.ToolSuccess, agent.ToolFailed:
+		c.flushStream()
+	}
 	switch e := event.(type) {
 	case agent.ToolProgress:
-		c.flushStream()
 		c.handleProgress(e)
 	case agent.ToolCalled:
-		c.flushStream()
 		c.openCall(e.CallID, e.Name)
 		if e.Name == coretool.SkillName {
 			// Skills are worth surfacing: unlike read/grep, a loaded skill
@@ -131,10 +134,8 @@ func (c *chat) handleParent(event agent.Event) {
 			c.console.write(fmt.Sprintf("%s[skill] %s%s\n", cyan, skillName(e.Input), reset))
 		}
 	case agent.ToolSuccess:
-		c.flushStream()
 		c.finishTool(e.CallID, "")
 	case agent.ToolFailed:
-		c.flushStream()
 		c.finishTool(e.CallID, errorMessage(e.Error))
 	case agent.SessionStatus:
 		c.parentBusy = e.Status == "busy"
