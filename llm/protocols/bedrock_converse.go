@@ -670,19 +670,19 @@ func (bedrockConverseBedrockTransport) Frames(ctx context.Context, prepared any,
 			yield(nil, llmErr)
 			return
 		}
-		var fb FrameBufferState
+		var fb BedrockFrameBuffer
 		tmp := make([]byte, 16384)
 		for {
 			n, readErr := resp.Body.Read(tmp)
 			if n > 0 {
-				decoded, decodeErr := DecodeEventStreamFrames(&fb, tmp[:n])
+				decoded, decodeErr := DecodeBedrockEventStreamFrames(&fb, tmp[:n])
 				if decodeErr != nil {
 					yield(nil, decodeErr)
 					resp.Body.Close()
 					return
 				}
 				for _, d := range decoded {
-					frame, wrapErr := RewrapFrame(d)
+					frame, wrapErr := RewrapBedrockFrame(d)
 					if wrapErr != nil {
 						yield(nil, wrapErr)
 						resp.Body.Close()
@@ -696,13 +696,13 @@ func (bedrockConverseBedrockTransport) Frames(ctx context.Context, prepared any,
 			}
 			if readErr != nil {
 				if readErr == io.EOF {
-					decoded, decodeErr := DecodeEventStreamFrames(&fb, nil)
+					decoded, decodeErr := DecodeBedrockEventStreamFrames(&fb, nil)
 					if decodeErr != nil {
 						yield(nil, decodeErr)
 						break
 					}
 					for _, d := range decoded {
-						frame, wrapErr := RewrapFrame(d)
+						frame, wrapErr := RewrapBedrockFrame(d)
 						if wrapErr != nil {
 							yield(nil, wrapErr)
 							break

@@ -14,7 +14,7 @@ import (
 // set to the protocol id, so ClientOptions.Credentials is called with it. Hand
 // the result to ClientOptions.ModelInfo.
 func NewModelInfo(protocol schema.ProtocolID, modelID, baseURL string, limit schema.ModelLimit) (schema.ModelInfo, error) {
-	if _, ok := protocols.Lookup(llmschema.ProtocolID(protocol)); !ok {
+	if _, ok := protocols.LookupProtocol(llmschema.ProtocolID(protocol)); !ok {
 		return schema.ModelInfo{}, fmt.Errorf("unknown protocol %q", protocol)
 	}
 	info := schema.ModelInfoEmpty(schema.ProviderID(protocol), schema.ModelID(modelID))

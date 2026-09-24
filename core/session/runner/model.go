@@ -136,7 +136,7 @@ func runnerModelAPIID(model schema.ModelInfo) string {
 // its protocol up in the registry and applying the credential with the
 // protocol's auth scheme.
 func FromCatalogModel(model schema.ModelInfo, credential schema.Credential) (route.Model, error) {
-	entry, ok := protocols.Lookup(llmschema.ProtocolID(model.API.Protocol))
+	entry, ok := protocols.LookupProtocol(llmschema.ProtocolID(model.API.Protocol))
 	if !ok {
 		return route.Model{}, &UnsupportedApiError{
 			ProviderID: model.ProviderID,
@@ -150,7 +150,7 @@ func FromCatalogModel(model schema.ModelInfo, credential schema.Credential) (rou
 }
 
 // runnerProtocolAuth applies the credential using the protocol's auth scheme.
-func runnerProtocolAuth(entry protocols.Entry, credential schema.Credential) *route.Auth {
+func runnerProtocolAuth(entry protocols.ProtocolEntry, credential schema.Credential) *route.Auth {
 	switch entry.Scheme {
 	case protocols.AuthBearer:
 		if credential.APIKey != "" {

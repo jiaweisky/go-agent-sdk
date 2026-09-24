@@ -52,7 +52,7 @@ func TestParseEventStreamHeaders(t *testing.T) {
 		{":event-type", "contentBlockDelta"},
 		{":message-type", "event"},
 	})
-	got := ParseEventStreamHeaders(headers)
+	got := ParseBedrockEventStreamHeaders(headers)
 	if got[":event-type"] != "contentBlockDelta" {
 		t.Fatalf("event-type = %q", got[":event-type"])
 	}
@@ -66,7 +66,7 @@ func TestParseEventStreamHeaders(t *testing.T) {
 
 func TestParseEventStreamHeadersDropsTruncatedValue(t *testing.T) {
 	headers := bedrockHeaders([][2]string{{":message-type", "event"}, {":event-type", "contentBlockDelta"}})
-	got := ParseEventStreamHeaders(headers[:len(headers)-2])
+	got := ParseBedrockEventStreamHeaders(headers[:len(headers)-2])
 	if got[":message-type"] != "event" {
 		t.Fatalf("message-type = %q, want the header before the truncation", got[":message-type"])
 	}
@@ -76,8 +76,8 @@ func TestParseEventStreamHeadersDropsTruncatedValue(t *testing.T) {
 }
 
 func TestDecodeSingleFrame(t *testing.T) {
-	var fb FrameBufferState
-	decoded, err := DecodeEventStreamFrames(&fb, bedrockFrame("contentBlockDelta", "event", `{"delta":{"text":"hi"},"p":"x"}`))
+	var fb BedrockFrameBuffer
+	decoded, err := DecodeBedrockEventStreamFrames(&fb, bedrockFrame("contentBlockDelta", "event", `{"delta":{"text":"hi"},"p":"x"}`))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -102,9 +102,9 @@ func TestDecodeSingleFrame(t *testing.T) {
 func TestDecodeFrameSplitAcrossChunks(t *testing.T) {
 	frame := bedrockFrame("contentBlockDelta", "event", `{"delta":{"text":"hi"}}`)
 	pieces := [][]byte{frame[:5], frame[5:20], frame[20:]}
-	var fb FrameBufferState
+	var fb BedrockFrameBuffer
 	for i, piece := range pieces {
-		decoded, err := DecodeEventStreamFrames(&fb, piece)
+		decoded, err := DecodeBedrockEventStreamFrames(&fb, piece)
 		if err != nil {
 			t.Fatalf("decode: %v", err)
 		}
@@ -116,7 +116,7 @@ func TestDecodeFrameSplitAcrossChunks(t *testing.T) {
 			t.Fatalf("piece %d decoded %d frames, want %d", i, len(decoded), want)
 		}
 	}
-	decoded, err := DecodeEventStreamFrames(&fb, nil)
+	decoded, err := DecodeBedrockEventStreamFrames(&fb, nil)
 	if err != nil {
 		t.Fatalf("flush: %v", err)
 	}
@@ -130,8 +130,8 @@ func TestDecodeMultipleFramesInOneChunk(t *testing.T) {
 		bedrockFrame("contentBlockDelta", "event", `{"delta":{"text":"a"}}`),
 		bedrockFrame("contentBlockStop", "event", `{"contentBlockIndex":0}`)...,
 	)
-	var fb FrameBufferState
-	decoded, err := DecodeEventStreamFrames(&fb, chunk)
+	var fb BedrockFrameBuffer
+	decoded, err := DecodeBedrockEventStreamFrames(&fb, chunk)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -144,8 +144,8 @@ func TestDecodeMultipleFramesInOneChunk(t *testing.T) {
 }
 
 func TestDecodeSkipsNonEventFrames(t *testing.T) {
-	var fb FrameBufferState
-	decoded, err := DecodeEventStreamFrames(&fb, bedrockFrame("internalServerException", "exception", `{"message":"boom"}`))
+	var fb BedrockFrameBuffer
+	decoded, err := DecodeBedrockEventStreamFrames(&fb, bedrockFrame("internalServerException", "exception", `{"message":"boom"}`))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -155,8 +155,8 @@ func TestDecodeSkipsNonEventFrames(t *testing.T) {
 }
 
 func TestDecodeSkipsEmptyPayload(t *testing.T) {
-	var fb FrameBufferState
-	decoded, err := DecodeEventStreamFrames(&fb, bedrockFrame("contentBlockStop", "event", ""))
+	var fb BedrockFrameBuffer
+	decoded, err := DecodeBedrockEventStreamFrames(&fb, bedrockFrame("contentBlockStop", "event", ""))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -168,8 +168,8 @@ func TestDecodeSkipsEmptyPayload(t *testing.T) {
 func TestDecodePreludeCRCMismatch(t *testing.T) {
 	frame := bedrockFrame("contentBlockDelta", "event", `{"delta":{"text":"hi"}}`)
 	frame[9] ^= 0xff
-	var fb FrameBufferState
-	if _, err := DecodeEventStreamFrames(&fb, frame); err == nil || !strings.Contains(err.Error(), "prelude CRC") {
+	var fb BedrockFrameBuffer
+	if _, err := DecodeBedrockEventStreamFrames(&fb, frame); err == nil || !strings.Contains(err.Error(), "prelude CRC") {
 		t.Fatalf("err = %v, want a prelude CRC error", err)
 	}
 }
@@ -177,8 +177,8 @@ func TestDecodePreludeCRCMismatch(t *testing.T) {
 func TestDecodeMessageCRCMismatch(t *testing.T) {
 	frame := bedrockFrame("contentBlockDelta", "event", `{"delta":{"text":"hi"}}`)
 	frame[len(frame)-8] ^= 0xff
-	var fb FrameBufferState
-	if _, err := DecodeEventStreamFrames(&fb, frame); err == nil || !strings.Contains(err.Error(), "message CRC") {
+	var fb BedrockFrameBuffer
+	if _, err := DecodeBedrockEventStreamFrames(&fb, frame); err == nil || !strings.Contains(err.Error(), "message CRC") {
 		t.Fatalf("err = %v, want a message CRC error", err)
 	}
 }
@@ -187,21 +187,21 @@ func TestDecodeInvalidFrameLength(t *testing.T) {
 	frame := bedrockFrame("contentBlockDelta", "event", `{}`)
 	binary.BigEndian.PutUint32(frame[0:], 10)
 	binary.BigEndian.PutUint32(frame[8:], crc32.ChecksumIEEE(frame[0:8]))
-	var fb FrameBufferState
-	if _, err := DecodeEventStreamFrames(&fb, frame); err == nil || !strings.Contains(err.Error(), "invalid frame length") {
+	var fb BedrockFrameBuffer
+	if _, err := DecodeBedrockEventStreamFrames(&fb, frame); err == nil || !strings.Contains(err.Error(), "invalid frame length") {
 		t.Fatalf("err = %v, want an invalid length error", err)
 	}
 }
 
 func TestDecodeBadPayload(t *testing.T) {
-	var fb FrameBufferState
-	if _, err := DecodeEventStreamFrames(&fb, bedrockFrame("contentBlockDelta", "event", "not json")); err == nil || !strings.Contains(err.Error(), "bad payload") {
+	var fb BedrockFrameBuffer
+	if _, err := DecodeBedrockEventStreamFrames(&fb, bedrockFrame("contentBlockDelta", "event", "not json")); err == nil || !strings.Contains(err.Error(), "bad payload") {
 		t.Fatalf("err = %v, want a bad payload error", err)
 	}
 }
 
 func TestRewrapFrame(t *testing.T) {
-	got, err := RewrapFrame(DecodedFrame{
+	got, err := RewrapBedrockFrame(BedrockFrame{
 		EventType: "contentBlockDelta",
 		Payload:   map[string]any{"delta": map[string]any{"text": "hi"}},
 	})
@@ -226,14 +226,14 @@ func TestParseEventStreamHeadersBinaryValue(t *testing.T) {
 	binary.BigEndian.PutUint32(binLen[:], 3)
 	headers = append(headers, binLen[:]...)
 	headers = append(headers, 1, 2, 3)
-	got := ParseEventStreamHeaders(headers)
+	got := ParseBedrockEventStreamHeaders(headers)
 	if got[":binary"] != string([]byte{1, 2, 3}) {
 		t.Fatalf("binary header = %q", got[":binary"])
 	}
 }
 
 func TestParseEventStreamHeadersTruncatedName(t *testing.T) {
-	if got := ParseEventStreamHeaders([]byte{200, 'a'}); len(got) != 0 {
+	if got := ParseBedrockEventStreamHeaders([]byte{200, 'a'}); len(got) != 0 {
 		t.Fatalf("headers = %v, want empty", got)
 	}
 }
@@ -243,19 +243,19 @@ func TestParseEventStreamHeadersUnknownType(t *testing.T) {
 	headers = append(headers, byte(len(":x")))
 	headers = append(headers, ":x"...)
 	headers = append(headers, 4)
-	if got := ParseEventStreamHeaders(headers); len(got) != 0 {
+	if got := ParseBedrockEventStreamHeaders(headers); len(got) != 0 {
 		t.Fatalf("headers = %v, want empty", got)
 	}
 }
 
 func TestRewrapFrameMarshalError(t *testing.T) {
-	if _, err := RewrapFrame(DecodedFrame{EventType: "x", Payload: map[string]any{"bad": func() {}}}); err == nil {
+	if _, err := RewrapBedrockFrame(BedrockFrame{EventType: "x", Payload: map[string]any{"bad": func() {}}}); err == nil {
 		t.Fatal("want a marshal error")
 	}
 }
 
 func TestFrameBufferAppendCompacts(t *testing.T) {
-	fb := NewFrameBuffer()
+	fb := NewBedrockFrameBuffer()
 	fb.Append([]byte("hello"))
 	fb.Offset = 2
 	fb.Append([]byte("world"))

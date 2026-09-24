@@ -8,16 +8,16 @@ import (
 	"strings"
 )
 
-type FrameBufferState struct {
+type BedrockFrameBuffer struct {
 	Buffer []byte
 	Offset int
 }
 
-func NewFrameBuffer() FrameBufferState {
-	return FrameBufferState{Buffer: make([]byte, 0)}
+func NewBedrockFrameBuffer() BedrockFrameBuffer {
+	return BedrockFrameBuffer{Buffer: make([]byte, 0)}
 }
 
-func (fb *FrameBufferState) Append(chunk []byte) {
+func (fb *BedrockFrameBuffer) Append(chunk []byte) {
 	remaining := len(fb.Buffer) - fb.Offset
 	next := make([]byte, remaining+len(chunk))
 	copy(next, fb.Buffer[fb.Offset:])
@@ -26,19 +26,19 @@ func (fb *FrameBufferState) Append(chunk []byte) {
 	fb.Offset = 0
 }
 
-func (fb *FrameBufferState) Compact() {
+func (fb *BedrockFrameBuffer) Compact() {
 	if fb.Offset > 0 && fb.Offset == len(fb.Buffer) {
 		fb.Buffer = nil
 		fb.Offset = 0
 	}
 }
 
-type DecodedFrame struct {
+type BedrockFrame struct {
 	EventType string
 	Payload   map[string]any
 }
 
-func ParseEventStreamHeaders(data []byte) map[string]string {
+func ParseBedrockEventStreamHeaders(data []byte) map[string]string {
 	result := make(map[string]string)
 	for i := 0; i < len(data); {
 		if i >= len(data) {
@@ -86,11 +86,11 @@ func ParseEventStreamHeaders(data []byte) map[string]string {
 	return result
 }
 
-func DecodeEventStreamFrames(fb *FrameBufferState, chunk []byte) ([]DecodedFrame, error) {
+func DecodeBedrockEventStreamFrames(fb *BedrockFrameBuffer, chunk []byte) ([]BedrockFrame, error) {
 	if chunk != nil {
 		fb.Append(chunk)
 	}
-	var out []DecodedFrame
+	var out []BedrockFrame
 	for fb.Offset+4 <= len(fb.Buffer) {
 		totalLen := int(binary.BigEndian.Uint32(fb.Buffer[fb.Offset:]))
 		if fb.Offset+totalLen > len(fb.Buffer) {
@@ -113,7 +113,7 @@ func DecodeEventStreamFrames(fb *FrameBufferState, chunk []byte) ([]DecodedFrame
 		if crc32.ChecksumIEEE(fb.Buffer[fb.Offset:payloadEnd]) != msgCRC {
 			return out, fmt.Errorf("Bedrock event stream: message CRC mismatch")
 		}
-		hdrs := ParseEventStreamHeaders(fb.Buffer[fb.Offset+12 : headersEnd])
+		hdrs := ParseBedrockEventStreamHeaders(fb.Buffer[fb.Offset+12 : headersEnd])
 		eventType := hdrs[":event-type"]
 		msgType := hdrs[":message-type"]
 		payload := strings.TrimRight(string(fb.Buffer[headersEnd:payloadEnd]), "\x00")
@@ -129,7 +129,7 @@ func DecodeEventStreamFrames(fb *FrameBufferState, chunk []byte) ([]DecodedFrame
 				}
 				delete(parsed, "p")
 			}
-			out = append(out, DecodedFrame{EventType: eventType, Payload: parsed})
+			out = append(out, BedrockFrame{EventType: eventType, Payload: parsed})
 		}
 		fb.Offset += totalLen
 	}
@@ -137,7 +137,7 @@ func DecodeEventStreamFrames(fb *FrameBufferState, chunk []byte) ([]DecodedFrame
 	return out, nil
 }
 
-func RewrapFrame(frame DecodedFrame) (string, error) {
+func RewrapBedrockFrame(frame BedrockFrame) (string, error) {
 	reWrapped, err := json.Marshal(map[string]any{frame.EventType: frame.Payload})
 	if err != nil {
 		return "", err
