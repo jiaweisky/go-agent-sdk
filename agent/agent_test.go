@@ -365,7 +365,7 @@ func TestSendContextCancelDoesNotInterruptTurn(t *testing.T) {
 	}
 
 	// Cancelling Send's ctx must not interrupt the turn: releasing the provider
-	// still completes it and persists the assistant text (TS run-coordinator
+	// still completes it and persists the assistant text (the run coordinator
 	// semantics: only Abort interrupts).
 	close(release)
 	deadline := time.Now().Add(3 * time.Second)

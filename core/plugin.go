@@ -11,8 +11,8 @@ import (
 // PluginID mirrors Plugin.ID.
 type PluginID = schema.PluginID
 
-// PluginContext is the narrowed capability surface passed to a plugin. The TS
-// host also exposes aisdk/catalog/integration/command transforms; those are CLI
+// PluginContext is the narrowed capability surface passed to a plugin: agents,
+// skills and references. Catalog, credential and integration transforms are CLI
 // infrastructure and intentionally not ported.
 type PluginContext struct {
 	Agents    *Agent

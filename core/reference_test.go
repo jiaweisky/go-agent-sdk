@@ -35,8 +35,8 @@ func TestRepositoryParseGitHubMirror(t *testing.T) {
 	if mirrored == nil || mirrored.Remote != "https://mirror.example.com/owner/repo.git" {
 		t.Fatalf("mirrored remote = %+v", mirrored)
 	}
-	// An explicit github.com URL is mirrored too (TS routes every github.com
-	// host through githubRemote), so origin and clone target stay consistent.
+	// An explicit github.com URL is mirrored too, so origin and clone target stay
+	// consistent.
 	explicit := RepositoryParse("https://github.com/owner/repo.git", WithGitHubBaseURL("https://mirror.example.com/"))
 	if explicit == nil || explicit.Remote != "https://mirror.example.com/owner/repo.git" {
 		t.Fatalf("explicit remote = %+v", explicit)

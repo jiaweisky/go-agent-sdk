@@ -31,8 +31,8 @@ type AgentDraft struct {
 	Remove  func(schema.AgentID)
 }
 
-// Agent mirrors AgentV2.Service. Agents are held in an ordered map so list and
-// fallback selection follow registration order, matching the TS Map iteration.
+// Agent is the agent registry. Agents are held in an ordered map so listing and
+// fallback selection follow registration order.
 type Agent struct {
 	state *State[*agentData, AgentDraft]
 }

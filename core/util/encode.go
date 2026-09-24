@@ -37,7 +37,7 @@ func Base64Decode(value string) (string, error) {
 	return string(decoded), nil
 }
 
-// Hash ports encode.ts hash. The TS default algorithm is SHA-256; pass an empty
+// Hash returns content's digest. The default algorithm is SHA-256; pass an empty
 // or omitted algorithm to use it.
 func Hash(content string, algorithm ...string) (string, error) {
 	name := "SHA-256"

@@ -26,8 +26,8 @@ func Match(input, pattern string) bool {
 		escaped = escaped[:len(escaped)-3] + "( .*)?"
 	}
 
-	// Mirrors TS Wildcard.match: the `s` (dotAll) flag always, plus `i`
-	// (case-insensitive) on Windows.
+	// The `s` (dotAll) flag is always set, plus `i` (case-insensitive) on
+	// Windows.
 	flags := "(?s)"
 	if runtime.GOOS == "windows" {
 		flags = "(?is)"

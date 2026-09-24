@@ -97,7 +97,7 @@ func (p *handlerPermission) Assert(input core.PermissionAssertInput) error {
 		return nil
 	case core.PermissionEffectDeny:
 		// A rule-based deny is a blocked tool, not a user decline: it must not
-		// halt the turn (mirrors TS BlockedError vs DeclinedError).
+		// halt the turn, unlike a user decline.
 		return &core.PermissionBlockedError{}
 	}
 	agent := ""
@@ -192,8 +192,7 @@ func (a permissionAgents) Resolve(agentID string) (*core.PermissionAgentInfo, bo
 	return &core.PermissionAgentInfo{ID: string(info.ID), Permissions: info.Permissions}, true
 }
 
-// permissionSaved persists "always allow" rules so they survive restarts
-// (mirrors the TS PermissionSaved table).
+// permissionSaved persists "always allow" rules so they survive restarts.
 type permissionSaved struct{ db *database.Database }
 
 func (s *permissionSaved) List(projectID string) ([]core.PermissionSaved, error) {

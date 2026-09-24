@@ -30,9 +30,8 @@ var (
 
 // RepositoryOptions configures repository parsing.
 //
-// TS's repository.ts builds github.com clone URLs through the
-// OPENCODE_REPO_CLONE_GITHUB_BASE_URL environment variable. The SDK never reads
-// the host environment, so a caller behind a mirror passes it here.
+// A caller behind a mirror passes its base URL here: the SDK never reads the
+// host environment, so the mirror cannot come from a variable.
 type RepositoryOptions struct {
 	// GitHubBaseURL routes github.com clone URLs through a mirror, for example
 	// "https://github.example.com/". Empty uses https://github.com/.

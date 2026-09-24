@@ -42,7 +42,7 @@ var SessionStatusEventStatus = Define(DefineInput{
 	Schema: map[string]any{"sessionID": nil, "status": nil},
 })
 
-// SessionStatusEventIdle is deprecated in TS.
+// SessionStatusEventIdle is deprecated: use SessionStatusEventStatus.
 var SessionStatusEventIdle = Define(DefineInput{
 	Type:   "session.idle",
 	Schema: map[string]any{"sessionID": nil},

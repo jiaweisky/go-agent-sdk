@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestChecksumMatchesTS(t *testing.T) {
+func TestChecksumMatchesUpstream(t *testing.T) {
 	cases := map[string]string{
 		"":                  "",
 		"ses_checksum_test": "ifoe61",
@@ -20,7 +20,7 @@ func TestChecksumMatchesTS(t *testing.T) {
 	}
 }
 
-func TestSampledChecksumMatchesTS(t *testing.T) {
+func TestSampledChecksumMatchesUpstream(t *testing.T) {
 	content := make([]byte, 10000)
 	for i := range content {
 		content[i] = byte('A' + i%26)
@@ -63,7 +63,7 @@ func TestBase64URLRoundTrip(t *testing.T) {
 	}
 }
 
-func TestHashMatchesTS(t *testing.T) {
+func TestHashMatchesUpstream(t *testing.T) {
 	got, err := Hash("hello world")
 	if err != nil {
 		t.Fatalf("Hash: %v", err)

@@ -327,7 +327,7 @@ func executeBash(deps BashDeps, execCtx context.Context, input BashInput, ctx Co
 		CombineOutput:  true,
 		Timeout:        time.Duration(timeout) * time.Millisecond,
 		MaxOutputBytes: &maxBytes,
-		// stdin is left nil, which reads from the null device ("ignore" in TS).
+		// stdin is left nil, which reads from the null device.
 		Detached:       goruntime.GOOS != "windows",
 		ForceKillAfter: 3 * time.Second,
 	})

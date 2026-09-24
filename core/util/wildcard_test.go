@@ -23,7 +23,7 @@ func TestMatchWildcards(t *testing.T) {
 		{"src/a.ts", "*.ts", true},
 		{"src/a.ts", "*.tsx", false},
 		{"read", "*", true},
-		{"a\nb", "a*b", true}, // dotAll: `.` matches newline (TS uses the `s` flag)
+		{"a\nb", "a*b", true}, // dotAll: `.` matches newline
 	}
 	for _, c := range cases {
 		if got := Match(c.input, c.pattern); got != c.want {
@@ -35,7 +35,7 @@ func TestMatchWildcards(t *testing.T) {
 func TestMatchCaseSensitivity(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		if !Match("README", "readme") {
-			t.Fatal("windows match should be case-insensitive (TS uses the `i` flag)")
+			t.Fatal("windows match should be case-insensitive")
 		}
 		return
 	}

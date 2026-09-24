@@ -183,9 +183,9 @@ func insertSession(tx DB, info v1.V1SessionInfo) (bool, error) {
 	return affected > 0, nil
 }
 
-// sessionUpdateSet mirrors the fields Drizzle's update().set() would emit from
-// sessionRow(info): explicit null/zero fields are always written, optional
-// absent fields (undefined in TS) are omitted so the existing column is kept.
+// sessionUpdateSet builds the columns to update from info: explicit null/zero
+// fields are always written, absent optional fields are omitted so the existing
+// column is kept.
 func sessionUpdateSet(info v1.V1SessionInfo) (map[string]any, error) {
 	cost := float64(0)
 	if info.Cost != nil {

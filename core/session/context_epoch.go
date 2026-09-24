@@ -89,8 +89,8 @@ func ContextEpochPrepare(
 		replacementSeq = compaction
 	}
 	var result systemcontext.ReconcileResult
-	// Mirrors the TS `replacementSeq ? replace(...) : reconcile(...)` truthiness
-	// check, so a replacement at sequence 0 falls through to reconcile.
+	// A replacement at sequence 0 falls through to reconcile: only a non-zero
+	// sequence replaces the snapshot.
 	if replacementSeq != nil && *replacementSeq != 0 {
 		result, err = systemcontext.Replace(context, snapshot)
 	} else {

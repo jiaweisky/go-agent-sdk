@@ -131,9 +131,8 @@ func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event,
 					}
 				}
 			case <-ctx.Done():
-				// Mirrors the TS coordinator's uninterruptibleMask: cancelling
-				// the caller's context only stops waiting; the active turn keeps
-				// running until it finishes or Abort is called.
+				// Cancelling the caller's context only stops waiting; the active
+				// turn keeps running until it finishes or Abort is called.
 				return
 			}
 		}

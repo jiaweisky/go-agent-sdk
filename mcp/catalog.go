@@ -19,10 +19,9 @@ func ToolName(server, name string) string {
 	return Sanitize(server) + "_" + Sanitize(name)
 }
 
-// ListTools mirrors McpCatalog.listTools. The SDK iterator handles pagination.
-// TS also retries tools/list with a tolerant schema when the MCP SDK rejects a
-// server's outputSchema; the Go SDK keeps Tool.OutputSchema as `any` and does
-// not validate it, so no fallback is needed here.
+// ListTools lists a server's tools; the SDK iterator handles pagination. It keeps
+// Tool.OutputSchema as `any` and does not validate it, so no tolerant fallback is
+// needed when a server's outputSchema is unusual.
 func ListTools(ctx context.Context, session *sdk.ClientSession) ([]*sdk.Tool, error) {
 	var tools []*sdk.Tool
 	for tool, err := range session.Tools(ctx, nil) {

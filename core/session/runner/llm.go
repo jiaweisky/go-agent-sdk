@@ -579,8 +579,8 @@ func (r *LLMRunner) runTurnAttempt(
 		settledErr = collected[0]
 	}
 
-	// A user decline anywhere in the batch halts the turn (TS inspects every
-	// fiber's cause), even when another tool failed first.
+	// A user decline anywhere in the batch halts the turn, even when another tool
+	// failed first.
 	if declined := firstDeclined(collected); declined != nil {
 		toolCancel()
 		if err := withPublication(func() error {

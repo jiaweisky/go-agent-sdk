@@ -133,9 +133,8 @@ type Retried struct {
 
 func (Retried) eventKind() string { return "retried" }
 
-// SessionStatus reports a session's run status ("busy" or "idle"). It mirrors
-// the TS session.status event and lets callers animate a spinner only while a
-// session is actually running.
+// SessionStatus reports a session's run status ("busy" or "idle"), so callers can
+// animate a spinner only while a session is actually running.
 type SessionStatus struct {
 	SessionID string
 	Status    string

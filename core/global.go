@@ -6,10 +6,9 @@ import (
 
 // Global is the directory layout for SDK-managed state.
 //
-// TS's global.ts is a CLI module: it reads XDG_* (and OPENCODE_CONFIG_DIR) at
-// load time. An embeddable SDK must not do that — its state has to follow an
-// explicit root so a host can isolate instances and so a test never touches the
-// developer's real data. The layout is therefore derived from a root the caller
+// An embeddable SDK must not read the host environment to locate its own state:
+// the layout has to follow an explicit root, so a host can isolate instances and
+// a test never touches the developer's real data. The layout is therefore derived from a root the caller
 // supplies; nothing here reads the environment.
 //
 // Consumers create the paths they use.
@@ -30,7 +29,7 @@ type Global struct {
 //
 //	data/   session database, snapshots, references, plans, tool output, logs
 //	cache/  downloaded binaries and skill content (disposable)
-//	state/  runtime state (reserved; TS uses it for flock)
+//	state/  runtime state (reserved)
 //	tmp/    scratch space
 func NewGlobal(root, home string) Global {
 	data := filepath.Join(root, "data")

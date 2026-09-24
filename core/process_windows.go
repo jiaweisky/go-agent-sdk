@@ -5,8 +5,8 @@ package core
 import "os/exec"
 
 // applyProcessAttrs mirrors ChildProcess's `detached` option. The bash tool
-// only requests detachment on non-Windows platforms, matching TS, so there is
-// nothing to apply here yet.
+// only requests detachment on non-Windows platforms, so there is nothing to
+// apply here yet.
 func applyProcessAttrs(cmd *exec.Cmd, detached bool) {}
 
 // processTerminate mirrors ChildProcess's killSignal behavior on Windows,

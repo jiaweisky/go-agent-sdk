@@ -491,7 +491,7 @@ func (s *permissionService) finish(id PermissionID) {
 }
 
 // Close declines every pending request with PermissionDeclinedError without
-// publishing an event, mirroring the TS layer finalizer. It is idempotent.
+// publishing an event. It is idempotent.
 func (s *permissionService) Close() error {
 	s.mu.Lock()
 	s.closed = true

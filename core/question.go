@@ -215,7 +215,7 @@ func (s *questionService) Reject(requestID QuestionID) error {
 }
 
 // reserve atomically claims a pending request so a concurrent reply or reject
-// observes the same outcome as TS's single-threaded delete-after-settle.
+// cannot act on it twice.
 func (s *questionService) reserve(requestID QuestionID) (*questionPending, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -256,7 +256,7 @@ func (s *questionService) List() []QuestionRequest {
 }
 
 // Close rejects every pending ask with QuestionRejectedError without publishing
-// an event, mirroring the TS layer finalizer. It is idempotent.
+// an event. It is idempotent.
 func (s *questionService) Close() error {
 	s.mu.Lock()
 	s.closed = true
