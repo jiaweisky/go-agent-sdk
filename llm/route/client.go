@@ -78,8 +78,7 @@ type MakeTransportInput struct {
 func MakeFromTransport(input MakeTransportInput) Route {
 	var build func(makeTransportInput) Route
 	build = func(ri makeTransportInput) Route {
-		var r Route
-		r = Route{
+		r := Route{
 			ID:        ri.ID,
 			Provider:  schema.ProviderID(ri.Provider),
 			Protocol:  ri.Protocol.ID,
@@ -92,129 +91,19 @@ func MakeFromTransport(input MakeTransportInput) Route {
 				Validator: CompileBodySchema(ri.Protocol.Body.Schema),
 				From:      ri.Protocol.Body.From,
 			},
-			With: func(patch RoutePatch) Route {
-				next := ri
-				if patch.ID != "" {
-					next.ID = patch.ID
-				}
-				if patch.Provider != "" {
-					next.Provider = patch.Provider
-				}
-				if patch.Auth != nil {
-					next.Auth = patch.Auth
-				}
-				if patch.Transport != nil {
-					next.Transport = patch.Transport
-				}
-				if patch.Endpoint != nil {
-					next.Endpoint = MergeEndpoint(ri.Endpoint, *patch.Endpoint)
-				}
-				if patch.Defaults != nil {
-					next.Defaults = mergeRouteDefaults(ri.Defaults, *patch.Defaults)
-				}
-				return build(next)
-			},
-			Model: func(input RouteModelInput) Model {
-				prov := input.Provider
-				if prov == "" {
-					prov = ri.Provider
-				}
-				if prov == "" {
-					panic(fmt.Sprintf("Route.Model(%s) requires a provider", ri.ID))
-				}
-				if ri.Endpoint.BaseURL == "" {
-					panic(fmt.Sprintf("Route.Model(%s) requires an endpoint baseURL — configure it on the route first", ri.ID))
-				}
-				return Model{
-					Model: schema.NewModel(schema.ModelInput{
-						ID:            input.ID,
-						Provider:      prov,
-						Defaults:      input.Defaults,
-						Compatibility: input.Compatibility,
-					}),
-					Route: r,
-				}
-			},
-			PrepareTransport: func(body any, request *schema.LLMRequest) (any, error) {
-				return ri.Transport.Prepare(TransportPrepareInput{
-					Body:     body,
-					Request:  request,
-					Endpoint: ri.Endpoint,
-					Auth:     ri.Auth,
-					EncodeBody: func(b any) string {
-						bytes, err := json.Marshal(b)
-						if err != nil {
-							return ""
-						}
-						return string(bytes)
-					},
-					Headers: ri.Headers,
-				})
-			},
-			StreamPrepared: func(ctx context.Context, prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error] {
-				stream := ri.Protocol.Stream
-				if stream.DecodeEvent == nil {
-					return ri.Transport.Frames(ctx, prepared, request, runtime)
-				}
-				return func(yield func(any, error) bool) {
-					state := stream.Initial(request)
-					for frame, err := range ri.Transport.Frames(ctx, prepared, request, runtime) {
-						if err != nil {
-							yield(nil, err)
-							return
-						}
-						frameStr, ok := frame.(string)
-						if !ok {
-							yield(nil, fmt.Errorf("route %s: expected string frame, got %T", ri.ID, frame))
-							return
-						}
-						event, decodeErr := stream.DecodeEvent(frameStr)
-						if decodeErr != nil {
-							yield(nil, decodeErr)
-							return
-						}
-						if stream.Terminal != nil && stream.Terminal(event) {
-							newState, events, stepErr := stream.Step(state, event)
-							if stepErr != nil {
-								yield(nil, stepErr)
-								return
-							}
-							state = newState
-							for _, evt := range events {
-								if !yield(schema.LLMEvent(evt), nil) {
-									return
-								}
-							}
-							if stream.OnHalt != nil {
-								for _, evt := range stream.OnHalt(state) {
-									if !yield(schema.LLMEvent(evt), nil) {
-										return
-									}
-								}
-							}
-							return
-						}
-						newState, events, stepErr := stream.Step(state, event)
-						if stepErr != nil {
-							yield(nil, stepErr)
-							return
-						}
-						state = newState
-						for _, evt := range events {
-							if !yield(schema.LLMEvent(evt), nil) {
-								return
-							}
-						}
-					}
-					if stream.OnHalt != nil {
-						for _, evt := range stream.OnHalt(state) {
-							if !yield(schema.LLMEvent(evt), nil) {
-								return
-							}
-						}
-					}
-				}
-			},
+		}
+		r.With = func(patch RoutePatch) Route { return routeWith(ri, patch, build) }
+		r.Model = func(input RouteModelInput) Model { return routeModel(ri, r, input) }
+		r.PrepareTransport = func(body any, request *schema.LLMRequest) (any, error) {
+			return routePrepareTransport(ri, body, request)
+		}
+		r.StreamPrepared = func(
+			ctx context.Context,
+			prepared any,
+			request *schema.LLMRequest,
+			runtime TransportRuntime,
+		) iter.Seq2[any, error] {
+			return routeStreamPrepared(ri, ctx, prepared, request, runtime)
 		}
 		return r
 	}
@@ -233,6 +122,134 @@ func MakeFromTransport(input MakeTransportInput) Route {
 		Defaults:  defaults,
 		Headers:   input.Headers,
 	})
+}
+
+// routeWith applies a patch to the route's inputs and rebuilds the route.
+func routeWith(ri makeTransportInput, patch RoutePatch, build func(makeTransportInput) Route) Route {
+	next := ri
+	if patch.ID != "" {
+		next.ID = patch.ID
+	}
+	if patch.Provider != "" {
+		next.Provider = patch.Provider
+	}
+	if patch.Auth != nil {
+		next.Auth = patch.Auth
+	}
+	if patch.Transport != nil {
+		next.Transport = patch.Transport
+	}
+	if patch.Endpoint != nil {
+		next.Endpoint = MergeEndpoint(ri.Endpoint, *patch.Endpoint)
+	}
+	if patch.Defaults != nil {
+		next.Defaults = mergeRouteDefaults(ri.Defaults, *patch.Defaults)
+	}
+	return build(next)
+}
+
+// routeModel binds a model to the route, rejecting the calls that cannot produce
+// a request.
+func routeModel(ri makeTransportInput, r Route, input RouteModelInput) Model {
+	prov := input.Provider
+	if prov == "" {
+		prov = ri.Provider
+	}
+	if prov == "" {
+		panic(fmt.Sprintf("Route.Model(%s) requires a provider", ri.ID))
+	}
+	if ri.Endpoint.BaseURL == "" {
+		panic(fmt.Sprintf("Route.Model(%s) requires an endpoint baseURL — configure it on the route first", ri.ID))
+	}
+	return Model{
+		Model: schema.NewModel(schema.ModelInput{
+			ID:            input.ID,
+			Provider:      prov,
+			Defaults:      input.Defaults,
+			Compatibility: input.Compatibility,
+		}),
+		Route: r,
+	}
+}
+
+// routePrepareTransport runs the transport's preparation step for a body.
+func routePrepareTransport(ri makeTransportInput, body any, request *schema.LLMRequest) (any, error) {
+	return ri.Transport.Prepare(TransportPrepareInput{
+		Body:     body,
+		Request:  request,
+		Endpoint: ri.Endpoint,
+		Auth:     ri.Auth,
+		EncodeBody: func(b any) string {
+			bytes, err := json.Marshal(b)
+			if err != nil {
+				return ""
+			}
+			return string(bytes)
+		},
+		Headers: ri.Headers,
+	})
+}
+
+// routeStreamPrepared decodes the transport's frames into LLM events, stepping
+// the protocol's state machine until it reports a terminal event.
+func routeStreamPrepared(
+	ri makeTransportInput,
+	ctx context.Context,
+	prepared any,
+	request *schema.LLMRequest,
+	runtime TransportRuntime,
+) iter.Seq2[any, error] {
+	stream := ri.Protocol.Stream
+	if stream.DecodeEvent == nil {
+		return ri.Transport.Frames(ctx, prepared, request, runtime)
+	}
+	return func(yield func(any, error) bool) {
+		state := stream.Initial(request)
+		for frame, err := range ri.Transport.Frames(ctx, prepared, request, runtime) {
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			frameStr, ok := frame.(string)
+			if !ok {
+				yield(nil, fmt.Errorf("route %s: expected string frame, got %T", ri.ID, frame))
+				return
+			}
+			event, decodeErr := stream.DecodeEvent(frameStr)
+			if decodeErr != nil {
+				yield(nil, decodeErr)
+				return
+			}
+			next, events, stepErr := stream.Step(state, event)
+			if stepErr != nil {
+				yield(nil, stepErr)
+				return
+			}
+			state = next
+			if !emitEvents(events, yield) {
+				return
+			}
+			if stream.Terminal != nil && stream.Terminal(event) {
+				if stream.OnHalt != nil {
+					emitEvents(stream.OnHalt(state), yield)
+				}
+				return
+			}
+		}
+		if stream.OnHalt != nil {
+			emitEvents(stream.OnHalt(state), yield)
+		}
+	}
+}
+
+// emitEvents yields every event, reporting whether the consumer kept iterating.
+func emitEvents(events []schema.LLMEvent, yield func(any, error) bool) bool {
+	for _, event := range events {
+		if !yield(schema.LLMEvent(event), nil) {
+			return false
+		}
+	}
+	return true
 }
 
 type makeTransportInput struct {

@@ -41,66 +41,88 @@ func hasSchemaIntent(schema any) bool {
 
 func sanitizeNode(schema any) any {
 	if !llmutils.IsRecord(schema) {
-		if arr, ok := schema.([]any); ok {
-			result := make([]any, len(arr))
-			for i, v := range arr {
-				result[i] = sanitizeNode(v)
-			}
-			return result
+		arr, ok := schema.([]any)
+		if !ok {
+			return schema
 		}
-		return schema
+		result := make([]any, len(arr))
+		for i, v := range arr {
+			result[i] = sanitizeNode(v)
+		}
+		return result
 	}
 	m := schema.(map[string]any)
 	result := make(map[string]any, len(m))
 	for k, v := range m {
-		if k == "enum" {
-			if arr, ok := v.([]any); ok {
-				strs := make([]any, len(arr))
-				for i, e := range arr {
-					strs[i] = fmt.Sprint(e)
-				}
-				result[k] = strs
-				continue
-			}
-		}
-		result[k] = sanitizeNode(v)
+		result[k] = sanitizeEntry(k, v)
 	}
-	if enum, hasEnum := result["enum"]; hasEnum {
-		if arr, ok := enum.([]any); ok && len(arr) > 0 {
-			if typ, ok := result["type"].(string); ok && (typ == "integer" || typ == "number") {
-				result["type"] = "string"
-			}
+	if enum, ok := result["enum"].([]any); ok && len(enum) > 0 {
+		if typ, ok := result["type"].(string); ok && (typ == "integer" || typ == "number") {
+			result["type"] = "string"
 		}
 	}
-	if typ, ok := result["type"].(string); ok && typ == "object" {
-		if props, ok := result["properties"].(map[string]any); ok {
-			if req, ok := result["required"].([]any); ok {
-				filtered := make([]any, 0, len(req))
-				for _, f := range req {
-					if name, ok := f.(string); ok {
-						if _, exists := props[name]; exists {
-							filtered = append(filtered, name)
-						}
-					}
-				}
-				result["required"] = filtered
-			}
-		}
+	typ, _ := result["type"].(string)
+	if typ == "object" {
+		filterRequired(result)
 	}
-	if typ, ok := result["type"].(string); ok && typ == "array" && !hasCombiner(result) {
-		if _, ok := result["items"]; !ok {
-			result["items"] = map[string]any{}
-		}
-		if items, ok := result["items"].(map[string]any); ok && !hasSchemaIntent(items) {
-			items["type"] = "string"
-			result["items"] = items
-		}
+	if typ == "array" && !hasCombiner(result) {
+		defaultArrayItems(result)
 	}
-	if typ, ok := result["type"].(string); ok && typ != "object" && !hasCombiner(result) {
+	if typ != "" && typ != "object" && !hasCombiner(result) {
 		delete(result, "properties")
 		delete(result, "required")
 	}
 	return result
+}
+
+// sanitizeEntry sanitizes one key of a schema, stringifying enum values because
+// Gemini wants strings there.
+func sanitizeEntry(key string, value any) any {
+	arr, ok := value.([]any)
+	if key != "enum" || !ok {
+		return sanitizeNode(value)
+	}
+	strs := make([]any, len(arr))
+	for i, entry := range arr {
+		strs[i] = fmt.Sprint(entry)
+	}
+	return strs
+}
+
+// filterRequired drops required names that have no property.
+func filterRequired(result map[string]any) {
+	props, ok := result["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+	required, ok := result["required"].([]any)
+	if !ok {
+		return
+	}
+	filtered := make([]any, 0, len(required))
+	for _, name := range required {
+		name, ok := name.(string)
+		if !ok {
+			continue
+		}
+		if _, exists := props[name]; exists {
+			filtered = append(filtered, name)
+		}
+	}
+	result["required"] = filtered
+}
+
+// defaultArrayItems gives a schema-less array a string item, as Gemini requires.
+func defaultArrayItems(result map[string]any) {
+	if _, ok := result["items"]; !ok {
+		result["items"] = map[string]any{}
+	}
+	items, ok := result["items"].(map[string]any)
+	if !ok || hasSchemaIntent(items) {
+		return
+	}
+	items["type"] = "string"
+	result["items"] = items
 }
 
 func emptyObjectSchema(schema map[string]any) bool {
@@ -117,94 +139,125 @@ func emptyObjectSchema(schema map[string]any) bool {
 
 func projectNode(schema any) map[string]any {
 	m, ok := schema.(map[string]any)
-	if !ok {
-		return nil
-	}
-	if emptyObjectSchema(m) {
+	if !ok || emptyObjectSchema(m) {
 		return nil
 	}
 	result := make(map[string]any)
-	if desc, ok := m["description"]; ok {
-		result["description"] = desc
-	}
-	if req, ok := m["required"]; ok {
-		result["required"] = req
-	}
-	if format, ok := m["format"]; ok {
-		result["format"] = format
-	}
-	if rawType, ok := m["type"]; ok {
-		if arr, ok := rawType.([]any); ok {
-			nonNull := make([]any, 0, len(arr))
-			hasNull := false
-			for _, t := range arr {
-				if t == "null" {
-					hasNull = true
-				} else {
-					nonNull = append(nonNull, t)
-				}
-			}
-			if len(nonNull) > 0 {
-				result["type"] = nonNull[0]
-			}
-			if hasNull {
-				result["nullable"] = true
-			}
-		} else {
-			result["type"] = rawType
+	for _, key := range []string{"description", "required", "format", "minLength"} {
+		if value, ok := m[key]; ok {
+			result[key] = value
 		}
 	}
-	if constVal, ok := m["const"]; ok && constVal != nil {
-		result["enum"] = []any{constVal}
-	} else if enum, ok := m["enum"]; ok {
-		result["enum"] = enum
-	}
-	if props, ok := m["properties"].(map[string]any); ok {
-		projected := make(map[string]any, len(props))
-		for k, v := range props {
-			if p := projectNode(v); p != nil {
-				projected[k] = p
-			}
-		}
-		if len(projected) > 0 {
-			result["properties"] = projected
-		}
-	}
-	if items, ok := m["items"]; ok {
-		if arr, ok := items.([]any); ok {
-			projected := make([]any, 0, len(arr))
-			for _, item := range arr {
-				if p := projectNode(item); p != nil {
-					projected = append(projected, p)
-				}
-			}
-			if len(projected) > 0 {
-				result["items"] = projected
-			}
-		} else if p := projectNode(items); p != nil {
-			result["items"] = p
-		}
-	}
-	for _, key := range []string{"allOf", "anyOf", "oneOf"} {
-		if arr, ok := m[key].([]any); ok {
-			projected := make([]any, 0, len(arr))
-			for _, item := range arr {
-				if p := projectNode(item); p != nil {
-					projected = append(projected, p)
-				}
-			}
-			if len(projected) > 0 {
-				result[key] = projected
-			}
-		}
-	}
-	if minLen, ok := m["minLength"]; ok {
-		result["minLength"] = minLen
-	}
+	projectType(m, result)
+	projectEnum(m, result)
+	projectProperties(m, result)
+	projectItems(m, result)
+	projectCombiners(m, result)
 	if len(result) == 0 {
 		return nil
 	}
 	return result
+}
+
+// projectType copies the JSON Schema type, flattening a ["string","null"] union
+// into one type plus nullable.
+func projectType(m, result map[string]any) {
+	rawType, ok := m["type"]
+	if !ok {
+		return
+	}
+	arr, isArray := rawType.([]any)
+	if !isArray {
+		result["type"] = rawType
+		return
+	}
+	nonNull := make([]any, 0, len(arr))
+	hasNull := false
+	for _, t := range arr {
+		if t == "null" {
+			hasNull = true
+			continue
+		}
+		nonNull = append(nonNull, t)
+	}
+	if len(nonNull) > 0 {
+		result["type"] = nonNull[0]
+	}
+	if hasNull {
+		result["nullable"] = true
+	}
+}
+
+// projectEnum renders a const as a single-value enum, and copies enum through.
+func projectEnum(m, result map[string]any) {
+	if constVal, ok := m["const"]; ok && constVal != nil {
+		result["enum"] = []any{constVal}
+		return
+	}
+	if enum, ok := m["enum"]; ok {
+		result["enum"] = enum
+	}
+}
+
+// projectProperties projects every property, dropping the ones that project to
+// nothing.
+func projectProperties(m, result map[string]any) {
+	props, ok := m["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+	projected := make(map[string]any, len(props))
+	for key, value := range props {
+		if p := projectNode(value); p != nil {
+			projected[key] = p
+		}
+	}
+	if len(projected) > 0 {
+		result["properties"] = projected
+	}
+}
+
+// projectItems projects a single item schema, or a tuple of them.
+func projectItems(m, result map[string]any) {
+	items, ok := m["items"]
+	if !ok {
+		return
+	}
+	arr, isArray := items.([]any)
+	if !isArray {
+		if p := projectNode(items); p != nil {
+			result["items"] = p
+		}
+		return
+	}
+	projected := make([]any, 0, len(arr))
+	for _, item := range arr {
+		if p := projectNode(item); p != nil {
+			projected = append(projected, p)
+		}
+	}
+	if len(projected) > 0 {
+		result["items"] = projected
+	}
+}
+
+// projectCombiners projects allOf, anyOf and oneOf.
+func projectCombiners(m, result map[string]any) {
+	for _, key := range []string{"allOf", "anyOf", "oneOf"} {
+		arr, ok := m[key].([]any)
+		if !ok {
+			continue
+		}
+		projected := make([]any, 0, len(arr))
+		for _, item := range arr {
+			if p := projectNode(item); p != nil {
+				projected = append(projected, p)
+			}
+		}
+		if len(projected) > 0 {
+			result[key] = projected
+		}
+	}
 }
 
 func Convert(schema any) map[string]any {

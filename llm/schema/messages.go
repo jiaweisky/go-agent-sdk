@@ -520,65 +520,27 @@ func LLMRequestUpdate(r *LLMRequest, patch map[string]any) *LLMRequest {
 		return r
 	}
 	updated := *r
-	if v, ok := patch["model"]; ok {
-		if m, ok2 := v.(ModelSchema); ok2 {
-			updated.Model = m
-		}
-	}
-	if v, ok := patch["id"]; ok {
-		if s, ok2 := v.(string); ok2 {
-			updated.ID = s
-		}
-	}
-	if v, ok := patch["system"]; ok {
-		if s, ok2 := v.([]SystemPart); ok2 {
-			updated.System = s
-		}
-	}
-	if v, ok := patch["messages"]; ok {
-		if m, ok2 := v.([]Message); ok2 {
-			updated.Messages = m
-		}
-	}
-	if v, ok := patch["tools"]; ok {
-		if t, ok2 := v.([]ToolDefinition); ok2 {
-			updated.Tools = t
-		}
-	}
-	if v, ok := patch["toolChoice"]; ok {
-		if tc, ok2 := v.(*ToolChoice); ok2 {
-			updated.ToolChoice = tc
-		}
-	}
-	if v, ok := patch["generation"]; ok {
-		if g, ok2 := v.(*GenerationOptions); ok2 {
-			updated.Generation = g
-		}
-	}
-	if v, ok := patch["providerOptions"]; ok {
-		if po, ok2 := v.(ProviderOptions); ok2 {
-			updated.ProviderOptions = po
-		}
-	}
-	if v, ok := patch["http"]; ok {
-		if h, ok2 := v.(*HttpOptions); ok2 {
-			updated.Http = h
-		}
-	}
-	if v, ok := patch["responseFormat"]; ok {
-		if rf, ok2 := v.(ResponseFormat); ok2 {
-			updated.ResponseFormat = rf
-		}
-	}
-	if v, ok := patch["cache"]; ok {
-		if c, ok2 := v.(*CachePolicy); ok2 {
-			updated.Cache = c
-		}
-	}
-	if v, ok := patch["metadata"]; ok {
-		if m, ok2 := v.(map[string]any); ok2 {
-			updated.Metadata = m
-		}
-	}
+	setField(&updated.Model, patch, "model")
+	setField(&updated.ID, patch, "id")
+	setField(&updated.System, patch, "system")
+	setField(&updated.Messages, patch, "messages")
+	setField(&updated.Tools, patch, "tools")
+	setField(&updated.ToolChoice, patch, "toolChoice")
+	setField(&updated.Generation, patch, "generation")
+	setField(&updated.ProviderOptions, patch, "providerOptions")
+	setField(&updated.Http, patch, "http")
+	setField(&updated.ResponseFormat, patch, "responseFormat")
+	setField(&updated.Cache, patch, "cache")
+	setField(&updated.Metadata, patch, "metadata")
 	return &updated
+}
+
+// setField copies patch[key] into dst when the key is present and its value has
+// the field's type; a value of another type is ignored.
+func setField[T any](dst *T, patch map[string]any, key string) {
+	if v, ok := patch[key]; ok {
+		if typed, ok := v.(T); ok {
+			*dst = typed
+		}
+	}
 }
