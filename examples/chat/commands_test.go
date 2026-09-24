@@ -14,9 +14,9 @@ import (
 func runCommand(t *testing.T, fn func(*chat)) string {
 	t.Helper()
 	client, err := agent.NewClient(&agent.ClientOptions{
-		Provider: agent.ProviderConfig{Type: "openai", APIKey: "test"},
-		Model:    "test-model",
-		DataDir:  t.TempDir(),
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model:   "test-model",
+		DataDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -78,9 +78,9 @@ func TestMCPsCommandWithoutServers(t *testing.T) {
 // discovered (like `chat -C examples/chat`).
 func TestDemoConfigDiscovered(t *testing.T) {
 	client, err := agent.NewClient(&agent.ClientOptions{
-		Provider: agent.ProviderConfig{Type: "openai", APIKey: "test"},
-		Model:    "test-model",
-		DataDir:  t.TempDir(),
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model:   "test-model",
+		DataDir: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)

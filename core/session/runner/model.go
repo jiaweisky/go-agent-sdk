@@ -2,6 +2,7 @@ package runner
 
 import (
 	"github.com/user/go-agent-sdk/llm/protocols"
+	"github.com/user/go-agent-sdk/llm/protocols/utils"
 	"github.com/user/go-agent-sdk/llm/route"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
@@ -50,26 +51,6 @@ func (e *UnsupportedApiError) Error() string {
 
 // ModelResolver mirrors the SessionRunnerModel.Interface.resolve seam.
 type ModelResolver func(session schema.SessionInfo) (route.Model, error)
-
-// runnerModelAPIKey mirrors `apiKey`. Credentials are narrowed to an optional
-// API key (the credential service is not ported).
-func runnerModelAPIKey(model schema.ModelInfo, credential *string) (string, bool) {
-	if credential != nil {
-		return *credential, true
-	}
-	if value, ok := model.Request.Body["apiKey"]; ok && value != nil {
-		if text, ok := value.(string); ok {
-			return text, true
-		}
-		return "", false
-	}
-	if value, ok := model.API.Settings["apiKey"]; ok {
-		if text, ok := value.(string); ok {
-			return text, true
-		}
-	}
-	return "", false
-}
 
 // runnerModelWithDefaults mirrors `withDefaults`.
 func runnerModelWithDefaults(model schema.ModelInfo, r route.Route) route.Route {
@@ -145,8 +126,8 @@ func runnerModelWithVariant(model schema.ModelInfo, variantID *schema.ModelVaria
 }
 
 func runnerModelAPIName(model schema.ModelInfo) string {
-	if model.API.Type == "aisdk" {
-		return "aisdk:" + model.API.Package
+	if model.API.Protocol != "" {
+		return string(model.API.Protocol)
 	}
 	return model.API.Type
 }
@@ -158,46 +139,61 @@ func runnerModelAPIID(model schema.ModelInfo) string {
 	return string(*model.API.ID)
 }
 
-// FromCatalogModel mirrors `fromCatalogModel`. The credential is narrowed to an
-// optional API key (the credential service is not ported).
-func FromCatalogModel(model schema.ModelInfo, credential *string) (route.Model, error) {
-	key, hasKey := runnerModelAPIKey(model, credential)
-	modelID := runnerModelAPIID(model)
-	switch {
-	case model.API.Type == "aisdk" && model.API.Package == "@ai-sdk/openai":
-		auth := route.None()
-		if hasKey {
-			auth = route.Bearer(key)
+// FromCatalogModel resolves a native-protocol model to a route.Model by looking
+// its protocol up in the registry and applying the credential with the
+// protocol's auth scheme.
+func FromCatalogModel(model schema.ModelInfo, credential schema.Credential) (route.Model, error) {
+	entry, ok := protocols.Lookup(llmschema.ProtocolID(model.API.Protocol))
+	if !ok {
+		return route.Model{}, &UnsupportedApiError{
+			ProviderID: model.ProviderID,
+			ModelID:    model.ID,
+			API:        runnerModelAPIName(model),
 		}
-		return runnerModelWithDefaults(model, protocols.OpenAIResponsesHTTPRoute).
-			With(route.RoutePatch{Auth: auth}).
-			Model(route.RouteModelInput{ID: modelID}), nil
-	case model.API.Type == "aisdk" && model.API.Package == "@ai-sdk/anthropic":
-		auth := route.None()
-		if hasKey {
-			auth = route.Header("x-api-key", key)
-		}
-		return runnerModelWithDefaults(model, protocols.AnthropicMessagesHTTPRoute).
-			With(route.RoutePatch{Auth: auth}).
-			Model(route.RouteModelInput{ID: modelID}), nil
-	case model.API.Type == "aisdk" && model.API.Package == "@ai-sdk/openai-compatible" && model.API.URL != nil:
-		auth := route.None()
-		if hasKey {
-			auth = route.Bearer(key)
-		}
-		return runnerModelWithDefaults(model, protocols.OpenAICompatibleChatHTTPRoute).
-			With(route.RoutePatch{Auth: auth}).
-			Model(route.RouteModelInput{ID: modelID}), nil
 	}
-	return route.Model{}, &UnsupportedApiError{
-		ProviderID: model.ProviderID,
-		ModelID:    model.ID,
-		API:        runnerModelAPIName(model),
+	return runnerModelWithDefaults(model, entry.Route).
+		With(route.RoutePatch{Auth: runnerProtocolAuth(entry, credential)}).
+		Model(route.RouteModelInput{ID: runnerModelAPIID(model)}), nil
+}
+
+// runnerProtocolAuth applies the credential using the protocol's auth scheme.
+func runnerProtocolAuth(entry protocols.Entry, credential schema.Credential) *route.Auth {
+	switch entry.Scheme {
+	case protocols.AuthBearer:
+		if credential.APIKey != "" {
+			return route.Bearer(credential.APIKey)
+		}
+	case protocols.AuthHeader:
+		if credential.APIKey != "" {
+			return route.Header(entry.HeaderName, credential.APIKey)
+		}
+	case protocols.AuthSigV4:
+		// Bedrock accepts either a bearer API key or AWS SigV4 credentials.
+		if credential.APIKey != "" {
+			return route.Bearer(credential.APIKey)
+		}
+		if credential.AWS != nil {
+			return bedrockSigV4(credential.AWS)
+		}
 	}
+	return route.None()
+}
+
+// bedrockSigV4 signs Bedrock requests with AWS SigV4 credentials.
+func bedrockSigV4(aws *schema.AWSCredentials) *route.Auth {
+	signer := utils.SigV4(&utils.Credentials{
+		Region:          aws.Region,
+		AccessKeyID:     aws.AccessKeyID,
+		SecretAccessKey: aws.SecretAccessKey,
+		SessionToken:    aws.SessionToken,
+	})
+	return route.Custom(func(input route.AuthInput) (map[string]string, error) {
+		return signer(utils.AuthInput{URL: input.URL, Body: input.Body, Headers: input.Headers})
+	})
 }
 
 // ResolveModel mirrors `resolve`.
-func ResolveModel(session schema.SessionInfo, model schema.ModelInfo, credential *string) (route.Model, error) {
+func ResolveModel(session schema.SessionInfo, model schema.ModelInfo, credential schema.Credential) (route.Model, error) {
 	var variant *schema.ModelVariantID
 	if session.Model != nil {
 		variant = session.Model.Variant
@@ -207,12 +203,4 @@ func ResolveModel(session schema.SessionInfo, model schema.ModelInfo, credential
 		return route.Model{}, err
 	}
 	return FromCatalogModel(selected, credential)
-}
-
-// Supported mirrors `supported`.
-func Supported(model schema.ModelInfo) bool {
-	return model.API.Type == "aisdk" &&
-		(model.API.Package == "@ai-sdk/openai" ||
-			model.API.Package == "@ai-sdk/anthropic" ||
-			(model.API.Package == "@ai-sdk/openai-compatible" && model.API.URL != nil))
 }

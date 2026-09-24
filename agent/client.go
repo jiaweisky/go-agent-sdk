@@ -9,31 +9,17 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/llm/route"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/mcp"
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// ProviderConfig selects the model provider and credentials.
-type ProviderConfig struct {
-	// Type is "openai" (default), "anthropic", or "openai-compatible".
-	Type    string
-	BaseURL string
-	APIKey  string
-	// Provider is the provider id for openai-compatible endpoints; it defaults
-	// to "openai-compatible".
-	Provider string
-	// Limits describes the model's context/output token limits. When set, the
-	// runner compacts history before a request overflows; when nil, automatic
-	// compaction is disabled and oversized requests fail at the provider.
-	Limits *llmschema.ModelLimits
-}
-
 // ClientOptions configures a Client.
 type ClientOptions struct {
-	Provider ProviderConfig
 	// Model is the default model id used when a session does not override it.
 	Model string
+	// Protocol selects the native wire protocol when ModelInfo is not set, for
+	// example "openai-responses", "anthropic-messages" or "gemini".
+	Protocol schema.ProtocolID
 	// WorkingDirectory is the project/worktree root. Defaults to the process cwd.
 	WorkingDirectory string
 	// DataDir stores the session database. Empty uses the default opencode path.
@@ -55,18 +41,32 @@ type ClientOptions struct {
 	// is built from Provider/Model over the default HTTP transport.
 	LLM route.LLMClient
 
-	// ModelInfo resolves a model id to catalog-style metadata (limits, endpoint,
-	// headers, variants). When set, it replaces the Provider.Type facade path,
-	// so callers can feed models.dev (or their own) metadata. Provider.APIKey is
-	// still used as the credential. Build the value with NewModelInfo for the
-	// SDK's supported APIs.
+	// ModelInfo resolves a model id to catalog-style metadata (protocol, limits,
+	// endpoint, headers, variants), so callers can feed models.dev (or their
+	// own) metadata. When set it takes precedence over Protocol. Build the value
+	// with NewModelInfo for the SDK's supported protocols.
 	ModelInfo ModelInfoProvider
+
+	// Credentials supplies the provider secret used to authenticate requests.
+	// The protocol decides how it is applied, so callers supply only the secret.
+	Credentials CredentialProvider
 }
 
 // ModelInfoProvider resolves a model id to catalog-style metadata. It is the
 // SDK's narrow replacement for the models.dev catalog: the caller supplies the
 // data (limits, endpoint, headers, variants) it already has.
 type ModelInfoProvider func(modelID string) (schema.ModelInfo, error)
+
+// CredentialProvider returns the credential for a provider id.
+type CredentialProvider func(providerID schema.ProviderID) (schema.Credential, error)
+
+// APIKey returns a CredentialProvider that supplies the same API key for every
+// provider.
+func APIKey(key string) CredentialProvider {
+	return func(schema.ProviderID) (schema.Credential, error) {
+		return schema.Credential{APIKey: key}, nil
+	}
+}
 
 // MCPConfig names an MCP server and its connection config.
 type MCPConfig struct {
@@ -215,10 +215,9 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 		return nil, err
 	}
 
-	providerID := c.opts.Provider.Type
-	if providerID == "" {
-		providerID = "openai"
-	}
+	// The stored provider id is informational; resolution uses the resolved
+	// ModelInfo. It is the configured protocol (empty when ModelInfo is set).
+	providerID := string(c.opts.Protocol)
 	now := time.Now().UnixMilli()
 	title := cfg.Title
 	if title == "" {

@@ -56,13 +56,14 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 
 ```go
 client, err := agent.NewClient(&agent.ClientOptions{
-    Provider: agent.ProviderConfig{
-        Type:    "openai",
-        BaseURL: "https://api.openai.com/v1",
-        APIKey:  os.Getenv("OPENAI_API_KEY"),
-        Limits:  llmschema.NewModelLimits(128_000, 8_192), // 启用自动压缩
+    Model:       "gpt-4o",
+    Protocol:    "openai-responses",           // 原生协议 id
+    Credentials: agent.APIKey(os.Getenv("OPENAI_API_KEY")),
+    // 可选：catalog 元数据（endpoint/limits/headers）。不设则用协议路由默认值。
+    ModelInfo: func(id string) (schema.ModelInfo, error) {
+        return agent.NewModelInfo("openai-responses", id, "https://api.openai.com/v1",
+            schema.ModelLimit{Context: 128_000, Output: 8_192}) // 启用自动压缩
     },
-    Model: "gpt-4o",
 })
 
 err = client.RegisterAgent("dev", agent.AgentConfig{
@@ -419,7 +420,7 @@ SessionRunner.Run(sessionID, force)
       → 检查队列输入 → 继续外层循环
 ```
 
-> 上下文压缩依赖模型的 `Limits`（`ProviderConfig.Limits` → route defaults → `compactionModelLimits`）。**未设置 `Limits` 时自动压缩被禁用**，超长请求会直接以 provider 400 失败。SDK 不内置模型目录（catalog），由调用方按需提供 `Context`/`Output` 限额。
+> 上下文压缩依赖模型的 `Limits`（`ModelInfo.Limit` → route defaults → `compactionModelLimits`）。**未设置 `Limits` 时自动压缩被禁用**，超长请求会直接以 provider 400 失败。SDK 不内置模型目录（catalog），由调用方按需提供 `Context`/`Output` 限额。
 
 ### 6.2 Agent 定义
 
@@ -667,8 +668,10 @@ import "github.com/user/go-agent-sdk/agent"
 
 // ─── Client ─────────────────────────────────────────────
 type ClientOptions struct {
-    Provider         ProviderConfig            // Type("openai"|"anthropic"|"openai-compatible")/BaseURL/APIKey/Provider/Limits
     Model            string                    // 默认模型
+    Protocol         schema.ProtocolID         // 原生协议 id（"openai-responses"|"anthropic-messages"|"gemini"|...）
+    ModelInfo        ModelInfoProvider         // 可选：catalog 元数据（protocol/endpoint/limits/headers）
+    Credentials      CredentialProvider        // provider → 秘密（APIKey / AWS）
     WorkingDirectory string
     DataDir          string                    // 会话数据库目录
     Tools            []Tool                    // 应用级工具

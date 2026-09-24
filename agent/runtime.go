@@ -22,8 +22,6 @@ import (
 	"github.com/user/go-agent-sdk/core/systemcontext"
 	"github.com/user/go-agent-sdk/core/tool"
 	"github.com/user/go-agent-sdk/llm"
-	"github.com/user/go-agent-sdk/llm/protocols"
-	"github.com/user/go-agent-sdk/llm/provider"
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/mcp"
 	opencodeconfig "github.com/user/go-agent-sdk/opencode/config"
@@ -426,69 +424,45 @@ func (e appEvents) PublishWithCommit(
 	return payload.Durable, nil
 }
 
-// buildModelResolver maps a provider config to a model resolver.
+// buildModelResolver maps the client's protocol (or ModelInfo) and credentials
+// to a model resolver.
 func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
-	apiKey := opts.Provider.APIKey
-	// A ModelInfo provider supplies catalog metadata directly (models.dev or the
-	// caller's own), which takes precedence over the built-in facades.
-	if opts.ModelInfo != nil {
-		var credential *string
-		if apiKey != "" {
-			credential = &apiKey
+	if opts.ModelInfo == nil {
+		if opts.Protocol == "" {
+			return nil, fmt.Errorf("ClientOptions requires ModelInfo or Protocol")
 		}
-		return func(stored schema.SessionInfo) (route.Model, error) {
-			id := opts.Model
-			if stored.Model != nil && stored.Model.ID != "" {
-				id = string(stored.Model.ID)
-			}
-			info, err := opts.ModelInfo(id)
-			if err != nil {
-				return route.Model{}, err
-			}
-			return runner.ResolveModel(stored, info, credential)
-		}, nil
-	}
-	var build func(id string) route.Model
-	switch opts.Provider.Type {
-	case "", "openai":
-		facade := provider.NewOpenAI(
-			protocols.OpenAIResponsesHTTPRoute,
-			protocols.OpenAIChatHTTPRoute,
-			provider.OpenAIConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL, Limits: opts.Provider.Limits},
-		)
-		build = func(id string) route.Model { return facade.Model(id) }
-	case "anthropic":
-		facade := provider.NewAnthropic(
-			protocols.AnthropicMessagesHTTPRoute,
-			provider.AnthropicConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL, Limits: opts.Provider.Limits},
-		)
-		build = func(id string) route.Model { return facade.Model(id) }
-	case "openai-compatible":
-		facade := provider.NewOpenAICompatible(
-			protocols.OpenAICompatibleChatHTTPRoute,
-			provider.OpenAICompatibleGenericOptions{
-				APIKey:   &apiKey,
-				BaseURL:  opts.Provider.BaseURL,
-				Provider: opts.Provider.Provider,
-				Limits:   opts.Provider.Limits,
-			},
-		)
-		build = func(id string) route.Model { return facade.Model(id) }
-	default:
-		facade := provider.NewOpenAI(
-			protocols.OpenAIResponsesHTTPRoute,
-			protocols.OpenAIChatHTTPRoute,
-			provider.OpenAIConfig{APIKey: &apiKey, BaseURL: opts.Provider.BaseURL, Limits: opts.Provider.Limits},
-		)
-		build = func(id string) route.Model { return facade.Model(id) }
+		// Fail fast on an unknown protocol instead of at the first request.
+		if _, err := NewModelInfo(opts.Protocol, opts.Model, "", schema.ModelLimit{}); err != nil {
+			return nil, err
+		}
 	}
 	return func(stored schema.SessionInfo) (route.Model, error) {
 		id := opts.Model
 		if stored.Model != nil && stored.Model.ID != "" {
 			id = string(stored.Model.ID)
 		}
-		return build(id), nil
+		info, err := resolveModelInfo(opts, id)
+		if err != nil {
+			return route.Model{}, err
+		}
+		var credential schema.Credential
+		if opts.Credentials != nil {
+			credential, err = opts.Credentials(info.ProviderID)
+			if err != nil {
+				return route.Model{}, err
+			}
+		}
+		return runner.ResolveModel(stored, info, credential)
 	}, nil
+}
+
+// resolveModelInfo returns the model metadata: the caller's ModelInfo when set,
+// otherwise a native ModelInfo synthesized from Protocol.
+func resolveModelInfo(opts *ClientOptions, id string) (schema.ModelInfo, error) {
+	if opts.ModelInfo != nil {
+		return opts.ModelInfo(id)
+	}
+	return NewModelInfo(opts.Protocol, id, "", schema.ModelLimit{})
 }
 
 // configDirectories collects the config directories from the loaded entries.

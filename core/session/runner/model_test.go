@@ -45,8 +45,8 @@ func runnerSession(model schema.ModelInfo, variant *schema.ModelVariantID) schem
 
 func TestFromCatalogModelOpenAI(t *testing.T) {
 	resolved, err := FromCatalogModel(runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/openai", URL: runnerStrPtr("https://openai.example/v1"),
-	}, nil), nil)
+		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+	}, nil), schema.Credential{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -74,8 +74,8 @@ func TestFromCatalogModelOpenAI(t *testing.T) {
 
 func TestFromCatalogModelAnthropic(t *testing.T) {
 	resolved, err := FromCatalogModel(runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/anthropic", URL: runnerStrPtr("https://anthropic.example/v1"),
-	}, nil), nil)
+		Type: "native", Protocol: "anthropic-messages", URL: runnerStrPtr("https://anthropic.example/v1"),
+	}, nil), schema.Credential{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -84,14 +84,13 @@ func TestFromCatalogModelAnthropic(t *testing.T) {
 	}
 }
 
-func TestFromCatalogModelCompatibleSettingsAuth(t *testing.T) {
+func TestFromCatalogModelCompatibleAuth(t *testing.T) {
 	info := runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/openai-compatible", URL: runnerStrPtr("https://compatible.example/v1"),
-		Settings: map[string]any{"apiKey": "settings-secret", "compatibility": "strict"},
+		Type: "native", Protocol: "openai-compatible-chat", URL: runnerStrPtr("https://compatible.example/v1"),
 	}, nil)
 	info.Request = schema.ModelRequest{Headers: map[string]string{}, Body: map[string]any{}}
 
-	resolved, err := FromCatalogModel(info, nil)
+	resolved, err := FromCatalogModel(info, schema.Credential{APIKey: "settings-secret"})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -110,7 +109,7 @@ func TestFromCatalogModelCompatibleSettingsAuth(t *testing.T) {
 func TestResolveModelOverlaysVariant(t *testing.T) {
 	high := schema.ModelVariantID("high")
 	catalog := runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/openai", URL: runnerStrPtr("https://openai.example/v1"),
+		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, []schema.ModelVariant{{
 		ID:      "high",
 		Headers: map[string]string{"x-variant": "high"},
@@ -120,7 +119,7 @@ func TestResolveModelOverlaysVariant(t *testing.T) {
 		},
 	}})
 
-	resolved, err := ResolveModel(runnerSession(catalog, &high), catalog, nil)
+	resolved, err := ResolveModel(runnerSession(catalog, &high), catalog, schema.Credential{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -142,10 +141,10 @@ func TestResolveModelOverlaysVariant(t *testing.T) {
 func TestResolveModelRejectsUnavailableVariant(t *testing.T) {
 	unknown := schema.ModelVariantID("unknown")
 	catalog := runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/openai", URL: runnerStrPtr("https://openai.example/v1"),
+		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, nil)
 
-	_, err := ResolveModel(runnerSession(catalog, &unknown), catalog, nil)
+	_, err := ResolveModel(runnerSession(catalog, &unknown), catalog, schema.Credential{})
 	var target *VariantUnavailableError
 	if !errors.As(err, &target) {
 		t.Fatalf("expected VariantUnavailableError, got %v", err)
@@ -157,34 +156,25 @@ func TestResolveModelRejectsUnavailableVariant(t *testing.T) {
 
 func TestFromCatalogModelRejectsUnsupportedApi(t *testing.T) {
 	_, err := FromCatalogModel(runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/google", URL: runnerStrPtr("https://google.example/v1"),
-	}, nil), nil)
+		Type: "native", Protocol: "bogus", URL: runnerStrPtr("https://google.example/v1"),
+	}, nil), schema.Credential{})
 	var target *UnsupportedApiError
 	if !errors.As(err, &target) {
 		t.Fatalf("expected UnsupportedApiError, got %v", err)
 	}
-	if target.API != "aisdk:@ai-sdk/google" || target.Error() != "Unsupported API for test-provider/test-model: aisdk:@ai-sdk/google" {
+	if target.API != "bogus" || target.Error() != "Unsupported API for test-provider/test-model: bogus" {
 		t.Fatalf("error = %+v", target)
 	}
 }
 
-func TestSupported(t *testing.T) {
-	openai := runnerModelInfo(schema.ModelAPI{Type: "aisdk", Package: "@ai-sdk/openai", URL: runnerStrPtr("https://openai.example/v1")}, nil)
-	google := runnerModelInfo(schema.ModelAPI{Type: "aisdk", Package: "@ai-sdk/google", URL: runnerStrPtr("https://google.example/v1")}, nil)
-	native := runnerModelInfo(schema.ModelAPI{Type: "native", Settings: map[string]any{}}, nil)
-	if !Supported(openai) || Supported(google) || Supported(native) {
-		t.Fatalf("supported = %v %v %v", Supported(openai), Supported(google), Supported(native))
-	}
-}
-
 func TestFromCatalogModelUsesCredentialKey(t *testing.T) {
-	credential := "secret"
+	credential := schema.Credential{APIKey: "secret"}
 	info := runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/openai", URL: runnerStrPtr("https://openai.example/v1"),
+		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, nil)
 	info.Request = schema.ModelRequest{Headers: map[string]string{}, Body: map[string]any{}}
 
-	resolved, err := FromCatalogModel(info, &credential)
+	resolved, err := FromCatalogModel(info, credential)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -197,14 +187,14 @@ func TestFromCatalogModelUsesCredentialKey(t *testing.T) {
 	}
 }
 
-func TestFromCatalogModelCredentialOverridesConfiguredKey(t *testing.T) {
-	credential := "stored-secret"
+func TestFromCatalogModelDropsBodyAPIKey(t *testing.T) {
+	credential := schema.Credential{APIKey: "stored-secret"}
 	info := runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/openai", URL: runnerStrPtr("https://openai.example/v1"),
+		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, nil)
 	info.Request = schema.ModelRequest{Headers: map[string]string{}, Body: map[string]any{"apiKey": "configured-secret"}}
 
-	resolved, err := FromCatalogModel(info, &credential)
+	resolved, err := FromCatalogModel(info, credential)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -215,6 +205,7 @@ func TestFromCatalogModelCredentialOverridesConfiguredKey(t *testing.T) {
 	if headers["authorization"] != "Bearer stored-secret" {
 		t.Fatalf("headers = %+v", headers)
 	}
+	// A stray body apiKey is dropped rather than sent to the provider.
 	if body := map[string]any(resolved.Route.Defaults.Http.Body); !reflect.DeepEqual(body, map[string]any{}) {
 		t.Fatalf("body = %+v", body)
 	}
@@ -222,8 +213,8 @@ func TestFromCatalogModelCredentialOverridesConfiguredKey(t *testing.T) {
 
 func TestResolvedModelRouteDefaultsAndJSON(t *testing.T) {
 	resolved, err := FromCatalogModel(runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/openai", URL: runnerStrPtr("https://openai.example/v1"),
-	}, nil), nil)
+		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+	}, nil), schema.Credential{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -243,12 +234,12 @@ func TestResolvedModelRouteDefaultsAndJSON(t *testing.T) {
 func TestResolveModelAnthropicVariant(t *testing.T) {
 	high := schema.ModelVariantID("high")
 	catalog := runnerModelInfo(schema.ModelAPI{
-		Type: "aisdk", Package: "@ai-sdk/anthropic", URL: runnerStrPtr("https://anthropic.example/v1"),
+		Type: "native", Protocol: "anthropic-messages", URL: runnerStrPtr("https://anthropic.example/v1"),
 	}, []schema.ModelVariant{{
 		ID:   "high",
 		Body: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 12000}},
 	}})
-	resolved, err := ResolveModel(runnerSession(catalog, &high), catalog, nil)
+	resolved, err := ResolveModel(runnerSession(catalog, &high), catalog, schema.Credential{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}

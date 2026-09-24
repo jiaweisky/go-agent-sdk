@@ -3,38 +3,22 @@ package agent
 import (
 	"fmt"
 
+	"github.com/user/go-agent-sdk/llm/protocols"
+	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// Provider API names accepted by NewModelInfo.
-const (
-	ModelAPIOpenAI           = "openai"
-	ModelAPIAnthropic        = "anthropic"
-	ModelAPIOpenAICompatible = "openai-compatible"
-)
-
-// NewModelInfo builds a catalog-style ModelInfo for one of the SDK's supported
-// provider APIs ("openai", "anthropic", "openai-compatible"). baseURL is the
-// provider endpoint; it is required for openai-compatible and optional
-// otherwise. Hand the result to ClientOptions.ModelInfo.
-func NewModelInfo(api, modelID, baseURL string, limit schema.ModelLimit) (schema.ModelInfo, error) {
-	var pkg string
-	switch api {
-	case ModelAPIOpenAI:
-		pkg = "@ai-sdk/openai"
-	case ModelAPIAnthropic:
-		pkg = "@ai-sdk/anthropic"
-	case ModelAPIOpenAICompatible:
-		pkg = "@ai-sdk/openai-compatible"
-		if baseURL == "" {
-			return schema.ModelInfo{}, fmt.Errorf("openai-compatible requires a base URL")
-		}
-	default:
-		return schema.ModelInfo{}, fmt.Errorf("unsupported model api %q", api)
+// NewModelInfo builds a native ModelInfo for a registered protocol id, for
+// example "openai-responses", "anthropic-messages" or "gemini". baseURL is
+// optional: an empty value uses the route's default endpoint. The ProviderID is
+// set to the protocol id, so ClientOptions.Credentials is called with it. Hand
+// the result to ClientOptions.ModelInfo.
+func NewModelInfo(protocol schema.ProtocolID, modelID, baseURL string, limit schema.ModelLimit) (schema.ModelInfo, error) {
+	if _, ok := protocols.Lookup(llmschema.ProtocolID(protocol)); !ok {
+		return schema.ModelInfo{}, fmt.Errorf("unknown protocol %q", protocol)
 	}
-	info := schema.ModelInfoEmpty(schema.ProviderID(api), schema.ModelID(modelID))
-	info.API.Type = "aisdk"
-	info.API.Package = pkg
+	info := schema.ModelInfoEmpty(schema.ProviderID(protocol), schema.ModelID(modelID))
+	info.API.Protocol = protocol
 	if baseURL != "" {
 		value := baseURL
 		info.API.URL = &value

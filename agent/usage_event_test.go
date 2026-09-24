@@ -73,7 +73,7 @@ func (u usageEventLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2
 
 func TestUsageEventDeliveredViaOn(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
-		Provider:   ProviderConfig{Type: "openai", APIKey: "k"},
+		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
 		DataDir:    t.TempDir(),
 		Permission: ApproveAll,

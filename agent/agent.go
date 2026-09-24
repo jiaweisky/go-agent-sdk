@@ -4,8 +4,9 @@
 // small surface modelled on github/copilot-sdk/go:
 //
 //	client := agent.NewClient(&agent.ClientOptions{
-//	    Provider: agent.ProviderConfig{Type: "openai", APIKey: os.Getenv("OPENAI_API_KEY")},
-//	    Model:    "gpt-4o",
+//	    Protocol:    "openai-responses",
+//	    Model:       "gpt-4o",
+//	    Credentials: agent.APIKey(os.Getenv("OPENAI_API_KEY")),
 //	})
 //	client.RegisterAgent("build", agent.AgentConfig{System: "You are a helpful assistant."})
 //	session, _ := client.CreateSession(ctx, &agent.SessionConfig{Agent: "build"})

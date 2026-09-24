@@ -11,6 +11,7 @@ import (
 	"github.com/user/go-agent-sdk/agent"
 	"github.com/user/go-agent-sdk/core"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
+	"github.com/user/go-agent-sdk/schema"
 )
 
 // Option customizes the client built by Client.
@@ -44,7 +45,7 @@ func WithMCP(configs ...agent.MCPConfig) Option {
 
 // Client builds a client from environment variables:
 //
-//	OPENCODE_PROVIDER     openai (default) | anthropic | openai-compatible
+//	OPENCODE_PROVIDER     openai (default) | anthropic | openai-compatible | gemini
 //	OPENCODE_PROVIDER_ID  provider id for openai-compatible (optional)
 //	OPENCODE_BASE_URL     provider base URL (optional)
 //	OPENCODE_API_KEY      provider API key (falls back to OPENAI_API_KEY for
@@ -73,6 +74,10 @@ func Client(options ...Option) (*agent.Client, error) {
 	if model == "" {
 		return nil, fmt.Errorf("OPENCODE_MODEL is required (the model id is provider-specific)")
 	}
+	protocol, err := protocolFor(providerType)
+	if err != nil {
+		return nil, err
+	}
 	apiKey := resolveAPIKey(providerType)
 	if apiKey == "" {
 		fmt.Fprintf(os.Stderr,
@@ -80,16 +85,26 @@ func Client(options ...Option) (*agent.Client, error) {
 				"requests will fail with 'Missing auth credential: value'\r\n",
 			providerType, apiKeyHint(providerType))
 	}
+	baseURL := os.Getenv("OPENCODE_BASE_URL")
+	var limit schema.ModelLimit
+	if value := envLimits(); value != nil {
+		limit = schema.ModelLimit{Context: value.Context, Output: value.Output}
+	}
 	opts := &agent.ClientOptions{
-		Provider: agent.ProviderConfig{
-			Type:     providerType,
-			Provider: os.Getenv("OPENCODE_PROVIDER_ID"),
-			BaseURL:  os.Getenv("OPENCODE_BASE_URL"),
-			APIKey:   apiKey,
-			Limits:   envLimits(),
+		Model:    model,
+		Protocol: protocol,
+		ModelInfo: func(id string) (schema.ModelInfo, error) {
+			info, err := agent.NewModelInfo(protocol, id, baseURL, limit)
+			if err != nil {
+				return info, err
+			}
+			if providerID := os.Getenv("OPENCODE_PROVIDER_ID"); providerID != "" {
+				info.ProviderID = schema.ProviderID(providerID)
+			}
+			return info, nil
 		},
-		Model:      model,
-		Permission: agent.ApproveAll,
+		Credentials: agent.APIKey(apiKey),
+		Permission:  agent.ApproveAll,
 	}
 	for _, option := range options {
 		option(opts)
@@ -105,6 +120,22 @@ func Client(options ...Option) (*agent.Client, error) {
 		return nil, err
 	}
 	return client, nil
+}
+
+// protocolFor maps the OPENCODE_PROVIDER value to a native protocol id.
+func protocolFor(providerType string) (schema.ProtocolID, error) {
+	switch providerType {
+	case "", "openai":
+		return "openai-responses", nil
+	case "anthropic":
+		return "anthropic-messages", nil
+	case "openai-compatible":
+		return "openai-compatible-chat", nil
+	case "gemini":
+		return "gemini", nil
+	default:
+		return "", fmt.Errorf("unsupported OPENCODE_PROVIDER %q", providerType)
+	}
 }
 
 // resolveAPIKey mirrors the credential the provider's route auth uses:
