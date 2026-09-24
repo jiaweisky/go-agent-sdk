@@ -235,15 +235,29 @@ func openaiChatLowerAssistantMessage(msg schema.Message) (openaiChatMessage, err
 	}
 	m := openaiChatMessage{Role: "assistant"}
 	if len(texts) > 0 {
-		m.Content = strings.Join(texts, "")
+		m.Content = strings.Join(texts, "\n")
 	}
 	if len(toolCalls) > 0 {
 		m.ToolCalls = toolCalls
 	}
 	if len(reasonings) > 0 {
 		m.ReasoningContent = strings.Join(reasonings, "")
+	} else {
+		m.ReasoningContent = openaiChatCompatibleReasoningContent(msg.Native)
 	}
 	return m, nil
+}
+
+// openaiChatCompatibleReasoningContent mirrors openAICompatibleReasoningContent:
+// it recovers the reasoning text an OpenAI-compatible provider stored on the
+// message native payload.
+func openaiChatCompatibleReasoningContent(native map[string]any) string {
+	compatible, ok := native["openaiCompatible"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	value, _ := compatible["reasoning_content"].(string)
+	return value
 }
 
 func openaiChatLowerToolMessage(part schema.ToolResultPart) openaiChatMessage {
