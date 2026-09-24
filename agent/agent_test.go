@@ -1852,3 +1852,37 @@ func TestRuntimeToolOutputCleanupStopsOnCancel(t *testing.T) {
 		t.Fatal("cleanup loop did not stop on cancel")
 	}
 }
+
+func TestClientDataRootControlsToolOutput(t *testing.T) {
+	root := t.TempDir()
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("k"),
+		Model:    "test-model",
+		DataDir:  t.TempDir(),
+		DataRoot: root,
+		LLM:      fakeLLM{reply: "x"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+
+	long := strings.Repeat("line\n", core.ToolOutputStoreMaxLines+100)
+	result, err := client.rt.toolOutput.Bound(core.ToolOutputStoreBoundInput{
+		SessionID:  "ses_1",
+		ToolCallID: "call_1",
+		Output: llmschema.ToolOutput{Content: []llmschema.ToolContent{
+			llmschema.ToolTextContent{Type: "text", Text: long},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("bound: %v", err)
+	}
+	if len(result.OutputPaths) != 1 {
+		t.Fatalf("paths = %v", result.OutputPaths)
+	}
+	want := filepath.Join(root, "tool-output") + string(filepath.Separator)
+	if !strings.HasPrefix(result.OutputPaths[0], want) {
+		t.Fatalf("output path = %q, want it under %q", result.OutputPaths[0], want)
+	}
+}

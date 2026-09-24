@@ -62,3 +62,12 @@ func NewGlobal(overrides ...func(*Global)) Global {
 	}
 	return global
 }
+
+// WithDataRoot overrides Global.Data and the paths derived from it.
+func WithDataRoot(root string) func(*Global) {
+	return func(global *Global) {
+		global.Data = root
+		global.Log = filepath.Join(root, "log")
+		global.Repos = filepath.Join(root, "repos")
+	}
+}

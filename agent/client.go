@@ -24,6 +24,11 @@ type ClientOptions struct {
 	WorkingDirectory string
 	// DataDir stores the session database. Empty uses the default opencode path.
 	DataDir string
+	// DataRoot overrides the data directory holding snapshots, references and
+	// managed tool output. Empty uses the default opencode path
+	// ($XDG_DATA_HOME/opencode or ~/.local/share/opencode). It is independent of
+	// DataDir, which only stores the session database.
+	DataRoot string
 	// Tools are application-level tools exposed to every session.
 	Tools []Tool
 	// MCP configures MCP servers whose tools are registered as application tools.

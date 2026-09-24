@@ -177,7 +177,11 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		return nil, err
 	}
 
-	global := core.NewGlobal()
+	var globalOverrides []func(*core.Global)
+	if opts.DataRoot != "" {
+		globalOverrides = append(globalOverrides, core.WithDataRoot(opts.DataRoot))
+	}
+	global := core.NewGlobal(globalOverrides...)
 
 	git := core.NewGit(core.NewAppProcess())
 	projectService := core.NewProject(core.ProjectConfig{
