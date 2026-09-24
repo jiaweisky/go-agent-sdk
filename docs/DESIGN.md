@@ -545,7 +545,7 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 
 > **工具输出限额**：`core.ToolOutputStore`（`MAX_LINES=2000` / `MAX_BYTES=50KB`）会把超限的 tool result 落盘为 `tool-output/tool_*`，只把 head/tail 预览发给模型（`core/tool/output_store.go` 适配 `tool.OutputStore`，由 `agent/runtime.go` 通过 `tool.WithOutputStore` 注入）。**未注入时 registry 的 `store == nil`，限额被跳过**，一次大 `grep`/`read` 就能撑爆上下文窗口。
 >
-> 落盘目录是 `{Global.Data}/tool-output`，即 `$XDG_DATA_HOME/opencode/tool-output` 或 `~/.local/share/opencode/tool-output`；`ClientOptions.DataRoot` 可重定向（`ClientOptions.DataDir` 只管 SQLite，不影响这里）。`ToolOutputStore.Cleanup` 按文件 mtime 清理超过 7 天（`ToolOutputStoreRetention`）的文件：`agent` 层在 `newRuntime` 时起一个 goroutine，启动时跑一次、之后每小时一次，`Client.Close()` 时随 runtime 的 lifetime context 退出；也可用 `Client.CleanupToolOutput()` 手动触发（对齐 v2 `tool-output-store.ts` 的 `cleanupLayer` + `cleanupNode`）。
+> 落盘目录是 `{Global.Data}/tool-output`，即 `{ClientOptions.Root}/data/tool-output`（默认 `~/.local/share/opencode/data/tool-output`）；`ClientOptions.Root` 可整体重定向（`ClientOptions.DataDir` 只管 SQLite，不影响这里）。`ToolOutputStore.Cleanup` 按文件 mtime 清理超过 7 天（`ToolOutputStoreRetention`）的文件：`agent` 层在 `newRuntime` 时起一个 goroutine，启动时跑一次、之后每小时一次，`Client.Close()` 时随 runtime 的 lifetime context 退出；也可用 `Client.CleanupToolOutput()` 手动触发（对齐 v2 `tool-output-store.ts` 的 `cleanupLayer` + `cleanupNode`）。
 
 ### 7.4 内置工具
 
@@ -680,8 +680,9 @@ type ClientOptions struct {
     ModelInfo        ModelInfoProvider         // 可选：catalog 元数据（protocol/endpoint/limits/headers）
     Credentials      CredentialProvider        // provider → 秘密（APIKey / AWS）
     WorkingDirectory string
-    DataDir          string                    // 会话数据库目录
-    DataRoot         string                    // 数据根（snapshot/reference/tool-output）；空则用 $XDG_DATA_HOME/opencode
+    Root             string                    // SDK 状态根（data/cache/db/state/tmp）；空则用 ~/.local/share/opencode
+    DataDir          string                    // 覆盖会话数据库目录；空则用 {Root}/db
+    Home             string                    // ~ 展开用；空则用 OS home
     ConfigDirs       []string                  // 内容配置目录（见「配置模型」）
     SubagentDepth    int                       // task 子会话最大深度（默认 1）
     Shell            string                    // bash 工具使用的 shell（默认 sh）
@@ -768,6 +769,20 @@ type SessionHooks struct { /* Pre/PostToolUse, UserPromptSubmitted,
 ### 11.1 配置模型（code config + 内容目录）
 
 SDK **不使用 `opencode.json`**，也不做目录发现（无 `OPENCODE_CONFIG_DIR` / `XDG_*` / 向上查找 `.opencode`）。所有**设置**都由代码通过 `ClientOptions` 传入（见上）。
+
+### 11.2 状态目录（一个 Root，不读 env）
+
+TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR` 等 env。**SDK 刻意偏离**——可嵌入的库不该读宿主进程的 env 来定位自己的状态。全部状态由 `ClientOptions.Root` 派生（`core.NewGlobal(root, home)` 是纯函数，不读 env）：
+
+```
+{Root}/data/    snapshot、reference clone、plans、tool-output、log
+{Root}/cache/   下载的二进制（ripgrep）、skill 内容缓存
+{Root}/db/      agent.db
+{Root}/state/   运行期状态（保留，对齐 TS 的 flock）
+{Root}/tmp/     临时文件
+```
+
+`Root` 为空时用 `~/.local/share/opencode`。因为不再读 env，设置 `Root` 即可完全隔离实例（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
 
 文件只承载**内容**（agent / mode / skill 的 markdown），且来源必须**显式**声明：`ClientOptions.ConfigDirs`。每个目录按以下模式扫描：
 

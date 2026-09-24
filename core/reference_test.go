@@ -42,7 +42,7 @@ func TestRepositoryValidateBranch(t *testing.T) {
 }
 
 func TestReferenceService(t *testing.T) {
-	global := NewGlobal()
+	global := NewGlobal(t.TempDir(), "/home")
 	reference := NewReference(global, nil, nil)
 	if _, err := reference.Transform(func(draft ReferenceDraft) error {
 		draft.Add("local", ReferenceLocalSource{Type: "local", Path: schema.AbsolutePath("/tmp/x")})

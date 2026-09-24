@@ -16,6 +16,7 @@ type builtinDeps struct {
 	permission core.Permission
 	question   core.Question
 	location   core.Location
+	global     core.Global
 	shell      string
 	skills     tool.SkillLister
 	agents     *core.Agent
@@ -31,7 +32,7 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 	files := core.NewFileMutation()
 	process := core.NewAppProcess()
 	image := core.NewImage(core.DefaultImageConfig())
-	ripgrepService := core.NewRipgrep(process, ripgrep.NewBinary(core.NewGlobal()))
+	ripgrepService := core.NewRipgrep(process, ripgrep.NewBinary(deps.global))
 	todos := core.NewSessionTodo(deps.db, deps.events)
 	directory := string(deps.location.Directory)
 

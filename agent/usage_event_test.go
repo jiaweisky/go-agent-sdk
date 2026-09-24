@@ -75,7 +75,7 @@ func TestUsageEventDeliveredViaOn(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM: usageEventLLM{usage: &llmschema.Usage{
 			NonCachedInputTokens: 100, OutputTokens: 20, ReasoningTokens: 5,

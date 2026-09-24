@@ -217,7 +217,7 @@ func LoadDotEnv() {
 }
 
 // findDotEnv returns the nearest .env at or above the working directory, stopping
-// at the project root. The boundary mirrors config discovery (core/config.go).
+// at the project root so a stray .env outside the repository is never loaded.
 func findDotEnv() (string, bool) {
 	start, err := os.Getwd()
 	if err != nil {

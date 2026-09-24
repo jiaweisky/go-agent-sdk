@@ -8,7 +8,7 @@ import (
 
 func TestApplyDefaultAgents(t *testing.T) {
 	agents := NewAgent()
-	global := NewGlobal(func(g *Global) { g.Data = "/data"; g.Tmp = "/tmp" })
+	global := NewGlobal("/data", "/home")
 	location := &Location{LocationInfo: schema.LocationInfo{Directory: schema.AbsolutePath("/work")}}
 	if err := ApplyDefaultAgents(agents, location, global); err != nil {
 		t.Fatalf("apply: %v", err)

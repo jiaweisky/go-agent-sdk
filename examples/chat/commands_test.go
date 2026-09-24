@@ -17,7 +17,7 @@ func runCommand(t *testing.T, configDirs []string, fn func(*chat)) string {
 		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
 		Model:      "test-model",
 		ConfigDirs: configDirs,
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -75,7 +75,7 @@ func TestDemoConfigDiscovered(t *testing.T) {
 		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
 		Model:      "test-model",
 		ConfigDirs: []string{".opencode"},
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)

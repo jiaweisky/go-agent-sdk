@@ -22,13 +22,23 @@ type ClientOptions struct {
 	Protocol schema.ProtocolID
 	// WorkingDirectory is the project/worktree root. Defaults to the process cwd.
 	WorkingDirectory string
-	// DataDir stores the session database. Empty uses the default opencode path.
+	// Root is the base directory for every piece of SDK-managed state:
+	//
+	//	{Root}/data/   snapshots, references, tool output, logs
+	//	{Root}/cache/  downloaded binaries and skill content
+	//	{Root}/db/     session database
+	//	{Root}/state/  runtime state (reserved)
+	//	{Root}/tmp/    scratch space
+	//
+	// Empty uses ~/.local/share/opencode. Nothing is read from the environment,
+	// so setting Root isolates an instance (tests, sandboxes, multiple tenants).
+	Root string
+	// DataDir overrides the directory holding the session database. Empty uses
+	// {Root}/db. It is independent of Root, which covers all the other state.
 	DataDir string
-	// DataRoot overrides the data directory holding snapshots, references and
-	// managed tool output. Empty uses the default opencode path
-	// ($XDG_DATA_HOME/opencode or ~/.local/share/opencode). It is independent of
-	// DataDir, which only stores the session database.
-	DataRoot string
+	// Home is the user's home directory, used to expand ~ in agent permission
+	// rules. Empty uses the OS home directory.
+	Home string
 	// Tools are application-level tools exposed to every session.
 	Tools []Tool
 	// MCP configures MCP servers whose tools are registered as application tools.

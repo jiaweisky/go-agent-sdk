@@ -154,14 +154,30 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		return nil, err
 	}
 
+	home := opts.Home
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	root := opts.Root
+	if root == "" {
+		if home == "" {
+			return nil, fmt.Errorf("ClientOptions.Root is required when the home directory cannot be determined")
+		}
+		root = core.DefaultGlobalRoot(home)
+	}
+	global := core.NewGlobal(root, home)
+
 	dbPath := opts.DataDir
 	if dbPath == "" {
-		dbPath = database.Path()
+		dbPath = filepath.Join(root, "db", "agent.db")
 	} else {
 		if err := os.MkdirAll(dbPath, 0o755); err != nil {
 			return nil, err
 		}
 		dbPath = filepath.Join(dbPath, "agent.db")
+	}
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return nil, err
 	}
 	db, err := database.Open(dbPath)
 	if err != nil {
@@ -176,12 +192,6 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db.Close()
 		return nil, err
 	}
-
-	var globalOverrides []func(*core.Global)
-	if opts.DataRoot != "" {
-		globalOverrides = append(globalOverrides, core.WithDataRoot(opts.DataRoot))
-	}
-	global := core.NewGlobal(globalOverrides...)
 
 	git := core.NewGit(core.NewAppProcess())
 	projectService := core.NewProject(core.ProjectConfig{
@@ -279,7 +289,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	task := &taskRunner{}
 	builtin := builtinDeps{
 		db: db, events: events, permission: permission, question: question,
-		location: *location, shell: opts.Shell, skills: skills,
+		location: *location, global: global, shell: opts.Shell, skills: skills,
 		agents: agents, task: task,
 	}
 	snapshots := runner.Snapshotter(noopSnapshots{})

@@ -2,8 +2,6 @@ package database
 
 import (
 	"database/sql"
-	"os"
-	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -50,51 +48,4 @@ func withImmediateTx(filename string) string {
 		separator = "&"
 	}
 	return filename + separator + "_txlock=immediate"
-}
-
-func Path() string {
-	if db := os.Getenv("OPENCODE_DB"); db != "" {
-		if db == ":memory:" || filepath.IsAbs(db) {
-			return db
-		}
-		return filepath.Join(globalDataDir(), db)
-	}
-	channel := InstallationChannel()
-	if channel == "latest" || channel == "beta" || channel == "prod" ||
-		os.Getenv("OPENCODE_DISABLE_CHANNEL_DB") == "1" ||
-		os.Getenv("OPENCODE_DISABLE_CHANNEL_DB") == "true" {
-		return filepath.Join(globalDataDir(), "opencode.db")
-	}
-	return filepath.Join(globalDataDir(), "opencode-"+sanitizeChannel(channel)+".db")
-}
-
-func globalDataDir() string {
-	if dir := os.Getenv("OPENCODE_DATA"); dir != "" {
-		return dir
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "."
-	}
-	return filepath.Join(home, ".local", "share", "opencode")
-}
-
-func InstallationChannel() string {
-	if channel := os.Getenv("OPENCODE_CHANNEL"); channel != "" {
-		return channel
-	}
-	return "latest"
-}
-
-func sanitizeChannel(channel string) string {
-	var b strings.Builder
-	for _, r := range channel {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
-			r == '.' || r == '_' || r == '-' {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune('-')
-		}
-	}
-	return b.String()
 }

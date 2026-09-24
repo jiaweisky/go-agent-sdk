@@ -120,7 +120,7 @@ func newTestClient(t *testing.T) *Client {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("test"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        fakeLLM{reply: "hello world"},
 	})
@@ -146,7 +146,7 @@ func TestClientOpenAICompatibleProvider(t *testing.T) {
 			return info, nil
 		},
 		Credentials: APIKey("test"),
-		DataDir:     t.TempDir(),
+		Root:        t.TempDir(),
 		LLM:         fakeLLM{reply: "x"},
 	})
 	if err != nil {
@@ -204,8 +204,8 @@ func TestSessionPermissionHandlerIsWired(t *testing.T) {
 	executed := false
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
-		Model:   "test-model",
-		DataDir: t.TempDir(),
+		Model: "test-model",
+		Root:  t.TempDir(),
 		Permission: func(request PermissionRequest) (PermissionDecision, error) {
 			permissionCalls++
 			return PermissionDecision{Allow: true}, nil
@@ -252,7 +252,7 @@ func TestToolOutputIsBounded(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        toolCallLLM{calls: &calls, toolName: "big", reply: "done"},
 	})
@@ -326,7 +326,7 @@ func TestSendContextCancelDoesNotInterruptTurn(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        blockingLLM{started: started, release: release, once: &once},
 	})
@@ -439,8 +439,8 @@ func TestSessionPermissionOverride(t *testing.T) {
 	executed := false
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
-		Model:   "test-model",
-		DataDir: t.TempDir(),
+		Model: "test-model",
+		Root:  t.TempDir(),
 		// Client default denies; the session override allows.
 		Permission: func(PermissionRequest) (PermissionDecision, error) {
 			return PermissionDecision{Allow: false}, nil
@@ -591,7 +591,7 @@ func TestSessionSendDoesNotDropEvents(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        manyDeltasLLM{deltas: deltas},
 	})
@@ -772,9 +772,9 @@ func TestClientPlugin(t *testing.T) {
 	loaded := false
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
-		Model:   "test-model",
-		DataDir: t.TempDir(),
-		LLM:     fakeLLM{reply: "x"},
+		Model: "test-model",
+		Root:  t.TempDir(),
+		LLM:   fakeLLM{reply: "x"},
 		Plugins: []PluginConfig{{
 			ID: "test",
 			Effect: func(ctx *core.PluginContext) (func(), error) {
@@ -806,9 +806,9 @@ func TestClientPlugin(t *testing.T) {
 func TestClientReferences(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
-		Model:   "test-model",
-		DataDir: t.TempDir(),
-		LLM:     fakeLLM{reply: "x"},
+		Model: "test-model",
+		Root:  t.TempDir(),
+		LLM:   fakeLLM{reply: "x"},
 		References: map[string]core.ReferenceSource{
 			"local": core.ReferenceLocalSource{Type: "local", Path: schema.AbsolutePath("/tmp/ref")},
 		},
@@ -836,7 +836,7 @@ func TestClientLoadsConfigAgentsAndSkills(t *testing.T) {
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
 		ConfigDirs: []string{dir},
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		LLM:        fakeLLM{reply: "x"},
 	})
 	if err != nil {
@@ -898,7 +898,7 @@ func TestSessionSendErrorBreakDoesNotPanic(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        errorLLM{err: errors.New("boom")},
 	})
@@ -985,7 +985,7 @@ func TestSessionQuestionHandler(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        questionLLM{calls: &calls, reply: "done"},
 	})
@@ -1167,7 +1167,7 @@ func TestTaskToolRunsSubagent(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        taskLLM{parentCalls: &calls},
 	})
@@ -1273,8 +1273,8 @@ func TestAlwaysPermissionRemembersRule(t *testing.T) {
 	var handlerCalls int
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
-		Model:   "test-model",
-		DataDir: t.TempDir(),
+		Model: "test-model",
+		Root:  t.TempDir(),
 		Permission: func(PermissionRequest) (PermissionDecision, error) {
 			handlerCalls++
 			return PermissionDecision{Allow: true, Always: true}, nil
@@ -1334,7 +1334,7 @@ func TestAlwaysPermissionPersistsAcrossClients(t *testing.T) {
 	var calls1 int
 	client1, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"), Model: "test-model",
-		DataDir: dir,
+		Root: dir,
 		Permission: func(PermissionRequest) (PermissionDecision, error) {
 			calls1++
 			return PermissionDecision{Allow: true, Always: true}, nil
@@ -1371,7 +1371,7 @@ func TestAlwaysPermissionPersistsAcrossClients(t *testing.T) {
 	var calls2 int
 	client2, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"), Model: "test-model",
-		DataDir: dir,
+		Root: dir,
 		Permission: func(PermissionRequest) (PermissionDecision, error) {
 			calls2++
 			return PermissionDecision{Allow: true}, nil
@@ -1445,7 +1445,7 @@ func TestTaskToolDepthLimit(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        depthLLM{parentCalls: &parentCalls, childCalls: &childCalls},
 	})
@@ -1498,7 +1498,7 @@ func TestSubagentDepth(t *testing.T) {
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:         "test-model",
 		SubagentDepth: 3,
-		DataDir:       t.TempDir(),
+		Root:          t.TempDir(),
 		LLM:           fakeLLM{reply: "x"},
 	})
 	if err != nil {
@@ -1515,7 +1515,7 @@ func TestClientOnTaskProgress(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        taskLLM{parentCalls: &calls},
 	})
@@ -1575,7 +1575,7 @@ func TestTaskProgressPersisted(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:      "test-model",
-		DataDir:    t.TempDir(),
+		Root:       t.TempDir(),
 		Permission: ApproveAll,
 		LLM:        taskLLM{parentCalls: &calls},
 	})
@@ -1673,8 +1673,8 @@ func TestSessionPermissionsApply(t *testing.T) {
 	executed := false
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
-		Model:   "test-model",
-		DataDir: t.TempDir(),
+		Model: "test-model",
+		Root:  t.TempDir(),
 		Permission: func(request PermissionRequest) (PermissionDecision, error) {
 			permissionCalls++
 			return PermissionDecision{Allow: false, Message: "denied"}, nil
@@ -1731,7 +1731,7 @@ func TestResumeSessionKeepsPermissions(t *testing.T) {
 	var calls1 int
 	client1, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"), Model: "test-model",
-		DataDir: dir, Permission: ApproveAll,
+		Root: dir, Permission: ApproveAll,
 		LLM: toolCallLLM{calls: &calls1, toolName: "echo", reply: "done"},
 	})
 	if err != nil {
@@ -1754,7 +1754,7 @@ func TestResumeSessionKeepsPermissions(t *testing.T) {
 	var calls2, permissionCalls int
 	client2, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"), Model: "test-model",
-		DataDir: dir,
+		Root: dir,
 		Permission: func(PermissionRequest) (PermissionDecision, error) {
 			permissionCalls++
 			return PermissionDecision{Allow: true}, nil
@@ -1816,7 +1816,7 @@ func TestRuleDenyDoesNotHaltTurn(t *testing.T) {
 		Protocol: "openai-responses", Credentials: APIKey("k"),
 		Model:            "test-model",
 		WorkingDirectory: dir,
-		DataDir:          t.TempDir(),
+		Root:             t.TempDir(),
 		Permission:       ApproveAll,
 		LLM:              &readCallLLM{path: envFile},
 	})
@@ -1856,8 +1856,8 @@ func TestRuleDenyDoesNotHaltTurn(t *testing.T) {
 
 func TestNewClientRequiresProtocolOrModelInfo(t *testing.T) {
 	_, err := NewClient(&ClientOptions{
-		Model:   "test-model",
-		DataDir: t.TempDir(),
+		Model: "test-model",
+		Root:  t.TempDir(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "requires ModelInfo or Protocol") {
 		t.Fatalf("err = %v, want a missing-protocol error", err)
@@ -1868,7 +1868,7 @@ func TestNewClientRejectsUnknownProtocol(t *testing.T) {
 	_, err := NewClient(&ClientOptions{
 		Model:    "test-model",
 		Protocol: "bogus",
-		DataDir:  t.TempDir(),
+		Root:     t.TempDir(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
 		t.Fatalf("err = %v, want an unknown-protocol error", err)
@@ -1935,14 +1935,13 @@ func TestRuntimeToolOutputCleanupStopsOnCancel(t *testing.T) {
 	}
 }
 
-func TestClientDataRootControlsToolOutput(t *testing.T) {
+func TestClientRootControlsToolOutput(t *testing.T) {
 	root := t.TempDir()
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
-		Model:    "test-model",
-		DataDir:  t.TempDir(),
-		DataRoot: root,
-		LLM:      fakeLLM{reply: "x"},
+		Model: "test-model",
+		Root:  root,
+		LLM:   fakeLLM{reply: "x"},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -1963,7 +1962,7 @@ func TestClientDataRootControlsToolOutput(t *testing.T) {
 	if len(result.OutputPaths) != 1 {
 		t.Fatalf("paths = %v", result.OutputPaths)
 	}
-	want := filepath.Join(root, "tool-output") + string(filepath.Separator)
+	want := filepath.Join(root, "data", "tool-output") + string(filepath.Separator)
 	if !strings.HasPrefix(result.OutputPaths[0], want) {
 		t.Fatalf("output path = %q, want it under %q", result.OutputPaths[0], want)
 	}
