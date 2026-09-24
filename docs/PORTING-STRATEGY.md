@@ -726,58 +726,26 @@ JSON-RPC 2.0 协议
 
 ### 问题
 
-opencode 的 agent 和 tool 定义来自 `{agent,agents}/**/*.md`，格式为 YAML frontmatter + markdown body。Go 端需要决定配置格式。
+opencode 的 agent 与 skill 定义来自 `{agent,agents}/**/*.md`、`{mode,modes}/*.md` 与 `{skill,skills}/**/SKILL.md`，格式为 YAML frontmatter + markdown body。
 
 ### 策略
 
-同时支持两种格式，代码层统一为 Go struct：
+**只支持 markdown**（frontmatter + body），格式与 TS 完全一致，不引入 YAML 双格式：
 
-| 格式 | 识别方式 | 实现 |
-|---|---|---|
-| `.md` | frontmatter + body | [`adrg/frontmatter`](https://github.com/adrg/frontmatter) 解析 frontmatter，body 作为 Prompt |
-| `.yaml` / `.yml` | 纯 YAML | `gopkg.in/yaml.v3` 直接反序列化（stdlib 不内置 YAML） |
-
-```go
-type AgentConfig struct {
-    Name        string              `yaml:"name" json:"name"`
-    Description string              `yaml:"description" json:"description"`
-    Model       *ModelOverride      `yaml:"model,omitempty" json:"model,omitempty"`
-    Temperature *float64            `yaml:"temperature,omitempty" json:"temperature,omitempty"`
-    TopP        *float64            `yaml:"top_p,omitempty" json:"top_p,omitempty"`
-    Steps       int                 `yaml:"steps,omitempty" json:"steps,omitempty" default:"100"`
-    Permission  []PermissionRule    `yaml:"permission,omitempty" json:"permission,omitempty"`
-    Prompt      string              `yaml:"-" json:"-"`        // 来自 markdown body
-}
-
-func LoadAgents(dir string) (map[string]AgentConfig, error) {
-    files, _ := filepath.Glob(filepath.Join(dir, "{agent,agents}/**/*.{md,yaml,yml}"))
-    agents := make(map[string]AgentConfig)
-    for _, f := range files {
-        cfg, err := loadFile(f)
-        if err != nil { return nil, err }
-        agents[cfg.Name] = cfg
-    }
-    return agents, nil
-}
-
-func loadFile(path string) (AgentConfig, error) {
-    switch ext := filepath.Ext(path); ext {
-    case ".md":
-        return loadMarkdownFrontmatter(path)
-    case ".yaml", ".yml":
-        return loadYAML(path)
-    }
-}
-```
+- 解析器 `core/util/markdown.go`（`ParseMarkdownOption`）逐行移植 TS 的 `ConfigMarkdown.parse`（含 `SanitizeMarkdown` 重试），不依赖第三方 frontmatter 库。
+- frontmatter 反序列化到 `opencode/config.AgentInfo`（json tag），body 作为 `system`（mode 文件额外置 `mode: primary`）。
+- **不做目录发现**：由 `ClientOptions.ConfigDirs` 显式给出目录，SDK 只扫描这些目录（见 DESIGN.md §11.1）。
+- legacy v1 agent markdown（旧字段名 → `V1MigrateAgent`）不移植，`core/v1/config` 已删除。
 
 ### 对照表
 
 | opencode 做法 | Go 做法 |
 |---|---|
-| `Schema.decodeUnknownExit(Schema)(config)` | `yaml.Unmarshal` + `validator` |
-| 内置 markdown 解析 | `adrg/frontmatter` |
-| `{agent,agents}/**/*.md` | `**/*.{md,yaml,yml}` |
-| markdown body → prompt | `AgentConfig.Prompt` 字段 |
+| `Schema.decodeUnknownExit(Schema)(config)` | `json.Unmarshal(frontmatter, &AgentInfo)` |
+| `ConfigMarkdown.parse`（gray-matter） | `util.ParseMarkdownOption`（逐行移植，含 sanitize 重试） |
+| `{agent,agents}/**/*.md` | 同（`core.Glob` + `doublestar`） |
+| markdown body → system prompt | `AgentInfo.System` |
+| 目录发现（`.opencode` 向上查找 + env + 全局目录） | `ClientOptions.ConfigDirs` 显式目录 |
 
 ---
 

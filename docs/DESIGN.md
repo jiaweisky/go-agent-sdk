@@ -7,7 +7,7 @@
 go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提供一套完整可嵌入的 Agent SDK。核心能力包括：
 
 - **LLM 协议层** — 支持 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini / Bedrock Converse 等协议（另有 openai-compatible chat），
-  支持多 provider 路由（当前 runtime 实际接线 OpenAI、Anthropic、OpenAI-compatible；其余 facade 已实现但未接入，见 §5）。
+  调用方按**协议 id** 选择（`ClientOptions.Protocol`），六种协议均可经 `llm/protocols` 注册表到达；`llm/provider/` 的 facade 只是预置默认值的便捷层（见 §5）。
 - **Agent 循环** — 自动化的 tool-calling agent 循环，支持步骤管理、上下文溢出恢复、steer/queue 输入。
 - **Agent 定义** — 可配置的 agent 元信息、system prompt、权限规则、模型覆盖。
 - **Skill** — 从 markdown 文件加载专业知识，注入系统上下文。
@@ -43,7 +43,7 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 | 模块 | 推迟原因 |
 |---|---|
 | `lsp` 工具 | 非核心路径，后续追加 |
-| 未接线的 provider（Gemini / Bedrock / OpenRouter / xAI / Azure / Cloudflare / GitHub Copilot / Google） | 协议与 facade 已实现，但 runtime 只接 OpenAI / Anthropic / OpenAI-compatible（见 §5） |
+| Provider facade（OpenRouter / xAI / Azure / Cloudflare / GitHub Copilot / Google / Bedrock 的预置 base URL） | 协议与 facade 已实现；`agent` 层改用 `Protocol` + `ModelInfo`，facade 仅供直接使用 `llm` 包的调用方（见 §5.4） |
 | `bash` 高级特性（tree-sitter、arity、后台任务、progress 流） | 见 `core/tool/bash.go` 的 TODO |
 | `edit` 高级特性（fuzzy match、formatter、watcher、snapshot、LSP） | 见 `core/tool/edit.go` 的 TODO |
 | `apply_patch` 的 move 与原子回滚 | 见 `core/tool/apply_patch.go` 的 TODO |
@@ -757,7 +757,7 @@ type SessionHooks struct { /* Pre/PostToolUse, UserPromptSubmitted,
 - 权限：`OnPermissionRequest` 回调经装饰器桥接 `core.Permission`（allow/deny/ask → 回调 → 自动 reply）。
 - 工具 Hooks（Pre/PostToolUse）通过 `hookedRegistry` 包裹 settlement 实现。
 
-> 已接入：MCP 工具（`connectMCP`）、Plugin（窄化）、Reference 服务。**未接线**：除 openai / anthropic / openai-compatible 之外的 provider facade（Gemini/Bedrock/OpenRouter/... 协议与 facade 已实现但 runtime 未接，见 §5）；system prompt sections 粒度比 copilot 粗。取消语义（对齐 TS `run-coordinator.ts` 的 `uninterruptibleMask`）：**只有 `Abort()`** 经 `coordinator.Interrupt` 取消 drain ctx 并中断进行中的 LLM 流与工具执行；取消 `Send(ctx)` 的 ctx 只停止等待，不中断当前轮。`context` 已贯穿 `SessionRunner.Run` → `Transport.Frames` → `http.NewRequestWithContext`，所以 `Abort()` 能真正打断 provider 请求。
+> 已接入：MCP 工具（`connectMCP`）、Plugin（窄化）、Reference 服务。system prompt sections 粒度比 copilot 粗。取消语义（对齐 TS `run-coordinator.ts` 的 `uninterruptibleMask`）：**只有 `Abort()`** 经 `coordinator.Interrupt` 取消 drain ctx 并中断进行中的 LLM 流与工具执行；取消 `Send(ctx)` 的 ctx 只停止等待，不中断当前轮。`context` 已贯穿 `SessionRunner.Run` → `Transport.Frames` → `http.NewRequestWithContext`，所以 `Abort()` 能真正打断 provider 请求。
 
 ### 11.1 配置模型（code config + 内容目录）
 
