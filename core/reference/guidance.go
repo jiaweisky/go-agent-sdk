@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/user/go-agent-sdk/core/systemcontext"
+	"github.com/user/go-agent-sdk/core/util"
 )
 
 // Info mirrors Reference.Info (only the fields guidance needs).
@@ -48,7 +49,7 @@ func (g *Guidance) Load() (systemcontext.SystemContext, error) {
 		}
 		available = append(available, Summary{Name: item.Name, Path: item.Path, Description: item.Description})
 	}
-	sort.Slice(available, func(i, j int) bool { return available[i].Name < available[j].Name })
+	sort.Slice(available, func(i, j int) bool { return util.CompareLocale(available[i].Name, available[j].Name) < 0 })
 	if len(available) == 0 {
 		return systemcontext.Empty, nil
 	}

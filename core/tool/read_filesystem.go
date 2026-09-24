@@ -14,9 +14,9 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/text/collate"
-	"golang.org/x/text/language"
 
 	"github.com/user/go-agent-sdk/core"
+	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -167,25 +167,6 @@ func readCharSlice(value string, end int) string {
 		return value
 	}
 	return string(utf16.Decode(units[:end]))
-}
-
-// readLocaleTag resolves the runtime locale the same way String.prototype
-// .localeCompare does by default: from the environment, falling back to root.
-var readLocaleTag = readLocaleFromEnv()
-
-func readLocaleFromEnv() language.Tag {
-	for _, key := range []string{"LC_ALL", "LC_COLLATE", "LANG"} {
-		value := os.Getenv(key)
-		if value == "" {
-			continue
-		}
-		value = strings.SplitN(value, ".", 2)[0]
-		value = strings.ReplaceAll(value, "_", "-")
-		if tag, err := language.Parse(value); err == nil {
-			return tag
-		}
-	}
-	return language.Und
 }
 
 func readImageMime(bytes []byte) string {
@@ -615,7 +596,7 @@ func listToolRead(input schema.AbsolutePath, page ReadPageInput) (*ReadListPage,
 		visible = append(visible, core.FileSystemEntry{Path: item.Name + suffix, Type: typ})
 	}
 
-	collator := collate.New(readLocaleTag)
+	collator := collate.New(util.LocaleTag)
 	sort.SliceStable(visible, func(i, j int) bool {
 		if visible[i].Type == visible[j].Type {
 			return collator.CompareString(visible[i].Path, visible[j].Path) < 0

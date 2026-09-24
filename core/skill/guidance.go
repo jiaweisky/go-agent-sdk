@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/user/go-agent-sdk/core/systemcontext"
+	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -60,7 +61,7 @@ func (g *Guidance) Load(agent *schema.AgentInfo) (systemcontext.SystemContext, e
 		}
 		available = append(available, Summary{Name: item.Name, Description: *item.Description})
 	}
-	sort.Slice(available, func(i, j int) bool { return available[i].Name < available[j].Name })
+	sort.Slice(available, func(i, j int) bool { return util.CompareLocale(available[i].Name, available[j].Name) < 0 })
 
 	return systemcontext.Make(systemcontext.Source[[]Summary]{
 		Key:      "core/skill-guidance",
