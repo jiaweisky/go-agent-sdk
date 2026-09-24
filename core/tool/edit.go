@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"golang.org/x/text/encoding/unicode"
-
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/jsonschema"
@@ -264,13 +262,8 @@ func editDecodeUtf8(content []byte) editDecoded {
 		raw = content[3:]
 	}
 	// Match `new TextDecoder().decode(...)`: invalid sequences are replaced
-	// with U+FFFD using the W3C maximal-subpart rule. unicode.UTF8 neither
-	// strips nor adds a BOM, so the BOM handling above stays in charge.
-	decoded, err := unicode.UTF8.NewDecoder().Bytes(raw)
-	if err != nil {
-		decoded = raw
-	}
-	return editDecoded{Bom: bom, Content: content, Text: string(decoded)}
+	// with U+FFFD. The BOM handling above stays in charge of stripping it.
+	return editDecoded{Bom: bom, Content: content, Text: strings.ToValidUTF8(string(raw), "\uFFFD")}
 }
 
 func editNormalizeLineEndings(text string) string {

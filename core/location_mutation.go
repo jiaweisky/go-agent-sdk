@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 type LocationMutationKind string
@@ -95,13 +96,13 @@ func (lm *locationMutation) Resolve(input LocationMutationResolveInput) (*Locati
 	}
 
 	external := !lexicallyInternal
-	resource := resolved.Canonical
+	resource := locationMutationSlash(resolved.Canonical)
 	if !external {
 		rel, err := filepath.Rel(locationRoot, resolved.Canonical)
 		if err != nil || rel == "" {
 			rel = "."
 		}
-		resource = rel
+		resource = locationMutationSlash(rel)
 	}
 
 	var externalDir *LocationMutationExternalDirectoryAuthorization
@@ -111,7 +112,7 @@ func (lm *locationMutation) Resolve(input LocationMutationResolveInput) (*Locati
 			resolved.Type != nil && *resolved.Type == "Directory" {
 			dir = resolved.Canonical
 		}
-		extResource := filepath.Join(dir, "*")
+		extResource := locationMutationSlash(filepath.Join(dir, "*"))
 		externalDir = &LocationMutationExternalDirectoryAuthorization{
 			Action:    "external_directory",
 			Directory: dir,
@@ -176,4 +177,10 @@ func LocationMutationExternalDirectoryPermission(input LocationMutationExternalD
 		Resources: []string{input.Resource},
 		Save:      []string{input.Save},
 	}
+}
+
+// locationMutationSlash mirrors FSUtil.slash: permission resources use forward
+// slashes on every platform.
+func locationMutationSlash(value string) string {
+	return strings.ReplaceAll(value, "\\", "/")
 }
