@@ -697,7 +697,7 @@ func anthropicMessagesMergeUsage(left, right *schema.Usage) *schema.Usage {
 }
 
 // mergeProviderMetadata right-biased merges provider usage payloads, shallow
-// merging the inner map per provider (mirrors the TS anthropic mergeUsage).
+// merging the inner map per provider.
 func mergeProviderMetadata(left, right map[string]map[string]any) map[string]map[string]any {
 	if len(left) == 0 {
 		return right

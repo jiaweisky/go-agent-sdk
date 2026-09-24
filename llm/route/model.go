@@ -6,10 +6,9 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
-// Model mirrors the LLM Model: model identity/defaults plus the configured route
-// it was resolved from. TS keeps `route` on Model directly; Go splits the
-// schema/route packages (route imports schema), so the route-holding concrete
-// Model lives here while schema.ModelSchema stays the consumer interface.
+// Model is a model identity/defaults plus the configured route it was resolved
+// from. The route-holding concrete type lives here because the route package
+// imports schema; schema.ModelSchema stays the consumer-facing interface.
 type Model struct {
 	schema.Model
 	Route Route
@@ -30,8 +29,8 @@ func (m Model) GetRouteDefaults() *schema.ModelDefaults {
 	}
 }
 
-// MarshalJSON serializes the embedded model only. The route carries func fields
-// that json.Marshal rejects; TS's JSON.stringify silently drops them.
+// MarshalJSON serializes the embedded model only: the route carries func fields,
+// which encoding/json cannot encode.
 func (m Model) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m.Model)
 }

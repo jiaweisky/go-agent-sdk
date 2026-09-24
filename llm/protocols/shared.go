@@ -173,10 +173,9 @@ func ErrorText(err error) string {
 	return "Unknown stream error"
 }
 
-// ParseToolInput decodes a tool call's JSON input. It delegates to the canonical
-// implementation in llm/protocols/utils: TS keeps this in shared.ts and imports
-// it from tool-stream.ts, but Go cannot have utils import protocols, so the
-// leaf package owns it and this re-exports it.
+// ParseToolInput decodes a tool call's JSON input. The canonical implementation
+// lives in llm/protocols/utils (the leaf package that both this package and
+// tool-stream can import); this re-exports it.
 func ParseToolInput(route, name, raw string) (any, error) {
 	return utils.ParseToolInput(route, name, raw)
 }

@@ -145,7 +145,7 @@ func geminiThoughtSignature(md schema.ProviderMetadata) *string {
 
 func geminiLowerTool(td schema.ToolDefinition, inputSchema any) geminiFunctionDeclaration {
 	decl := geminiFunctionDeclaration{Name: td.Name, Description: td.Description}
-	// An empty object schema projects to nil; TS drops the undefined key.
+	// An empty object schema projects to nil, so the key stays absent.
 	if params := utils.Convert(schemaMap(inputSchema)); params != nil {
 		decl.Parameters = params
 	}

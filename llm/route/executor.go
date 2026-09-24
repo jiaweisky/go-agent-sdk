@@ -426,8 +426,7 @@ func (e *Executor) DoWithRetries(req *http.Request) (*http.Response, *schema.LLM
 				return nil, canceledTransportError(ctxErr)
 			}
 			lastErr = transportError(req, err)
-			// TS TransportReason is not retryable; unlike TS we still retry a
-			// failed transport because a transient network error is worth a
+			// A failed transport is retried: a transient network error is worth a
 			// second attempt. Status errors follow the reason's Retryable().
 			continue
 		}

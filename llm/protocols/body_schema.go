@@ -2,7 +2,7 @@ package protocols
 
 import "github.com/user/go-agent-sdk/jsonschema"
 
-// Body schemas mirror the Effect schemas in the TS protocols. Route
+// Body schemas describe the JSON each protocol puts on the wire. Route
 // construction compiles them and compile() validates every built body, so a
 // lowering bug fails as an invalid request instead of reaching the provider.
 
