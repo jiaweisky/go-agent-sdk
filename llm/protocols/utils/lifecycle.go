@@ -2,12 +2,15 @@ package utils
 
 import "github.com/user/go-agent-sdk/llm/schema"
 
+// State tracks the parts a protocol has already started, so each start and end is
+// emitted once.
 type State struct {
 	StepStarted bool
 	Text        map[string]struct{}
 	Reasoning   map[string]struct{}
 }
 
+// Initial returns the state for a new stream.
 func Initial() State {
 	return State{
 		Text:      make(map[string]struct{}),
@@ -15,6 +18,7 @@ func Initial() State {
 	}
 }
 
+// StepStart emits the start of a step, once per step.
 func StepStart(state *State, events *[]schema.LLMEvent) {
 	stepStart(state, events)
 }
@@ -27,6 +31,7 @@ func stepStart(state *State, events *[]schema.LLMEvent) {
 	state.StepStarted = true
 }
 
+// TextDelta emits the start of a text part when needed and then the delta.
 func TextDelta(state *State, events *[]schema.LLMEvent, id, text string) {
 	stepStart(state, events)
 	if _, ok := state.Text[id]; ok {
@@ -37,6 +42,7 @@ func TextDelta(state *State, events *[]schema.LLMEvent, id, text string) {
 	state.Text[id] = struct{}{}
 }
 
+// ReasoningStart emits the start of a reasoning part.
 func ReasoningStart(state *State, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
 	if _, ok := state.Reasoning[id]; ok {
 		return
@@ -50,11 +56,14 @@ func ReasoningStart(state *State, events *[]schema.LLMEvent, id string, provider
 	state.Reasoning[id] = struct{}{}
 }
 
+// ReasoningDelta emits the start of a reasoning part when needed and then the
+// delta.
 func ReasoningDelta(state *State, events *[]schema.LLMEvent, id, text string, providerMetadata ...schema.ProviderMetadata) {
 	ReasoningStart(state, events, id, providerMetadata...)
 	*events = append(*events, schema.NewReasoningDelta(id, text))
 }
 
+// ReasoningEnd emits the end of a reasoning part.
 func ReasoningEnd(state *State, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
 	if _, ok := state.Reasoning[id]; !ok {
 		return
@@ -68,6 +77,7 @@ func ReasoningEnd(state *State, events *[]schema.LLMEvent, id string, providerMe
 	delete(state.Reasoning, id)
 }
 
+// TextEnd emits the end of a text part.
 func TextEnd(state *State, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
 	if _, ok := state.Text[id]; !ok {
 		return
@@ -92,6 +102,7 @@ func closeOpenBlocks(state *State, events *[]schema.LLMEvent) {
 	state.Reasoning = make(map[string]struct{})
 }
 
+// Finish emits the end of the step and of the response.
 func Finish(state *State, events *[]schema.LLMEvent, input struct {
 	Reason           schema.FinishReason
 	Usage            *schema.Usage

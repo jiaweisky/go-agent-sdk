@@ -92,6 +92,7 @@ type bedrockConverseBedrockUsage struct {
 	ProviderMetadata      schema.ProviderMetadata `json:"-"`
 }
 
+// UnmarshalJSON reads the usage payload Bedrock sends.
 func (u *bedrockConverseBedrockUsage) UnmarshalJSON(data []byte) error {
 	type plain bedrockConverseBedrockUsage
 	var decoded plain
@@ -592,6 +593,7 @@ func bedrockConverseOnHalt(state any) []schema.LLMEvent {
 	return events
 }
 
+// BedrockConverseProtocol is the Bedrock Converse wire protocol.
 var BedrockConverseProtocol = route.Protocol{
 	ID:   bedrockConverseAdapter,
 	Body: route.ProtocolBody{Schema: bedrockConverseBodySchema, From: bedrockConverseFromRequest},
@@ -606,8 +608,10 @@ var BedrockConverseProtocol = route.Protocol{
 
 type bedrockConverseBedrockTransport struct{}
 
+// ID identifies the Bedrock transport.
 func (bedrockConverseBedrockTransport) ID() string { return "bedrock-converse" }
 
+// Prepare builds the Bedrock request for one call.
 func (bedrockConverseBedrockTransport) Prepare(input route.TransportPrepareInput) (any, error) {
 	body, ok := input.Body.(bedrockConverseBedrockBody)
 	if !ok {
@@ -645,6 +649,7 @@ func (bedrockConverseBedrockTransport) Prepare(input route.TransportPrepareInput
 	}{URL: u, Method: "POST", Body: string(bodyText), Headers: headers}, nil
 }
 
+// Frames sends the prepared request and yields its event-stream frames.
 func (bedrockConverseBedrockTransport) Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
 	p := prepared.(struct {
 		URL     string
@@ -719,6 +724,7 @@ func (bedrockConverseBedrockTransport) Frames(ctx context.Context, prepared any,
 	}
 }
 
+// BedrockConverseRoute builds the Bedrock Converse route for a protocol.
 func BedrockConverseRoute(protocol route.Protocol) route.Route {
 	return route.MakeFromTransport(route.MakeTransportInput{
 		ID:        bedrockConverseAdapter,

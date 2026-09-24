@@ -7,8 +7,10 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// OpenRouterProviderID is the provider id models.dev uses for OpenRouter.
 const OpenRouterProviderID = schema.ProviderID("openrouter")
 
+// OpenRouterConfig configures the OpenRouter facade.
 type OpenRouterConfig struct {
 	Auth            *route.Auth
 	APIKey          *string
@@ -20,6 +22,8 @@ type OpenRouterConfig struct {
 	Http            *schema.HttpOptions
 }
 
+// OpenRouterProvider is a configured OpenRouter facade: its id, its routes, and
+// its model factory.
 type OpenRouterProvider struct {
 	ID    schema.ProviderID
 	Model func(id string, opts ...llm.ModelOptions) route.Model
@@ -91,6 +95,7 @@ func openRouterAuth(input OpenRouterConfig) *route.Auth {
 	}{Auth: input.Auth, APIKey: input.APIKey}, []string{"OPENROUTER_API_KEY"})
 }
 
+// NewOpenRouter builds the OpenRouter facade over the OpenAI Chat protocol.
 func NewOpenRouter(openAIChatProtocol route.Protocol, input OpenRouterConfig) OpenRouterProvider {
 	baseURL := input.BaseURL
 	if baseURL == "" {

@@ -6,8 +6,11 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// OpenAICompatibleProviderID is the provider id used when a generic
+// OpenAI-compatible config names none.
 const OpenAICompatibleProviderID = schema.ProviderID("openai-compatible")
 
+// OpenAICompatibleGenericOptions configures a generic OpenAI-compatible facade.
 type OpenAICompatibleGenericOptions struct {
 	Auth            *route.Auth
 	APIKey          *string
@@ -20,6 +23,8 @@ type OpenAICompatibleGenericOptions struct {
 	Http            *schema.HttpOptions
 }
 
+// OpenAICompatibleFamilyOptions configures one OpenAI-compatible family (a known
+// provider and base URL).
 type OpenAICompatibleFamilyOptions struct {
 	Auth            *route.Auth
 	APIKey          *string
@@ -31,16 +36,17 @@ type OpenAICompatibleFamilyOptions struct {
 	Http            *schema.HttpOptions
 }
 
+// OpenAICompatibleProvider is a configured OpenAI-compatible facade.
 type OpenAICompatibleProvider struct {
 	ID    schema.ProviderID
 	Model func(id string, opts ...llm.ModelOptions) route.Model
-	// Configure mirrors the facade's `configure`: it rebuilds the facade with
+	// Configure rebuilds the facade with
 	// new options. For profile facades the provider id is fixed to the profile
 	// and BaseURL falls back to the profile default.
 	Configure func(OpenAICompatibleGenericOptions) OpenAICompatibleProvider
 }
 
-// OpenAICompatibleRoutes mirrors the module-level `routes` export.
+// OpenAICompatibleRoutes is the route every OpenAI-compatible facade is built on.
 var OpenAICompatibleRoutes []route.Route
 
 func configure(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
@@ -105,21 +111,28 @@ func define(openAICompatibleChatRoute route.Route, profile OpenAICompatibleProfi
 	return facade
 }
 
-// NewOpenAICompatible mirrors OpenAICompatible.configure: it builds a facade for
-// a generic OpenAI Chat-compatible endpoint. When input.Provider is empty the
-// provider id defaults to "openai-compatible".
+// NewOpenAICompatible builds a facade for a generic OpenAI Chat-compatible
+// endpoint. When input.Provider is empty the provider id defaults to
+// "openai-compatible".
 func NewOpenAICompatible(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
 	return configure(openAICompatibleChatRoute, input)
 }
 
+// The known OpenAI-compatible families, built by InitOpenAICompatible.
 var Baseten OpenAICompatibleProvider
-var Cerebras OpenAICompatibleProvider
-var DeepInfra OpenAICompatibleProvider
-var DeepSeek OpenAICompatibleProvider
-var Fireworks OpenAICompatibleProvider
-var Groq OpenAICompatibleProvider
-var TogetherAI OpenAICompatibleProvider
 
+// The known OpenAI-compatible families, built by InitOpenAICompatible.
+var (
+	Cerebras   OpenAICompatibleProvider
+	DeepInfra  OpenAICompatibleProvider
+	DeepSeek   OpenAICompatibleProvider
+	Fireworks  OpenAICompatibleProvider
+	Groq       OpenAICompatibleProvider
+	TogetherAI OpenAICompatibleProvider
+)
+
+// InitOpenAICompatible builds the known OpenAI-compatible families over the given
+// route.
 func InitOpenAICompatible(openAICompatibleChatRoute route.Route) {
 	OpenAICompatibleRoutes = []route.Route{openAICompatibleChatRoute}
 	Baseten = define(openAICompatibleChatRoute, Profiles["baseten"])

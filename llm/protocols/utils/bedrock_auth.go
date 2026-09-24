@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// Credentials is the AWS credential SigV4 signs with.
 type Credentials struct {
 	Region          string
 	AccessKeyID     string
@@ -17,14 +18,18 @@ type Credentials struct {
 	SessionToken    string
 }
 
+// AuthInput is what a signing function sees.
 type AuthInput struct {
 	URL     string
 	Body    string
 	Headers map[string]string
 }
 
+// AuthFunc signs a request and returns its headers.
 type AuthFunc func(input AuthInput) (map[string]string, error)
 
+// SigV4 signs a request with AWS SigV4. Nil credentials fall back to the
+// environment.
 func SigV4(credentials *Credentials) AuthFunc {
 	return sigV4(credentials)
 }
@@ -49,6 +54,7 @@ func sigV4(credentials *Credentials) AuthFunc {
 	}
 }
 
+// BedrockAuth is SigV4 over the ambient AWS credentials.
 var BedrockAuth = SigV4(nil)
 
 func signRequest(input AuthInput, creds *Credentials) (map[string]string, error) {

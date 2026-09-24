@@ -2,10 +2,12 @@ package utils
 
 import "github.com/user/go-agent-sdk/llm/schema"
 
+// OpenAIReasoningEfforts are the reasoning efforts the OpenAI API accepts.
 var OpenAIReasoningEfforts = []string{
 	"none", "minimal", "low", "medium", "high", "xhigh",
 }
 
+// OpenAIResponseIncludables are the extra outputs a Responses call may include.
 var OpenAIResponseIncludables = []string{
 	"file_search_call.results",
 	"web_search_call.results",
@@ -17,6 +19,7 @@ var OpenAIResponseIncludables = []string{
 	"message.output_text.logprobs",
 }
 
+// OpenAIServiceTiers are the service tiers the OpenAI API accepts.
 var OpenAIServiceTiers = []string{"auto", "default", "flex", "priority"}
 
 var reasoningEffortSet = map[string]struct{}{
@@ -71,6 +74,7 @@ func openAIOption[T any](request *schema.LLMRequest, key string) (T, bool) {
 	return value, ok
 }
 
+// Store returns the request's "store" option, if set.
 func Store(request *schema.LLMRequest) *bool {
 	v, ok := openAIOption[bool](request, "store")
 	if !ok {
@@ -79,6 +83,7 @@ func Store(request *schema.LLMRequest) *bool {
 	return &v
 }
 
+// ReasoningEffort returns the request's reasoning effort, if set and supported.
 func ReasoningEffort(request *schema.LLMRequest) *string {
 	v, ok := openAIOption[string](request, "reasoningEffort")
 	if !ok {
@@ -90,6 +95,7 @@ func ReasoningEffort(request *schema.LLMRequest) *string {
 	return &v
 }
 
+// ReasoningSummary returns the request's reasoning summary, when it is "auto".
 func ReasoningSummary(request *schema.LLMRequest) *string {
 	v, ok := openAIOption[string](request, "reasoningSummary")
 	if !ok || v != "auto" {
@@ -98,6 +104,7 @@ func ReasoningSummary(request *schema.LLMRequest) *string {
 	return &v
 }
 
+// Include returns the request's include list, filtered to the supported values.
 func Include(request *schema.LLMRequest) []string {
 	raw, ok := openAIOption[[]any](request, "include")
 	if !ok {
@@ -119,6 +126,7 @@ func Include(request *schema.LLMRequest) []string {
 	return filtered
 }
 
+// PromptCacheKey returns the request's prompt cache key, if set.
 func PromptCacheKey(request *schema.LLMRequest) *string {
 	v, ok := openAIOption[string](request, "promptCacheKey")
 	if !ok {
@@ -127,6 +135,7 @@ func PromptCacheKey(request *schema.LLMRequest) *string {
 	return &v
 }
 
+// TextVerbosity returns the request's text verbosity, if set and supported.
 func TextVerbosity(request *schema.LLMRequest) *string {
 	v, ok := openAIOption[string](request, "textVerbosity")
 	if !ok {
@@ -138,6 +147,7 @@ func TextVerbosity(request *schema.LLMRequest) *string {
 	return &v
 }
 
+// ServiceTier returns the request's service tier, if set and supported.
 func ServiceTier(request *schema.LLMRequest) *string {
 	v, ok := openAIOption[string](request, "serviceTier")
 	if !ok {
@@ -149,6 +159,7 @@ func ServiceTier(request *schema.LLMRequest) *string {
 	return &v
 }
 
+// Instructions returns the request's instructions, if set.
 func Instructions(request *schema.LLMRequest) *string {
 	v, ok := openAIOption[string](request, "instructions")
 	if !ok {

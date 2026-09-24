@@ -11,12 +11,15 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// RouteBody is how a route turns a request into a wire body, and how it validates
+// the result.
 type RouteBody struct {
 	Schema    *jsonschema.Schema
 	Validator *jsonschema6.Schema
 	From      func(request *schema.LLMRequest) (any, error)
 }
 
+// RouteDefaults is what a route applies to every request.
 type RouteDefaults struct {
 	Headers         map[string]string
 	Limits          *schema.ModelLimits
@@ -25,6 +28,7 @@ type RouteDefaults struct {
 	Http            *schema.HttpOptions
 }
 
+// RouteDefaultsInput is the input form of RouteDefaults.
 type RouteDefaultsInput struct {
 	Headers         map[string]string
 	Limits          *schema.ModelLimits
@@ -33,6 +37,7 @@ type RouteDefaultsInput struct {
 	Http            *schema.HttpOptions
 }
 
+// RouteModelInput describes the model to bind to a route.
 type RouteModelInput struct {
 	ID            string
 	Provider      string
@@ -40,6 +45,8 @@ type RouteModelInput struct {
 	Compatibility *schema.ModelCompatibility
 }
 
+// RoutePatch overrides parts of a route; a nil or empty field keeps the current
+// value.
 type RoutePatch struct {
 	ID        string
 	Provider  string
@@ -49,6 +56,8 @@ type RoutePatch struct {
 	Defaults  *RouteDefaultsInput
 }
 
+// Route reaches one provider's API: its endpoint, auth, transport and protocol,
+// plus the model factory built on top of them.
 type Route struct {
 	ID               string
 	Provider         schema.ProviderID
@@ -64,6 +73,7 @@ type Route struct {
 	StreamPrepared   func(ctx context.Context, prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error]
 }
 
+// MakeTransportInput describes a route to build.
 type MakeTransportInput struct {
 	ID        string
 	Provider  string
@@ -75,6 +85,7 @@ type MakeTransportInput struct {
 	Defaults  *RouteDefaultsInput
 }
 
+// MakeFromTransport builds a route from a protocol, endpoint, auth and transport.
 func MakeFromTransport(input MakeTransportInput) Route {
 	var build func(makeTransportInput) Route
 	build = func(ri makeTransportInput) Route {
@@ -306,6 +317,7 @@ func mergeHeaders(base, patch map[string]string) map[string]string {
 	return r
 }
 
+// LLMClient runs requests. Client implements it over a route.
 type LLMClient interface {
 	Prepare(ctx context.Context, req *schema.LLMRequest) (*schema.PreparedRequest, error)
 	Stream(ctx context.Context, req *schema.LLMRequest) (iter.Seq2[schema.LLMEvent, error], error)

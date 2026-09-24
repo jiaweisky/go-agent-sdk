@@ -35,6 +35,7 @@ func EventError(route, message string, raw ...string) *schema.LLMError {
 	}
 }
 
+// PendingTool is a tool call being accumulated: its id, name and arguments.
 type PendingTool struct {
 	ID               string
 	Name             string
@@ -43,17 +44,21 @@ type PendingTool struct {
 	ProviderMetadata schema.ProviderMetadata
 }
 
+// AppendOutcome is what appending a chunk produced: the updated tools and the
+// events it completed.
 type AppendOutcome struct {
 	Tools  map[string]*PendingTool
 	Tool   *PendingTool
 	Events []schema.LLMEvent
 }
 
+// FinishOutcome is what finishing a tool call produced.
 type FinishOutcome struct {
 	Tools  map[string]*PendingTool
 	Events []schema.LLMEvent
 }
 
+// Empty returns an empty set of pending tool calls.
 func Empty() map[string]*PendingTool {
 	return make(map[string]*PendingTool)
 }
@@ -123,10 +128,13 @@ func appendTool(tools map[string]*PendingTool, key string, tool *PendingTool, te
 	}
 }
 
+// Start records a tool call that has just begun.
 func Start(tools map[string]*PendingTool, key string, tool PendingTool) map[string]*PendingTool {
 	return start(tools, key, tool)
 }
 
+// AppendOrStart appends a chunk to a pending tool call, starting it when it is
+// new.
 func AppendOrStart(
 	route string,
 	tools map[string]*PendingTool,
@@ -171,6 +179,7 @@ func AppendOrStart(
 	return r, nil
 }
 
+// AppendExisting appends a chunk to a tool call that must already exist.
 func AppendExisting(
 	route string,
 	tools map[string]*PendingTool,
@@ -190,6 +199,7 @@ func AppendExisting(
 	return appendTool(tools, key, &next, text), nil
 }
 
+// FinishTool completes a tool call and returns the events it produced.
 func FinishTool(route string, tools map[string]*PendingTool, key string) (FinishOutcome, error) {
 	tool := tools[key]
 	if tool == nil {
@@ -212,6 +222,7 @@ func FinishTool(route string, tools map[string]*PendingTool, key string) (Finish
 	}, nil
 }
 
+// FinishToolWithInput completes a tool call whose arguments arrived whole.
 func FinishToolWithInput(route string, tools map[string]*PendingTool, key string, input string) (FinishOutcome, error) {
 	tool := tools[key]
 	if tool == nil {
@@ -234,6 +245,7 @@ func FinishToolWithInput(route string, tools map[string]*PendingTool, key string
 	}, nil
 }
 
+// FinishAllTools completes every pending tool call, in key order.
 func FinishAllTools(route string, tools map[string]*PendingTool) (FinishOutcome, error) {
 	var allEvents []schema.LLMEvent
 	for _, tool := range tools {

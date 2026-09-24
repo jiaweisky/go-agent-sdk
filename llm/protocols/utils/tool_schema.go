@@ -102,6 +102,7 @@ func moonshotNode(schema any) any {
 	return result
 }
 
+// Moonshot rewrites a tool schema into the shape Moonshot requires.
 func Moonshot(schema map[string]any) map[string]any {
 	projected := moonshotNode(schema)
 	if r, ok := projected.(map[string]any); ok {
@@ -110,6 +111,7 @@ func Moonshot(schema map[string]any) map[string]any {
 	return map[string]any{}
 }
 
+// Gemini rewrites a tool schema into the shape Gemini requires.
 func Gemini(schema map[string]any) map[string]any {
 	r := Convert(schema)
 	if r != nil {
@@ -118,6 +120,7 @@ func Gemini(schema map[string]any) map[string]any {
 	return map[string]any{}
 }
 
+// OpenAI leaves a tool schema as the OpenAI API expects it.
 func OpenAI(schema map[string]any) map[string]any {
 	anyOf, hasAnyOf := schema["anyOf"].([]any)
 	var flattened map[string]any
@@ -160,6 +163,8 @@ func OpenAI(schema map[string]any) map[string]any {
 	return map[string]any{"type": "object"}
 }
 
+// ModelCompatibility applies the tool-schema shape a model requires, leaving the
+// schema unchanged for unknown models.
 func ModelCompatibility(schema map[string]any, compatibility string) map[string]any {
 	switch compatibility {
 	case "gemini":

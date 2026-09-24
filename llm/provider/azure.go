@@ -10,8 +10,10 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// AzureProviderID is the provider id models.dev uses for Azure OpenAI.
 const AzureProviderID = schema.ProviderID("azure")
 
+// AzureConfig configures the Azure OpenAI facade.
 type AzureConfig struct {
 	Auth              *route.Auth
 	APIKey            *string
@@ -27,6 +29,8 @@ type AzureConfig struct {
 	Http              *schema.HttpOptions
 }
 
+// AzureProvider is a configured Azure OpenAI facade: its id, its routes, and its
+// model factory.
 type AzureProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
@@ -84,6 +88,7 @@ func azureEndpoint(input AzureConfig) *route.EndpointPatch {
 	}
 }
 
+// NewAzure builds the Azure OpenAI facade over the Responses and Chat routes.
 func NewAzure(responsesRoute, chatRoute route.Route, input AzureConfig) AzureProvider {
 	responsesPre := responsesRoute.With(route.RoutePatch{
 		ID:       "azure-openai-responses",

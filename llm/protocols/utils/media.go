@@ -12,9 +12,13 @@ import (
 var base64Pattern = regexp.MustCompile(`^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$`)
 var dataURLPattern = regexp.MustCompile(`^data:([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$`)
 
+// MaxMediaEncodedBytes bounds the encoded size of one media part.
 const MaxMediaEncodedBytes = 28 * 1024 * 1024
+
+// MaxMediaDecodedBytes bounds the decoded size of one media part.
 const MaxMediaDecodedBytes = 20 * 1024 * 1024
 
+// ValidatedMedia is a checked media part: its type, decoded bytes and filename.
 type ValidatedMedia struct {
 	MIME    string
 	Base64  string
@@ -22,6 +26,7 @@ type ValidatedMedia struct {
 	Bytes   []byte
 }
 
+// ValidateMedia checks a media part's type and size, and decodes its bytes.
 func ValidateMedia(route string, part schema.MediaPart, supportedMIMEs map[string]struct{}) (*ValidatedMedia, error) {
 	mime := strings.ToLower(part.MediaType)
 	if _, ok := supportedMIMEs[mime]; !ok {
@@ -75,6 +80,7 @@ func ValidateMedia(route string, part schema.MediaPart, supportedMIMEs map[strin
 	}, nil
 }
 
+// ValidateToolFile checks a tool file result's type and size.
 func ValidateToolFile(route string, part schema.ToolFileContent, supportedMIMEs map[string]struct{}) (*ValidatedMedia, error) {
 	return ValidateMedia(route, schema.MediaPart{
 		Type:      "media",

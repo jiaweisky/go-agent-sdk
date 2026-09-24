@@ -9,8 +9,10 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// AmazonAmazonBedrockProviderID is the provider id models.dev uses for Bedrock.
 const AmazonAmazonBedrockProviderID = schema.ProviderID("amazon-bedrock")
 
+// AmazonBedrockConfig configures the Amazon Bedrock facade.
 type AmazonBedrockConfig struct {
 	APIKey          *string
 	Region          string
@@ -23,6 +25,8 @@ type AmazonBedrockConfig struct {
 	Http            *schema.HttpOptions
 }
 
+// AmazonBedrockProvider is a configured Bedrock facade: its id, its route, and
+// its model factory.
 type AmazonBedrockProvider struct {
 	ID    schema.ProviderID
 	Model func(id string, opts ...llm.ModelOptions) route.Model
@@ -56,6 +60,7 @@ func bedrockDefaults(input AmazonBedrockConfig) route.RouteDefaultsInput {
 	}
 }
 
+// NewAmazonBedrock builds the Bedrock facade over the Bedrock Converse route.
 func NewAmazonBedrock(bedrockConverseRoute route.Route, input AmazonBedrockConfig) AmazonBedrockProvider {
 	region := input.Region
 	if region == "" && input.Credentials != nil {

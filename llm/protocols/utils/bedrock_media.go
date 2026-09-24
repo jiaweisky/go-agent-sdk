@@ -7,25 +7,30 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// ImageBlock is a Bedrock image content block.
 type ImageBlock struct {
 	Image ImageContent `json:"image"`
 }
 
+// ImageContent is a Bedrock image payload.
 type ImageContent struct {
 	Format string `json:"format"`
 	Source Source `json:"source"`
 }
 
+// DocumentBlock is a Bedrock document content block.
 type DocumentBlock struct {
 	Document DocumentContent `json:"document"`
 }
 
+// DocumentContent is a Bedrock document payload.
 type DocumentContent struct {
 	Format string `json:"format"`
 	Name   string `json:"name"`
 	Source Source `json:"source"`
 }
 
+// Source is a Bedrock media source: bytes or a URI.
 type Source struct {
 	Bytes string `json:"bytes"`
 }
@@ -81,6 +86,7 @@ func documentMIMESet() map[string]struct{} {
 	return m
 }
 
+// Lower converts a media part into the Bedrock block that carries it.
 func Lower(part schema.MediaPart) (any, error) {
 	mime := strings.ToLower(part.MediaType)
 	if imageFormat, ok := imageFormats[mime]; ok {

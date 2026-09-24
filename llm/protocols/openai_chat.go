@@ -12,7 +12,11 @@ import (
 )
 
 const openaiChatAdapter = "openai-chat"
+
+// OpenAIChatDefaultBaseURL is the OpenAI API base URL.
 const OpenAIChatDefaultBaseURL = "https://api.openai.com/v1"
+
+// OpenAIChatPath is the Chat Completions endpoint path.
 const OpenAIChatPath = "/chat/completions"
 
 var openaiChatImageMIMEs = map[string]struct{}{
@@ -71,6 +75,7 @@ type openaiChatUsage struct {
 	ProviderMetadata schema.ProviderMetadata `json:"-"`
 }
 
+// UnmarshalJSON reads the usage payload OpenAI sends for chat completions.
 func (u *openaiChatUsage) UnmarshalJSON(data []byte) error {
 	type plain openaiChatUsage
 	var decoded plain
@@ -544,6 +549,7 @@ func openaiChatFinish(state any) []schema.LLMEvent {
 	return events
 }
 
+// OpenAIChatProtocol is the OpenAI Chat Completions wire protocol.
 var OpenAIChatProtocol = route.Protocol{
 	ID: openaiChatAdapter,
 	Body: route.ProtocolBody{
@@ -563,6 +569,7 @@ var OpenAIChatProtocol = route.Protocol{
 	},
 }
 
+// OpenAIChatHTTPRoute is the OpenAI Chat Completions route.
 var OpenAIChatHTTPRoute = route.MakeFromTransport(route.MakeTransportInput{
 	ID:        openaiChatAdapter,
 	Provider:  "openai",

@@ -47,12 +47,15 @@ func projectToolSchema(inputSchema any, compatibility string) any {
 	return utils.ModelCompatibility(s, compatibility)
 }
 
+// ToolAccumulator accumulates the events of a tool call as they stream.
 type ToolAccumulator struct {
 	ID    string
 	Name  string
 	Input string
 }
 
+// TotalTokens returns the total when the provider reports it, and the sum of the
+// input and output tokens otherwise.
 func TotalTokens(inputTokens, outputTokens, total *int) *int {
 	if total != nil {
 		return total
@@ -72,6 +75,7 @@ func TotalTokens(inputTokens, outputTokens, total *int) *int {
 	return &sum
 }
 
+// SubtractTokens returns total minus subtrahend, or nil when either is nil.
 func SubtractTokens(total, subtrahend *int) *int {
 	if total == nil {
 		return nil
@@ -86,6 +90,7 @@ func SubtractTokens(total, subtrahend *int) *int {
 	return &diff
 }
 
+// SumTokens adds the values that are set, or nil when none are.
 func SumTokens(values ...*int) *int {
 	allNil := true
 	sum := 0
@@ -101,6 +106,7 @@ func SumTokens(values ...*int) *int {
 	return &sum
 }
 
+// JoinText joins the non-empty texts, without a separator.
 func JoinText(parts []struct{ Text string }) string {
 	texts := make([]string, len(parts))
 	for i, p := range parts {
@@ -146,14 +152,18 @@ func escapeSystemUpdateText(text string) string {
 	return text
 }
 
+// WrapSystemUpdate wraps a mid-conversation instruction so the model does not read
+// it as the initial system prompt.
 func WrapSystemUpdate(parts []struct{ Text string }) string {
 	return "<system-update>\n" + escapeSystemUpdateText(JoinText(parts)) + "\n</system-update>"
 }
 
+// TrimBaseURL drops trailing slashes from a base URL.
 func TrimBaseURL(value string) string {
 	return strings.TrimRight(value, "/")
 }
 
+// ToolResultText renders a tool result part as text.
 func ToolResultText(part schema.ToolResultPart) string {
 	switch part.Result.Type {
 	case "text":
@@ -166,6 +176,7 @@ func ToolResultText(part schema.ToolResultPart) string {
 	}
 }
 
+// ErrorText renders an error as text, or "Unknown stream error" for nil.
 func ErrorText(err error) string {
 	if err != nil {
 		return err.Error()
@@ -185,6 +196,7 @@ func EventError(route, message string, raw ...string) *schema.LLMError {
 	return utils.EventError(route, message, raw...)
 }
 
+// InvalidRequest builds an invalid-request error for a route.
 func InvalidRequest(message string) *schema.LLMError {
 	return &schema.LLMError{
 		Module: "ProviderShared",
@@ -193,9 +205,16 @@ func InvalidRequest(message string) *schema.LLMError {
 	}
 }
 
+// ImageMIMEs are the image types the protocols accept.
 var ImageMIMEs = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+// VideoMIMEs are the video types the protocols accept.
 var VideoMIMEs = []string{"video/mp4", "video/webm", "video/quicktime"}
+
+// AudioMIMEs are the audio types the protocols accept.
 var AudioMIMEs = []string{"audio/wav", "audio/mp3", "audio/aiff", "audio/aac", "audio/ogg", "audio/flac"}
+
+// MediaMIMEs are every media type the protocols accept.
 var MediaMIMEs = append(append([]string{}, ImageMIMEs...), append(VideoMIMEs, AudioMIMEs...)...)
 
 // mediaMIMESet builds a lookup set from a MIME list.
@@ -207,6 +226,7 @@ func mediaMIMESet(values []string) map[string]struct{} {
 	return set
 }
 
+// SupportsContent reports whether a part's type is one of the accepted types.
 func SupportsContent(part schema.ContentPart, types []string) bool {
 	switch part.(type) {
 	case schema.TextPart:
@@ -243,6 +263,7 @@ func SupportsContent(part schema.ContentPart, types []string) bool {
 	return false
 }
 
+// FormatContentTypes renders accepted types for an error message.
 func FormatContentTypes(types []string) string {
 	if len(types) == 0 {
 		return ""
@@ -256,6 +277,8 @@ func FormatContentTypes(types []string) string {
 	return strings.Join(types[:len(types)-1], ", ") + ", and " + types[len(types)-1]
 }
 
+// UnsupportedContent builds the error for a message that carries content the
+// protocol cannot send.
 func UnsupportedContent(route string, role schema.MessageRole, types []string) *schema.LLMError {
 	return InvalidRequest(fmt.Sprintf("%s %s messages only support %s content for now", route, role, FormatContentTypes(types)))
 }

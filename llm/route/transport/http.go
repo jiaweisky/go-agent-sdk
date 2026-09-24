@@ -13,6 +13,7 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// JsonRequestParts is the pieces a JSON request is assembled from.
 type JsonRequestParts struct {
 	URL      string
 	JSONBody any
@@ -20,6 +21,7 @@ type JsonRequestParts struct {
 	Headers  map[string]string
 }
 
+// HttpPrepared is a request ready to send: its URL, method, headers and body.
 type HttpPrepared struct {
 	URL     string
 	Method  string
@@ -152,10 +154,12 @@ func jsonRequestParts(input route.TransportPrepareInput) (JsonRequestParts, erro
 	}, nil
 }
 
+// HttpJsonInput describes a JSON-over-HTTP transport.
 type HttpJsonInput struct {
 	Framing route.Framing[string]
 }
 
+// HttpJsonTransport sends a JSON body over HTTP and frames the response.
 type HttpJsonTransport struct {
 	id      string
 	withFn  func(patch HttpJsonInput) *HttpJsonTransport
@@ -163,17 +167,21 @@ type HttpJsonTransport struct {
 	frames  func(ctx context.Context, prepared HttpPrepared, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error]
 }
 
+// ID identifies the transport.
 func (t *HttpJsonTransport) ID() string { return t.id }
 
+// Prepare builds the HTTP request for one call.
 func (t *HttpJsonTransport) Prepare(input route.TransportPrepareInput) (any, error) {
 	return t.prepare(input)
 }
 
+// Frames sends the prepared request and yields its frames.
 func (t *HttpJsonTransport) Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
 	p := prepared.(HttpPrepared)
 	return t.frames(ctx, p, request, runtime)
 }
 
+// NewHttpJsonTransport builds a JSON-over-HTTP transport.
 func NewHttpJsonTransport(input HttpJsonInput) *HttpJsonTransport {
 	base := &HttpJsonTransport{
 		id: "http-json",
@@ -228,6 +236,8 @@ func NewHttpJsonTransport(input HttpJsonInput) *HttpJsonTransport {
 	return base
 }
 
+// SSEJson is the standard JSON-over-HTTP transport: a JSON body in, server-sent
+// events out.
 func SSEJson() *HttpJsonTransport {
 	return NewHttpJsonTransport(HttpJsonInput{Framing: route.SSE})
 }

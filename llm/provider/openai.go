@@ -6,8 +6,10 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// OpenAIProviderID is the provider id models.dev uses for OpenAI.
 const OpenAIProviderID = schema.ProviderID("openai")
 
+// OpenAIConfig configures the OpenAI facade.
 type OpenAIConfig struct {
 	Auth            *route.Auth
 	APIKey          *string
@@ -20,6 +22,8 @@ type OpenAIConfig struct {
 	Http            *schema.HttpOptions
 }
 
+// OpenAIProvider is a configured OpenAI facade: its id, its routes, and its model
+// factory.
 type OpenAIProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
@@ -72,6 +76,7 @@ func modelFactory(r route.Route, modelID string, baseOpts route.RouteDefaultsInp
 	return r.With(route.RoutePatch{Defaults: &merged}).Model(modelInput)
 }
 
+// NewOpenAI builds the OpenAI facade over the Responses and Chat routes.
 func NewOpenAI(responsesRoute, chatRoute route.Route, input OpenAIConfig) OpenAIProvider {
 	responsesRoute = configureOpenAIRoute(responsesRoute, input)
 	chatRoute = configureOpenAIRoute(chatRoute, input)

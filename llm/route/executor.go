@@ -377,10 +377,12 @@ func sleepContext(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+// Executor runs HTTP requests, retrying the retryable failures.
 type Executor struct {
 	client *http.Client
 }
 
+// NewExecutor builds an executor over an HTTP client.
 func NewExecutor(client *http.Client) *Executor {
 	if client == nil {
 		client = http.DefaultClient
@@ -388,10 +390,13 @@ func NewExecutor(client *http.Client) *Executor {
 	return &Executor{client: client}
 }
 
+// Do sends one request without retrying.
 func (e *Executor) Do(req *http.Request) (*http.Response, error) {
 	return e.client.Do(req)
 }
 
+// DoWithRetries sends a request, retrying while the failure is retryable and the
+// attempt budget allows.
 func (e *Executor) DoWithRetries(req *http.Request) (*http.Response, *schema.LLMError) {
 	var reqBody []byte
 	if req.Body != nil {

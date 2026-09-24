@@ -6,8 +6,10 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// XAIProviderID is the provider id models.dev uses for xAI.
 const XAIProviderID = schema.ProviderID("xai")
 
+// XAIConfig configures the xAI facade.
 type XAIConfig struct {
 	Auth            *route.Auth
 	APIKey          *string
@@ -19,6 +21,8 @@ type XAIConfig struct {
 	Http            *schema.HttpOptions
 }
 
+// XAIProvider is a configured xAI facade: its id, its routes, and its model
+// factory.
 type XAIProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
@@ -64,6 +68,7 @@ func configureXAIRoute(r route.Route, input XAIConfig, baseURL string) route.Rou
 	})
 }
 
+// NewXAI builds the xAI facade over the Responses and Chat routes.
 func NewXAI(responsesRoute, chatRoute route.Route, input XAIConfig) XAIProvider {
 	baseURL := xaiDefaultBaseURL()
 	respCfg := configureXAIRoute(responsesRoute, input, baseURL)

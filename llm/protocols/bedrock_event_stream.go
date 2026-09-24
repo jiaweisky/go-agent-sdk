@@ -8,15 +8,19 @@ import (
 	"strings"
 )
 
+// BedrockFrameBuffer holds the bytes of an event stream that do not form a whole
+// frame yet.
 type BedrockFrameBuffer struct {
 	Buffer []byte
 	Offset int
 }
 
+// NewBedrockFrameBuffer returns an empty frame buffer.
 func NewBedrockFrameBuffer() BedrockFrameBuffer {
 	return BedrockFrameBuffer{Buffer: make([]byte, 0)}
 }
 
+// Append adds received bytes to the buffer.
 func (fb *BedrockFrameBuffer) Append(chunk []byte) {
 	remaining := len(fb.Buffer) - fb.Offset
 	next := make([]byte, remaining+len(chunk))
@@ -26,6 +30,7 @@ func (fb *BedrockFrameBuffer) Append(chunk []byte) {
 	fb.Offset = 0
 }
 
+// Compact drops the bytes already consumed, keeping the buffer small.
 func (fb *BedrockFrameBuffer) Compact() {
 	if fb.Offset > 0 && fb.Offset == len(fb.Buffer) {
 		fb.Buffer = nil
@@ -33,11 +38,13 @@ func (fb *BedrockFrameBuffer) Compact() {
 	}
 }
 
+// BedrockFrame is one decoded event-stream message.
 type BedrockFrame struct {
 	EventType string
 	Payload   map[string]any
 }
 
+// ParseBedrockEventStreamHeaders decodes a frame's header block.
 func ParseBedrockEventStreamHeaders(data []byte) map[string]string {
 	result := make(map[string]string)
 	for i := 0; i < len(data); {
@@ -86,6 +93,7 @@ func ParseBedrockEventStreamHeaders(data []byte) map[string]string {
 	return result
 }
 
+// DecodeBedrockEventStreamFrames decodes the frames completed by chunk.
 func DecodeBedrockEventStreamFrames(fb *BedrockFrameBuffer, chunk []byte) ([]BedrockFrame, error) {
 	if chunk != nil {
 		fb.Append(chunk)
@@ -137,6 +145,7 @@ func DecodeBedrockEventStreamFrames(fb *BedrockFrameBuffer, chunk []byte) ([]Bed
 	return out, nil
 }
 
+// RewrapBedrockFrame renders a frame as the JSON payload the protocol decodes.
 func RewrapBedrockFrame(frame BedrockFrame) (string, error) {
 	reWrapped, err := json.Marshal(map[string]any{frame.EventType: frame.Payload})
 	if err != nil {

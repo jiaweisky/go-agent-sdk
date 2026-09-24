@@ -12,6 +12,8 @@ import (
 )
 
 const geminiAdapter = "gemini"
+
+// GeminiDefaultBaseURL is the Google Generative Language API base URL.
 const GeminiDefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
 var geminiMediaMIMEs = mediaMIMESet(MediaMIMEs)
@@ -91,6 +93,7 @@ type geminiUsage struct {
 	ProviderMetadata        schema.ProviderMetadata `json:"-"`
 }
 
+// UnmarshalJSON reads the usage payload Gemini sends.
 func (u *geminiUsage) UnmarshalJSON(data []byte) error {
 	type plain geminiUsage
 	var decoded plain
@@ -588,6 +591,7 @@ func geminiFinish(state any) []schema.LLMEvent {
 	return events
 }
 
+// GeminiProtocol is the Gemini generateContent wire protocol.
 var GeminiProtocol = route.Protocol{
 	ID:   geminiAdapter,
 	Body: route.ProtocolBody{Schema: geminiBodySchema, From: geminiFromRequest},
@@ -603,6 +607,7 @@ var GeminiProtocol = route.Protocol{
 	},
 }
 
+// GeminiHTTPRoute is the Gemini route.
 var GeminiHTTPRoute = route.MakeFromTransport(route.MakeTransportInput{
 	ID:       geminiAdapter,
 	Provider: "google",

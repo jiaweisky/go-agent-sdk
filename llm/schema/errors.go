@@ -6,6 +6,8 @@ import "fmt"
 // specially (a context overflow, for example).
 type ProviderFailureClassification string
 
+// ClassificationContextOverflow marks a request that exceeded the model's context
+// window.
 const ClassificationContextOverflow ProviderFailureClassification = "context-overflow"
 
 // HttpRequestDetails is the redacted request a failed call sent.

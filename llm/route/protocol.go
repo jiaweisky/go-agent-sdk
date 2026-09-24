@@ -6,12 +6,16 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// Protocol is a wire protocol: how to build its body and how to decode its
+// stream.
 type Protocol struct {
 	ID     schema.ProtocolID
 	Body   ProtocolBody
 	Stream ProtocolStream
 }
 
+// ProtocolBody lowers a request into the protocol's body and describes its
+// schema.
 type ProtocolBody struct {
 	// Schema is the provider-native body contract. Route construction compiles
 	// it and compile() validates every built body against it.
@@ -33,6 +37,8 @@ func CompileBodySchema(sch *jsonschema.Schema) *jsonschema6.Schema {
 	return compiled
 }
 
+// ProtocolStream decodes a protocol's frames into LLM events through a state
+// machine.
 type ProtocolStream struct {
 	DecodeEvent func(frame string) (any, error)
 	Initial     func(request *schema.LLMRequest) any
@@ -41,6 +47,7 @@ type ProtocolStream struct {
 	OnHalt      func(state any) []schema.LLMEvent
 }
 
+// MakeProtocol fills in a protocol's defaults.
 func MakeProtocol(input Protocol) Protocol {
 	return input
 }

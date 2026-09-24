@@ -8,8 +8,10 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// GoogleProviderID is the provider id models.dev uses for Google.
 const GoogleProviderID = schema.ProviderID("google")
 
+// GoogleConfig configures the Google facade.
 type GoogleConfig struct {
 	Auth            *route.Auth
 	APIKey          *string
@@ -21,6 +23,8 @@ type GoogleConfig struct {
 	Http            *schema.HttpOptions
 }
 
+// GoogleProvider is a configured Google facade: its id, its route, and its model
+// factory.
 type GoogleProvider struct {
 	ID     schema.ProviderID
 	Routes []route.Route
@@ -61,6 +65,7 @@ func configuredGoogleRoute(geminiRoute route.Route, input GoogleConfig) route.Ro
 	})
 }
 
+// NewGoogle builds the Google facade over the Gemini route.
 func NewGoogle(geminiRoute route.Route, input GoogleConfig) GoogleProvider {
 	r := configuredGoogleRoute(geminiRoute, input)
 	return GoogleProvider{

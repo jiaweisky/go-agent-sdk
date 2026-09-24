@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// Framing turns a response body into the frames a protocol decodes.
 type Framing[T any] struct {
 	ID    string
 	Frame func(reader io.Reader) iter.Seq2[T, error]
@@ -17,6 +18,7 @@ type Framing[T any] struct {
 // tool arguments, base64 media, or long reasoning.
 const maxSSEFrameBytes = 10 * 1024 * 1024
 
+// SSE frames a text/event-stream body into its data payloads.
 var SSE = Framing[string]{
 	ID:    "sse",
 	Frame: sseFraming,

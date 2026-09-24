@@ -7,16 +7,20 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// TransportRuntime is what a transport needs from the host: the HTTP client and
+// any credentials.
 type TransportRuntime struct {
 	HTTP *Executor
 }
 
+// Transport sends a prepared body and yields the frames it receives.
 type Transport interface {
 	ID() string
 	Prepare(input TransportPrepareInput) (any, error)
 	Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error]
 }
 
+// TransportPrepareInput is what a transport prepares from.
 type TransportPrepareInput struct {
 	Body       any
 	Request    *schema.LLMRequest

@@ -11,7 +11,11 @@ import (
 )
 
 const openaiResponsesAdapter = "openai-responses"
+
+// OpenAIResponsesDefaultBaseURL is the OpenAI API base URL.
 const OpenAIResponsesDefaultBaseURL = "https://api.openai.com/v1"
+
+// OpenAIResponsesPath is the Responses endpoint path.
 const OpenAIResponsesPath = "/responses"
 
 var openaiResponsesImageMIMEs = map[string]struct{}{
@@ -87,6 +91,7 @@ type openaiResponsesResponsesUsage struct {
 	ProviderMetadata    schema.ProviderMetadata             `json:"-"`
 }
 
+// UnmarshalJSON reads the usage payload the Responses API sends.
 func (u *openaiResponsesResponsesUsage) UnmarshalJSON(data []byte) error {
 	type plain openaiResponsesResponsesUsage
 	var decoded plain
@@ -976,6 +981,7 @@ func openaiResponsesProviderErrorMessage(evt openaiResponsesResponsesEvent, fall
 	return fallback
 }
 
+// OpenAIResponsesProtocol is the OpenAI Responses wire protocol.
 var OpenAIResponsesProtocol = route.Protocol{
 	ID: openaiResponsesAdapter,
 	Body: route.ProtocolBody{
@@ -997,6 +1003,7 @@ var OpenAIResponsesProtocol = route.Protocol{
 	},
 }
 
+// OpenAIResponsesHTTPRoute is the OpenAI Responses route.
 var OpenAIResponsesHTTPRoute = route.MakeFromTransport(route.MakeTransportInput{
 	ID:        openaiResponsesAdapter,
 	Provider:  "openai",

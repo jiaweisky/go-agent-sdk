@@ -6,6 +6,7 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// OpenAIOptionsInput is the ergonomic form of the "openai" provider options.
 type OpenAIOptionsInput struct {
 	Store            *bool    `json:"store,omitempty"`
 	PromptCacheKey   *string  `json:"promptCacheKey,omitempty"`
@@ -16,6 +17,7 @@ type OpenAIOptionsInput struct {
 	ServiceTier      *string  `json:"serviceTier,omitempty"`
 }
 
+// OpenAIProviderOptionsInput is the raw form of the provider options.
 type OpenAIProviderOptionsInput = schema.ProviderOptions
 
 func openAIProviderOptions(opts *OpenAIOptionsInput) schema.ProviderOptions {

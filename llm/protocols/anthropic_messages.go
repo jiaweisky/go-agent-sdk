@@ -11,7 +11,11 @@ import (
 )
 
 const anthropicMessagesAdapter = "anthropic-messages"
+
+// AnthropicMessagesDefaultBaseURL is the Anthropic API base URL.
 const AnthropicMessagesDefaultBaseURL = "https://api.anthropic.com/v1"
+
+// AnthropicMessagesPath is the Anthropic Messages endpoint path.
 const AnthropicMessagesPath = "/messages"
 const anthropicMessagesBreakpointCap = 4
 
@@ -117,6 +121,7 @@ type anthropicMessagesAnthropicUsage struct {
 	ProviderMetadata     schema.ProviderMetadata `json:"-"`
 }
 
+// UnmarshalJSON reads the usage payload Anthropic sends.
 func (u *anthropicMessagesAnthropicUsage) UnmarshalJSON(data []byte) error {
 	type plain anthropicMessagesAnthropicUsage
 	var decoded plain
@@ -945,6 +950,7 @@ func anthropicMessagesStrVal(s *string, def string) string {
 	return *s
 }
 
+// AnthropicMessagesProtocol is the Anthropic Messages wire protocol.
 var AnthropicMessagesProtocol = route.Protocol{
 	ID: anthropicMessagesAdapter,
 	Body: route.ProtocolBody{
@@ -963,6 +969,7 @@ var AnthropicMessagesProtocol = route.Protocol{
 	},
 }
 
+// AnthropicMessagesHTTPRoute is the Anthropic Messages route.
 var AnthropicMessagesHTTPRoute = route.MakeFromTransport(route.MakeTransportInput{
 	ID:       anthropicMessagesAdapter,
 	Provider: "anthropic",

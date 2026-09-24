@@ -1,10 +1,12 @@
 package provider
 
+// OpenAICompatibleProfile is a known OpenAI-compatible provider and its base URL.
 type OpenAICompatibleProfile struct {
 	Provider string
 	BaseURL  string
 }
 
+// Profiles are the known OpenAI-compatible providers, keyed by provider id.
 var Profiles = map[string]OpenAICompatibleProfile{
 	"baseten":    {Provider: "baseten", BaseURL: "https://inference.baseten.co/v1"},
 	"cerebras":   {Provider: "cerebras", BaseURL: "https://api.cerebras.ai/v1"},
@@ -17,6 +19,7 @@ var Profiles = map[string]OpenAICompatibleProfile{
 	"xai":        {Provider: "xai", BaseURL: "https://api.x.ai/v1"},
 }
 
+// ByProvider indexes Profiles by their provider id.
 var ByProvider map[string]OpenAICompatibleProfile
 
 func init() {

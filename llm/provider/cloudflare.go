@@ -15,6 +15,7 @@ const (
 	CloudflareWorkersAIProviderID = schema.ProviderID("cloudflare-workers-ai")
 )
 
+// CloudflareAIGatewayConfig configures the Cloudflare AI Gateway facade.
 type CloudflareAIGatewayConfig struct {
 	AccountID       string
 	GatewayID       string
@@ -29,6 +30,7 @@ type CloudflareAIGatewayConfig struct {
 	Http            *schema.HttpOptions
 }
 
+// CloudflareWorkersAIConfig configures the Cloudflare Workers AI facade.
 type CloudflareWorkersAIConfig struct {
 	AccountID       string
 	BaseURL         string
@@ -41,16 +43,19 @@ type CloudflareWorkersAIConfig struct {
 	Http            *schema.HttpOptions
 }
 
+// CloudflareAIGatewayProvider is a configured AI Gateway facade.
 type CloudflareAIGatewayProvider struct {
 	ID    schema.ProviderID
 	Model func(id string, opts ...llm.ModelOptions) route.Model
 }
 
+// CloudflareWorkersAIProvider is a configured Workers AI facade.
 type CloudflareWorkersAIProvider struct {
 	ID    schema.ProviderID
 	Model func(id string, opts ...llm.ModelOptions) route.Model
 }
 
+// AIGatewayBaseURL renders the AI Gateway base URL for a config.
 func AIGatewayBaseURL(input CloudflareAIGatewayConfig) string {
 	if input.BaseURL != "" {
 		return input.BaseURL
@@ -66,6 +71,7 @@ func AIGatewayBaseURL(input CloudflareAIGatewayConfig) string {
 		url.PathEscape(input.AccountID), url.PathEscape(gwID))
 }
 
+// WorkersAIBaseURL renders the Workers AI base URL for a config.
 func WorkersAIBaseURL(input CloudflareWorkersAIConfig) string {
 	if input.BaseURL != "" {
 		return input.BaseURL
@@ -130,6 +136,8 @@ func cloudflareWorkersAIDefaults(input CloudflareWorkersAIConfig) route.RouteDef
 	}
 }
 
+// NewCloudflareAIGateway builds the AI Gateway facade over the OpenAI-compatible
+// Chat route.
 func NewCloudflareAIGateway(openAICompatibleChatRoute route.Route, input CloudflareAIGatewayConfig) CloudflareAIGatewayProvider {
 	preconfigured := openAICompatibleChatRoute.With(route.RoutePatch{
 		ID:       string(CloudflareAIGatewayProviderID),
@@ -155,6 +163,8 @@ func NewCloudflareAIGateway(openAICompatibleChatRoute route.Route, input Cloudfl
 	}
 }
 
+// NewCloudflareWorkersAI builds the Workers AI facade over the OpenAI-compatible
+// Chat route.
 func NewCloudflareWorkersAI(openAICompatibleChatRoute route.Route, input CloudflareWorkersAIConfig) CloudflareWorkersAIProvider {
 	preconfigured := openAICompatibleChatRoute.With(route.RoutePatch{
 		ID:       string(CloudflareWorkersAIProviderID),

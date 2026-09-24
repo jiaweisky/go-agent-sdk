@@ -10,10 +10,12 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// GitHubCopilotProviderID is the provider id models.dev uses for GitHub Copilot.
 const GitHubCopilotProviderID = schema.ProviderID("github-copilot")
 
 var gptModelRegex = regexp.MustCompile(`^gpt-(\d+)`)
 
+// GitHubCopilotConfig configures the GitHub Copilot facade.
 type GitHubCopilotConfig struct {
 	Auth            *route.Auth
 	APIKey          *string
@@ -26,6 +28,8 @@ type GitHubCopilotConfig struct {
 	Http            *schema.HttpOptions
 }
 
+// GitHubCopilotProvider is a configured GitHub Copilot facade: its id, its routes,
+// and its model factory.
 type GitHubCopilotProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
@@ -34,6 +38,8 @@ type GitHubCopilotProvider struct {
 	Chat      func(id string, opts ...llm.ModelOptions) route.Model
 }
 
+// ShouldUseResponsesAPI reports whether a Copilot model should use the Responses
+// API rather than Chat Completions.
 func ShouldUseResponsesAPI(modelID string, endpoint *string) bool {
 	if endpoint != nil {
 		return *endpoint == "responses"
@@ -73,6 +79,7 @@ func configGhCopilotRoute(r route.Route, options GitHubCopilotConfig) route.Rout
 	})
 }
 
+// NewGitHubCopilot builds the Copilot facade over the Responses and Chat routes.
 func NewGitHubCopilot(responsesRoute, chatRoute route.Route, options GitHubCopilotConfig) GitHubCopilotProvider {
 	chatWithProvider := chatRoute.With(route.RoutePatch{Provider: string(GitHubCopilotProviderID)})
 	responsesWithProvider := responsesRoute.With(route.RoutePatch{Provider: string(GitHubCopilotProviderID)})

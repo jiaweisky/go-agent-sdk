@@ -4,6 +4,7 @@ import (
 	"os"
 )
 
+// ApiKeyMode says whether an API key is required.
 type ApiKeyMode string
 
 const (
@@ -11,6 +12,8 @@ const (
 	ApiKeyModeRequired ApiKeyMode = "required"
 )
 
+// BearerAuth builds the auth for an API-key provider: an explicit Auth wins,
+// then the API key, then the first set variable from envVar.
 func BearerAuth(options struct {
 	Auth   *Auth
 	APIKey *string

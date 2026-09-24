@@ -8,8 +8,10 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
+// AnthropicProviderID is the provider id models.dev uses for Anthropic.
 const AnthropicProviderID = schema.ProviderID("anthropic")
 
+// AnthropicConfig configures the Anthropic facade.
 type AnthropicConfig struct {
 	Auth            *route.Auth
 	APIKey          *string
@@ -21,6 +23,8 @@ type AnthropicConfig struct {
 	Http            *schema.HttpOptions
 }
 
+// AnthropicProvider is a configured Anthropic facade: its id, its route, and its
+// model factory.
 type AnthropicProvider struct {
 	ID     schema.ProviderID
 	Routes []route.Route
@@ -61,6 +65,7 @@ func configuredRoute(anthropicMessagesRoute route.Route, input AnthropicConfig) 
 	})
 }
 
+// NewAnthropic builds the Anthropic facade over the Anthropic Messages route.
 func NewAnthropic(anthropicMessagesRoute route.Route, input AnthropicConfig) AnthropicProvider {
 	r := configuredRoute(anthropicMessagesRoute, input)
 	return AnthropicProvider{
