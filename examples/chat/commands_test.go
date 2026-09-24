@@ -69,6 +69,53 @@ func TestMCPsCommandWithoutServers(t *testing.T) {
 	}
 }
 
+// TestSkillsCommandWithPaddedInput guards that the prompt's whitespace does not
+// stop a command from being recognised.
+func TestSkillsCommandWithPaddedInput(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		if !handleCommand(c, c.console, "  /skills  ") {
+			t.Error("a padded command was not recognised")
+		}
+	})
+	if !strings.Contains(out, "no skills") {
+		t.Fatalf("out = %q, want the empty-skills hint", out)
+	}
+}
+
+// TestTaskCommands covers the task lifecycle lines and /task: the list, the
+// drill-down by handle, and an unknown argument.
+func TestTaskCommands(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		c.handle(agent.ToolProgress{
+			SessionID: "ses_1", CallID: "call_1",
+			Structured: map[string]any{
+				"sessionId":    "ses_child",
+				"subagentType": "explore",
+				"description":  "explore core",
+			},
+		})
+		c.handle(agent.ToolSuccess{SessionID: "ses_1", CallID: "call_1"})
+
+		c.console.write("--list--\n")
+		c.taskCommand("/task")
+		c.console.write("--detail--\n")
+		c.taskCommand("/task 1")
+		c.console.write("--missing--\n")
+		c.taskCommand("/task nope")
+	})
+	for _, want := range []string{
+		"┌ #1 Explore Task — explore core", // start line
+		"└ #1 ✓",                           // finish line
+		"(/task #1 for the full text)",
+		"#1 · done · Explore Task — explore core", // list
+		"task not found: nope",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("out = %q, missing %q", out, want)
+		}
+	}
+}
+
 // TestDemoConfigDiscovered loads the demo config from the package's .config
 // directory (go test runs with the package directory as the working directory).
 func TestDemoConfigDiscovered(t *testing.T) {
@@ -120,21 +167,14 @@ func TestDemoConfigDiscovered(t *testing.T) {
 	}
 }
 
-// TestExampleDirIsSelfContained: the example's state and sample config resolve
-// next to the example, not in the user's home.
-func TestExampleDirIsSelfContained(t *testing.T) {
+// TestExampleDirPointsAtTheExample: ExampleDir resolves to the example's own
+// directory, which is where Client reads .config from and writes .data to.
+func TestExampleDirPointsAtTheExample(t *testing.T) {
 	dir := util.ExampleDir()
+	if _, err := os.Stat(filepath.Join(dir, "main.go")); err != nil {
+		t.Fatalf("example dir: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(dir, ".config", "skill", "code-review", "SKILL.md")); err != nil {
 		t.Fatalf("sample skill next to the example: %v", err)
-	}
-
-	opts := &agent.ClientOptions{ConfigDirs: []string{".config"}}
-	util.WithExampleDir(dir)(opts)
-	if want := filepath.Join(dir, ".data"); opts.Root != want {
-		t.Fatalf("Root = %q, want %q", opts.Root, want)
-	}
-	if len(opts.ConfigDirs) != 2 ||
-		opts.ConfigDirs[0] != filepath.Join(dir, ".config") || opts.ConfigDirs[1] != ".config" {
-		t.Fatalf("ConfigDirs = %v", opts.ConfigDirs)
 	}
 }

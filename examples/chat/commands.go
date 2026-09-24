@@ -41,7 +41,7 @@ func (c *chat) agentsCommand() {
 		return
 	}
 	var permissions schema.PermissionRuleset
-	if info := agents.Get(schema.AgentID("build")); info != nil {
+	if info := agents.Get(schema.AgentID(agentName)); info != nil {
 		permissions = info.Permissions
 	}
 	subagents := agent.SubagentTypes(agents, permissions, util.LocaleTag)

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -14,6 +16,9 @@ type chatUsage struct {
 	cacheMiss int
 	output    int
 	cost      float64 // CNY
+	// priced is set once a turn was priced, so the status line can show a cost
+	// only for the models this demo knows the rates of.
+	priced bool
 }
 
 func (u chatUsage) tokens() int { return u.cacheHit + u.cacheMiss + u.output }
@@ -45,6 +50,7 @@ func (u *chatUsage) addUsage(modelID string, providerMetadata map[string]map[str
 	u.output += int(output)
 	if cost, ok := deepseekCost(modelID, hit, miss, output, at); ok {
 		u.cost += cost
+		u.priced = true
 	}
 }
 
@@ -62,11 +68,18 @@ var deepseekPeakPricing = map[string]deepseekPricing{
 	"pro":   {cacheHit: 0.30, cacheMiss: 9.0, output: 27.0},
 }
 
+// deepseekPricingFor returns the DeepSeek schedule for modelID, if this demo can
+// price it. Only DeepSeek ids from the priced families are matched: keying on
+// "pro" alone would price another vendor's model (gemini-2.5-pro, gpt-5-pro)
+// with DeepSeek's schedule, and an unlisted DeepSeek id gets no invented rate.
 func deepseekPricingFor(modelID string) (deepseekPricing, bool) {
+	if !strings.HasPrefix(modelID, "deepseek") {
+		return deepseekPricing{}, false
+	}
 	switch {
 	case strings.Contains(modelID, "pro"):
 		return deepseekPeakPricing["pro"], true
-	case strings.Contains(modelID, "flash"), strings.Contains(modelID, "deepseek"):
+	case strings.Contains(modelID, "flash"):
 		return deepseekPeakPricing["flash"], true
 	default:
 		return deepseekPricing{}, false
@@ -126,14 +139,15 @@ func nestedNumber(data map[string]any, keys ...string) float64 {
 	return 0
 }
 
-// formatTokens renders a token count compactly (1.2k, 3.4M).
+// formatTokens renders a token count compactly (1.2k, 3.4M). It truncates
+// rather than rounds, so 999_999 reads as 999.9k instead of 1000.0k.
 func formatTokens(count int) string {
-	switch {
-	case count >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(count)/1_000_000)
-	case count >= 1_000:
-		return fmt.Sprintf("%.1fk", float64(count)/1_000)
-	default:
-		return fmt.Sprintf("%d", count)
+	if count < 1_000 {
+		return strconv.Itoa(count)
 	}
+	unit, suffix := 1_000.0, "k"
+	if count >= 1_000_000 {
+		unit, suffix = 1_000_000.0, "M"
+	}
+	return fmt.Sprintf("%.1f%s", math.Floor(float64(count)/unit*10)/10, suffix)
 }

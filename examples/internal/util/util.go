@@ -37,28 +37,6 @@ func WithQuestion(handler agent.QuestionHandlerFunc) Option {
 	}
 }
 
-// WithRoot overrides the state root. Defaults to ExampleDir()/.data.
-func WithRoot(root string) Option {
-	return func(opts *agent.ClientOptions) {
-		if root != "" {
-			opts.Root = root
-		}
-	}
-}
-
-// WithExampleDir makes an example self-contained: state goes to <dir>/.data and
-// <dir>/.config is scanned for the sample agents and skills. Pass ExampleDir(),
-// which also prepends it to any explicit ConfigDirs.
-func WithExampleDir(dir string) Option {
-	return func(opts *agent.ClientOptions) {
-		if dir == "" {
-			return
-		}
-		opts.Root = filepath.Join(dir, ".data")
-		opts.ConfigDirs = append([]string{filepath.Join(dir, ".config")}, opts.ConfigDirs...)
-	}
-}
-
 // ExampleDir is the directory of the file that calls it, so an example's state
 // and sample config live next to the example instead of in the user's home (and
 // stay put when -C changes the working directory). Call it from the example's
@@ -100,7 +78,7 @@ func WithMCP(configs ...agent.MCPConfig) Option {
 //
 // The default permission handler is agent.ApproveAll; override it with
 // WithPermission.
-func Client(options ...Option) (*agent.Client, error) {
+func Client(dir string, options ...Option) (*agent.Client, error) {
 	providerType := envOr("OPENCODE_PROVIDER", "openai")
 	// The model id is provider-specific, so require it explicitly rather than
 	// silently defaulting to another provider's model.
@@ -125,6 +103,9 @@ func Client(options ...Option) (*agent.Client, error) {
 		limit = schema.ModelLimit{Context: value.Context, Output: value.Output}
 	}
 	opts := &agent.ClientOptions{
+		// The SDK never picks a state directory, so the example keeps its state
+		// next to itself (git-ignored) instead of in the user's home.
+		Root:     filepath.Join(dir, ".data"),
 		Model:    model,
 		Protocol: protocol,
 		ModelInfo: func(id string) (schema.ModelInfo, error) {
@@ -141,7 +122,7 @@ func Client(options ...Option) (*agent.Client, error) {
 		Permission:  agent.ApproveAll,
 		// The example's sample agents/skills, then .config in the working
 		// directory (-C pins it) so a project can override them.
-		ConfigDirs: []string{".config"},
+		ConfigDirs: []string{filepath.Join(dir, ".config"), ".config"},
 	}
 	for _, option := range options {
 		option(opts)

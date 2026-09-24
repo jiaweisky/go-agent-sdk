@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/term"
@@ -60,8 +61,11 @@ type console struct {
 	// keys streams raw runes from stdin on a TTY so the turn loop can watch
 	// for Esc/Ctrl+C while a turn is running. Nil on a non-TTY.
 	keys chan rune
-	// prompting is set while a line editor owns stdin (the main prompt or a
-	// permission/question prompt), so the turn watcher yields input to it.
+	// edit streams the runes typed while a line editor owns stdin (the main
+	// prompt or a permission/question prompt). Non-nil exactly when keys is.
+	edit chan rune
+	// prompting is set while a line editor owns stdin, so incoming runes are
+	// routed to the editor and the status line is not drawn over the prompt.
 	prompting atomic.Bool
 	out       io.Writer
 
@@ -85,21 +89,62 @@ func newConsole() (*console, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	c.keys = make(chan rune, 64)
-	go func() {
-		reader := bufio.NewReader(os.Stdin)
-		for {
-			r, _, err := reader.ReadRune()
-			if err != nil {
-				close(c.keys)
-				return
+	c.keys = make(chan rune, stdinQueue)
+	c.edit = make(chan rune, stdinQueue)
+	go c.readStdin()
+	c.editor = &editor{
+		in:  &chanRuneReader{keys: c.edit},
+		out: os.Stdout,
+		width: func() int {
+			if columns, _, err := term.GetSize(fd); err == nil {
+				return columns
 			}
-			c.keys <- r
-		}
-	}()
-	c.editor = &editor{in: &chanRuneReader{keys: c.keys}, out: os.Stdout}
+			return 0
+		},
+	}
 	c.out = crlfWriter{os.Stdout}
 	return c, func() { _ = term.Restore(fd, state) }, nil
+}
+
+// stdinQueue is the rune buffer on each stdin stream: enough for typing ahead,
+// and never a blocking point for the reader.
+const stdinQueue = 64
+
+// readStdin is the only goroutine that reads stdin, and it routes every rune to
+// exactly one owner: the line editor while a prompt is active, the turn watcher
+// otherwise. Handing out runes here — instead of letting both consumers read the
+// same channel — is what stops the turn watcher from swallowing a keystroke that
+// was meant for a prompt: a lost "n" reaches interactivePermission as an empty
+// answer, which defaults to allow.
+func (c *console) readStdin() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		r, _, err := reader.ReadRune()
+		if err != nil {
+			close(c.keys)
+			close(c.edit)
+			return
+		}
+		c.deliver(r)
+	}
+}
+
+// deliver routes one raw stdin rune to its owner.
+func (c *console) deliver(r rune) {
+	if c.prompting.Load() {
+		enqueue(c.edit, r)
+		return
+	}
+	enqueue(c.keys, r)
+}
+
+// enqueue queues r, dropping it when the queue is full: stdin must never block
+// the reader, which would also stop interrupts from being delivered.
+func enqueue(runes chan rune, r rune) {
+	select {
+	case runes <- r:
+	default:
+	}
 }
 
 // watchInterrupt waits until done closes or the user presses Esc/Ctrl+C,
@@ -107,8 +152,8 @@ func newConsole() (*console, func(), error) {
 // was pressed. onTick (if non-nil) is called about every watchTick with a
 // monotonically increasing frame counter, so callers can animate a spinner.
 //
-// While a line editor owns stdin (a prompt is active) the watcher yields input
-// to it instead of consuming keys.
+// Runes typed while a prompt owns stdin are routed to the editor by readStdin,
+// so the watcher only ever sees keys meant for the turn it is watching.
 func (c *console) watchInterrupt(done <-chan struct{}, onInterrupt func(), onTick func(int)) bool {
 	ticker := time.NewTicker(watchTick)
 	defer ticker.Stop()
@@ -130,16 +175,6 @@ func (c *console) watchInterrupt(done <-chan struct{}, onInterrupt func(), onTic
 		}
 	}
 	for {
-		if c.prompting.Load() {
-			select {
-			case <-done:
-				return false
-			case <-ticker.C:
-				tick()
-			case <-time.After(20 * time.Millisecond):
-				continue
-			}
-		}
 		select {
 		case <-done:
 			return false
@@ -224,6 +259,9 @@ func (c *console) drawStatusLocked() {
 	c.statusDrawn = true
 }
 
+// prompt reads one line of input with the line editor. The returned line is
+// trimmed (on both the TTY and the piped path), so callers can compare it to a
+// command or test it for emptiness.
 func (c *console) prompt(prompt string) (string, error) {
 	c.prompting.Store(true)
 	defer c.prompting.Store(false)
@@ -237,7 +275,8 @@ func (c *console) prompt(prompt string) (string, error) {
 	}()
 	c.eraseStatusLocked()
 	if c.editor != nil {
-		return c.editor.readLine(prompt)
+		line, err := c.editor.readLine(prompt)
+		return strings.TrimSpace(line), err
 	}
 	fmt.Fprint(c.out, prompt)
 	line, err := c.reader.ReadString('\n')
@@ -268,6 +307,10 @@ type editor struct {
 	in      keyReader
 	out     io.Writer
 	history []string
+	// width reports the terminal width in columns, or 0 when unknown. A line
+	// wider than the terminal is drawn as a scrolling window instead of being
+	// allowed to wrap: the in-place redraw assumes the line occupies one row.
+	width func() int
 }
 
 func (e *editor) readLine(prompt string) (string, error) {
@@ -396,7 +439,18 @@ func (e *editor) readEscape() (rune, error) {
 	if err != nil {
 		return 0, err
 	}
-	if r != '[' {
+	switch r {
+	case 'O':
+		// SS3: application cursor keys (DECCKM) send ESC O A/B/C/D/H/F, so the
+		// rune after "ESC O" is the key itself. Without this the 'O' is dropped
+		// and the final rune is inserted as text (pressing Up typed an "A").
+		final, _, err := e.in.ReadRune()
+		if err != nil {
+			return 0, err
+		}
+		return final, nil
+	case '[':
+	default:
 		return r, nil
 	}
 	var last rune
@@ -425,12 +479,49 @@ func (e *editor) readEscape() (rune, error) {
 }
 
 func (e *editor) draw(prompt string, line []rune, pos int) {
+	from, to := e.viewport(prompt, line, pos)
 	fmt.Fprint(e.out, "\r\x1b[K")
 	fmt.Fprint(e.out, prompt)
-	fmt.Fprint(e.out, string(line))
-	if back := runesWidth(line[pos:]); back > 0 {
+	fmt.Fprint(e.out, string(line[from:to]))
+	if back := runesWidth(line[pos:to]); back > 0 {
 		fmt.Fprintf(e.out, "\x1b[%dD", back)
 	}
+}
+
+// viewport returns the slice of line to draw: the cursor stays visible and the
+// drawn runes never exceed the terminal width. A line that does not fit scrolls
+// horizontally; drawing it in full would wrap and break the in-place redraw.
+func (e *editor) viewport(prompt string, line []rune, pos int) (int, int) {
+	if e.width == nil {
+		return 0, len(line)
+	}
+	usable := e.width() - stringWidth(prompt)
+	if usable <= 0 || runesWidth(line) <= usable {
+		return 0, len(line)
+	}
+	// Drop leading runes until the tail fits, so the end of the line stays in
+	// view while the cursor is inside the window.
+	from := 0
+	for from < len(line) && runesWidth(line[from:]) > usable {
+		from++
+	}
+	if from <= pos {
+		return from, len(line)
+	}
+	// The cursor sits in the dropped head: keep it visible and cut the tail.
+	from, to := pos, pos
+	for to < len(line) && runesWidth(line[from:to+1]) <= usable {
+		to++
+	}
+	return from, to
+}
+
+func stringWidth(s string) int {
+	total := 0
+	for _, r := range s {
+		total += runeWidth(r)
+	}
+	return total
 }
 
 func runesWidth(runes []rune) int {
@@ -442,7 +533,7 @@ func runesWidth(runes []rune) int {
 }
 
 // runeWidth returns the terminal cell width of r, treating East Asian wide and
-// fullwidth runes as two cells.
+// fullwidth runes as two cells and combining marks as none.
 func runeWidth(r rune) int {
 	if r == 0 || r < keySpace || (r >= asciiDEL && r < asciiC1End) {
 		return 0
@@ -450,6 +541,11 @@ func runeWidth(r rune) int {
 	switch width.LookupRune(r).Kind() {
 	case width.EastAsianWide, width.EastAsianFullwidth:
 		return 2
+	}
+	// A combining mark adds no cell of its own; counting it would shift the
+	// cursor one column per accent.
+	if unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
+		return 0
 	}
 	return 1
 }

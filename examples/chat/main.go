@@ -23,7 +23,18 @@ const (
 	reset  = "\033[0m"
 )
 
+// agentName is the primary agent the chat session runs. util.Client registers it
+// with a system prompt; the permission demo below extends the same agent.
+const agentName = "build"
+
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "chat: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	// -C runs as if started in the given directory (like git -C), so the
 	// config directory and workspace do not depend on where chat was launched.
 	dir := flag.String("C", "", "run as if started in this directory")
@@ -31,8 +42,7 @@ func main() {
 	flag.Parse()
 	if *dir != "" {
 		if err := os.Chdir(*dir); err != nil {
-			fmt.Fprintf(os.Stderr, "chat: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 	}
 	// Load .env from the (possibly changed) working directory; util no longer
@@ -42,13 +52,13 @@ func main() {
 	ctx := context.Background()
 	console, restore, err := newConsole()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer restore()
 
-	client, err := util.Client(clientOptions(console, *yolo)...)
+	client, err := util.Client(util.ExampleDir(), clientOptions(console, *yolo)...)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer client.Close()
 
@@ -57,7 +67,7 @@ func main() {
 		// Append an "ask" rule for bash to demonstrate interactive approval.
 		if err := client.Plugin().Add("chat-permission-demo", func(pluginCtx *core.PluginContext) (func(), error) {
 			_, err := pluginCtx.Agents.Transform(func(draft core.AgentDraft) error {
-				draft.Update(schema.AgentID("build"), func(info *schema.AgentInfo) {
+				draft.Update(schema.AgentID(agentName), func(info *schema.AgentInfo) {
 					info.Permissions = append(info.Permissions, schema.PermissionRule{
 						Action: "bash", Resource: "*", Effect: schema.PermissionEffectAsk,
 					})
@@ -66,13 +76,13 @@ func main() {
 			})
 			return func() {}, err
 		}); err != nil {
-			panic(err)
+			return err
 		}
 	}
 
-	session, err := client.CreateSession(ctx, &agent.SessionConfig{Agent: "build"})
+	session, err := client.CreateSession(ctx, &agent.SessionConfig{Agent: agentName})
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer session.Close()
 
@@ -98,22 +108,7 @@ func main() {
 			continue
 		}
 		console.write("\n")
-		switch {
-		case input == "/skills":
-			renderer.skillsCommand()
-			console.write("\n")
-			continue
-		case input == "/agents":
-			renderer.agentsCommand()
-			console.write("\n")
-			continue
-		case input == "/mcps":
-			renderer.mcpsCommand()
-			console.write("\n")
-			continue
-		case input == "/task" || strings.HasPrefix(input, "/task "):
-			renderer.taskCommand(input)
-			console.write("\n")
+		if handleCommand(renderer, console, input) {
 			continue
 		}
 
@@ -136,6 +131,27 @@ func main() {
 		renderer.clearStatus()
 		console.write("\n")
 	}
+	return nil
+}
+
+// handleCommand runs a slash command from the prompt, and reports whether the
+// input was one: the caller must not send it to the model. The input is trimmed
+// here so that "/skills " (or a leading space) is still a command.
+func handleCommand(renderer *chat, console *console, input string) bool {
+	switch command := strings.TrimSpace(input); {
+	case command == "/skills":
+		renderer.skillsCommand()
+	case command == "/agents":
+		renderer.agentsCommand()
+	case command == "/mcps":
+		renderer.mcpsCommand()
+	case command == "/task" || strings.HasPrefix(command, "/task "):
+		renderer.taskCommand(command)
+	default:
+		return false
+	}
+	console.write("\n")
+	return true
 }
 
 // send drives one turn; rendering happens in the client event handler.
@@ -153,7 +169,6 @@ func send(ctx context.Context, console *console, session *agent.Session, prompt 
 // and every "ask" is approved without a prompt. Questions stay interactive.
 func clientOptions(console *console, yolo bool) []util.Option {
 	options := []util.Option{
-		util.WithExampleDir(util.ExampleDir()),
 		util.WithQuestion(interactiveQuestion(console)),
 		util.WithMCP(weatherMCP()...),
 	}
@@ -193,21 +208,44 @@ func interactiveQuestion(console *console) agent.QuestionHandlerFunc {
 				fmt.Fprintf(&message, "  %d) %s - %s\n", i+1, option.Label, option.Description)
 			}
 			console.write(message.String())
-			answer, _ := console.prompt("Answer (number or text, empty to skip): ")
+			answer, err := console.prompt(questionPrompt(question))
+			if err != nil {
+				// EOF (e.g. Ctrl+D) or a closed stdin: the remaining answers are
+				// skipped rather than prompted into a dead terminal, and every
+				// question keeps its slot so the answers stay aligned.
+				answers = append(answers, schema.QuestionAnswer{})
+				continue
+			}
 			answers = append(answers, parseAnswer(answer, question.Options))
 		}
 		return answers, nil
 	}
 }
 
+func questionPrompt(question schema.QuestionInfo) string {
+	if question.Multiple != nil && *question.Multiple {
+		return "Answer (numbers separated by comma, empty to skip): "
+	}
+	return "Answer (number or text, empty to skip): "
+}
+
+// parseAnswer maps a prompt answer to the labels the model expects: numbers
+// select options (several, comma separated, when the question allows it), and
+// anything else is free text.
 func parseAnswer(input string, options []schema.QuestionOption) []string {
 	if input == "" {
 		return []string{}
 	}
-	if index, err := strconv.Atoi(input); err == nil && index >= 1 && index <= len(options) {
-		return []string{options[index-1].Label}
+	selected := []string{}
+	for _, part := range strings.Split(input, ",") {
+		index, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || index < 1 || index > len(options) {
+			// Not a selection list: treat the whole answer as text.
+			return []string{input}
+		}
+		selected = append(selected, options[index-1].Label)
 	}
-	return []string{input}
+	return selected
 }
 
 // weatherMCP configures an optional local weather MCP server (stdio). It is

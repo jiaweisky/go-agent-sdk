@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,10 +42,32 @@ func (m *markdown) render(line string) string {
 	if strings.HasPrefix(trimmed, "> ") {
 		return dim + "│ " + reset + inline(trimmed[2:])
 	}
-	if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
-		return "• " + inline(trimmed[2:])
+	if indent, marker, content, ok := listItem(trimmed); ok {
+		return indent + marker + " " + inline(content)
 	}
 	return inline(line)
+}
+
+// listItem splits a list line into its indentation, marker and content, so
+// nested items keep their indentation and ordered items keep their number (the
+// model emits both).
+func listItem(line string) (indent, marker, content string, ok bool) {
+	body := strings.TrimLeft(line, " \t")
+	indent = line[:len(line)-len(body)]
+	if len(body) >= 2 {
+		switch body[0] {
+		case '-', '*', '+':
+			if body[1] == ' ' {
+				return indent, "•", body[2:], true
+			}
+		}
+	}
+	if end := strings.IndexAny(body, ".)"); end > 0 && end <= 3 && end+1 < len(body) && body[end+1] == ' ' {
+		if _, err := strconv.Atoi(body[:end]); err == nil {
+			return indent, body[:end+1], body[end+2:], true
+		}
+	}
+	return "", "", "", false
 }
 
 func heading(line string) (int, string, bool) {
@@ -107,9 +130,14 @@ func inline(s string) string {
 			}
 		case s[i] == '*':
 			if end := strings.IndexByte(s[i+1:], '*'); end > 0 {
-				out.WriteString(italic + inline(s[i+1:i+1+end]) + reset)
-				i += end + 2
-				continue
+				text := s[i+1 : i+1+end]
+				// Emphasis cannot start or end with a space, so arithmetic like
+				// "2 * 3 * 4" stays literal instead of rendering as italic.
+				if text == strings.TrimSpace(text) {
+					out.WriteString(italic + inline(text) + reset)
+					i += end + 2
+					continue
+				}
 			}
 		}
 		out.WriteByte(s[i])
@@ -196,19 +224,23 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 // chat renders client-wide events. Subagent internals are not streamed inline;
 // each task shows a lifecycle line plus a one-line result preview, and the full
-// answer is available via /task.
+// answer is available via /task. Every session other than the parent's is a
+// subagent's, including the sessions of the tasks a subagent starts.
 type chat struct {
-	console     *console
-	client      *agent.Client
-	mu          sync.Mutex
-	parent      string
-	model       string
-	usage       chatUsage
-	children    map[string]string
-	busy        map[string]bool
-	parentBusy  bool
-	parentTool  string
+	console    *console
+	client     *agent.Client
+	mu         sync.Mutex
+	parent     string
+	model      string
+	usage      chatUsage
+	busy       map[string]bool
+	parentBusy bool
+	// calls maps an open parent tool call to its tool name, and running holds
+	// the ids of its non-task calls in start order: the tool calls of one step
+	// run in parallel, so the status line names the most recent call that is
+	// still running rather than one field that any finishing call would clear.
 	calls       map[string]string
+	running     []string
 	tasksByCall map[string]string
 	tasks       map[string]*taskRecord
 	order       []string
@@ -223,7 +255,6 @@ func newChat(console *console, client *agent.Client, parent, model string) *chat
 		client:      client,
 		parent:      parent,
 		model:       model,
-		children:    map[string]string{},
 		busy:        map[string]bool{},
 		calls:       map[string]string{},
 		tasksByCall: map[string]string{},
@@ -249,28 +280,37 @@ func (c *chat) handle(event agent.Event) {
 		return
 	}
 	sessionID := agent.SessionIDOf(event)
-	if _, isChild := c.children[sessionID]; isChild {
-		c.handleChild(event, sessionID)
+	if sessionID == "" || sessionID == c.parent {
+		c.handleParent(event, sessionID)
 		return
 	}
-	c.handleParent(event, sessionID)
+	// Every other session is a subagent's: a task's session, or the session of a
+	// task started by one (the SDK allows nesting). Classifying by "not the
+	// parent's session" covers grandchildren too, instead of rendering their
+	// text as the user's own assistant reply.
+	c.handleChild(event, sessionID)
 }
 
-// handleChild tracks a subagent's current tool for the bottom status line.
-// Nothing is printed: per-tool-call lines (including failures — the model
-// often gets arguments wrong) are noise, and the status line already shows
-// each busy task's current tool. Full output is available via /task.
+// handleChild tracks one subagent session. A task started by a subagent gets its
+// own lifecycle lines, and the subagent's current tool feeds the bottom status
+// line; nothing else is printed: per-tool-call lines (including failures — the
+// model often gets arguments wrong) are noise and the subagent's text belongs to
+// /task.
 func (c *chat) handleChild(event agent.Event, sessionID string) {
 	switch e := event.(type) {
+	case agent.ToolProgress:
+		c.handleProgress(e)
 	case agent.ToolCalled:
 		record := c.tasks[sessionID]
-		if record == nil {
+		if record == nil || e.Name == agent.TaskName {
 			return
 		}
 		record.tools++
-		if e.Name != agent.TaskName {
-			record.lastTool = e.Name
-		}
+		record.lastTool = e.Name
+	case agent.ToolSuccess:
+		c.finishTool(e.CallID, "")
+	case agent.ToolFailed:
+		c.finishTool(e.CallID, errorMessage(e.Error))
 	case agent.SessionStatus:
 		// Authoritative run state from the SDK's session.status event.
 		if e.Status == "busy" {
@@ -314,8 +354,8 @@ func (c *chat) drawStatusLocked(frame int) {
 		line = fmt.Sprintf("%s %s", spinner, strings.Join(parts, " · "))
 	case c.parentBusy:
 		label := "working"
-		if c.parentTool != "" {
-			label = c.parentTool
+		if tool := c.currentTool(); tool != "" {
+			label = tool
 		}
 		line = fmt.Sprintf("%s %s", spinner, label)
 	}
@@ -337,7 +377,13 @@ func (c *chat) usageLine() string {
 	if c.usage.tokens() == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s tok · ¥%.4f", formatTokens(c.usage.tokens()), c.usage.cost)
+	line := formatTokens(c.usage.tokens()) + " tok"
+	// Only a priced model has a cost to show; otherwise the tokens stand alone
+	// instead of being reported as ¥0.
+	if c.usage.priced {
+		line += fmt.Sprintf(" · ¥%.4f", c.usage.cost)
+	}
+	return line
 }
 
 // clearStatus resets the run state after a turn and redraws the status line so
@@ -347,7 +393,8 @@ func (c *chat) clearStatus() {
 	defer c.mu.Unlock()
 	c.busy = map[string]bool{}
 	c.parentBusy = false
-	c.parentTool = ""
+	c.calls = map[string]string{}
+	c.running = nil
 	c.drawStatusLocked(0)
 }
 
@@ -366,14 +413,11 @@ func (c *chat) handleParent(event agent.Event, sessionID string) {
 		c.handleProgress(e)
 	case agent.ToolCalled:
 		c.flushStream(sessionID)
-		c.calls[e.CallID] = e.Name
+		c.openCall(e.CallID, e.Name)
 		if e.Name == coretool.SkillName {
 			// Skills are worth surfacing: unlike read/grep, a loaded skill
 			// changes how the model behaves for the rest of the turn.
 			c.console.write(fmt.Sprintf("%s[skill] %s%s\n", cyan, skillName(e.Input), reset))
-		}
-		if e.Name != agent.TaskName {
-			c.parentTool = e.Name
 		}
 	case agent.ToolSuccess:
 		c.flushStream(sessionID)
@@ -426,7 +470,6 @@ func (c *chat) handleProgress(event agent.ToolProgress) {
 		return
 	}
 	description := stringField(structured, "description")
-	c.children[childID] = subagent
 	c.tasksByCall[event.CallID] = childID
 	if _, seen := c.tasks[childID]; !seen {
 		record := &taskRecord{
@@ -443,16 +486,12 @@ func (c *chat) handleProgress(event agent.ToolProgress) {
 // finishTool closes a tool call. Non-task tools print nothing (the status line
 // shows the current tool); a task result prints the result preview.
 func (c *chat) finishTool(callID, failure string) {
-	name := c.takeCall(callID)
+	c.endCall(callID)
 	childID, isTask := c.tasksByCall[callID]
 	if !isTask {
-		if name != "" {
-			c.parentTool = ""
-		}
 		return
 	}
 	delete(c.tasksByCall, callID)
-	delete(c.children, childID)
 
 	record := c.tasks[childID]
 	elapsed, tools := time.Duration(0), 0
@@ -472,7 +511,7 @@ func (c *chat) finishTool(callID, failure string) {
 	if tools > 0 {
 		detail = formatToolcalls(tools) + " · " + detail
 	}
-	c.console.write(fmt.Sprintf("%s└ %s %s %s · %s (%s 查看全文)%s\n",
+	c.console.write(fmt.Sprintf("%s└ %s %s %s · %s (%s for the full text)%s\n",
 		yellow, taskHandle(record), mark, detail, summarize(answer, failure), "/task "+taskHandle(record), reset))
 }
 
@@ -488,6 +527,9 @@ func (c *chat) taskCommand(input string) {
 		}
 		for _, childID := range c.order {
 			record := c.tasks[childID]
+			if record == nil {
+				continue
+			}
 			status := "done"
 			if c.busy[childID] {
 				status = "running"
@@ -552,13 +594,13 @@ func renderMarkdown(text string) string {
 // summarize renders the task result preview line.
 func summarize(answer, failure string) string {
 	if failure != "" {
-		return "摘要: 失败: " + truncateRunes(firstLine(failure), 80)
+		return "Summary: failed: " + truncateRunes(firstLine(failure), 80)
 	}
 	text := strings.TrimSpace(answer)
 	if text == "" {
-		return "摘要: (无输出)"
+		return "Summary: (no output)"
 	}
-	return "摘要: " + inline(truncateRunes(firstLine(text), 80))
+	return "Summary: " + inline(truncateRunes(firstLine(text), 80))
 }
 
 func truncateRunes(s string, limit int) string {
@@ -592,10 +634,37 @@ func stringField(data map[string]any, key string) string {
 	return ""
 }
 
-func (c *chat) takeCall(callID string) string {
-	name := c.calls[callID]
+// openCall records a running tool call of the parent session. Task calls are
+// excluded: the status line names the task itself (see tasks).
+func (c *chat) openCall(callID, name string) {
+	if name == agent.TaskName {
+		return
+	}
+	c.calls[callID] = name
+	c.running = append(c.running, callID)
+}
+
+// endCall drops a finished tool call.
+func (c *chat) endCall(callID string) {
 	delete(c.calls, callID)
-	return name
+	for i, id := range c.running {
+		if id == callID {
+			c.running = append(c.running[:i], c.running[i+1:]...)
+			return
+		}
+	}
+}
+
+// currentTool is the parent's most recently started tool call that is still
+// running: tool calls in one step run in parallel, so a finishing call must not
+// clear the label of a call that is still going.
+func (c *chat) currentTool() string {
+	for i := len(c.running) - 1; i >= 0; i-- {
+		if name, ok := c.calls[c.running[i]]; ok {
+			return name
+		}
+	}
+	return ""
 }
 
 // errorMessage extracts a readable message from a tool error payload.

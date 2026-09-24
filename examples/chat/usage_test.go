@@ -47,6 +47,33 @@ func TestDeepseekCost(t *testing.T) {
 	if _, ok := deepseekCost("gpt-4o", 1, 1, 1, peak); ok {
 		t.Fatal("unknown model should not be priced")
 	}
+	// Another vendor's "pro" model must not inherit DeepSeek's schedule.
+	for _, model := range []string{"gemini-2.5-pro", "gpt-5-pro", "claude-opus-pro"} {
+		if _, ok := deepseekCost(model, 1_000_000, 1_000_000, 1_000_000, peak); ok {
+			t.Errorf("%s should not be priced with the DeepSeek schedule", model)
+		}
+	}
+	// A DeepSeek model outside the priced families gets no invented rate.
+	if _, ok := deepseekCost("deepseek-chat", 1, 1, 1, peak); ok {
+		t.Fatal("an unlisted deepseek model should not be priced")
+	}
+}
+
+func TestChatUsageUnpricedModel(t *testing.T) {
+	var usage chatUsage
+	raw := map[string]map[string]any{"openai": {
+		"prompt_cache_hit_tokens":  float64(100),
+		"prompt_cache_miss_tokens": float64(200),
+		"completion_tokens":        float64(50),
+	}}
+	usage.addUsage("gpt-4o", raw, time.Date(2024, 1, 2, 12, 0, 0, 0, time.UTC))
+
+	if usage.tokens() != 350 {
+		t.Fatalf("tokens = %d, want 350", usage.tokens())
+	}
+	if usage.priced || usage.cost != 0 {
+		t.Fatalf("usage = %+v, want no cost for an unpriced model", usage)
+	}
 }
 
 func TestChatUsageAccumulates(t *testing.T) {
@@ -67,7 +94,14 @@ func TestChatUsageAccumulates(t *testing.T) {
 }
 
 func TestFormatTokens(t *testing.T) {
-	cases := map[int]string{500: "500", 1500: "1.5k", 2_000_000: "2.0M"}
+	cases := map[int]string{
+		500:       "500",
+		1500:      "1.5k",
+		2_000_000: "2.0M",
+		// Truncated, not rounded up into the next unit.
+		999_999:   "999.9k",
+		1_999_999: "1.9M",
+	}
 	for in, want := range cases {
 		if got := formatTokens(in); got != want {
 			t.Errorf("formatTokens(%d) = %q, want %q", in, got, want)
