@@ -8,7 +8,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// NewModelInfo builds a native ModelInfo for a registered protocol id, for
+// NewModelInfo builds a ModelInfo for a registered protocol id, for
 // example "openai-responses", "anthropic-messages" or "gemini". baseURL is
 // optional: an empty value uses the route's default endpoint. The ProviderID is
 // set to the protocol id, so ClientOptions.Credentials is called with it. Hand

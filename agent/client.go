@@ -17,7 +17,7 @@ import (
 type ClientOptions struct {
 	// Model is the default model id used when a session does not override it.
 	Model string
-	// Protocol selects the native wire protocol when ModelInfo is not set, for
+	// Protocol selects the wire protocol when ModelInfo is not set, for
 	// example "openai-responses", "anthropic-messages" or "gemini".
 	Protocol schema.ProtocolID
 	// WorkingDirectory is the project/worktree root. Defaults to the process cwd.

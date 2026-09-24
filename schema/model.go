@@ -47,15 +47,14 @@ type ModelCost struct {
 	Cache  *ModelCostCache `json:"cache,omitempty"`
 }
 
-// ProtocolID identifies a native wire protocol (for example "openai-responses",
+// ProtocolID identifies a wire protocol (for example "openai-responses",
 // "anthropic-messages" or "gemini"). It selects the route the SDK speaks. It
 // mirrors llm/schema.ProtocolID; values convert trivially.
 type ProtocolID string
 
-// ModelAPI mirrors Model.Api: the native protocol plus an optional endpoint.
+// ModelAPI identifies the wire protocol and an optional endpoint.
 type ModelAPI struct {
 	ID       *ModelID   `json:"id,omitempty"`
-	Type     string     `json:"type"`
 	Protocol ProtocolID `json:"protocol,omitempty"`
 	URL      *string    `json:"url,omitempty"`
 }
@@ -111,7 +110,7 @@ func ModelInfoEmpty(providerID ProviderID, modelID ModelID) ModelInfo {
 		ID:         modelID,
 		ProviderID: providerID,
 		Name:       string(modelID),
-		API:        ModelAPI{ID: &id, Type: "native"},
+		API:        ModelAPI{ID: &id},
 		Capabilities: ModelCapabilities{
 			Tools:  false,
 			Input:  []string{},

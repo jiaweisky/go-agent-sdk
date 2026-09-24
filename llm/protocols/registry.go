@@ -15,8 +15,8 @@ const (
 	AuthSigV4  AuthScheme = "sigv4"
 )
 
-// Entry describes how to reach a native protocol: the route that speaks it and
-// the auth scheme that route expects.
+// Entry describes how to reach a protocol: the route that speaks it and the
+// auth scheme that route expects.
 type Entry struct {
 	Route route.Route
 	// Scheme is how the credential is applied.
@@ -25,8 +25,8 @@ type Entry struct {
 	HeaderName string
 }
 
-// registry maps a native protocol id to its entry. It is keyed by the route id
-// (each protocol has exactly one HTTP route).
+// registry is the table of supported protocols, keyed by route id (each protocol
+// has exactly one HTTP route). It is populated once at init and read-only after.
 var registry = map[schema.ProtocolID]Entry{
 	schema.ProtocolID(OpenAIResponsesHTTPRoute.ID):      {Route: OpenAIResponsesHTTPRoute, Scheme: AuthBearer},
 	schema.ProtocolID(OpenAIChatHTTPRoute.ID):           {Route: OpenAIChatHTTPRoute, Scheme: AuthBearer},
@@ -36,14 +36,8 @@ var registry = map[schema.ProtocolID]Entry{
 	schema.ProtocolID(BedrockConverseProtocol.ID):       {Route: BedrockConverseRoute(BedrockConverseProtocol), Scheme: AuthSigV4},
 }
 
-// Lookup returns the entry for a native protocol id.
+// Lookup returns the entry for a protocol id.
 func Lookup(id schema.ProtocolID) (Entry, bool) {
 	entry, ok := registry[id]
 	return entry, ok
-}
-
-// Register adds a protocol to the registry, so embedders can extend the SDK
-// with their own protocol (or override an existing one).
-func Register(id schema.ProtocolID, entry Entry) {
-	registry[id] = entry
 }

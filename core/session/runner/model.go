@@ -125,13 +125,6 @@ func runnerModelWithVariant(model schema.ModelInfo, variantID *schema.ModelVaria
 	return updated, nil
 }
 
-func runnerModelAPIName(model schema.ModelInfo) string {
-	if model.API.Protocol != "" {
-		return string(model.API.Protocol)
-	}
-	return model.API.Type
-}
-
 func runnerModelAPIID(model schema.ModelInfo) string {
 	if model.API.ID == nil {
 		return ""
@@ -139,7 +132,7 @@ func runnerModelAPIID(model schema.ModelInfo) string {
 	return string(*model.API.ID)
 }
 
-// FromCatalogModel resolves a native-protocol model to a route.Model by looking
+// FromCatalogModel resolves a model to a route.Model by looking
 // its protocol up in the registry and applying the credential with the
 // protocol's auth scheme.
 func FromCatalogModel(model schema.ModelInfo, credential schema.Credential) (route.Model, error) {
@@ -148,7 +141,7 @@ func FromCatalogModel(model schema.ModelInfo, credential schema.Credential) (rou
 		return route.Model{}, &UnsupportedApiError{
 			ProviderID: model.ProviderID,
 			ModelID:    model.ID,
-			API:        runnerModelAPIName(model),
+			API:        string(model.API.Protocol),
 		}
 	}
 	return runnerModelWithDefaults(model, entry.Route).

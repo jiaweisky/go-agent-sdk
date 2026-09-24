@@ -457,7 +457,7 @@ func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
 }
 
 // resolveModelInfo returns the model metadata: the caller's ModelInfo when set,
-// otherwise a native ModelInfo synthesized from Protocol.
+// otherwise a ModelInfo synthesized from Protocol.
 func resolveModelInfo(opts *ClientOptions, id string) (schema.ModelInfo, error) {
 	if opts.ModelInfo != nil {
 		return opts.ModelInfo(id)

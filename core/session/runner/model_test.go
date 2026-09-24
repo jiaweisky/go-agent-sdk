@@ -45,7 +45,7 @@ func runnerSession(model schema.ModelInfo, variant *schema.ModelVariantID) schem
 
 func TestFromCatalogModelOpenAI(t *testing.T) {
 	resolved, err := FromCatalogModel(runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+		Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, nil), schema.Credential{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -74,7 +74,7 @@ func TestFromCatalogModelOpenAI(t *testing.T) {
 
 func TestFromCatalogModelAnthropic(t *testing.T) {
 	resolved, err := FromCatalogModel(runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "anthropic-messages", URL: runnerStrPtr("https://anthropic.example/v1"),
+		Protocol: "anthropic-messages", URL: runnerStrPtr("https://anthropic.example/v1"),
 	}, nil), schema.Credential{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -86,7 +86,7 @@ func TestFromCatalogModelAnthropic(t *testing.T) {
 
 func TestFromCatalogModelCompatibleAuth(t *testing.T) {
 	info := runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "openai-compatible-chat", URL: runnerStrPtr("https://compatible.example/v1"),
+		Protocol: "openai-compatible-chat", URL: runnerStrPtr("https://compatible.example/v1"),
 	}, nil)
 	info.Request = schema.ModelRequest{Headers: map[string]string{}, Body: map[string]any{}}
 
@@ -109,7 +109,7 @@ func TestFromCatalogModelCompatibleAuth(t *testing.T) {
 func TestResolveModelOverlaysVariant(t *testing.T) {
 	high := schema.ModelVariantID("high")
 	catalog := runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+		Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, []schema.ModelVariant{{
 		ID:      "high",
 		Headers: map[string]string{"x-variant": "high"},
@@ -141,7 +141,7 @@ func TestResolveModelOverlaysVariant(t *testing.T) {
 func TestResolveModelRejectsUnavailableVariant(t *testing.T) {
 	unknown := schema.ModelVariantID("unknown")
 	catalog := runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+		Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, nil)
 
 	_, err := ResolveModel(runnerSession(catalog, &unknown), catalog, schema.Credential{})
@@ -156,7 +156,7 @@ func TestResolveModelRejectsUnavailableVariant(t *testing.T) {
 
 func TestFromCatalogModelRejectsUnsupportedApi(t *testing.T) {
 	_, err := FromCatalogModel(runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "bogus", URL: runnerStrPtr("https://google.example/v1"),
+		Protocol: "bogus", URL: runnerStrPtr("https://google.example/v1"),
 	}, nil), schema.Credential{})
 	var target *UnsupportedApiError
 	if !errors.As(err, &target) {
@@ -170,7 +170,7 @@ func TestFromCatalogModelRejectsUnsupportedApi(t *testing.T) {
 func TestFromCatalogModelUsesCredentialKey(t *testing.T) {
 	credential := schema.Credential{APIKey: "secret"}
 	info := runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+		Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, nil)
 	info.Request = schema.ModelRequest{Headers: map[string]string{}, Body: map[string]any{}}
 
@@ -190,7 +190,7 @@ func TestFromCatalogModelUsesCredentialKey(t *testing.T) {
 func TestFromCatalogModelDropsBodyAPIKey(t *testing.T) {
 	credential := schema.Credential{APIKey: "stored-secret"}
 	info := runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+		Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, nil)
 	info.Request = schema.ModelRequest{Headers: map[string]string{}, Body: map[string]any{"apiKey": "configured-secret"}}
 
@@ -213,7 +213,7 @@ func TestFromCatalogModelDropsBodyAPIKey(t *testing.T) {
 
 func TestResolvedModelRouteDefaultsAndJSON(t *testing.T) {
 	resolved, err := FromCatalogModel(runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+		Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
 	}, nil), schema.Credential{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -234,7 +234,7 @@ func TestResolvedModelRouteDefaultsAndJSON(t *testing.T) {
 func TestResolveModelAnthropicVariant(t *testing.T) {
 	high := schema.ModelVariantID("high")
 	catalog := runnerModelInfo(schema.ModelAPI{
-		Type: "native", Protocol: "anthropic-messages", URL: runnerStrPtr("https://anthropic.example/v1"),
+		Protocol: "anthropic-messages", URL: runnerStrPtr("https://anthropic.example/v1"),
 	}, []schema.ModelVariant{{
 		ID:   "high",
 		Body: map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": 12000}},

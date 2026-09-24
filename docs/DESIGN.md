@@ -57,7 +57,7 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 ```go
 client, err := agent.NewClient(&agent.ClientOptions{
     Model:       "gpt-4o",
-    Protocol:    "openai-responses",           // 原生协议 id
+    Protocol:    "openai-responses",           // 协议 id
     Credentials: agent.APIKey(os.Getenv("OPENAI_API_KEY")),
     // 可选：catalog 元数据（endpoint/limits/headers）。不设则用协议路由默认值。
     ModelInfo: func(id string) (schema.ModelInfo, error) {
@@ -671,7 +671,7 @@ import "github.com/user/go-agent-sdk/agent"
 // ─── Client ─────────────────────────────────────────────
 type ClientOptions struct {
     Model            string                    // 默认模型
-    Protocol         schema.ProtocolID         // 原生协议 id（"openai-responses"|"anthropic-messages"|"gemini"|...）
+    Protocol         schema.ProtocolID         // 协议 id（"openai-responses"|"anthropic-messages"|"gemini"|...）
     ModelInfo        ModelInfoProvider         // 可选：catalog 元数据（protocol/endpoint/limits/headers）
     Credentials      CredentialProvider        // provider → 秘密（APIKey / AWS）
     WorkingDirectory string
