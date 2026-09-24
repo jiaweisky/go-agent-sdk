@@ -41,14 +41,6 @@ func (p *bashTestProcess) RunStream(ctx context.Context, command string, args []
 	return func(yield func(string, error) bool) {}
 }
 
-type bashTestConfig struct {
-	entries []core.ConfigEntry
-}
-
-func (c bashTestConfig) Entries() []core.ConfigEntry {
-	return c.entries
-}
-
 type bashTestPermission struct {
 	assertions []core.PermissionAssertInput
 	denyAction string
@@ -86,12 +78,12 @@ func bashSuccessResult() *core.RunResult {
 	}
 }
 
-func newBashDeps(root string, proc core.AppProcess, perm core.Permission, cfg core.Config) BashDeps {
+func newBashDeps(root string, proc core.AppProcess, perm core.Permission, shell string) BashDeps {
 	return BashDeps{
 		Mutation:   core.NewLocationMutation(&core.Location{LocationInfo: coreschema.LocationInfo{Directory: coreschema.AbsolutePath(root)}}),
 		Process:    proc,
 		Permission: perm,
-		Config:     cfg,
+		Shell:      shell,
 	}
 }
 
@@ -146,7 +138,7 @@ func TestBash_StructuredOutput(t *testing.T) {
 	}
 	proc := &bashTestProcess{result: bashSuccessResult()}
 	perm := &bashTestPermission{}
-	deps := newBashDeps(root, proc, perm, bashTestConfig{})
+	deps := newBashDeps(root, proc, perm, "")
 
 	registry := NewRegistry()
 	if _, err := RegisterBash(registry, deps); err != nil {
@@ -225,9 +217,7 @@ func TestBash_UsesConfiguredShell(t *testing.T) {
 	root := t.TempDir()
 	shell := "/bin/bash"
 	proc := &bashTestProcess{result: bashSuccessResult()}
-	deps := newBashDeps(root, proc, &bashTestPermission{}, bashTestConfig{
-		entries: []core.ConfigEntry{core.ConfigDocument{Info: core.ConfigInfo{Shell: &shell}}},
-	})
+	deps := newBashDeps(root, proc, &bashTestPermission{}, shell)
 	settleBash(t, deps, map[string]any{"command": "pwd"})
 	if proc.runs[0].Command != shell {
 		t.Fatalf("expected configured shell %q, got %q", shell, proc.runs[0].Command)
@@ -245,7 +235,7 @@ func TestBash_RelativeWorkdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	proc := &bashTestProcess{result: bashSuccessResult()}
-	deps := newBashDeps(root, proc, &bashTestPermission{}, bashTestConfig{})
+	deps := newBashDeps(root, proc, &bashTestPermission{}, "")
 
 	settleBash(t, deps, map[string]any{"command": "pwd", "workdir": "src"})
 	if len(proc.runs) != 1 || proc.runs[0].Options.Dir != realSrc {
@@ -268,7 +258,7 @@ func TestBash_RejectsWorkdirThatStopsBeingDirectory(t *testing.T) {
 		os.RemoveAll(workdir)
 		os.WriteFile(workdir, []byte("not a directory"), 0644)
 	}
-	deps := newBashDeps(root, proc, perm, bashTestConfig{})
+	deps := newBashDeps(root, proc, perm, "")
 
 	settled := settleBash(t, deps, map[string]any{"command": "pwd", "workdir": "src"})
 	if settled.Result.Type != "error" {
@@ -287,7 +277,7 @@ func TestBash_RealShellCommand(t *testing.T) {
 		t.Skip("posix shell only")
 	}
 	root := t.TempDir()
-	deps := newBashDeps(root, core.NewAppProcess(), &bashTestPermission{}, bashTestConfig{})
+	deps := newBashDeps(root, core.NewAppProcess(), &bashTestPermission{}, "")
 
 	settled := settleBash(t, deps, map[string]any{"command": "printf core-bash"})
 	content := bashResultContent(t, settled)
@@ -312,7 +302,7 @@ func TestBash_ExternalWorkdirApproval(t *testing.T) {
 	}
 	proc := &bashTestProcess{result: bashSuccessResult()}
 	perm := &bashTestPermission{}
-	deps := newBashDeps(active, proc, perm, bashTestConfig{})
+	deps := newBashDeps(active, proc, perm, "")
 
 	settleBash(t, deps, map[string]any{"command": "pwd", "workdir": outside})
 	if len(perm.assertions) != 2 {
@@ -336,7 +326,7 @@ func TestBash_DenialDoesNotExecute(t *testing.T) {
 
 	proc := &bashTestProcess{result: bashSuccessResult()}
 	perm := &bashTestPermission{denyAction: "external_directory"}
-	deps := newBashDeps(active, proc, perm, bashTestConfig{})
+	deps := newBashDeps(active, proc, perm, "")
 	settleBash(t, deps, map[string]any{"command": "pwd", "workdir": outside})
 	if len(perm.assertions) != 1 || perm.assertions[0].Action != "external_directory" {
 		t.Fatalf("unexpected assertions: %#v", perm.assertions)
@@ -347,7 +337,7 @@ func TestBash_DenialDoesNotExecute(t *testing.T) {
 
 	proc = &bashTestProcess{result: bashSuccessResult()}
 	perm = &bashTestPermission{denyAction: BashName}
-	deps = newBashDeps(active, proc, perm, bashTestConfig{})
+	deps = newBashDeps(active, proc, perm, "")
 	settleBash(t, deps, map[string]any{"command": "pwd"})
 	if len(perm.assertions) != 1 || perm.assertions[0].Action != BashName {
 		t.Fatalf("unexpected assertions: %#v", perm.assertions)
@@ -363,7 +353,7 @@ func TestBash_ExternalArgumentWarnings(t *testing.T) {
 	target := filepath.Join(outside, "secret.txt")
 	proc := &bashTestProcess{result: bashSuccessResult()}
 	perm := &bashTestPermission{denyAction: "external_directory"}
-	deps := newBashDeps(active, proc, perm, bashTestConfig{})
+	deps := newBashDeps(active, proc, perm, "")
 
 	settled := settleBash(t, deps, map[string]any{"command": "cat " + target})
 	if len(perm.assertions) != 1 || perm.assertions[0].Action != BashName {
@@ -391,7 +381,7 @@ func TestBash_NonZeroExit(t *testing.T) {
 	result.ExitCode = 7
 	result.Output = []byte("HEAD full output TAIL")
 	proc := &bashTestProcess{result: result}
-	deps := newBashDeps(root, proc, &bashTestPermission{}, bashTestConfig{})
+	deps := newBashDeps(root, proc, &bashTestPermission{}, "")
 
 	settled := settleBash(t, deps, map[string]any{"command": "false"})
 	content := bashResultContent(t, settled)
@@ -412,7 +402,7 @@ func TestBash_Truncation(t *testing.T) {
 	result := bashSuccessResult()
 	result.OutputTruncated = true
 	proc := &bashTestProcess{result: result}
-	deps := newBashDeps(root, proc, &bashTestPermission{}, bashTestConfig{})
+	deps := newBashDeps(root, proc, &bashTestPermission{}, "")
 
 	settled := settleBash(t, deps, map[string]any{"command": "verbose"})
 	structured := bashStructured(t, settled)
@@ -428,7 +418,7 @@ func TestBash_Truncation(t *testing.T) {
 func TestBash_Timeout(t *testing.T) {
 	root := t.TempDir()
 	proc := &bashTestProcess{err: &core.AppProcessError{Command: "sleep", Cause: core.ErrTimedOut}}
-	deps := newBashDeps(root, proc, &bashTestPermission{}, bashTestConfig{})
+	deps := newBashDeps(root, proc, &bashTestPermission{}, "")
 
 	settled := settleBash(t, deps, map[string]any{"command": "sleep 60", "timeout": 10})
 	content := bashResultContent(t, settled)

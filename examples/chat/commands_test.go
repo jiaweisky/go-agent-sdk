@@ -11,12 +11,13 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-func runCommand(t *testing.T, fn func(*chat)) string {
+func runCommand(t *testing.T, configDirs []string, fn func(*chat)) string {
 	t.Helper()
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
-		Model:   "test-model",
-		DataDir: t.TempDir(),
+		Model:      "test-model",
+		ConfigDirs: configDirs,
+		DataDir:    t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -30,12 +31,7 @@ func runCommand(t *testing.T, fn func(*chat)) string {
 }
 
 func TestSkillsCommandEmpty(t *testing.T) {
-	// Isolate from the demo .opencode and from any user skills.
-	t.Setenv("OPENCODE_CONFIG_DIR", t.TempDir())
-	t.Setenv("OPENCODE_DISABLE_EXTERNAL_SKILLS", "true")
-	t.Chdir(t.TempDir())
-
-	out := runCommand(t, func(c *chat) { c.skillsCommand() })
+	out := runCommand(t, nil, func(c *chat) { c.skillsCommand() })
 	if !strings.Contains(out, "no skills") {
 		t.Fatalf("out = %q, want the empty-skills hint", out)
 	}
@@ -51,36 +47,35 @@ func TestSkillsCommandListsConfiguredSkill(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	out := runCommand(t, func(c *chat) { c.skillsCommand() })
+	out := runCommand(t, []string{dir}, func(c *chat) { c.skillsCommand() })
 	if !strings.Contains(out, "demo") || !strings.Contains(out, "A demo skill.") {
-		t.Fatalf("out = %q, want the skill from OPENCODE_CONFIG_DIR", out)
+		t.Fatalf("out = %q, want the skill from ConfigDirs", out)
 	}
 }
 
 func TestAgentsCommandListsSubagents(t *testing.T) {
-	out := runCommand(t, func(c *chat) { c.agentsCommand() })
+	out := runCommand(t, nil, func(c *chat) { c.agentsCommand() })
 	if !strings.Contains(out, "Subagents") || !strings.Contains(out, "explore") {
 		t.Fatalf("out = %q, want a subagent list containing explore", out)
 	}
 }
 
 func TestMCPsCommandWithoutServers(t *testing.T) {
-	out := runCommand(t, func(c *chat) { c.mcpsCommand() })
+	out := runCommand(t, nil, func(c *chat) { c.mcpsCommand() })
 	if !strings.Contains(out, "no MCP servers") {
 		t.Fatalf("out = %q, want the no-MCP hint", out)
 	}
 }
 
-// TestDemoConfigDiscovered relies on go test running with the package directory
-// as the working directory, so the .opencode config under examples/chat is
-// discovered (like `chat -C examples/chat`).
+// TestDemoConfigDiscovered loads the demo config from the package's .opencode
+// directory (go test runs with the package directory as the working directory).
 func TestDemoConfigDiscovered(t *testing.T) {
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
-		Model:   "test-model",
-		DataDir: t.TempDir(),
+		Model:      "test-model",
+		ConfigDirs: []string{".opencode"},
+		DataDir:    t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)

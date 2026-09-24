@@ -34,7 +34,7 @@ func newSnapshotTest(t *testing.T) (*Snapshot, string) {
 		t.Fatalf("location: %v", err)
 	}
 	global := NewGlobal(func(value *Global) { value.Data = t.TempDir() })
-	snapshot, err := NewSnapshot(git, &configService{}, global, location)
+	snapshot, err := NewSnapshot(git, global, location)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}

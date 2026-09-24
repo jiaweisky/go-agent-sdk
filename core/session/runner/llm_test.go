@@ -84,10 +84,6 @@ func (runnerTestSnapshots) Files(core.SnapshotCompareInput) ([]schema.RelativePa
 	return nil, nil
 }
 
-type runnerTestConfig struct{}
-
-func (runnerTestConfig) Entries() []core.ConfigEntry { return nil }
-
 type runnerTestReferences struct{}
 
 func (runnerTestReferences) List() ([]reference.Info, error) { return nil, nil }
@@ -153,7 +149,7 @@ func newRunnerTestRunner(t *testing.T, db *database.Database, llm route.LLMClien
 		SystemContext:     systemcontext.NewRegistry(),
 		SkillGuidance:     skill.NewGuidance(nil, nil),
 		ReferenceGuidance: reference.NewGuidance(runnerTestReferences{}),
-		Config:            runnerTestConfig{},
+		Compaction:        session.DefaultCompactionSettings(),
 		Snapshots:         runnerTestSnapshots{},
 		DB:                db,
 	})

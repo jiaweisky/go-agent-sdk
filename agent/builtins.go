@@ -16,7 +16,7 @@ type builtinDeps struct {
 	permission core.Permission
 	question   core.Question
 	location   core.Location
-	config     core.Config
+	shell      string
 	skills     tool.SkillLister
 	agents     *core.Agent
 	task       TaskRunner
@@ -51,7 +51,7 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 			return tool.RegisterApplyPatch(tools, tool.ApplyPatchDeps{Mutation: mutation, Files: files, Permission: deps.permission})
 		},
 		func() (func(), error) {
-			return tool.RegisterBash(tools, tool.BashDeps{Mutation: mutation, Process: process, Permission: deps.permission, Config: deps.config})
+			return tool.RegisterBash(tools, tool.BashDeps{Mutation: mutation, Process: process, Permission: deps.permission, Shell: deps.shell})
 		},
 		func() (func(), error) {
 			return tool.RegisterGlob(tools, tool.GlobDeps{Ripgrep: ripgrepService, Directory: directory, Permission: deps.permission})

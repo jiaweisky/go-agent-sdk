@@ -9,7 +9,6 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/user/go-agent-sdk/core/config"
 	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/llm"
 	"github.com/user/go-agent-sdk/llm/route"
@@ -79,18 +78,12 @@ type CompactionSettings struct {
 	Tokens int
 }
 
-// CompactionConfigEntry is the narrow Config.Entry surface SessionCompaction
-// needs. Entries that are not config documents (or carry no compaction settings)
-// report a nil CompactionInfo.
-type CompactionConfigEntry interface {
-	CompactionInfo() *config.CompactionInfo
-}
-
 // CompactionDependencies mirrors SessionCompaction.Dependencies.
 type CompactionDependencies struct {
 	Events EventPublisher
 	LLM    func(ctx context.Context, request llm.LLMRequest) iter.Seq2[llm.LLMEvent, error]
-	Config []CompactionConfigEntry
+	// Settings carries the resolved compaction settings.
+	Settings CompactionSettings
 }
 
 // CompactionInput mirrors SessionCompaction.Input.
@@ -122,7 +115,7 @@ func NewCompaction(dependencies CompactionDependencies) *Compaction {
 	return &Compaction{
 		events: dependencies.Events,
 		llm:    dependencies.LLM,
-		config: resolveCompactionSettings(dependencies.Config),
+		config: dependencies.Settings,
 	}
 }
 
@@ -302,24 +295,9 @@ func BuildCompactionPrompt(input CompactionPromptInput) string {
 	}, "\n\n")
 }
 
-func resolveCompactionSettings(entries []CompactionConfigEntry) CompactionSettings {
-	result := CompactionSettings{Auto: true, Buffer: compactionDefaultBuffer, Tokens: compactionDefaultKeepTokens}
-	for _, entry := range entries {
-		info := entry.CompactionInfo()
-		if info == nil {
-			continue
-		}
-		if info.Auto != nil {
-			result.Auto = *info.Auto
-		}
-		if info.Buffer != nil {
-			result.Buffer = int(*info.Buffer)
-		}
-		if info.Keep != nil && info.Keep.Tokens != nil {
-			result.Tokens = int(*info.Keep.Tokens)
-		}
-	}
-	return result
+// DefaultCompactionSettings mirrors the built-in defaults.
+func DefaultCompactionSettings() CompactionSettings {
+	return CompactionSettings{Auto: true, Buffer: compactionDefaultBuffer, Tokens: compactionDefaultKeepTokens}
 }
 
 func compactionModelLimits(model route.Model) *llmschema.ModelLimits {

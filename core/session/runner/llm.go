@@ -64,7 +64,7 @@ type LLMRunner struct {
 	SystemContext     *systemcontext.Registry
 	SkillGuidance     *skill.Guidance
 	ReferenceGuidance *reference.Guidance
-	Config            core.Config
+	Compaction        session.CompactionSettings
 	Snapshots         Snapshotter
 	DB                *database.Database
 
@@ -76,9 +76,9 @@ var _ SessionRunner = (*LLMRunner)(nil)
 func NewLLMRunner(runner LLMRunner) *LLMRunner {
 	result := &runner
 	result.compaction = session.NewCompaction(session.CompactionDependencies{
-		Events: runner.Events,
-		LLM:    runner.compactionStream,
-		Config: core.SessionCompactionConfig(runner.Config.Entries()),
+		Events:   runner.Events,
+		LLM:      runner.compactionStream,
+		Settings: runner.Compaction,
 	})
 	return result
 }

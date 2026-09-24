@@ -50,6 +50,41 @@ type ClientOptions struct {
 	// Credentials supplies the provider secret used to authenticate requests.
 	// The protocol decides how it is applied, so callers supply only the secret.
 	Credentials CredentialProvider
+
+	// ConfigDirs are explicit directories to load agents and skills from. Each
+	// is scanned for {agent,agents}/**/*.md, {mode,modes}/*.md and
+	// {skill,skills}/**/SKILL.md. No environment, global or project discovery is
+	// performed.
+	ConfigDirs []string
+	// SubagentDepth limits nested subagent (task) recursion. Defaults to 1.
+	SubagentDepth int
+	// Shell overrides the shell used by the bash tool. Empty uses the platform
+	// default.
+	Shell string
+	// ToolOutput bounds oversized tool results. Nil uses the defaults.
+	ToolOutput *ToolOutputConfig
+	// Compaction controls automatic history compaction. Nil uses the defaults.
+	Compaction *CompactionConfig
+	// Policies are policy statements evaluated for tool access.
+	Policies []schema.PolicyInfo
+}
+
+// ToolOutputConfig bounds oversized tool results. Zero values use the defaults.
+type ToolOutputConfig struct {
+	MaxLines int
+	MaxBytes int
+}
+
+// CompactionConfig controls automatic history compaction.
+type CompactionConfig struct {
+	// Auto enables automatic compaction. Nil keeps the default (enabled).
+	Auto *bool
+	// PreserveRecentTokens is the token budget of history kept verbatim after
+	// compaction. Zero keeps the default.
+	PreserveRecentTokens int
+	// Reserved is the headroom subtracted from the model context limit. Zero
+	// keeps the default.
+	Reserved int
 }
 
 // ModelInfoProvider resolves a model id to catalog-style metadata. It is the

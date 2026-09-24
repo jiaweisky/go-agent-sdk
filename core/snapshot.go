@@ -67,7 +67,7 @@ type Snapshot struct {
 	enabled      bool
 }
 
-func NewSnapshot(git Git, config Config, global Global, location *Location) (*Snapshot, error) {
+func NewSnapshot(git Git, global Global, location *Location) (*Snapshot, error) {
 	source, err := git.Repo.Discover(location.Project.Directory)
 	if err != nil {
 		return nil, err
@@ -82,11 +82,7 @@ func NewSnapshot(git Git, config Config, global Global, location *Location) (*Sn
 	}
 	gitDirectory := AbsolutePath(filepath.Join(global.Data, "snapshot", string(location.Project.ID), util.HashFastString(string(worktree))))
 
-	enabled := false
-	if location.Vcs != nil && location.Vcs.Type == project.VcsTypeGit {
-		snapshots := Latest(config.Entries(), func(info ConfigInfo) *bool { return info.Snapshots })
-		enabled = snapshots == nil || *snapshots
-	}
+	enabled := location.Vcs != nil && location.Vcs.Type == project.VcsTypeGit
 
 	return &Snapshot{
 		git:          git,

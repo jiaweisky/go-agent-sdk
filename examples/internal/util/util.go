@@ -105,6 +105,9 @@ func Client(options ...Option) (*agent.Client, error) {
 		},
 		Credentials: agent.APIKey(apiKey),
 		Permission:  agent.ApproveAll,
+		// Load agents and skills from .opencode in the working directory (the
+		// examples pin it with -C).
+		ConfigDirs: []string{".opencode"},
 	}
 	for _, option := range options {
 		option(opts)

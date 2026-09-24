@@ -742,23 +742,20 @@ func TestClientReferences(t *testing.T) {
 }
 
 func TestClientLoadsConfigAgentsAndSkills(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("OPENCODE_TEST_HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	work := t.TempDir()
-	writeConfigFile(t, filepath.Join(work, ".opencode", "agent", "review.md"),
+	dir := t.TempDir()
+	writeConfigFile(t, filepath.Join(dir, "agent", "review.md"),
 		"---\ndescription: reviewer\nmode: subagent\n---\nReview code.\n")
-	writeConfigFile(t, filepath.Join(work, ".opencode", "skills", "foo", "SKILL.md"),
+	writeConfigFile(t, filepath.Join(dir, "skills", "foo", "SKILL.md"),
 		"---\nname: foo\ndescription: foo skill\n---\nFoo body.\n")
-	writeConfigFile(t, filepath.Join(work, ".opencode", "skills", "foo", "reference.md"),
+	writeConfigFile(t, filepath.Join(dir, "skills", "foo", "reference.md"),
 		"supporting notes that are not a skill\n")
 
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
-		Model:            "test-model",
-		WorkingDirectory: work,
-		DataDir:          t.TempDir(),
-		LLM:              fakeLLM{reply: "x"},
+		Model:      "test-model",
+		ConfigDirs: []string{dir},
+		DataDir:    t.TempDir(),
+		LLM:        fakeLLM{reply: "x"},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -1414,18 +1411,13 @@ func TestTaskToolDepthLimit(t *testing.T) {
 	}
 }
 
-func TestSubagentDepthFromConfig(t *testing.T) {
-	t.Setenv("OPENCODE_TEST_HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	work := t.TempDir()
-	writeConfigFile(t, filepath.Join(work, ".opencode", "opencode.json"), `{"subagent_depth": 3}`)
-
+func TestSubagentDepth(t *testing.T) {
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("k"),
-		Model:            "test-model",
-		WorkingDirectory: work,
-		DataDir:          t.TempDir(),
-		LLM:              fakeLLM{reply: "x"},
+		Model:         "test-model",
+		SubagentDepth: 3,
+		DataDir:       t.TempDir(),
+		LLM:           fakeLLM{reply: "x"},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -1798,5 +1790,37 @@ func TestNewClientRejectsUnknownProtocol(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
 		t.Fatalf("err = %v, want an unknown-protocol error", err)
+	}
+}
+
+func TestCompactionSettings(t *testing.T) {
+	defaults := compactionSettings(&ClientOptions{})
+	if !defaults.Auto || defaults.Buffer == 0 || defaults.Tokens == 0 {
+		t.Fatalf("defaults = %+v", defaults)
+	}
+
+	off := false
+	configured := compactionSettings(&ClientOptions{Compaction: &CompactionConfig{
+		Auto:                 &off,
+		PreserveRecentTokens: 1234,
+		Reserved:             4321,
+	}})
+	if configured.Auto || configured.Tokens != 1234 || configured.Buffer != 4321 {
+		t.Fatalf("configured = %+v", configured)
+	}
+
+	partial := compactionSettings(&ClientOptions{Compaction: &CompactionConfig{PreserveRecentTokens: 999}})
+	if !partial.Auto || partial.Tokens != 999 || partial.Buffer != defaults.Buffer {
+		t.Fatalf("partial = %+v", partial)
+	}
+}
+
+func TestToolOutputSettings(t *testing.T) {
+	if got := toolOutputSettings(&ClientOptions{}); got.MaxLines != 0 || got.MaxBytes != 0 {
+		t.Fatalf("defaults = %+v", got)
+	}
+	got := toolOutputSettings(&ClientOptions{ToolOutput: &ToolOutputConfig{MaxLines: 10, MaxBytes: 20}})
+	if got.MaxLines != 10 || got.MaxBytes != 20 {
+		t.Fatalf("got = %+v", got)
 	}
 }

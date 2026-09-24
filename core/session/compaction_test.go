@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk/core/config"
 	"github.com/user/go-agent-sdk/llm"
 	"github.com/user/go-agent-sdk/llm/route"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
@@ -25,12 +24,6 @@ func (p *compactionTestPublisher) Publish(def schema.EventDefinition, data any) 
 	}
 	return &schema.EventPayloadDurable{Seq: len(p.published)}, nil
 }
-
-type compactionTestConfig struct {
-	info *config.CompactionInfo
-}
-
-func (c compactionTestConfig) CompactionInfo() *config.CompactionInfo { return c.info }
 
 func compactionTestModel(context, output int) route.Model {
 	return route.Model{
@@ -117,22 +110,8 @@ func TestSerializeToolContentDescribesMedia(t *testing.T) {
 	}
 }
 
-func TestResolveCompactionSettings(t *testing.T) {
-	auto := false
-	buffer := schema.NonNegativeInt(5000)
-	tokens := schema.NonNegativeInt(2000)
-	settings := resolveCompactionSettings([]CompactionConfigEntry{
-		compactionTestConfig{info: &config.CompactionInfo{}},
-		compactionTestConfig{info: &config.CompactionInfo{
-			Auto:   &auto,
-			Buffer: &buffer,
-			Keep:   &config.CompactionKeep{Tokens: &tokens},
-		}},
-	})
-	if settings.Auto || settings.Buffer != 5000 || settings.Tokens != 2000 {
-		t.Fatalf("settings = %+v", settings)
-	}
-	defaults := resolveCompactionSettings(nil)
+func TestDefaultCompactionSettings(t *testing.T) {
+	defaults := DefaultCompactionSettings()
 	if !defaults.Auto || defaults.Buffer != compactionDefaultBuffer || defaults.Tokens != compactionDefaultKeepTokens {
 		t.Fatalf("defaults = %+v", defaults)
 	}
@@ -161,8 +140,9 @@ func TestCompactionCompactAfterOverflowPublishesSummary(t *testing.T) {
 	model := compactionTestModel(100_000, 1_000)
 	publisher := &compactionTestPublisher{}
 	compaction := NewCompaction(CompactionDependencies{
-		Events: publisher,
-		LLM:    compactionTextLLM("summary text"),
+		Events:   publisher,
+		LLM:      compactionTextLLM("summary text"),
+		Settings: DefaultCompactionSettings(),
 	})
 	input := CompactionInput{
 		SessionID: "ses_1",
@@ -208,9 +188,9 @@ func TestCompactionCompactAfterOverflowSkipsWhenNoContextLimit(t *testing.T) {
 func TestCompactionCompactIfNeeded(t *testing.T) {
 	publisher := &compactionTestPublisher{}
 	compaction := NewCompaction(CompactionDependencies{
-		Events: publisher,
-		LLM:    compactionTextLLM("summary"),
-		Config: []CompactionConfigEntry{compactionTestConfig{info: &config.CompactionInfo{}}},
+		Events:   publisher,
+		LLM:      compactionTextLLM("summary"),
+		Settings: DefaultCompactionSettings(),
 	})
 	entries := []CompactionEntry{
 		{Seq: 0, Message: schema.SessionMessageCompaction{ID: "msg_c", Type: "compaction", Summary: "old", Recent: "recent"}},
@@ -220,9 +200,9 @@ func TestCompactionCompactIfNeeded(t *testing.T) {
 	// Auto disabled.
 	disabled := false
 	off := NewCompaction(CompactionDependencies{
-		Events: publisher,
-		LLM:    compactionTextLLM("summary"),
-		Config: []CompactionConfigEntry{compactionTestConfig{info: &config.CompactionInfo{Auto: &disabled}}},
+		Events:   publisher,
+		LLM:      compactionTextLLM("summary"),
+		Settings: CompactionSettings{Auto: disabled},
 	})
 	if compacted, err := off.CompactIfNeeded(CompactionInput{SessionID: "ses_1", Entries: entries, Model: compactionTestModel(1000, 100)}); err != nil || compacted {
 		t.Fatalf("disabled: compacted=%v err=%v", compacted, err)
@@ -346,8 +326,9 @@ func TestCompactionCompactAfterOverflowHandlesLLMFailure(t *testing.T) {
 func TestCompactionCompactIfNeededEstimatesRequest(t *testing.T) {
 	publisher := &compactionTestPublisher{}
 	compaction := NewCompaction(CompactionDependencies{
-		Events: publisher,
-		LLM:    compactionTextLLM("summary"),
+		Events:   publisher,
+		LLM:      compactionTextLLM("summary"),
+		Settings: DefaultCompactionSettings(),
 	})
 	entries := []CompactionEntry{
 		{Seq: 0, Message: schema.SessionMessageCompaction{ID: "msg_c", Type: "compaction", Summary: "old", Recent: "recent"}},

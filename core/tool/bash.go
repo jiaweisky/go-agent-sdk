@@ -78,7 +78,8 @@ type BashDeps struct {
 	Mutation   core.LocationMutation
 	Process    core.AppProcess
 	Permission core.Permission
-	Config     core.Config
+	// Shell overrides the platform default shell. Empty uses the default.
+	Shell string
 }
 
 func MakeBash(deps BashDeps) *Def[BashInput, BashOutput, BashStructuredOutput] {
@@ -173,24 +174,9 @@ func bashDefaultShell() string {
 	return "/bin/sh"
 }
 
-func bashShell(config core.Config) string {
-	if config == nil {
-		return bashDefaultShell()
-	}
-	// Object.assign({}, ...documentInfos).shell: the last document that sets a
-	// shell wins, otherwise fall back to the platform default.
-	var shell *string
-	for _, entry := range config.Entries() {
-		document, ok := entry.(core.ConfigDocument)
-		if !ok {
-			continue
-		}
-		if document.Info.Shell != nil {
-			shell = document.Info.Shell
-		}
-	}
-	if shell != nil {
-		return *shell
+func bashShell(shell string) string {
+	if shell != "" {
+		return shell
 	}
 	return bashDefaultShell()
 }
@@ -329,7 +315,7 @@ func executeBash(deps BashDeps, execCtx context.Context, input BashInput, ctx Co
 		return BashOutput{}, fmt.Errorf("Working directory is not a directory: %s", target.Canonical)
 	}
 
-	shell := bashShell(deps.Config)
+	shell := bashShell(deps.Shell)
 
 	timeout := BashDefaultTimeoutMS
 	if input.Timeout != nil {

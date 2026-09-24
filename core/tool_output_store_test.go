@@ -8,7 +8,7 @@ import (
 )
 
 func TestToolOutputStoreBoundKeepsSmallOutput(t *testing.T) {
-	store := NewToolOutputStore(Global{Data: t.TempDir()}, nil)
+	store := NewToolOutputStore(Global{Data: t.TempDir()}, ToolOutputSettings{})
 	output := llmschema.ToolOutput{
 		Structured: map[string]any{},
 		Content:    []llmschema.ToolContent{llmschema.ToolTextContent{Type: "text", Text: "small"}},
@@ -26,7 +26,7 @@ func TestToolOutputStoreBoundKeepsSmallOutput(t *testing.T) {
 }
 
 func TestToolOutputStoreBoundTruncatesAndWrites(t *testing.T) {
-	store := NewToolOutputStore(Global{Data: t.TempDir()}, nil)
+	store := NewToolOutputStore(Global{Data: t.TempDir()}, ToolOutputSettings{})
 	long := strings.Repeat("line\n", ToolOutputStoreMaxLines+100)
 	output := llmschema.ToolOutput{
 		Structured: map[string]any{"kept": true},
@@ -51,7 +51,7 @@ func TestToolOutputStoreBoundTruncatesAndWrites(t *testing.T) {
 }
 
 func TestToolOutputStoreBoundStructuredWhenNoContent(t *testing.T) {
-	store := NewToolOutputStore(Global{Data: t.TempDir()}, nil)
+	store := NewToolOutputStore(Global{Data: t.TempDir()}, ToolOutputSettings{})
 	output := llmschema.ToolOutput{Structured: map[string]any{"a": 1}, Content: []llmschema.ToolContent{}}
 	result, err := store.Bound(ToolOutputStoreBoundInput{SessionID: "ses_1", ToolCallID: "call_1", Output: output})
 	if err != nil {

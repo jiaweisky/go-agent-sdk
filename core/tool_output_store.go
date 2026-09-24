@@ -51,36 +51,34 @@ func (e *ToolOutputStoreStorageError) Error() string {
 
 func (e *ToolOutputStoreStorageError) Unwrap() error { return e.Cause }
 
-// ToolOutputStore mirrors the ToolOutputStore service. Config is optional.
-type ToolOutputStore struct {
-	directory string
-	config    Config
+// ToolOutputSettings bounds oversized tool results. Zero values use the
+// built-in defaults (ToolOutputStoreMaxLines / ToolOutputStoreMaxBytes).
+type ToolOutputSettings struct {
+	MaxLines int
+	MaxBytes int
 }
 
-func NewToolOutputStore(global Global, config Config) *ToolOutputStore {
+// ToolOutputStore mirrors the ToolOutputStore service.
+type ToolOutputStore struct {
+	directory string
+	settings  ToolOutputSettings
+}
+
+func NewToolOutputStore(global Global, settings ToolOutputSettings) *ToolOutputStore {
 	return &ToolOutputStore{
 		directory: filepath.Join(global.Data, ToolOutputStoreManagedDirectory),
-		config:    config,
+		settings:  settings,
 	}
 }
 
 // Limits mirrors ToolOutputStore.limits.
 func (s *ToolOutputStore) Limits() (maxLines int, maxBytes int) {
 	maxLines, maxBytes = ToolOutputStoreMaxLines, ToolOutputStoreMaxBytes
-	if s.config == nil {
-		return maxLines, maxBytes
+	if s.settings.MaxLines > 0 {
+		maxLines = s.settings.MaxLines
 	}
-	for _, entry := range s.config.Entries() {
-		document, ok := entry.(ConfigDocument)
-		if !ok || document.Info.ToolOutput == nil {
-			continue
-		}
-		if document.Info.ToolOutput.MaxLines != nil {
-			maxLines = int(*document.Info.ToolOutput.MaxLines)
-		}
-		if document.Info.ToolOutput.MaxBytes != nil {
-			maxBytes = int(*document.Info.ToolOutput.MaxBytes)
-		}
+	if s.settings.MaxBytes > 0 {
+		maxBytes = s.settings.MaxBytes
 	}
 	return maxLines, maxBytes
 }

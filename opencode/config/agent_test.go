@@ -25,45 +25,29 @@ func TestConfigEntryNameFromPath(t *testing.T) {
 	}
 }
 
-func TestLoadAgents(t *testing.T) {
+func TestLoadAgentEntries(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "agent", "review.md"), "---\ndescription: reviewer\nmode: subagent\n---\nYou review code.\n")
 	writeFile(t, filepath.Join(dir, "agents", "nested", "build.md"), "---\ndescription: builder\n---\nYou build.\n")
+	writeFile(t, filepath.Join(dir, "mode", "plan.md"), "---\ndescription: planning\n---\nPlan.\n")
 
-	agents, err := LoadAgents(dir)
+	entries, err := LoadAgentEntries(dir)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(agents) != 2 {
-		t.Fatalf("agents = %+v", agents)
+	byName := map[string]AgentEntry{}
+	for _, entry := range entries {
+		byName[entry.Name] = entry
 	}
-	review := agents["review"]
-	if review.Description == nil || *review.Description != "reviewer" {
+	review, ok := byName["review"]
+	if !ok || review.Primary || review.Content != "You review code." {
 		t.Fatalf("review = %+v", review)
 	}
-	if review.Mode == nil || *review.Mode != "subagent" {
-		t.Fatalf("review mode = %v", review.Mode)
+	if _, ok := byName["nested/build"]; !ok {
+		t.Fatalf("missing nested agent: %+v", byName)
 	}
-	if review.Prompt == nil || *review.Prompt != "You review code." {
-		t.Fatalf("review prompt = %v", review.Prompt)
-	}
-	if _, ok := agents["nested/build"]; !ok {
-		t.Fatalf("missing nested agent: %+v", agents)
-	}
-}
-
-func TestLoadModes(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "mode", "plan.md"), "---\ndescription: planning\n---\nPlan.\n")
-	modes, err := LoadModes(dir)
-	if err != nil {
-		t.Fatalf("load modes: %v", err)
-	}
-	plan, ok := modes["plan"]
-	if !ok {
-		t.Fatalf("modes = %+v", modes)
-	}
-	if plan.Mode == nil || *plan.Mode != "primary" {
-		t.Fatalf("mode = %v", plan.Mode)
+	plan, ok := byName["plan"]
+	if !ok || !plan.Primary {
+		t.Fatalf("plan = %+v", plan)
 	}
 }

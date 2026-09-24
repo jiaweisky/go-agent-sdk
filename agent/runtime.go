@@ -12,7 +12,6 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/database"
-	coreflag "github.com/user/go-agent-sdk/core/flag"
 	"github.com/user/go-agent-sdk/core/installation"
 	coreproject "github.com/user/go-agent-sdk/core/project"
 	"github.com/user/go-agent-sdk/core/reference"
@@ -199,26 +198,17 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		return nil, err
 	}
 
-	config, err := core.NewConfig(core.ConfigDeps{
-		Global:   global,
-		Location: location,
-		Policy:   core.NewPolicy(),
-	})
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
+	policy := core.NewPolicy()
+	policy.Load(opts.Policies)
 
 	// Bound oversized tool results (see core.ToolOutputStore) before they are
 	// sent to the model; without this a single large grep/read can overflow the
 	// provider context window.
-	outputStore := tool.NewCoreOutputStore(core.NewToolOutputStore(global, config))
+	outputStore := tool.NewCoreOutputStore(core.NewToolOutputStore(global, toolOutputSettings(opts)))
 
-	subagentDepth := 1
-	if depth := core.Latest(config.Entries(), func(info core.ConfigInfo) *schema.NonNegativeInt {
-		return info.SubagentDepth
-	}); depth != nil {
-		subagentDepth = int(*depth)
+	subagentDepth := opts.SubagentDepth
+	if subagentDepth <= 0 {
+		subagentDepth = 1
 	}
 
 	agents := core.NewAgent()
@@ -226,7 +216,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := opencodeconfig.ApplyConfigAgents(agents, config.Entries(), global); err != nil {
+	if err := opencodeconfig.ApplyDirAgents(agents, opts.ConfigDirs, global); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -249,16 +239,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	discovery := core.NewSkillDiscovery(filepath.Join(global.Cache, "skills"), http.DefaultClient)
 	skills := core.NewSkill(discovery)
 	if _, err := skills.Transform(func(draft core.SkillDraft) error {
-		discovered := opencodeskill.DiscoverSkills(opencodeskill.DiscoverConfig{
-			Directory:               string(location.Directory),
-			Worktree:                string(location.Project.Directory),
-			Home:                    global.Home,
-			ConfigDirs:              configDirectories(config.Entries()),
-			Skills:                  configSkills(config.Entries()),
-			DisableExternalSkills:   coreflag.Flag.OPENCODE_DISABLE_EXTERNAL_SKILLS(),
-			DisableClaudeCodeSkills: coreflag.Flag.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS(),
-			Discovery:               discovery,
-		})
+		discovered := opencodeskill.DiscoverSkills(opts.ConfigDirs)
 		for _, dir := range discovered.Roots {
 			draft.Source(schema.SkillDirectorySource{Type: "directory", Path: schema.AbsolutePath(dir)})
 		}
@@ -291,11 +272,11 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	task := &taskRunner{}
 	builtin := builtinDeps{
 		db: db, events: events, permission: permission, question: question,
-		location: *location, config: config, skills: skills,
+		location: *location, shell: opts.Shell, skills: skills,
 		agents: agents, task: task,
 	}
 	snapshots := runner.Snapshotter(noopSnapshots{})
-	if snapshot, err := core.NewSnapshot(git, config, global, location); err == nil {
+	if snapshot, err := core.NewSnapshot(git, global, location); err == nil {
 		snapshots = snapshot
 	}
 
@@ -321,7 +302,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		SystemContext:     systemcontext.NewRegistry(),
 		SkillGuidance:     skill.NewGuidance(skills, allowAllEvaluator{}),
 		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: referenceService}),
-		Config:            config,
+		Compaction:        compactionSettings(opts),
 		Snapshots:         snapshots,
 		DB:                db,
 	})
@@ -424,6 +405,33 @@ func (e appEvents) PublishWithCommit(
 	return payload.Durable, nil
 }
 
+// toolOutputSettings maps ClientOptions.ToolOutput to the core settings.
+func toolOutputSettings(opts *ClientOptions) core.ToolOutputSettings {
+	if opts.ToolOutput == nil {
+		return core.ToolOutputSettings{}
+	}
+	return core.ToolOutputSettings{MaxLines: opts.ToolOutput.MaxLines, MaxBytes: opts.ToolOutput.MaxBytes}
+}
+
+// compactionSettings maps ClientOptions.Compaction to the session settings,
+// applying the built-in defaults for a nil config.
+func compactionSettings(opts *ClientOptions) session.CompactionSettings {
+	settings := session.DefaultCompactionSettings()
+	if opts.Compaction == nil {
+		return settings
+	}
+	if opts.Compaction.Auto != nil {
+		settings.Auto = *opts.Compaction.Auto
+	}
+	if opts.Compaction.Reserved > 0 {
+		settings.Buffer = opts.Compaction.Reserved
+	}
+	if opts.Compaction.PreserveRecentTokens > 0 {
+		settings.Tokens = opts.Compaction.PreserveRecentTokens
+	}
+	return settings
+}
+
 // buildModelResolver maps the client's protocol (or ModelInfo) and credentials
 // to a model resolver.
 func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
@@ -463,28 +471,6 @@ func resolveModelInfo(opts *ClientOptions, id string) (schema.ModelInfo, error) 
 		return opts.ModelInfo(id)
 	}
 	return NewModelInfo(opts.Protocol, id, "", schema.ModelLimit{})
-}
-
-// configDirectories collects the config directories from the loaded entries.
-func configDirectories(entries []core.ConfigEntry) []string {
-	var directories []string
-	for _, entry := range entries {
-		if directory, ok := entry.(core.ConfigDirectory); ok {
-			directories = append(directories, string(directory.Path))
-		}
-	}
-	return directories
-}
-
-// configSkills collects the flat `skills` entries from config documents.
-func configSkills(entries []core.ConfigEntry) []string {
-	var skills []string
-	for _, entry := range entries {
-		if document, ok := entry.(core.ConfigDocument); ok {
-			skills = append(skills, document.Info.Skills...)
-		}
-	}
-	return skills
 }
 
 // --- task tool (subagent delegation) ---

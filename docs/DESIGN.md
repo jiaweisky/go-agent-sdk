@@ -189,7 +189,6 @@ go-agent-sdk/                            opencode TS
 │   └── utils/                       通用工具 (utils/record.ts)
 ├── core/           ← packages/core/src/          (@opencode-ai/core)
 │   ├── schema.go                    re-exports (schema.ts)
-│   ├── config.go                    Config.Info / Document / Directory / entries (config.ts)
 │   ├── global.go                    Global (global.ts)
 │   ├── policy.go                    Policy allow/deny statements (policy.ts)
 │   ├── provider.go                  ProviderV2 re-exports (provider.ts)
@@ -203,8 +202,6 @@ go-agent-sdk/                            opencode TS
 │   ├── fs_util.go                   fs-util.ts
 │   ├── process.go                   process.ts
 │   ├── git.go                       git.ts
-│   ├── config/                      config/ sub-schemas (config/agent.ts, ...)
-│   ├── v1/config/                   legacy ConfigV1 + migrate (v1/config/)
 │   ├── database/                    SQLite + migrations (database/)
 │   ├── effect/                      Effect 运行时工具 (effect/keyed-mutex.ts, ...)
 │   ├── project/                     project/schema.ts, project/directories.ts
@@ -215,14 +212,16 @@ go-agent-sdk/                            opencode TS
 │   │   ├── write.go                 write.ts
 │   │   ├── edit.go                  edit.ts
 │   │   └── bash.go                  bash.ts
-│   └── util/                        通用工具 (util/wildcard.ts, util/hash.ts, util/jsonc.go)
+│   └── util/                        通用工具 (util/wildcard.ts, util/hash.ts, util/markdown.ts)
+│       └── markdown.go              ConfigMarkdown（frontmatter 解析，config/markdown.ts）
 ├── opencode/       ← packages/opencode/src/      (opencode CLI)
-│   ├── config/                      config/agent.ts, config/entry-name.ts + 应用逻辑
-│   │   ├── agent.go                 config/agent.ts（LoadAgents/LoadModes/LoadAgentEntries）
+│   ├── config/                      内容型配置加载（agent/mode markdown）
+│   │   ├── agent.go                 config/agent.ts（LoadAgentEntries）
+│   │   ├── agent_info.go            config/agent.ts 的 AgentInfo 类型
 │   │   ├── entry_name.go            config/entry-name.ts
-│   │   └── agent_apply.go           core/config/plugin/agent.ts 的应用逻辑
+│   │   └── agent_apply.go           config/plugin/agent.ts 的应用逻辑
 │   ├── skill/                       技能发现 (skill/index.ts 的 discoverSkills)
-│   │   └── skill.go                 DiscoverSkills（外部/config/路径/URL）
+│   │   └── skill.go                 DiscoverSkills（仅扫描给定目录）
 │   └── id/                          带前缀的单调 ID 生成 (id/id.ts)
 ├── agent/          ← 无 TS 对应目录（高层公开 API，对标 copilot-sdk/go）
 │   ├── client.go / session.go / runtime.go    Client/Session/runtime 装配
@@ -448,7 +447,7 @@ type Agent struct {
 **工具参数**：`description`、`prompt`、`subagent_type`、`task_id`（续跑同一子会话）、`command`、`background`（暂不支持，返回失败）。
 
 **执行流程**：
-1. 深度检查：沿 `parent_id` 数子会话深度，超过 `subagent_depth`（config，默认 1）报错。
+1. 深度检查：沿 `parent_id` 数子会话深度，超过 `ClientOptions.SubagentDepth`（默认 1）报错。
 2. 权限检查：action `task`、resource `subagent_type`。
 3. 解析 agent：`subagent_type` 必须是已注册 agent，否则报 `Unknown agent type`。
 4. 派生权限：`DeriveSubagentSessionPermission(父会话权限, 子 agent)` —— 继承父的 deny 规则 + `external_directory`，并默认追加 `todowrite` / `task` 的 `deny`（除非子 agent 自己已声明该 action）。写入子会话的 `session.permission` 列。
@@ -622,11 +621,12 @@ type SkillLoader interface {
 }
 ```
 
-发现路径 (按优先级):
-1. `.opencode/skills/**/SKILL.md`
+发现路径（`ClientOptions.ConfigDirs` 的每个目录，按优先级）:
+1. `{skill,skills}/**/SKILL.md`
 2. `.agents/skills/**/SKILL.md`
 3. `.claude/skills/**/SKILL.md`
-4. 用户配置目录 `{skill,skills}/**/SKILL.md`
+
+> 仅扫描显式给出的目录，不做环境变量/全局目录/向上查找（见 §11.1）。
 
 ---
 
@@ -676,6 +676,12 @@ type ClientOptions struct {
     Credentials      CredentialProvider        // provider → 秘密（APIKey / AWS）
     WorkingDirectory string
     DataDir          string                    // 会话数据库目录
+    ConfigDirs       []string                  // 内容配置目录（见「配置模型」）
+    SubagentDepth    int                       // task 子会话最大深度（默认 1）
+    Shell            string                    // bash 工具使用的 shell（默认 sh）
+    ToolOutput       *ToolOutputConfig         // 工具输出落盘上限（MaxLines / MaxBytes）
+    Compaction       *CompactionConfig         // 上下文压缩（Auto / PreserveRecentTokens / Reserved）
+    Policies         []schema.PolicyInfo       // allow/deny 策略
     Tools            []Tool                    // 应用级工具
     MCP              []MCPConfig               // MCP servers（工具注册为应用级）
     Plugins          []PluginConfig            // 启动时加载的插件
@@ -683,11 +689,10 @@ type ClientOptions struct {
     Permission       PermissionHandlerFunc     // 默认权限回调（默认 ApproveAll）
     Question         QuestionHandlerFunc       // 默认 question 回调（默认 RejectQuestions）
     LLM              route.LLMClient           // 可选：注入自定义 LLM client
-    ModelInfo        ModelInfoProvider         // 可选：func(modelID) (schema.ModelInfo, error)，取代 Provider.Type facade（见下）
 }
-// 用 NewModelInfo(api, modelID, baseURL, limit) 构造受支持的 ModelInfo。
+// 用 NewModelInfo(protocol, modelID, baseURL, limit) 构造受支持的 ModelInfo。
 // ModelInfo 是 models.dev catalog 的窄输入替代：调用方提供 limits/endpoint/headers/variants，
-// SDK 走 runner.FromCatalogModel 建 route（Provider.APIKey 仍作凭据）。
+// SDK 走 runner.FromCatalogModel 建 route（Protocol 决定鉴权与路由）。
 type ModelInfoProvider func(modelID string) (schema.ModelInfo, error)
 func NewClient(*ClientOptions) (*Client, error)
 func (c *Client) RegisterAgent(name string, cfg AgentConfig) error
@@ -753,6 +758,20 @@ type SessionHooks struct { /* Pre/PostToolUse, UserPromptSubmitted,
 - 工具 Hooks（Pre/PostToolUse）通过 `hookedRegistry` 包裹 settlement 实现。
 
 > 已接入：MCP 工具（`connectMCP`）、Plugin（窄化）、Reference 服务。**未接线**：除 openai / anthropic / openai-compatible 之外的 provider facade（Gemini/Bedrock/OpenRouter/... 协议与 facade 已实现但 runtime 未接，见 §5）；system prompt sections 粒度比 copilot 粗。取消语义（对齐 TS `run-coordinator.ts` 的 `uninterruptibleMask`）：**只有 `Abort()`** 经 `coordinator.Interrupt` 取消 drain ctx 并中断进行中的 LLM 流与工具执行；取消 `Send(ctx)` 的 ctx 只停止等待，不中断当前轮。`context` 已贯穿 `SessionRunner.Run` → `Transport.Frames` → `http.NewRequestWithContext`，所以 `Abort()` 能真正打断 provider 请求。
+
+### 11.1 配置模型（code config + 内容目录）
+
+SDK **不使用 `opencode.json`**，也不做目录发现（无 `OPENCODE_CONFIG_DIR` / `XDG_*` / 向上查找 `.opencode`）。所有**设置**都由代码通过 `ClientOptions` 传入（见上）。
+
+文件只承载**内容**（agent / mode / skill 的 markdown），且来源必须**显式**声明：`ClientOptions.ConfigDirs`。每个目录按以下模式扫描：
+
+- `{agent,agents}/**/*.md` —— 子 agent
+- `{mode,modes}/*.md` —— primary agent（旧称 mode）
+- `{skill,skills}/**/SKILL.md` —— 技能
+
+优先级：内置 agent（代码）< `ConfigDirs`（文件）< `RegisterAgent`（代码）。
+
+与 TS 的差异：TS 从 `.opencode` 向上查找并合并 `opencode.json` + 环境变量 + 全局目录；Go SDK 只读取调用方给出的目录，避免隐式 I/O 与全局状态。`core/config.go`（Config.Info/Document 发现）、`core/config/`、`core/v1/config/`（legacy ConfigV1）**已删除**。
 
 ## 12. 错误处理
 

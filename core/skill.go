@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/user/go-agent-sdk/core/config"
 	skillsub "github.com/user/go-agent-sdk/core/skill"
 	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/schema"
@@ -160,7 +159,7 @@ func (s *Skill) load(source schema.SkillSource) ([]schema.SkillInfo, error) {
 			if !ok || content == "" {
 				continue
 			}
-			markdown, ok := config.ParseMarkdownOption(content)
+			markdown, ok := util.ParseMarkdownOption(content)
 			if !ok {
 				continue
 			}
