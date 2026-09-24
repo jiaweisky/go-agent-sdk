@@ -7,6 +7,7 @@ import (
 
 // --- Tool Content Types ---
 
+// ToolTextContent is a tool result's text.
 type ToolTextContent struct {
 	Type string `json:"type"` // must be "text"
 	Text string `json:"text"`
@@ -14,6 +15,7 @@ type ToolTextContent struct {
 
 func (ToolTextContent) toolContentTag() {}
 
+// ToolFileContent is a tool result's file reference.
 type ToolFileContent struct {
 	Type string  `json:"type"` // must be "file"
 	URI  string  `json:"uri"`
@@ -23,6 +25,7 @@ type ToolFileContent struct {
 
 func (ToolFileContent) toolContentTag() {}
 
+// ToolContent is one piece of a tool result: text or a file.
 type ToolContent interface {
 	toolContentTag()
 }
@@ -52,6 +55,7 @@ func toToolContentSlice(v any) []ToolContent {
 
 // --- System Part ---
 
+// SystemPart is one part of the system prompt.
 type SystemPart struct {
 	Type     string         `json:"type"`
 	Text     string         `json:"text"`
@@ -59,10 +63,12 @@ type SystemPart struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
+// NewSystemPart builds a text system part.
 func NewSystemPart(text string) SystemPart {
 	return SystemPart{Type: "text", Text: text}
 }
 
+// SystemParts normalizes a string, a part, or a slice of them into system parts.
 func SystemParts(input any) []SystemPart {
 	switch v := input.(type) {
 	case nil:
@@ -80,6 +86,7 @@ func SystemParts(input any) []SystemPart {
 
 // --- Text Part ---
 
+// TextPart is a text block in a message.
 type TextPart struct {
 	Type             string           `json:"type"` // must be "text"
 	Text             string           `json:"text"`
@@ -92,6 +99,7 @@ func (TextPart) contentPartTag() {}
 
 // --- Media Part ---
 
+// MediaPart is an image or other media block in a message.
 type MediaPart struct {
 	Type      string         `json:"type"` // must be "media"
 	MediaType string         `json:"mediaType"`
@@ -104,6 +112,7 @@ func (MediaPart) contentPartTag() {}
 
 // --- Reasoning Part ---
 
+// ReasoningPart is a model's reasoning block, with any provider signature.
 type ReasoningPart struct {
 	Type             string           `json:"type"` // must be "reasoning"
 	Text             string           `json:"text"`
@@ -116,6 +125,7 @@ func (ReasoningPart) contentPartTag() {}
 
 // --- Tool Call Part ---
 
+// ToolCallPart is a tool call the model asked for.
 type ToolCallPart struct {
 	Type             string           `json:"type"` // must be "tool-call"
 	ID               string           `json:"id"`
@@ -128,6 +138,7 @@ type ToolCallPart struct {
 
 func (ToolCallPart) contentPartTag() {}
 
+// ToolCallPartInput is the input form of a ToolCallPart.
 type ToolCallPartInput struct {
 	ID               string
 	Name             string
@@ -137,6 +148,7 @@ type ToolCallPartInput struct {
 	ProviderMetadata ProviderMetadata
 }
 
+// NewToolCallPart builds a tool call part.
 func NewToolCallPart(input ToolCallPartInput) ToolCallPart {
 	return ToolCallPart{
 		Type:             "tool-call",
@@ -151,11 +163,14 @@ func NewToolCallPart(input ToolCallPartInput) ToolCallPart {
 
 // --- Tool Result Value ---
 
+// ToolResultValue is a tool result: its kind ("json", "text", "error" or
+// "content") and its value.
 type ToolResultValue struct {
 	Type  string `json:"type"` // "json", "text", "error", "content"
 	Value any    `json:"value"`
 }
 
+// IsToolResultValue reports whether v looks like a tool result value.
 func IsToolResultValue(v any) bool {
 	m, ok := v.(map[string]any)
 	if !ok {
@@ -171,6 +186,8 @@ func IsToolResultValue(v any) bool {
 	return false
 }
 
+// NewToolResultValue builds a tool result value, inferring its kind from the Go
+// type unless typ overrides it.
 func NewToolResultValue(value any, typ ...string) ToolResultValue {
 	if rv, ok := value.(ToolResultValue); ok {
 		return rv
@@ -196,6 +213,7 @@ func NewToolResultValue(value any, typ ...string) ToolResultValue {
 
 // --- Tool Result Part ---
 
+// ToolResultPart is a tool result sent back to the model.
 type ToolResultPart struct {
 	Type             string           `json:"type"` // must be "tool-result"
 	ID               string           `json:"id"`
@@ -209,6 +227,7 @@ type ToolResultPart struct {
 
 func (ToolResultPart) contentPartTag() {}
 
+// ToolResultPartInput is the input form of a ToolResultPart.
 type ToolResultPartInput struct {
 	ID               string
 	Name             string
@@ -220,6 +239,7 @@ type ToolResultPartInput struct {
 	ProviderMetadata ProviderMetadata
 }
 
+// NewToolResultPart builds a tool result part.
 func NewToolResultPart(input ToolResultPartInput) ToolResultPart {
 	return ToolResultPart{
 		Type:             "tool-result",
@@ -235,15 +255,19 @@ func NewToolResultPart(input ToolResultPartInput) ToolResultPart {
 
 // --- Tool Output ---
 
+// ToolOutput is what a tool produced: the structured value and the content the
+// model sees.
 type ToolOutput struct {
 	Structured any           `json:"structured"`
 	Content    []ToolContent `json:"content"`
 }
 
+// NewToolOutput builds a tool output.
 func NewToolOutput(structured any, content ...ToolContent) ToolOutput {
 	return ToolOutput{Structured: structured, Content: content}
 }
 
+// ToolOutputFromResultValue converts a tool result value into a tool output.
 func ToolOutputFromResultValue(result ToolResultValue) *ToolOutput {
 	switch result.Type {
 	case "json":
@@ -266,6 +290,7 @@ func ToolOutputFromResultValue(result ToolResultValue) *ToolOutput {
 	}
 }
 
+// ToolOutputToResultValue converts a tool output into a tool result value.
 func ToolOutputToResultValue(output ToolOutput) ToolResultValue {
 	if len(output.Content) == 0 {
 		return ToolResultValue{Type: "json", Value: output.Structured}
@@ -294,18 +319,21 @@ func toolResultText(v any) string {
 
 // --- Content Part ---
 
+// ContentPart is one block of a message: text, media, reasoning or a tool call.
 type ContentPart interface {
 	contentPartTag()
 }
 
 // --- Response Format ---
 
+// ResponseFormatText asks for plain text.
 type ResponseFormatText struct {
 	Type string `json:"type"` // "text"
 }
 
 func (ResponseFormatText) responseFormatTag() {}
 
+// ResponseFormatJSON asks for JSON matching a schema.
 type ResponseFormatJSON struct {
 	Type   string     `json:"type"` // "json"
 	Schema JsonSchema `json:"schema"`
@@ -313,6 +341,7 @@ type ResponseFormatJSON struct {
 
 func (ResponseFormatJSON) responseFormatTag() {}
 
+// ResponseFormatTool asks for the arguments of a named tool.
 type ResponseFormatTool struct {
 	Type string         `json:"type"` // "tool"
 	Tool ToolDefinition `json:"tool"`
@@ -320,12 +349,14 @@ type ResponseFormatTool struct {
 
 func (ResponseFormatTool) responseFormatTag() {}
 
+// ResponseFormat is how the response should be shaped.
 type ResponseFormat interface {
 	responseFormatTag()
 }
 
 // --- Tool Definition ---
 
+// ToolDefinition is a tool as the model sees it.
 type ToolDefinition struct {
 	Name         string         `json:"name"`
 	Description  string         `json:"description"`
@@ -336,8 +367,10 @@ type ToolDefinition struct {
 	Native       map[string]any `json:"native,omitempty"`
 }
 
+// ToolDef is an alias for ToolDefinition.
 type ToolDef = ToolDefinition
 
+// ToolDefinitionInput is the input form of a ToolDefinition.
 type ToolDefinitionInput struct {
 	Name         string
 	Description  string
@@ -348,6 +381,7 @@ type ToolDefinitionInput struct {
 	Native       map[string]any
 }
 
+// NewToolDefinition normalizes a definition, a pointer to one, or its input form.
 func NewToolDefinition(input any) ToolDefinition {
 	switch v := input.(type) {
 	case ToolDefinition:
@@ -366,19 +400,27 @@ func NewToolDefinition(input any) ToolDefinition {
 
 // --- Tool Choice ---
 
+// ToolChoice is how the model should choose a tool: a mode, or a named tool.
 type ToolChoice struct {
 	Type string  `json:"type"` // "auto", "none", "required", "tool"
 	Name *string `json:"name,omitempty"`
 }
 
+// ToolChoiceAuto lets the model decide.
 var ToolChoiceAuto = ToolChoice{Type: "auto"}
+
+// ToolChoiceNone forbids tool calls.
 var ToolChoiceNone = ToolChoice{Type: "none"}
+
+// ToolChoiceRequired forces at least one tool call.
 var ToolChoiceRequired = ToolChoice{Type: "required"}
 
+// ToolChoiceNamed forces one named tool.
 func ToolChoiceNamed(name string) ToolChoice {
 	return ToolChoice{Type: "tool", Name: &name}
 }
 
+// NewToolChoice normalizes a tool choice, a tool definition, or a mode/tool name.
 func NewToolChoice(input any) ToolChoice {
 	switch v := input.(type) {
 	case ToolChoice:
@@ -399,6 +441,7 @@ func NewToolChoice(input any) ToolChoice {
 
 // --- Message ---
 
+// Message is one turn of the conversation.
 type Message struct {
 	ID       string         `json:"id,omitempty"`
 	Role     MessageRole    `json:"role"`
@@ -407,10 +450,13 @@ type Message struct {
 	Native   map[string]any `json:"native,omitempty"`
 }
 
+// NewTextContent builds a text content part.
 func NewTextContent(value string) ContentPart {
 	return TextPart{Type: "text", Text: value}
 }
 
+// MessageContent normalizes a string, a part, or a slice of them into content
+// parts.
 func MessageContent(input any) []ContentPart {
 	switch v := input.(type) {
 	case nil:
@@ -429,6 +475,7 @@ func MessageContent(input any) []ContentPart {
 	}
 }
 
+// MessageInput is the input form of a Message.
 type MessageInput struct {
 	ID       string
 	Role     MessageRole
@@ -437,6 +484,7 @@ type MessageInput struct {
 	Native   map[string]any
 }
 
+// NewMessage normalizes a message or its input form.
 func NewMessage(input any) Message {
 	switch v := input.(type) {
 	case Message:
@@ -456,18 +504,23 @@ func NewMessage(input any) Message {
 	}
 }
 
+// MessageUser builds a user message.
 func MessageUser(content any) Message {
 	return NewMessage(MessageInput{Role: RoleUser, Content: content})
 }
 
+// MessageAssistant builds an assistant message.
 func MessageAssistant(content any) Message {
 	return NewMessage(MessageInput{Role: RoleAssistant, Content: content})
 }
 
+// MessageSystem builds a system message, an instruction at this point in the
+// conversation rather than the initial system prompt.
 func MessageSystem(content any) Message {
 	return NewMessage(MessageInput{Role: RoleSystem, Content: content})
 }
 
+// MessageTool builds a tool-result message.
 func MessageTool(result any) Message {
 	switch v := result.(type) {
 	case ToolResultPart:
@@ -483,6 +536,8 @@ func MessageTool(result any) Message {
 
 // --- LLM Request ---
 
+// LLMRequest is a fully resolved request: the model, the conversation, the
+// tools, and the options for this call.
 type LLMRequest struct {
 	ID              string             `json:"id,omitempty"`
 	Model           ModelSchema        `json:"model"`
@@ -498,6 +553,7 @@ type LLMRequest struct {
 	Metadata        map[string]any     `json:"metadata,omitempty"`
 }
 
+// LLMRequestInput renders the request as the input record its schema accepts.
 func LLMRequestInput(r *LLMRequest) map[string]any {
 	return map[string]any{
 		"id":              r.ID,
@@ -515,6 +571,7 @@ func LLMRequestInput(r *LLMRequest) map[string]any {
 	}
 }
 
+// LLMRequestUpdate applies the set keys of patch and returns a new request.
 func LLMRequestUpdate(r *LLMRequest, patch map[string]any) *LLMRequest {
 	if len(patch) == 0 {
 		return r

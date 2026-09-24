@@ -2,18 +2,23 @@ package schema
 
 import "encoding/json"
 
+// ProviderOptions carries provider-specific request options, keyed by provider.
 type ProviderOptions map[string]map[string]any
 
+// HttpOptions adds body, header and query values to a request.
 type HttpOptions struct {
 	Body    JsonSchema        `json:"body,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Query   map[string]string `json:"query,omitempty"`
 }
 
+// NewHttpOptions builds http options.
 func NewHttpOptions(body JsonSchema, headers, query map[string]string) *HttpOptions {
 	return &HttpOptions{Body: body, Headers: headers, Query: query}
 }
 
+// GenerationOptions controls sampling: token limits, temperature, penalties, and
+// the stop sequences.
 type GenerationOptions struct {
 	MaxTokens        *int     `json:"maxTokens,omitempty"`
 	Temperature      *float64 `json:"temperature,omitempty"`
@@ -25,19 +30,23 @@ type GenerationOptions struct {
 	Stop             []string `json:"stop,omitempty"`
 }
 
+// NewGenerationOptions returns empty generation options.
 func NewGenerationOptions() *GenerationOptions {
 	return &GenerationOptions{}
 }
 
+// ModelLimits is a model's context and output token limits.
 type ModelLimits struct {
 	Context int `json:"context,omitempty"`
 	Output  int `json:"output,omitempty"`
 }
 
+// NewModelLimits builds model limits.
 func NewModelLimits(context, output int) *ModelLimits {
 	return &ModelLimits{Context: context, Output: output}
 }
 
+// ModelDefaults is what a model applies to a request the caller left unset.
 type ModelDefaults struct {
 	Limits          *ModelLimits       `json:"limits,omitempty"`
 	Generation      *GenerationOptions `json:"generation,omitempty"`
@@ -45,10 +54,12 @@ type ModelDefaults struct {
 	Http            *HttpOptions       `json:"http,omitempty"`
 }
 
+// NewModelDefaults builds model defaults.
 func NewModelDefaults(limits *ModelLimits, generation *GenerationOptions, providerOptions ProviderOptions, http *HttpOptions) *ModelDefaults {
 	return &ModelDefaults{Limits: limits, Generation: generation, ProviderOptions: providerOptions, Http: http}
 }
 
+// ModelToolSchemaCompatibility names a tool-schema shape a model requires.
 type ModelToolSchemaCompatibility string
 
 const (
@@ -56,24 +67,30 @@ const (
 	ModelToolSchemaMoonshot ModelToolSchemaCompatibility = "moonshot"
 )
 
+// ModelCompatibility records the schema shapes a model requires.
 type ModelCompatibility struct {
 	ToolSchema *ModelToolSchemaCompatibility `json:"toolSchema,omitempty"`
 }
 
+// NewModelCompatibility builds compatibility for one tool-schema shape.
 func NewModelCompatibility(toolSchema ModelToolSchemaCompatibility) *ModelCompatibility {
 	return &ModelCompatibility{ToolSchema: &toolSchema}
 }
 
+// ModelSchema is the model surface a request needs: its identity, its defaults,
+// and the schema shapes it requires.
 type ModelSchema interface {
 	ModelID() ModelID
 	ProviderID() ProviderID
 	GetDefaults() *ModelDefaults
-	// GetRouteDefaults mirrors `model.route.defaults`; nil when the model has no
-	// route (bare schema.Model / ModelID).
+	// GetRouteDefaults returns the defaults of the model's route, or nil when it
+	// has none.
 	GetRouteDefaults() *ModelDefaults
 	GetCompatibility() *ModelCompatibility
 }
 
+// Model is a concrete model: its identity, defaults and compatibility. It
+// implements ModelSchema.
 type Model struct {
 	ID            ModelID             `json:"id"`
 	Provider      ProviderID          `json:"provider"`
@@ -81,18 +98,37 @@ type Model struct {
 	Compatibility *ModelCompatibility `json:"compatibility,omitempty"`
 }
 
-func (m Model) ModelID() ModelID                      { return m.ID }
-func (m Model) ProviderID() ProviderID                { return m.Provider }
-func (m Model) GetDefaults() *ModelDefaults           { return m.Defaults }
-func (m Model) GetRouteDefaults() *ModelDefaults      { return nil }
+// ModelID returns the model's id.
+func (m Model) ModelID() ModelID { return m.ID }
+
+// ProviderID returns the model's provider.
+func (m Model) ProviderID() ProviderID { return m.Provider }
+
+// GetDefaults returns the model's defaults.
+func (m Model) GetDefaults() *ModelDefaults { return m.Defaults }
+
+// GetRouteDefaults returns nil: a bare model carries no route.
+func (m Model) GetRouteDefaults() *ModelDefaults { return nil }
+
+// GetCompatibility returns the model's compatibility.
 func (m Model) GetCompatibility() *ModelCompatibility { return m.Compatibility }
 
-func (m ModelID) ModelID() ModelID                      { return m }
-func (m ModelID) ProviderID() ProviderID                { return "" }
-func (m ModelID) GetDefaults() *ModelDefaults           { return nil }
-func (m ModelID) GetRouteDefaults() *ModelDefaults      { return nil }
+// ModelID implements ModelSchema as a bare model id: only the id is known.
+func (m ModelID) ModelID() ModelID { return m }
+
+// ProviderID returns "": a bare id has no provider.
+func (m ModelID) ProviderID() ProviderID { return "" }
+
+// GetDefaults returns nil: a bare id carries no defaults.
+func (m ModelID) GetDefaults() *ModelDefaults { return nil }
+
+// GetRouteDefaults returns nil: a bare id carries no route.
+func (m ModelID) GetRouteDefaults() *ModelDefaults { return nil }
+
+// GetCompatibility returns nil: a bare id carries no compatibility.
 func (m ModelID) GetCompatibility() *ModelCompatibility { return nil }
 
+// ModelInput is the input form of a Model.
 type ModelInput struct {
 	ID            string
 	Provider      string
@@ -100,6 +136,7 @@ type ModelInput struct {
 	Compatibility *ModelCompatibility
 }
 
+// NewModel builds a model from input.
 func NewModel(input ModelInput) Model {
 	return Model{
 		ID:            ModelID(input.ID),
@@ -109,6 +146,7 @@ func NewModel(input ModelInput) Model {
 	}
 }
 
+// ModelInputFrom converts a model back to its input form.
 func ModelInputFrom(m Model) ModelInput {
 	return ModelInput{
 		ID:            string(m.ID),
@@ -118,6 +156,7 @@ func ModelInputFrom(m Model) ModelInput {
 	}
 }
 
+// ModelUpdate applies the set fields of patch and returns the updated model.
 func ModelUpdate(m Model, patch ModelInput) Model {
 	if patch.ID == "" && patch.Provider == "" && patch.Defaults == nil && patch.Compatibility == nil {
 		return m
@@ -138,15 +177,18 @@ func ModelUpdate(m Model, patch ModelInput) Model {
 	return r
 }
 
+// CacheHint marks content the provider may cache.
 type CacheHint struct {
 	Type       string `json:"type"` // "ephemeral" or "persistent"
 	TTLSeconds *int   `json:"ttlSeconds,omitempty"`
 }
 
+// NewCacheHint builds a cache hint.
 func NewCacheHint(t string, ttlSeconds *int) CacheHint {
 	return CacheHint{Type: t, TTLSeconds: ttlSeconds}
 }
 
+// CachePolicyMessages selects a number of trailing messages to cache.
 type CachePolicyMessages struct {
 	Tail *int `json:"tail,omitempty"`
 }
@@ -164,14 +206,17 @@ type CachePolicy struct {
 	TTLSeconds *int  `json:"ttlSeconds,omitempty"`
 }
 
+// CachePolicyAuto caches tools, the system prompt and the latest messages.
 func CachePolicyAuto() *CachePolicy {
 	return &CachePolicy{Auto: true}
 }
 
+// CachePolicyNone disables caching.
 func CachePolicyNone() *CachePolicy {
 	return &CachePolicy{None: true}
 }
 
+// MarshalJSON renders the policy as "auto", "none", or an object of flags.
 func (c *CachePolicy) MarshalJSON() ([]byte, error) {
 	if c.Auto {
 		return json.Marshal("auto")
@@ -198,6 +243,7 @@ func (c *CachePolicy) MarshalJSON() ([]byte, error) {
 	return json.Marshal(obj)
 }
 
+// UnmarshalJSON accepts "auto", "none", or an object of flags.
 func (c *CachePolicy) UnmarshalJSON(data []byte) error {
 	if len(data) == 0 {
 		return nil
@@ -243,6 +289,7 @@ func (c *CachePolicy) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MergeJsonRecords merges records left to right, later keys winning.
 func MergeJsonRecords(items ...map[string]any) map[string]any {
 	defined := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -287,6 +334,7 @@ func MergeJsonRecords(items ...map[string]any) map[string]any {
 	return result
 }
 
+// MergeStringRecords merges string records left to right, later keys winning.
 func MergeStringRecords(items ...map[string]string) map[string]string {
 	defined := make([]map[string]string, 0, len(items))
 	for _, item := range items {
@@ -312,6 +360,8 @@ func MergeStringRecords(items ...map[string]string) map[string]string {
 	return result
 }
 
+// MergeProviderOptions merges provider options left to right, later providers and
+// keys winning.
 func MergeProviderOptions(items ...ProviderOptions) ProviderOptions {
 	result := make(map[string]map[string]any)
 	for _, item := range items {
@@ -331,6 +381,8 @@ func MergeProviderOptions(items ...ProviderOptions) ProviderOptions {
 	return result
 }
 
+// MergeHttpOptions merges http options: bodies and headers are merged, query
+// values are taken from the last one that sets them.
 func MergeHttpOptions(items ...*HttpOptions) *HttpOptions {
 	bodies := make([]map[string]any, 0, len(items))
 	headers := make([]map[string]string, 0, len(items))
@@ -372,6 +424,8 @@ func latestStop(items []*GenerationOptions) []string {
 	return nil
 }
 
+// MergeGenerationOptions merges generation options left to right: a later
+// non-zero value wins.
 func MergeGenerationOptions(items ...*GenerationOptions) *GenerationOptions {
 	maxTokens := latestGenerationPtr(items, func(o *GenerationOptions) *int { return o.MaxTokens })
 	temperature := latestGenerationPtr(items, func(o *GenerationOptions) *float64 { return o.Temperature })

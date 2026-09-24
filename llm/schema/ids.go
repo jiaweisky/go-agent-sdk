@@ -1,19 +1,27 @@
 package schema
 
+// ProtocolID names a wire protocol, such as "openai-responses".
 type ProtocolID string
 
+// RouteID names a configured route.
 type RouteID string
 
+// ModelID names a model.
 type ModelID string
 
+// ProviderID names a provider.
 type ProviderID string
 
+// ResponseID identifies one response.
 type ResponseID string
 
+// ContentBlockID identifies a content block within a response.
 type ContentBlockID string
 
+// ToolCallID identifies one tool call.
 type ToolCallID string
 
+// ReasoningEffort is how much reasoning a model should spend.
 type ReasoningEffort string
 
 const (
@@ -26,6 +34,7 @@ const (
 	ReasoningEffortMax     ReasoningEffort = "max"
 )
 
+// TextVerbosity is how verbose a model's text output should be.
 type TextVerbosity string
 
 const (
@@ -34,6 +43,7 @@ const (
 	TextVerbosityHigh   TextVerbosity = "high"
 )
 
+// MessageRole is the part a message plays in the conversation.
 type MessageRole string
 
 const (
@@ -43,6 +53,7 @@ const (
 	RoleTool      MessageRole = "tool"
 )
 
+// FinishReason is why a step or a response ended.
 type FinishReason string
 
 const (
@@ -54,6 +65,8 @@ const (
 	ReasonUnknown       FinishReason = "unknown"
 )
 
+// JsonSchema is a JSON schema document.
 type JsonSchema map[string]any
 
+// ProviderMetadata carries provider-specific values keyed by provider.
 type ProviderMetadata map[string]map[string]any
