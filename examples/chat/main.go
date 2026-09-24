@@ -35,8 +35,9 @@ func main() {
 }
 
 func run() error {
-	// -C runs as if started in the given directory (like git -C), so the
-	// config directory and workspace do not depend on where chat was launched.
+	// -C runs as if started in the given directory (like git -C): the workspace
+	// and the project's .config follow it. The example's own state and sample
+	// config stay next to the example (see util.ExampleDir).
 	dir := flag.String("C", "", "run as if started in this directory")
 	yolo := flag.Bool("yolo", false, "skip all permission prompts (approve every tool call)")
 	flag.Parse()
@@ -45,8 +46,8 @@ func run() error {
 			return err
 		}
 	}
-	// Load .env from the (possibly changed) working directory; util no longer
-	// loads it at package init so that -C takes effect first.
+	// Load .env from the working directory, after -C so the file comes from the
+	// intended directory.
 	util.LoadDotEnv()
 
 	ctx := context.Background()

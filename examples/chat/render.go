@@ -187,9 +187,9 @@ type taskRecord struct {
 	lastTool string
 }
 
-// taskHandle is the human-facing task handle. TS identifies subagents by their
-// title (agent + description) and an "N of M" index, not by session id — and
-// session ids share their first 8 chars when created in the same millisecond.
+// taskHandle is the human-facing handle for a task: "#N" by start order.
+// Session ids are not usable as a handle — ids created in the same millisecond
+// share their first characters, so they would be indistinguishable.
 func taskHandle(record *taskRecord) string {
 	if record == nil {
 		return "#?"
@@ -211,7 +211,7 @@ func skillName(input any) string {
 	return "?"
 }
 
-// formatToolcalls mirrors TS formatSubagentToolcalls.
+// formatToolcalls renders a tool-call count for the task result line.
 func formatToolcalls(count int) string {
 	if count == 1 {
 		return "1 toolcall"
@@ -280,6 +280,8 @@ func (c *chat) handle(event agent.Event) {
 		return
 	}
 	sessionID := agent.SessionIDOf(event)
+	// Events without a session id (usage, retries) belong to the parent's turn,
+	// as do the parent session's own events.
 	if sessionID == "" || sessionID == c.parent {
 		c.handleParent(event, sessionID)
 		return
@@ -617,8 +619,8 @@ func firstLine(text string) string {
 	return strings.TrimRight(text, "\r")
 }
 
-// titlecase upper-cases the first rune, mirroring TS Locale.titlecase for the
-// subagent name in a task title.
+// titlecase upper-cases the first rune of s (the subagent name in a task
+// title).
 func titlecase(s string) string {
 	if s == "" {
 		return s

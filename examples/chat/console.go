@@ -418,8 +418,8 @@ func (e *editor) readLine(prompt string) (string, error) {
 	}
 }
 
-// hasPending reports whether another rune is available within timeout. A lone
-// Esc yields none; an escape sequence's remaining runes arrive within a few ms.
+// hasPending reports whether another rune arrives within timeout. A lone Esc
+// yields none; an escape sequence's remaining runes arrive within a few ms.
 func (e *editor) hasPending(timeout time.Duration) bool {
 	if e.in.Buffered() > 0 {
 		return true
