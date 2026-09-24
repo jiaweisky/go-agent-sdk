@@ -313,7 +313,9 @@ func ReduceResponseState(state *ResponseState, event LLMEvent) {
 
 	switch event.Type {
 	case EventFinish:
-		state.Usage = event.Usage
+		if event.Usage != nil {
+			state.Usage = event.Usage
+		}
 		state.FinishReason = &event.Reason
 	case EventProviderError:
 		if state.FinishReason == nil {
@@ -441,28 +443,40 @@ func reduceReasoningEnd(state *ResponseState, event LLMEvent) {
 }
 
 func textContent(text string, providerMetadata ProviderMetadata) ContentPart {
-	return TextPart{Type: "text", Text: text}
+	part := TextPart{Type: "text", Text: text}
+	if providerMetadata != nil {
+		part.ProviderMetadata = providerMetadata
+	}
+	return part
 }
 
 func reasoningContent(text string, providerMetadata ProviderMetadata) ContentPart {
-	return ReasoningPart{Type: "reasoning", Text: text}
+	part := ReasoningPart{Type: "reasoning", Text: text}
+	if providerMetadata != nil {
+		part.ProviderMetadata = providerMetadata
+	}
+	return part
 }
 
 func toolCallContent(event LLMEvent) ContentPart {
 	return ToolCallPart{
-		Type:  "tool-call",
-		ID:    event.ID,
-		Name:  event.Name,
-		Input: event.Input,
+		Type:             "tool-call",
+		ID:               event.ID,
+		Name:             event.Name,
+		Input:            event.Input,
+		ProviderExecuted: event.ProviderExecuted,
+		ProviderMetadata: event.ProviderMetadata,
 	}
 }
 
 func toolResultContent(event LLMEvent) ContentPart {
 	return ToolResultPart{
-		Type:   "tool-result",
-		ID:     event.ID,
-		Name:   event.Name,
-		Result: event.Result,
+		Type:             "tool-result",
+		ID:               event.ID,
+		Name:             event.Name,
+		Result:           event.Result,
+		ProviderExecuted: event.ProviderExecuted,
+		ProviderMetadata: event.ProviderMetadata,
 	}
 }
 

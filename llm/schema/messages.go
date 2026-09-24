@@ -247,7 +247,7 @@ func NewToolOutput(structured any, content ...ToolContent) ToolOutput {
 func ToolOutputFromResultValue(result ToolResultValue) *ToolOutput {
 	switch result.Type {
 	case "json":
-		return &ToolOutput{Structured: result.Value}
+		return &ToolOutput{Structured: result.Value, Content: []ToolContent{}}
 	case "text":
 		return &ToolOutput{
 			Structured: map[string]any{},
