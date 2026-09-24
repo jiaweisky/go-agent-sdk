@@ -14,9 +14,9 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/text/collate"
+	"golang.org/x/text/language"
 
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -97,11 +97,11 @@ type ReadFileSystem interface {
 	List(input schema.AbsolutePath, page ReadPageInput) (*ReadListPage, error)
 }
 
-func NewReadFileSystem() ReadFileSystem {
-	return defaultReadFileSystem{}
+func NewReadFileSystem(locale language.Tag) ReadFileSystem {
+	return defaultReadFileSystem{locale: locale}
 }
 
-type defaultReadFileSystem struct{}
+type defaultReadFileSystem struct{ locale language.Tag }
 
 func (defaultReadFileSystem) Inspect(input schema.AbsolutePath) (string, error) {
 	return inspectToolRead(input)
@@ -111,8 +111,8 @@ func (defaultReadFileSystem) Read(input schema.AbsolutePath, resource string, pa
 	return readToolRead(input, resource, page)
 }
 
-func (defaultReadFileSystem) List(input schema.AbsolutePath, page ReadPageInput) (*ReadListPage, error) {
-	return listToolRead(input, page)
+func (f defaultReadFileSystem) List(input schema.AbsolutePath, page ReadPageInput) (*ReadListPage, error) {
+	return listToolRead(input, page, f.locale)
 }
 
 var readBinaryExtensions = map[string]bool{
@@ -550,7 +550,7 @@ func readToolRead(input schema.AbsolutePath, resource string, page ReadPageInput
 	}, nil
 }
 
-func listToolRead(input schema.AbsolutePath, page ReadPageInput) (*ReadListPage, error) {
+func listToolRead(input schema.AbsolutePath, page ReadPageInput, locale language.Tag) (*ReadListPage, error) {
 	real, err := core.RealPath(string(input))
 	if err != nil {
 		return nil, err
@@ -596,7 +596,7 @@ func listToolRead(input schema.AbsolutePath, page ReadPageInput) (*ReadListPage,
 		visible = append(visible, core.FileSystemEntry{Path: item.Name + suffix, Type: typ})
 	}
 
-	collator := collate.New(util.LocaleTag)
+	collator := collate.New(locale)
 	sort.SliceStable(visible, func(i, j int) bool {
 		if visible[i].Type == visible[j].Type {
 			return collator.CompareString(visible[i].Path, visible[j].Path) < 0

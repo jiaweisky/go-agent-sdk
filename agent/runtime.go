@@ -20,6 +20,7 @@ import (
 	"github.com/user/go-agent-sdk/core/skill"
 	"github.com/user/go-agent-sdk/core/systemcontext"
 	"github.com/user/go-agent-sdk/core/tool"
+	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/llm"
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/mcp"
@@ -286,11 +287,12 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		return nil, err
 	}
 
+	locale := util.ResolveLocale(opts.Locale)
 	task := &taskRunner{}
 	builtin := builtinDeps{
 		db: db, events: events, permission: permission, question: question,
 		location: *location, global: global, shell: opts.Shell, skills: skills,
-		webSearch: opts.WebSearch, agents: agents, task: task,
+		webSearch: opts.WebSearch, locale: locale, agents: agents, task: task,
 	}
 	snapshots := runner.Snapshotter(noopSnapshots{})
 	if snapshot, err := core.NewSnapshot(git, global, location); err == nil {
@@ -319,8 +321,8 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		Store:             store,
 		Location:          *location,
 		SystemContext:     systemcontext.NewRegistry(),
-		SkillGuidance:     skill.NewGuidance(skills, allowAllEvaluator{}),
-		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: referenceService}),
+		SkillGuidance:     skill.NewGuidance(skills, allowAllEvaluator{}, locale),
+		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: referenceService}, locale),
 		Compaction:        compactionSettings(opts),
 		Snapshots:         snapshots,
 		DB:                db,

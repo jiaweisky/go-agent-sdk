@@ -686,6 +686,7 @@ type ClientOptions struct {
     ConfigDirs       []string                  // 内容配置目录（见「配置模型」）
     SubagentDepth    int                       // task 子会话最大深度（默认 1）
     Shell            string                    // bash 工具使用的 shell（默认 sh）
+    Locale           string                    // 列表排序 locale；空则用 LC_ALL/LC_COLLATE/LANG
     ToolOutput       *ToolOutputConfig         // 工具输出落盘上限（MaxLines / MaxBytes）
     Compaction       *CompactionConfig         // 上下文压缩（Auto / PreserveRecentTokens / Reserved）
     Policies         []schema.PolicyInfo       // allow/deny 策略
@@ -789,6 +790,7 @@ TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR`
 
 - websearch：`ClientOptions.WebSearch`；nil 时**不注册**该工具（模型不会看到一个必然失败的工具）。想沿用 CLI 约定的宿主调用 `tool.WebSearchConfigFromEnv()` 自己读 env 再传入。
 - github 镜像：`core.WithGitHubBaseURL(base)` 传给 `RepositoryParse` / `NewRepositoryCache`（TS 对**所有** github.com host 都走 `githubRemote`，显式 URL 同样被改写，以保证 origin 与 clone target 一致）。
+- 排序 locale：`util.CompareLocale(left, right, tag)` 显式接收 tag，`ClientOptions.Locale` 一路传到 read 工具的目录列表、skill/reference guidance 与 task 的 subagent 列表；`util.ResolveLocale(name)` 负责解析，空值回退到 env 推断出的 `util.LocaleTag`（对齐 JS `localeCompare` 的默认行为）。
 
 文件只承载**内容**（agent / mode / skill 的 markdown），且来源必须**显式**声明：`ClientOptions.ConfigDirs`。每个目录按以下模式扫描：
 

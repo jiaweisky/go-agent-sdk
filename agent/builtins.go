@@ -3,6 +3,8 @@ package agent
 import (
 	"net/http"
 
+	"golang.org/x/text/language"
+
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/database"
 	"github.com/user/go-agent-sdk/core/ripgrep"
@@ -20,6 +22,7 @@ type builtinDeps struct {
 	shell      string
 	skills     tool.SkillLister
 	webSearch  *tool.WebSearchConfig
+	locale     language.Tag
 	agents     *core.Agent
 	task       TaskRunner
 }
@@ -40,7 +43,7 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 	registrations := []func() (func(), error){
 		func() (func(), error) {
 			return tool.RegisterRead(tools, tool.ReadDeps{
-				Mutation: mutation, Reader: tool.NewReadFileSystem(), Image: image, Permission: deps.permission,
+				Mutation: mutation, Reader: tool.NewReadFileSystem(deps.locale), Image: image, Permission: deps.permission,
 			})
 		},
 		func() (func(), error) {
@@ -76,7 +79,7 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 		func() (func(), error) {
 			return RegisterTask(tools, TaskToolDeps{
 				Permission: deps.permission, Agents: deps.agents, Runner: deps.task,
-				AgentPermissions: agentPermissions,
+				AgentPermissions: agentPermissions, Locale: deps.locale,
 			})
 		},
 	}

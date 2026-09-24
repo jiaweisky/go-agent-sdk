@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/text/language"
+
 	"github.com/user/go-agent-sdk/core/systemcontext"
 	"github.com/user/go-agent-sdk/core/util"
 )
@@ -30,10 +32,11 @@ type Summary struct {
 // Guidance mirrors the ReferenceGuidance service.
 type Guidance struct {
 	references Lister
+	locale     language.Tag
 }
 
-func NewGuidance(references Lister) *Guidance {
-	return &Guidance{references: references}
+func NewGuidance(references Lister, locale language.Tag) *Guidance {
+	return &Guidance{references: references, locale: locale}
 }
 
 // Load mirrors ReferenceGuidance.load.
@@ -49,7 +52,7 @@ func (g *Guidance) Load() (systemcontext.SystemContext, error) {
 		}
 		available = append(available, Summary{Name: item.Name, Path: item.Path, Description: item.Description})
 	}
-	sort.Slice(available, func(i, j int) bool { return util.CompareLocale(available[i].Name, available[j].Name) < 0 })
+	sort.Slice(available, func(i, j int) bool { return util.CompareLocale(available[i].Name, available[j].Name, g.locale) < 0 })
 	if len(available) == 0 {
 		return systemcontext.Empty, nil
 	}

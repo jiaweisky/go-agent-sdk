@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/user/go-agent-sdk/agent"
+	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -43,7 +44,7 @@ func (c *chat) agentsCommand() {
 	if info := agents.Get(schema.AgentID("build")); info != nil {
 		permissions = info.Permissions
 	}
-	subagents := agent.SubagentTypes(agents, permissions)
+	subagents := agent.SubagentTypes(agents, permissions, util.LocaleTag)
 	if len(subagents) == 0 {
 		c.console.write("(no subagents; add <configDir>/agent/<name>.md)\n")
 		return
@@ -74,7 +75,7 @@ func (c *chat) mcpsCommand() {
 	for name := range statuses {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	sort.Slice(names, func(i, j int) bool { return util.CompareLocale(names[i], names[j], util.LocaleTag) < 0 })
 	c.console.write(fmt.Sprintf("%sMCP servers (%d):%s\n", bold, len(names), reset))
 	for _, name := range names {
 		status := statuses[name]

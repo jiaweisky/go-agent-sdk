@@ -14,6 +14,7 @@ import (
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/llm/schema"
 	coreschema "github.com/user/go-agent-sdk/schema"
+	"golang.org/x/text/language"
 )
 
 func newReadDeps(root string) ReadDeps {
@@ -22,7 +23,7 @@ func newReadDeps(root string) ReadDeps {
 	}
 	return ReadDeps{
 		Mutation: core.NewLocationMutation(&core.Location{LocationInfo: coreschema.LocationInfo{Directory: coreschema.AbsolutePath(root)}}),
-		Reader:   NewReadFileSystem(),
+		Reader:   NewReadFileSystem(language.Und),
 		Image:    core.NewImage(core.DefaultImageConfig()),
 		Permission: core.NewPermission(core.PermissionConfig{
 			Sessions:  testSessions{agent: "build"},

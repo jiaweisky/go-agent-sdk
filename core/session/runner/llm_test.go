@@ -20,6 +20,7 @@ import (
 	"github.com/user/go-agent-sdk/llm/route"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
+	"golang.org/x/text/language"
 )
 
 type runnerTestEvents struct{ events core.Event }
@@ -147,8 +148,8 @@ func newRunnerTestRunner(t *testing.T, db *database.Database, llm route.LLMClien
 		Store:             session.NewStore(db),
 		Location:          core.Location{LocationInfo: schema.LocationInfo{Directory: "/project"}},
 		SystemContext:     systemcontext.NewRegistry(),
-		SkillGuidance:     skill.NewGuidance(nil, nil),
-		ReferenceGuidance: reference.NewGuidance(runnerTestReferences{}),
+		SkillGuidance:     skill.NewGuidance(nil, nil, language.Und),
+		ReferenceGuidance: reference.NewGuidance(runnerTestReferences{}, language.Und),
 		Compaction:        session.DefaultCompactionSettings(),
 		Snapshots:         runnerTestSnapshots{},
 		DB:                db,

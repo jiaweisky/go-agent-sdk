@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/text/language"
+
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/tool"
 	"github.com/user/go-agent-sdk/core/util"
@@ -106,12 +108,14 @@ type TaskToolDeps struct {
 	// AgentPermissions are the calling agent's rules, used to filter the
 	// advertised subagent types (mirrors registry.describeTask).
 	AgentPermissions schema.PermissionRuleset
+	// Locale orders the advertised subagent types.
+	Locale language.Tag
 }
 
 // SubagentTypes mirrors the registry's describeTask: agents whose mode is not
 // "primary" and whose "task" permission is not denied for the caller, sorted by
-// name.
-func SubagentTypes(agents *core.Agent, permissions schema.PermissionRuleset) []schema.AgentInfo {
+// name with the given locale.
+func SubagentTypes(agents *core.Agent, permissions schema.PermissionRuleset, locale language.Tag) []schema.AgentInfo {
 	var items []schema.AgentInfo
 	for _, item := range agents.All() {
 		if item.Mode == schema.AgentModePrimary {
@@ -122,13 +126,15 @@ func SubagentTypes(agents *core.Agent, permissions schema.PermissionRuleset) []s
 		}
 		items = append(items, item)
 	}
-	sort.Slice(items, func(i, j int) bool { return util.CompareLocale(string(items[i].ID), string(items[j].ID)) < 0 })
+	sort.Slice(items, func(i, j int) bool {
+		return util.CompareLocale(string(items[i].ID), string(items[j].ID), locale) < 0
+	})
 	return items
 }
 
-func taskDescription(agents *core.Agent, permissions schema.PermissionRuleset) string {
+func taskDescription(agents *core.Agent, permissions schema.PermissionRuleset, locale language.Tag) string {
 	lines := []string{"Available agent types and the tools they have access to:"}
-	for _, item := range SubagentTypes(agents, permissions) {
+	for _, item := range SubagentTypes(agents, permissions, locale) {
 		description := "This subagent should only be called manually by the user."
 		if item.Description != nil && *item.Description != "" {
 			description = *item.Description
@@ -154,7 +160,7 @@ func renderTaskOutput(output TaskOutput) string {
 
 func MakeTask(deps TaskToolDeps) *tool.Def[TaskInput, TaskOutput, TaskOutput] {
 	return tool.Make(tool.Config[TaskInput, TaskOutput, TaskOutput]{
-		Description: taskDescription(deps.Agents, deps.AgentPermissions),
+		Description: taskDescription(deps.Agents, deps.AgentPermissions, deps.Locale),
 		Input:       TaskInputSchema,
 		Output:      TaskOutputSchema,
 		ToModelOutput: func(input TaskInput, output any) []tool.Content {

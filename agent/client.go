@@ -82,6 +82,11 @@ type ClientOptions struct {
 	// Shell overrides the shell used by the bash tool. Empty uses the platform
 	// default.
 	Shell string
+	// Locale orders model-visible lists (read-tool directory listings, skill and
+	// reference guidance, advertised subagent types), matching
+	// String.prototype.localeCompare. Empty uses the environment locale
+	// (LC_ALL, LC_COLLATE, LANG).
+	Locale string
 	// ToolOutput bounds oversized tool results. Nil uses the defaults.
 	ToolOutput *ToolOutputConfig
 	// Compaction controls automatic history compaction. Nil uses the defaults.

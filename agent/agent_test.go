@@ -15,6 +15,7 @@ import (
 
 	"github.com/user/go-agent-sdk/core"
 	coretool "github.com/user/go-agent-sdk/core/tool"
+	"github.com/user/go-agent-sdk/core/util"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -1266,7 +1267,7 @@ func TestSubagentTypesFilteredByTaskPermission(t *testing.T) {
 
 	listed := func(permissions schema.PermissionRuleset) map[schema.AgentID]bool {
 		result := map[schema.AgentID]bool{}
-		for _, item := range SubagentTypes(client.rt.agents, permissions) {
+		for _, item := range SubagentTypes(client.rt.agents, permissions, util.LocaleTag) {
 			result[item.ID] = true
 		}
 		return result
