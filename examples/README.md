@@ -6,11 +6,14 @@ Runnable examples for the go-agent-sdk high-level `agent` package.
 
 | Variable | Description | Default |
 |---|---|---|
-| `OPENCODE_PROVIDER` | Provider type: `openai`, `anthropic`, or `openai-compatible` | `openai` |
+| `OPENCODE_MODEL` | Model id (required; provider-specific, so there is no default) | — |
+| `OPENCODE_PROVIDER` | Provider type: `openai`, `anthropic`, `openai-compatible`, or `gemini` | `openai` |
 | `OPENCODE_PROVIDER_ID` | Provider id for `openai-compatible` (e.g. `deepseek`) | `openai-compatible` |
 | `OPENCODE_BASE_URL` | Provider base URL | provider default |
-| `OPENCODE_API_KEY` | Provider API key | — |
-| `OPENCODE_MODEL` | Model id | `gpt-4o` |
+| `OPENCODE_API_KEY` | Provider API key (falls back to `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) | — |
+| `OPENCODE_CONTEXT_LIMIT` | Model context limit; with `OPENCODE_OUTPUT_LIMIT` it enables automatic compaction | — |
+| `OPENCODE_OUTPUT_LIMIT` | Model output limit | — |
+| `OPENCODE_DATA` | State root (`data/`, `cache/`, `state/`, `tmp/` live under it) | `$XDG_DATA_HOME/go-agent-sdk` or `~/.local/share/go-agent-sdk` |
 
 Example:
 

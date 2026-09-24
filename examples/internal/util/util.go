@@ -126,15 +126,19 @@ func Client(options ...Option) (*agent.Client, error) {
 	return client, nil
 }
 
-// dataRoot is this host's state root: the opencode CLI convention
-// ($XDG_DATA_HOME/opencode, else ~/.local/share/opencode), so the example reuses
-// whatever state the CLI already has. The SDK never picks this itself.
+// dataRoot is this host's state root. The SDK never picks one, so the host
+// decides: OPENCODE_DATA overrides, otherwise a directory of the example's own
+// ($XDG_DATA_HOME/go-agent-sdk, else ~/.local/share/go-agent-sdk). It is a demo,
+// not the opencode CLI, so it must not write into the CLI's directory.
 func dataRoot() string {
+	if dir := os.Getenv("OPENCODE_DATA"); dir != "" {
+		return dir
+	}
 	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
-		return filepath.Join(dir, "opencode")
+		return filepath.Join(dir, "go-agent-sdk")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "opencode")
+	return filepath.Join(home, ".local", "share", "go-agent-sdk")
 }
 
 // protocolFor maps the OPENCODE_PROVIDER value to a native protocol id.
