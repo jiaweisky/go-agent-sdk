@@ -89,16 +89,10 @@ func (s *Session) On(handler func(Event)) func() {
 // iterating.
 func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
-		events := make(chan Event, 256)
-		closed := make(chan struct{})
-		unsubscribe := s.On(func(event Event) {
-			select {
-			case events <- event:
-			case <-closed:
-			}
-		})
+		events := newTurnEvents()
+		unsubscribe := s.On(events.offer)
 		defer func() {
-			close(closed)
+			events.close()
 			unsubscribe()
 		}()
 
@@ -107,34 +101,61 @@ func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event,
 
 		for {
 			select {
-			case event := <-events:
+			case event := <-events.events:
 				if !yield(event, nil) {
 					return
 				}
 			case err := <-done:
-				for {
-					select {
-					case event := <-events:
-						if !yield(event, nil) {
-							return
-						}
-					default:
-						if err != nil {
-							// Carry the error on both channels: the event for On
-							// subscribers, the second value for range callers.
-							if !yield(ErrorEvent{SessionID: s.ID(), Err: err}, err) {
-								return
-							}
-						}
-						yield(Idle{SessionID: s.ID()}, nil)
-						return
-					}
-				}
+				drainTurn(events, s.ID(), yield, err)
+				return
 			case <-ctx.Done():
 				// Cancelling the caller's context only stops waiting; the active
 				// turn keeps running until it finishes or Abort is called.
 				return
 			}
+		}
+	}
+}
+
+// turnEvents hands a turn's events to the caller with backpressure: the offer
+// blocks while the buffer is full, and close releases it once the caller stops
+// iterating.
+type turnEvents struct {
+	events chan Event
+	closed chan struct{}
+}
+
+func newTurnEvents() *turnEvents {
+	return &turnEvents{events: make(chan Event, 256), closed: make(chan struct{})}
+}
+
+func (t *turnEvents) offer(event Event) {
+	select {
+	case t.events <- event:
+	case <-t.closed:
+	}
+}
+
+func (t *turnEvents) close() { close(t.closed) }
+
+// drainTurn yields the events a finished turn left buffered, then the error, if
+// any, and finally Idle. The error is carried on both channels: as an event for
+// On subscribers, and as the second value for range callers.
+func drainTurn(events *turnEvents, sessionID string, yield func(Event, error) bool, err error) {
+	for {
+		select {
+		case event := <-events.events:
+			if !yield(event, nil) {
+				return
+			}
+		default:
+			if err != nil {
+				if !yield(ErrorEvent{SessionID: sessionID, Err: err}, err) {
+					return
+				}
+			}
+			yield(Idle{SessionID: sessionID}, nil)
+			return
 		}
 	}
 }

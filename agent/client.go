@@ -213,79 +213,18 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 	if cfg == nil {
 		cfg = &SessionConfig{}
 	}
-	agentID := cfg.Agent
-	if agentID == "" {
-		agentID = string(core.AgentDefaultID)
-	}
-	modelID := cfg.Model
-	if modelID == "" {
-		modelID = c.opts.Model
-	}
 	sessionID := schema.NewSessionID()
-
-	// Per-session system prompt customization is applied to a derived agent so
-	// it does not mutate the shared agent used by other sessions.
-	effectiveAgent := agentID
-	derivedAgent := false
-	var startContext string
-	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
-		if out, _ := cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: string(sessionID), Agent: agentID, Model: modelID}); out != nil {
-			startContext = out.AdditionalContext
-		}
+	agentID, modelID := c.sessionDefaults(cfg)
+	effectiveAgent, derivedAgent, err := c.deriveAgent(cfg, sessionID, agentID, modelID)
+	if err != nil {
+		return nil, err
 	}
-	if cfg.SystemPrompt != nil || startContext != "" {
-		base := c.rt.agents.Get(schema.AgentID(agentID))
-		if base == nil {
-			return nil, fmt.Errorf("unknown agent: %s", agentID)
-		}
-		effectiveAgent = agentID + "#" + string(sessionID)
-		copied := *base
-		applySystemPrompt(&copied, cfg.SystemPrompt)
-		if startContext != "" {
-			system := ""
-			if copied.System != nil {
-				system = *copied.System
-			}
-			combined := joinSections(system, startContext)
-			copied.System = &combined
-		}
-		if _, err := c.rt.agents.Transform(func(draft core.AgentDraft) error {
-			draft.Update(schema.AgentID(effectiveAgent), func(target *schema.AgentInfo) {
-				*target = copied
-			})
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		derivedAgent = true
-	}
-
 	sessionRegistry, err := c.rt.newSessionRegistry(effectiveAgent, cfg.Permissions, cfg.Tools)
 	if err != nil {
 		c.removeDerivedAgent(effectiveAgent, derivedAgent)
 		return nil, err
 	}
-
-	// The stored provider id is informational; resolution uses the resolved
-	// ModelInfo. It is the configured protocol (empty when ModelInfo is set).
-	providerID := string(c.opts.Protocol)
-	now := time.Now().UnixMilli()
-	title := cfg.Title
-	if title == "" {
-		title = "Session"
-	}
-	permissionJSON := "null"
-	if len(cfg.Permissions) > 0 {
-		if encoded, err := json.Marshal(cfg.Permissions); err == nil {
-			permissionJSON = string(encoded)
-		}
-	}
-	if _, err := c.rt.db.DB.Exec(
-		"INSERT INTO `session` (`id`,`project_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`revert`,`time_created`,`time_updated`) "+
-			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-		string(sessionID), string(c.rt.projectID), "session", string(c.rt.location.Directory),
-		title, "1", effectiveAgent, fmt.Sprintf(`{"id":%q,"providerID":%q}`, modelID, providerID), permissionJSON, `null`, now, now,
-	); err != nil {
+	if err := c.insertSession(cfg, sessionID, effectiveAgent, modelID); err != nil {
 		c.removeDerivedAgent(effectiveAgent, derivedAgent)
 		return nil, err
 	}
@@ -309,6 +248,90 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 	session.unsub = unsub
 	c.trackSession(session)
 	return session, nil
+}
+
+// sessionDefaults is the session's agent and model, with the client's defaults
+// filled in.
+func (c *Client) sessionDefaults(cfg *SessionConfig) (agentID, modelID string) {
+	agentID = cfg.Agent
+	if agentID == "" {
+		agentID = string(core.AgentDefaultID)
+	}
+	modelID = cfg.Model
+	if modelID == "" {
+		modelID = c.opts.Model
+	}
+	return agentID, modelID
+}
+
+// deriveAgent registers a per-session copy of the agent when the session
+// customizes the system prompt, so the shared agent is not mutated. It reports
+// the effective agent id and whether that id is derived.
+func (c *Client) deriveAgent(
+	cfg *SessionConfig,
+	sessionID schema.SessionID,
+	agentID, modelID string,
+) (string, bool, error) {
+	var startContext string
+	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
+		if out, _ := cfg.Hooks.OnSessionStart(SessionStartInput{
+			SessionID: string(sessionID), Agent: agentID, Model: modelID,
+		}); out != nil {
+			startContext = out.AdditionalContext
+		}
+	}
+	if cfg.SystemPrompt == nil && startContext == "" {
+		return agentID, false, nil
+	}
+	base := c.rt.agents.Get(schema.AgentID(agentID))
+	if base == nil {
+		return "", false, fmt.Errorf("unknown agent: %s", agentID)
+	}
+	effectiveAgent := agentID + "#" + string(sessionID)
+	copied := *base
+	applySystemPrompt(&copied, cfg.SystemPrompt)
+	if startContext != "" {
+		system := ""
+		if copied.System != nil {
+			system = *copied.System
+		}
+		combined := joinSections(system, startContext)
+		copied.System = &combined
+	}
+	if _, err := c.rt.agents.Transform(func(draft core.AgentDraft) error {
+		draft.Update(schema.AgentID(effectiveAgent), func(target *schema.AgentInfo) {
+			*target = copied
+		})
+		return nil
+	}); err != nil {
+		return "", false, err
+	}
+	return effectiveAgent, true, nil
+}
+
+// insertSession records the session row.
+func (c *Client) insertSession(cfg *SessionConfig, sessionID schema.SessionID, agentID, modelID string) error {
+	// The stored provider id is informational; resolution uses the resolved
+	// ModelInfo. It is the configured protocol (empty when ModelInfo is set).
+	providerID := string(c.opts.Protocol)
+	now := time.Now().UnixMilli()
+	title := cfg.Title
+	if title == "" {
+		title = "Session"
+	}
+	permissionJSON := "null"
+	if len(cfg.Permissions) > 0 {
+		if encoded, err := json.Marshal(cfg.Permissions); err == nil {
+			permissionJSON = string(encoded)
+		}
+	}
+	_, err := c.rt.db.DB.Exec(
+		"INSERT INTO `session` (`id`,`project_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`revert`,`time_created`,`time_updated`) "+
+			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+		string(sessionID), string(c.rt.projectID), "session", string(c.rt.location.Directory),
+		title, "1", agentID, fmt.Sprintf(`{"id":%q,"providerID":%q}`, modelID, providerID), permissionJSON, `null`, now, now,
+	)
+	return err
 }
 
 func (c *Client) removeDerivedAgent(agentID string, derived bool) {

@@ -145,32 +145,27 @@ func (r *runtime) hooksFor(sessionID string) *SessionHooks {
 	return r.hooks[sessionID]
 }
 
+// newRuntime builds the process-wide services: the database and event log, the
+// project location, the agent/skill/reference registries, the permission and
+// question handlers, and the runner the coordinator drives.
 func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
-	workingDir := opts.WorkingDirectory
-	if workingDir == "" {
-		workingDir, _ = os.Getwd()
-	}
-	directory, err := filepath.Abs(workingDir)
+	directory, err := resolveWorkingDirectory(opts.WorkingDirectory)
 	if err != nil {
 		return nil, err
 	}
-
-	home := opts.Home
-	if home == "" {
-		home, _ = os.UserHomeDir()
-	}
-	root := opts.Root
-	if root == "" {
-		return nil, fmt.Errorf("ClientOptions.Root is required: the SDK does not choose a data directory")
+	home, root, err := resolveHomeAndRoot(opts)
+	if err != nil {
+		return nil, err
 	}
 	global := core.NewGlobal(root, home)
 
-	dbPath := filepath.Join(global.Data, "agent.db")
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+	db, err := openDatabase(global)
+	if err != nil {
 		return nil, err
 	}
-	db, err := database.Open(dbPath)
-	if err != nil {
+	// fail releases the database when a later step cannot start.
+	fail := func(err error) (*runtime, error) {
+		db.Close()
 		return nil, err
 	}
 
@@ -179,128 +174,58 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		Durable: schema.Durable(schema.SessionEventDurableDefinitions),
 	})
 	if err := core.RegisterSessionProjectors(events); err != nil {
-		db.Close()
-		return nil, err
+		return fail(err)
 	}
 
 	git := core.NewGit(core.NewAppProcess())
-	projectService := core.NewProject(core.ProjectConfig{
-		Git:         git,
-		Directories: coreproject.NewDirectories(db),
-	})
-	location, err := core.NewLocation(schema.LocationRef{Directory: schema.AbsolutePath(directory)}, projectService)
+	location, err := ensureProject(db, git, directory)
 	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	projectID := location.Project.ID
-	now := time.Now().UnixMilli()
-	if _, err := db.DB.Exec(
-		"INSERT INTO `project` (`id`,`worktree`,`sandboxes`,`time_created`,`time_updated`) VALUES (?,?,?,?,?) "+
-			"ON CONFLICT(`id`) DO NOTHING",
-		string(projectID), string(location.Project.Directory), "[]", now, now,
-	); err != nil {
-		db.Close()
-		return nil, err
+		return fail(err)
 	}
 
-	policy := core.NewPolicy()
-	policy.Load(opts.Policies)
+	agents, err := buildAgents(opts, location, global)
+	if err != nil {
+		return fail(err)
+	}
+	store := session.NewStore(db)
+	permission := buildPermission(opts, db, events, agents, store, location.Project.ID)
+	question := newHandlerQuestion(core.NewQuestion(core.QuestionConfig{Events: events}), opts.Question)
+	skills, err := buildSkills(opts, global)
+	if err != nil {
+		return fail(err)
+	}
+	references, err := buildReferences(opts, global, events, git)
+	if err != nil {
+		return fail(err)
+	}
+	models, err := buildModelResolver(opts)
+	if err != nil {
+		return fail(err)
+	}
 
 	// Bound oversized tool results (see core.ToolOutputStore) before they are
 	// sent to the model; without this a single large grep/read can overflow the
 	// provider context window.
 	toolOutput := core.NewToolOutputStore(global, toolOutputSettings(opts))
-	outputStore := tool.NewCoreOutputStore(toolOutput)
-
-	subagentDepth := opts.SubagentDepth
-	if subagentDepth <= 0 {
-		subagentDepth = 1
-	}
-
-	agents := core.NewAgent()
-	if err := core.ApplyDefaultAgents(agents, location, global); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err := opencodeconfig.ApplyDirAgents(agents, opts.ConfigDirs, global); err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	store := session.NewStore(db)
-	agentSessions := permissionSessionStore{store: store}
-	permission := &handlerPermission{
-		inner: core.NewPermission(core.PermissionConfig{
-			Sessions:  agentSessions,
-			Agents:    permissionAgents{agents: agents},
-			Saved:     &permissionSaved{db: db},
-			Events:    permissionEvents{events: events},
-			ProjectID: string(projectID),
-		}),
-		def:      opts.Permission,
-		handlers: map[string]PermissionHandlerFunc{},
-	}
-	question := newHandlerQuestion(core.NewQuestion(core.QuestionConfig{Events: events}), opts.Question)
-
-	discovery := core.NewSkillDiscovery(filepath.Join(global.Cache, "skills"), http.DefaultClient)
-	skills := core.NewSkill(discovery)
-	if _, err := skills.Transform(func(draft core.SkillDraft) error {
-		discovered := opencodeskill.DiscoverSkills(opts.ConfigDirs)
-		for _, dir := range discovered.Roots {
-			draft.Source(schema.SkillDirectorySource{Type: "directory", Path: schema.AbsolutePath(dir)})
-		}
-		return nil
-	}); err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	referenceCache := core.NewRepositoryCache(git, global.Repos)
-	referenceService := core.NewReference(global, events, referenceCache)
-	if len(opts.References) > 0 {
-		if _, err := referenceService.Transform(func(draft core.ReferenceDraft) error {
-			for name, source := range opts.References {
-				draft.Add(name, source)
-			}
-			return nil
-		}); err != nil {
-			db.Close()
-			return nil, err
-		}
-	}
-
-	models, err := buildModelResolver(opts)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
 
 	locale := util.ResolveLocale(opts.Locale)
-	task := &taskRunner{}
-	builtin := builtinDeps{
-		db: db, events: events, permission: permission, question: question,
-		location: *location, global: global, shell: opts.Shell, skills: skills,
-		locale: locale, agents: agents, task: task,
-	}
-	snapshots := runner.Snapshotter(noopSnapshots{})
-	if snapshot, err := core.NewSnapshot(git, global, location); err == nil {
-		snapshots = snapshot
-	}
-
 	lifetime, cancel := context.WithCancel(context.Background())
 	rt := &runtime{
 		db: db, events: events, store: store, agents: agents, skills: skills,
-		outputStore: outputStore, toolOutput: toolOutput,
+		outputStore: tool.NewCoreOutputStore(toolOutput), toolOutput: toolOutput,
 		permission: permission, question: question, location: *location,
-		projectID: projectID, models: models,
-		subagentDepth: subagentDepth,
-		hooks:         map[string]*SessionHooks{}, builtin: builtin, clientTools: opts.Tools,
+		projectID: location.Project.ID, models: models,
+		subagentDepth: subagentDepth(opts.SubagentDepth),
+		hooks:         map[string]*SessionHooks{}, clientTools: opts.Tools,
 		dispatcher: &toolDispatcher{sessions: map[string]*tool.Registry{}},
-		reference:  referenceService,
+		reference:  references,
 		cancel:     cancel,
 	}
-	task.rt = rt
+	rt.builtin = builtinDeps{
+		db: db, events: events, permission: permission, question: question,
+		location: *location, global: global, shell: opts.Shell, skills: skills,
+		locale: locale, agents: agents, task: &taskRunner{rt: rt},
+	}
 	rt.runner = runner.NewLLMRunner(runner.LLMRunner{
 		Events:            appEvents{events: events},
 		LLM:               chooseLLM(opts),
@@ -311,9 +236,9 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		Location:          *location,
 		SystemContext:     systemcontext.NewRegistry(),
 		SkillGuidance:     skill.NewGuidance(skills, allowAllEvaluator{}, locale),
-		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: referenceService}, locale),
+		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: references}, locale),
 		Compaction:        compactionSettings(opts),
-		Snapshots:         snapshots,
+		Snapshots:         buildSnapshots(git, global, location),
 		DB:                db,
 	})
 	rt.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
@@ -323,19 +248,157 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	})
 	if err := rt.connectMCP(ctx, opts.MCP); err != nil {
 		cancel()
-		db.Close()
-		return nil, err
+		return fail(err)
 	}
-	rt.plugin = core.NewPlugin(events, agents, skills, referenceService)
+	rt.plugin = core.NewPlugin(events, agents, skills, references)
 	for _, config := range opts.Plugins {
 		if err := rt.plugin.Add(schema.PluginID(config.ID), core.PluginEffect(config.Effect)); err != nil {
 			cancel()
-			db.Close()
-			return nil, err
+			return fail(err)
 		}
 	}
 	go rt.runToolOutputCleanup(lifetime)
 	return rt, nil
+}
+
+// resolveWorkingDirectory returns the absolute project directory.
+func resolveWorkingDirectory(dir string) (string, error) {
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	return filepath.Abs(dir)
+}
+
+// resolveHomeAndRoot resolves the home directory and the required state root.
+func resolveHomeAndRoot(opts *ClientOptions) (string, string, error) {
+	home := opts.Home
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if opts.Root == "" {
+		return "", "", fmt.Errorf("ClientOptions.Root is required: the SDK does not choose a data directory")
+	}
+	return home, opts.Root, nil
+}
+
+// openDatabase opens the session database under the state root.
+func openDatabase(global core.Global) (*database.Database, error) {
+	dbPath := filepath.Join(global.Data, "agent.db")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return nil, err
+	}
+	return database.Open(dbPath)
+}
+
+// ensureProject resolves the project location and records it, so the row the
+// session tables reference exists.
+func ensureProject(db *database.Database, git core.Git, directory string) (*core.Location, error) {
+	projectService := core.NewProject(core.ProjectConfig{
+		Git:         git,
+		Directories: coreproject.NewDirectories(db),
+	})
+	location, err := core.NewLocation(schema.LocationRef{Directory: schema.AbsolutePath(directory)}, projectService)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UnixMilli()
+	if _, err := db.DB.Exec(
+		"INSERT INTO `project` (`id`,`worktree`,`sandboxes`,`time_created`,`time_updated`) VALUES (?,?,?,?,?) "+
+			"ON CONFLICT(`id`) DO NOTHING",
+		string(location.Project.ID), string(location.Project.Directory), "[]", now, now,
+	); err != nil {
+		return nil, err
+	}
+	return location, nil
+}
+
+// buildAgents registers the built-in agents, then the configured directories.
+func buildAgents(opts *ClientOptions, location *core.Location, global core.Global) (*core.Agent, error) {
+	agents := core.NewAgent()
+	if err := core.ApplyDefaultAgents(agents, location, global); err != nil {
+		return nil, err
+	}
+	if err := opencodeconfig.ApplyDirAgents(agents, opts.ConfigDirs, global); err != nil {
+		return nil, err
+	}
+	return agents, nil
+}
+
+// buildPermission wires the permission service to the session store, the agent
+// registry and the saved-rules table.
+func buildPermission(
+	opts *ClientOptions,
+	db *database.Database,
+	events core.Event,
+	agents *core.Agent,
+	store *session.Store,
+	projectID schema.ProjectID,
+) *handlerPermission {
+	return &handlerPermission{
+		inner: core.NewPermission(core.PermissionConfig{
+			Sessions:  permissionSessionStore{store: store},
+			Agents:    permissionAgents{agents: agents},
+			Saved:     &permissionSaved{db: db},
+			Events:    permissionEvents{events: events},
+			ProjectID: string(projectID),
+		}),
+		def:      opts.Permission,
+		handlers: map[string]PermissionHandlerFunc{},
+	}
+}
+
+// buildSkills registers the skill directories the client was configured with.
+func buildSkills(opts *ClientOptions, global core.Global) (*core.Skill, error) {
+	discovery := core.NewSkillDiscovery(filepath.Join(global.Cache, "skills"), http.DefaultClient)
+	skills := core.NewSkill(discovery)
+	_, err := skills.Transform(func(draft core.SkillDraft) error {
+		for _, dir := range opencodeskill.DiscoverSkills(opts.ConfigDirs).Roots {
+			draft.Source(schema.SkillDirectorySource{Type: "directory", Path: schema.AbsolutePath(dir)})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return skills, nil
+}
+
+// buildReferences registers the named reference sources the client was
+// configured with.
+func buildReferences(opts *ClientOptions, global core.Global, events core.Event, git core.Git) (*core.Reference, error) {
+	cache := core.NewRepositoryCache(git, global.Repos)
+	references := core.NewReference(global, events, cache)
+	if len(opts.References) == 0 {
+		return references, nil
+	}
+	_, err := references.Transform(func(draft core.ReferenceDraft) error {
+		for name, source := range opts.References {
+			draft.Add(name, source)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return references, nil
+}
+
+// subagentDepth is the configured nesting limit, at least one.
+func subagentDepth(configured int) int {
+	if configured <= 0 {
+		return 1
+	}
+	return configured
+}
+
+// buildSnapshots uses the git-backed snapshotter when the project supports it,
+// and a no-op one otherwise.
+func buildSnapshots(git core.Git, global core.Global, location *core.Location) runner.Snapshotter {
+	snapshot, err := core.NewSnapshot(git, global, location)
+	if err != nil {
+		return noopSnapshots{}
+	}
+	return snapshot
 }
 
 const toolOutputCleanupInterval = time.Hour
@@ -518,7 +581,7 @@ func (t *taskRunner) RunTask(ctx context.Context, input TaskRunInput) (TaskRunOu
 	return t.rt.runTask(ctx, input)
 }
 
-func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (out TaskRunOutput, err error) {
+func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (TaskRunOutput, error) {
 	parent, err := r.store.Get(schema.SessionID(input.ParentSessionID))
 	if err != nil {
 		return TaskRunOutput{}, err
@@ -526,36 +589,16 @@ func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (out TaskRunO
 	if parent == nil {
 		return TaskRunOutput{}, fmt.Errorf("parent session not found: %s", input.ParentSessionID)
 	}
-	if err := r.checkSubagentDepth(parent); err != nil {
+	subagent, derived, err := r.resolveSubagent(parent, input)
+	if err != nil {
 		return TaskRunOutput{}, err
 	}
-	subagent := r.agents.Get(schema.AgentID(input.SubagentType))
-	if subagent == nil {
-		return TaskRunOutput{}, fmt.Errorf("Unknown agent type: %s is not a valid agent type", input.SubagentType)
-	}
-	var parentPermission schema.PermissionRuleset
-	if parent.Permission != nil {
-		parentPermission = *parent.Permission
-	}
-	derived := DeriveSubagentSessionPermission(parentPermission, *subagent)
 
 	childID, reused, err := r.resolveChildSession(input, parent, subagent, derived)
 	if err != nil {
 		return TaskRunOutput{}, err
 	}
-	// A resumed session keeps its stored agent and permission ruleset.
-	childAgent := input.SubagentType
-	childRules := derived
-	if reused {
-		if existing, getErr := r.store.Get(childID); getErr == nil && existing != nil {
-			if existing.Agent != nil {
-				childAgent = string(*existing.Agent)
-			}
-			if existing.Permission != nil {
-				childRules = *existing.Permission
-			}
-		}
-	}
+	childAgent, childRules := r.childRunSettings(childID, reused, input.SubagentType, derived)
 	registry, err := r.newSessionRegistry(childAgent, childRules, nil)
 	if err != nil {
 		return TaskRunOutput{}, err
@@ -563,40 +606,86 @@ func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (out TaskRunO
 	r.dispatcher.set(string(childID), registry)
 	defer r.dispatcher.remove(string(childID))
 
-	// Publish the running task state (durable) on the parent session, mirroring
-	// the tool's progress metadata. The child session id links the subagent's
-	// events to this task.
-	if input.Progress != nil {
-		_ = input.Progress(map[string]any{
-			"sessionId":       string(childID),
-			"parentSessionId": input.ParentSessionID,
-			"subagentType":    input.SubagentType,
-			"description":     input.Description,
-			"prompt":          input.Prompt,
-			"model":           childModelJSON(subagent, parent),
-		}, nil)
-	}
-
-	if _, err := session.Admit(r.db.DB, appEvents{events: r.events}, session.AdmitInput{
-		ID:        schema.NewMessageID(),
-		SessionID: childID,
-		Prompt:    schema.Prompt{Text: input.Prompt},
-		Delivery:  schema.SessionDeliveryQueue,
-	}); err != nil {
+	r.publishTaskProgress(input, childID, subagent, parent)
+	if err := r.runChildSession(ctx, childID, input.Prompt); err != nil {
 		return TaskRunOutput{}, err
-	}
-	runErr := r.coord.Run(ctx, childID)
-	if ctx.Err() != nil {
-		r.coord.Interrupt(childID)
-	}
-	if runErr != nil {
-		return TaskRunOutput{}, runErr
 	}
 	text, err := r.lastAssistantText(childID)
 	if err != nil {
 		return TaskRunOutput{}, err
 	}
 	return TaskRunOutput{SessionID: string(childID), Text: text}, nil
+}
+
+// resolveSubagent checks the nesting limit and returns the subagent to run,
+// together with the permission ruleset its session starts from.
+func (r *runtime) resolveSubagent(parent *schema.SessionInfo, input TaskRunInput) (*schema.AgentInfo, schema.PermissionRuleset, error) {
+	if err := r.checkSubagentDepth(parent); err != nil {
+		return nil, nil, err
+	}
+	subagent := r.agents.Get(schema.AgentID(input.SubagentType))
+	if subagent == nil {
+		return nil, nil, fmt.Errorf("Unknown agent type: %s is not a valid agent type", input.SubagentType)
+	}
+	var parentPermission schema.PermissionRuleset
+	if parent.Permission != nil {
+		parentPermission = *parent.Permission
+	}
+	return subagent, DeriveSubagentSessionPermission(parentPermission, *subagent), nil
+}
+
+// childRunSettings is the agent and permission ruleset a child session runs with.
+// A resumed session keeps the agent and ruleset it was created with.
+func (r *runtime) childRunSettings(childID schema.SessionID, reused bool, subagentType string, derived schema.PermissionRuleset) (string, schema.PermissionRuleset) {
+	if !reused {
+		return subagentType, derived
+	}
+	existing, err := r.store.Get(childID)
+	if err != nil || existing == nil {
+		return subagentType, derived
+	}
+	agentID, rules := subagentType, derived
+	if existing.Agent != nil {
+		agentID = string(*existing.Agent)
+	}
+	if existing.Permission != nil {
+		rules = *existing.Permission
+	}
+	return agentID, rules
+}
+
+// publishTaskProgress reports the running task state on the parent session,
+// mirroring the tool's progress metadata. The child session id links the
+// subagent's events to this task.
+func (r *runtime) publishTaskProgress(input TaskRunInput, childID schema.SessionID, subagent *schema.AgentInfo, parent *schema.SessionInfo) {
+	if input.Progress == nil {
+		return
+	}
+	_ = input.Progress(map[string]any{
+		"sessionId":       string(childID),
+		"parentSessionId": input.ParentSessionID,
+		"subagentType":    input.SubagentType,
+		"description":     input.Description,
+		"prompt":          input.Prompt,
+		"model":           childModelJSON(subagent, parent),
+	}, nil)
+}
+
+// runChildSession admits the prompt and drains the child session's turn.
+func (r *runtime) runChildSession(ctx context.Context, childID schema.SessionID, prompt string) error {
+	if _, err := session.Admit(r.db.DB, appEvents{events: r.events}, session.AdmitInput{
+		ID:        schema.NewMessageID(),
+		SessionID: childID,
+		Prompt:    schema.Prompt{Text: prompt},
+		Delivery:  schema.SessionDeliveryQueue,
+	}); err != nil {
+		return err
+	}
+	runErr := r.coord.Run(ctx, childID)
+	if ctx.Err() != nil {
+		r.coord.Interrupt(childID)
+	}
+	return runErr
 }
 
 // checkSubagentDepth counts the parent chain; nesting beyond the limit fails.
