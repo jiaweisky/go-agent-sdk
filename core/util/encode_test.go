@@ -7,11 +7,11 @@ import (
 
 func TestChecksumMatchesTS(t *testing.T) {
 	cases := map[string]string{
-		"":                   "",
-		"ses_websearch_test": "1awf4n0",
-		"ses_abc":            "1qrpf0p",
-		"hello world":        "1n91413",
-		"测试会话":               "jizlx4",
+		"":                  "",
+		"ses_checksum_test": "ifoe61",
+		"ses_abc":           "1qrpf0p",
+		"hello world":       "1n91413",
+		"测试会话":              "jizlx4",
 	}
 	for input, want := range cases {
 		if got := Checksum(input); got != want {

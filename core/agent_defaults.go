@@ -172,7 +172,6 @@ func ApplyDefaultAgents(agents *Agent, location *Location, global Global) error 
 				{Action: "grep", Resource: "*", Effect: PermissionEffectAllow},
 				{Action: "glob", Resource: "*", Effect: PermissionEffectAllow},
 				{Action: "webfetch", Resource: "*", Effect: PermissionEffectAllow},
-				{Action: "websearch", Resource: "*", Effect: PermissionEffectAllow},
 				{Action: "read", Resource: "*", Effect: PermissionEffectAllow},
 			}, readonlyExternalDirectory)...)
 		})
