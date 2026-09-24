@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"golang.org/x/text/encoding/unicode"
-
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/jsonschema"
@@ -383,12 +381,11 @@ func applyPatchAssertFile(path string) error {
 	return nil
 }
 
+// applyPatchDecodeUtf8 mirrors `new TextDecoder("utf-8", {ignoreBOM: true})`:
+// invalid sequences become U+FFFD and a leading BOM is retained (the caller
+// strips it from `before`).
 func applyPatchDecodeUtf8(content []byte) string {
-	decoded, err := unicode.UTF8.NewDecoder().Bytes(content)
-	if err != nil {
-		return string(content)
-	}
-	return string(decoded)
+	return strings.ToValidUTF8(string(content), "\uFFFD")
 }
 
 func patchHunkPath(hunk core.PatchHunk) string {
