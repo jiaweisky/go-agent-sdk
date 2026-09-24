@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"iter"
 
+	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/user/go-agent-sdk/jsonschema"
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
 type RouteBody struct {
-	Schema schema.JsonSchema
-	From   func(request *schema.LLMRequest) (any, error)
+	Schema    *jsonschema.Schema
+	Validator *jsonschema6.Schema
+	From      func(request *schema.LLMRequest) (any, error)
 }
 
 type RouteDefaults struct {
@@ -85,8 +88,9 @@ func MakeFromTransport(input MakeTransportInput) Route {
 			Transport: ri.Transport,
 			Defaults:  ri.Defaults,
 			Body: RouteBody{
-				Schema: ri.Protocol.Body.Schema,
-				From:   ri.Protocol.Body.From,
+				Schema:    ri.Protocol.Body.Schema,
+				Validator: CompileBodySchema(ri.Protocol.Body.Schema),
+				From:      ri.Protocol.Body.From,
 			},
 			With: func(patch RoutePatch) Route {
 				next := ri

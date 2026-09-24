@@ -336,7 +336,7 @@ func bedrockConverseFromRequest(request *schema.LLMRequest) (any, error) {
 }
 
 func bedrockConverseLowerMessages(request *schema.LLMRequest, bp *utils.Breakpoints) ([]bedrockConverseBedrockMessage, error) {
-	var msgs []bedrockConverseBedrockMessage
+	msgs := []bedrockConverseBedrockMessage{}
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
@@ -594,7 +594,7 @@ func bedrockConverseOnHalt(state any) []schema.LLMEvent {
 
 var BedrockConverseProtocol = route.Protocol{
 	ID:   bedrockConverseAdapter,
-	Body: route.ProtocolBody{From: bedrockConverseFromRequest},
+	Body: route.ProtocolBody{Schema: bedrockConverseBodySchema, From: bedrockConverseFromRequest},
 	Stream: route.ProtocolStream{
 		DecodeEvent: bedrockConverseDecodeEvent,
 		Initial: func(request *schema.LLMRequest) any {

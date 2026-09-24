@@ -301,7 +301,8 @@ type Protocol struct {
 }
 
 type ProtocolBody struct {
-    Schema schema.JsonSchema
+    // 协议 body 契约（jsonschema AST）；路由构造时编译，compile() 校验每个 body。
+    Schema *jsonschema.Schema
     From   func(request *schema.LLMRequest) (any, error)
 }
 
@@ -313,6 +314,8 @@ type ProtocolStream struct {
     OnHalt      func(state any) []schema.LLMEvent
 }
 ```
+
+> **body 校验**：每个协议在 `llm/protocols/body_schema.go` 定义 `Schema`（对齐 TS 的 Effect body schema）；`MakeFromTransport` 用 `jsonschema.CompileValidation` 编译 `Validation()` 投影，`llm.Client.compile` 在 `Body.From` 之后校验 marshal 出来的 body，不合法则返回 `InvalidRequestReason`（对齐 TS `ProviderShared.validateWith`）。这层校验抓到了几处 lowering 偏差（如 `messages: null` 而非 `[]`、`parameters: null`）。
 
 ### 5.3 LLMEvent (流式事件)
 

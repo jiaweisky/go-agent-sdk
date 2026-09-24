@@ -1,6 +1,10 @@
 package route
 
-import "github.com/user/go-agent-sdk/llm/schema"
+import (
+	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/user/go-agent-sdk/jsonschema"
+	"github.com/user/go-agent-sdk/llm/schema"
+)
 
 type Protocol struct {
 	ID     schema.ProtocolID
@@ -9,8 +13,24 @@ type Protocol struct {
 }
 
 type ProtocolBody struct {
-	Schema schema.JsonSchema
+	// Schema is the provider-native body contract. Route construction compiles
+	// it and compile() validates every built body against it.
+	Schema *jsonschema.Schema
 	From   func(request *schema.LLMRequest) (any, error)
+}
+
+// CompileBodySchema compiles a body schema's validation projection, panicking
+// when a non-nil schema cannot be compiled. A route that silently skipped body
+// validation would let a malformed request reach the provider.
+func CompileBodySchema(sch *jsonschema.Schema) *jsonschema6.Schema {
+	if sch == nil {
+		return nil
+	}
+	compiled, err := jsonschema.CompileValidation(sch.Validation())
+	if err != nil {
+		panic("route: body schema failed to compile: " + err.Error())
+	}
+	return compiled
 }
 
 type ProtocolStream struct {

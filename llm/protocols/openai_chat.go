@@ -318,7 +318,7 @@ func openaiChatFromRequest(request *schema.LLMRequest) (any, error) {
 }
 
 func openaiChatLowerMessages(request *schema.LLMRequest) ([]openaiChatMessage, error) {
-	var msgs []openaiChatMessage
+	msgs := []openaiChatMessage{}
 	if len(request.System) > 0 {
 		parts := make([]struct{ Text string }, len(request.System))
 		for i, p := range request.System {
@@ -547,7 +547,8 @@ func openaiChatFinish(state any) []schema.LLMEvent {
 var OpenAIChatProtocol = route.Protocol{
 	ID: openaiChatAdapter,
 	Body: route.ProtocolBody{
-		From: openaiChatFromRequest,
+		Schema: openaiChatBodySchema,
+		From:   openaiChatFromRequest,
 	},
 	Stream: route.ProtocolStream{
 		DecodeEvent: openaiChatDecodeOpenAIChatEvent,

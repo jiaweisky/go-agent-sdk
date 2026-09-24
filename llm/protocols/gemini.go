@@ -144,11 +144,12 @@ func geminiThoughtSignature(md schema.ProviderMetadata) *string {
 }
 
 func geminiLowerTool(td schema.ToolDefinition, inputSchema any) geminiFunctionDeclaration {
-	return geminiFunctionDeclaration{
-		Name:        td.Name,
-		Description: td.Description,
-		Parameters:  utils.Convert(schemaMap(inputSchema)),
+	decl := geminiFunctionDeclaration{Name: td.Name, Description: td.Description}
+	// An empty object schema projects to nil; TS drops the undefined key.
+	if params := utils.Convert(schemaMap(inputSchema)); params != nil {
+		decl.Parameters = params
 	}
+	return decl
 }
 
 func geminiLowerToolConfig(tc schema.ToolChoice) (*geminiToolConfig, error) {
@@ -196,7 +197,7 @@ func geminiLowerToolCall(part schema.ToolCallPart) geminiFunctionCallPart {
 }
 
 func geminiLowerMessages(request *schema.LLMRequest) ([]geminiContent, error) {
-	var contents []geminiContent
+	contents := []geminiContent{}
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
@@ -589,7 +590,7 @@ func geminiFinish(state any) []schema.LLMEvent {
 
 var GeminiProtocol = route.Protocol{
 	ID:   geminiAdapter,
-	Body: route.ProtocolBody{From: geminiFromRequest},
+	Body: route.ProtocolBody{Schema: geminiBodySchema, From: geminiFromRequest},
 	Stream: route.ProtocolStream{
 		DecodeEvent: geminiDecodeEvent,
 		Initial: func(request *schema.LLMRequest) any {

@@ -2,9 +2,11 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
 
+	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/llm/schema"
 )
@@ -98,6 +100,9 @@ func (c *Client) compile(request *schema.LLMRequest) (*schema.LLMRequest, route.
 	if err != nil {
 		return nil, r, nil, nil, err
 	}
+	if err := validateBody(body, r.Body.Validator); err != nil {
+		return nil, r, nil, nil, err
+	}
 	prepared, err := r.PrepareTransport(body, resolved)
 	if err != nil {
 		return nil, r, nil, nil, err
@@ -132,6 +137,30 @@ func resolveRequestOptions(request *schema.LLMRequest) *schema.LLMRequest {
 	updated.ProviderOptions = schema.MergeProviderOptions(routeDefaults.ProviderOptions, modelDefaults.ProviderOptions, request.ProviderOptions)
 	updated.Http = schema.MergeHttpOptions(routeDefaults.Http, modelDefaults.Http, request.Http)
 	return &updated
+}
+
+// validateBody mirrors ProviderShared.validateWith: a body that does not
+// satisfy the protocol schema is rejected as an invalid request.
+func validateBody(body any, validator *jsonschema6.Schema) error {
+	if validator == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	var document any
+	if err := json.Unmarshal(encoded, &document); err != nil {
+		return err
+	}
+	if err := validator.Validate(document); err != nil {
+		return &schema.LLMError{
+			Module: "ProviderShared",
+			Method: "request",
+			Reason: schema.NewInvalidRequestReason(err.Error()),
+		}
+	}
+	return nil
 }
 
 func streamError(request *schema.LLMRequest, message string) error {

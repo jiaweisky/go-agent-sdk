@@ -78,24 +78,6 @@ type openaiResponsesResponsesTool struct {
 	Strict      bool   `json:"strict"`
 }
 
-type openaiResponsesResponsesBody struct {
-	Model           string                         `json:"model"`
-	Input           []openaiResponsesInputItem     `json:"input"`
-	Instructions    *string                        `json:"instructions,omitempty"`
-	Tools           []openaiResponsesResponsesTool `json:"tools,omitempty"`
-	ToolChoice      any                            `json:"tool_choice,omitempty"`
-	Stream          bool                           `json:"stream"`
-	Store           *bool                          `json:"store,omitempty"`
-	ServiceTier     *string                        `json:"service_tier,omitempty"`
-	PromptCacheKey  *string                        `json:"prompt_cache_key,omitempty"`
-	Include         []string                       `json:"include,omitempty"`
-	Reasoning       any                            `json:"reasoning,omitempty"`
-	Text            any                            `json:"text,omitempty"`
-	MaxOutputTokens *int                           `json:"max_output_tokens,omitempty"`
-	Temperature     *float64                       `json:"temperature,omitempty"`
-	TopP            *float64                       `json:"top_p,omitempty"`
-}
-
 type openaiResponsesResponsesUsage struct {
 	InputTokens         *int                                `json:"input_tokens,omitempty"`
 	InputTokensDetails  *openaiResponsesInputTokensDetails  `json:"input_tokens_details,omitempty"`
@@ -354,7 +336,7 @@ func openaiResponsesReasoningMetadata(itemID string, encrypted *string) schema.P
 }
 
 func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponsesInputItem, error) {
-	var input []openaiResponsesInputItem
+	input := []openaiResponsesInputItem{}
 	if len(request.System) > 0 {
 		parts := make([]struct{ Text string }, len(request.System))
 		for i, p := range request.System {
@@ -566,9 +548,15 @@ func openaiResponsesFromRequest(request *schema.LLMRequest) (any, error) {
 		body["tool_choice"] = choice
 	}
 	if gen != nil {
-		body["max_output_tokens"] = gen.MaxTokens
-		body["temperature"] = gen.Temperature
-		body["top_p"] = gen.TopP
+		if gen.MaxTokens != nil {
+			body["max_output_tokens"] = *gen.MaxTokens
+		}
+		if gen.Temperature != nil {
+			body["temperature"] = *gen.Temperature
+		}
+		if gen.TopP != nil {
+			body["top_p"] = *gen.TopP
+		}
 	}
 	return body, nil
 }
@@ -991,7 +979,8 @@ func openaiResponsesProviderErrorMessage(evt openaiResponsesResponsesEvent, fall
 var OpenAIResponsesProtocol = route.Protocol{
 	ID: openaiResponsesAdapter,
 	Body: route.ProtocolBody{
-		From: openaiResponsesFromRequest,
+		Schema: openaiResponsesBodySchema,
+		From:   openaiResponsesFromRequest,
 	},
 	Stream: route.ProtocolStream{
 		DecodeEvent: openaiResponsesDecodeEvent,

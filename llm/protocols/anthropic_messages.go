@@ -486,7 +486,7 @@ func anthropicMessagesFromRequest(request *schema.LLMRequest) (any, error) {
 }
 
 func anthropicMessagesLowerMessages(request *schema.LLMRequest, bp *anthropicMessagesBreakpointTracker) ([]anthropicMessagesAnthropicMessage, error) {
-	var msgs []anthropicMessagesAnthropicMessage
+	msgs := []anthropicMessagesAnthropicMessage{}
 	nativeSystem := anthropicMessagesSupportsNativeSystemUpdate(request)
 
 	for i, msg := range request.Messages {
@@ -948,7 +948,8 @@ func anthropicMessagesStrVal(s *string, def string) string {
 var AnthropicMessagesProtocol = route.Protocol{
 	ID: anthropicMessagesAdapter,
 	Body: route.ProtocolBody{
-		From: anthropicMessagesFromRequest,
+		Schema: anthropicMessagesBodySchema,
+		From:   anthropicMessagesFromRequest,
 	},
 	Stream: route.ProtocolStream{
 		DecodeEvent: anthropicMessagesDecodeEvent,
