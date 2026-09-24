@@ -27,3 +27,22 @@ func TestIsContextOverflow(t *testing.T) {
 		}
 	}
 }
+
+func TestIsContextOverflowNoBody(t *testing.T) {
+	for _, message := range []string{
+		"400 (no body)",
+		"413 (no body)",
+		"400 status code (no body)",
+		"413 status code (no body)",
+	} {
+		if !IsContextOverflow(message) {
+			t.Fatalf("IsContextOverflow(%q) = false, want true", message)
+		}
+	}
+	if IsContextOverflow("200 (no body)") {
+		t.Fatal("IsContextOverflow(\"200 (no body)\") = true, want false")
+	}
+	if IsContextOverflow("rate limit: 400 (no body)") {
+		t.Fatal("an exclusion must win over the no-body pattern")
+	}
+}

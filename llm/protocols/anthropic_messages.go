@@ -780,7 +780,7 @@ func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt an
 		events = append(events, schema.NewToolInputStart(anthropicMessagesStrVal(block.ID, fmt.Sprint(*evt.Index)), anthropicMessagesStrVal(block.Name, "")))
 		return s, events, nil
 	}
-	if block.Type == "text" && block.Text != nil {
+	if block.Type == "text" && block.Text != nil && *block.Text != "" {
 		var events []schema.LLMEvent
 		idx := 0
 		if evt.Index != nil {
@@ -789,7 +789,7 @@ func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt an
 		utils.TextDelta(&s.lifecycle, &events, fmt.Sprintf("text-%d", idx), *block.Text)
 		return s, events, nil
 	}
-	if block.Type == "thinking" && block.Thinking != nil {
+	if block.Type == "thinking" && block.Thinking != nil && *block.Thinking != "" {
 		var events []schema.LLMEvent
 		idx := 0
 		if evt.Index != nil {
@@ -832,24 +832,24 @@ func anthropicMessagesOnContentBlockDelta(s anthropicMessagesParserState, evt an
 	if evt.Index != nil {
 		idx = *evt.Index
 	}
-	if anthropicMessagesStrVal(delta.Type, "") == "text_delta" && delta.Text != nil {
+	if anthropicMessagesStrVal(delta.Type, "") == "text_delta" && delta.Text != nil && *delta.Text != "" {
 		var events []schema.LLMEvent
 		utils.TextDelta(&s.lifecycle, &events, fmt.Sprintf("text-%d", idx), *delta.Text)
 		return s, events, nil
 	}
-	if anthropicMessagesStrVal(delta.Type, "") == "thinking_delta" && delta.Thinking != nil {
+	if anthropicMessagesStrVal(delta.Type, "") == "thinking_delta" && delta.Thinking != nil && *delta.Thinking != "" {
 		var events []schema.LLMEvent
 		utils.ReasoningDelta(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), *delta.Thinking)
 		return s, events, nil
 	}
-	if anthropicMessagesStrVal(delta.Type, "") == "signature_delta" && delta.Signature != nil {
+	if anthropicMessagesStrVal(delta.Type, "") == "signature_delta" && delta.Signature != nil && *delta.Signature != "" {
 		var events []schema.LLMEvent
 		utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx),
 			anthropicMessagesAnthropicMetadata(map[string]any{"signature": *delta.Signature}))
 		return s, events, nil
 	}
 	if anthropicMessagesStrVal(delta.Type, "") == "input_json_delta" && evt.Index != nil {
-		if delta.PartialJSON == nil {
+		if delta.PartialJSON == nil || *delta.PartialJSON == "" {
 			return s, nil, nil
 		}
 		result, err := utils.AppendExisting(anthropicMessagesAdapter, s.tools, fmt.Sprint(*evt.Index), *delta.PartialJSON,
@@ -881,8 +881,8 @@ func anthropicMessagesOnContentBlockStop(s anthropicMessagesParserState, evt ant
 	if len(result.Events) > 0 {
 		utils.StepStart(&s.lifecycle, &events)
 	} else {
-		utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", *evt.Index))
 		utils.TextEnd(&s.lifecycle, &events, fmt.Sprintf("text-%d", *evt.Index))
+		utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", *evt.Index))
 	}
 	events = append(events, result.Events...)
 	s.tools = result.Tools
@@ -893,7 +893,7 @@ func anthropicMessagesOnMessageDelta(s anthropicMessagesParserState, evt anthrop
 	usage := anthropicMessagesMergeUsage(s.usage, anthropicMessagesMapUsage(evt.Usage))
 	var events []schema.LLMEvent
 	var pm schema.ProviderMetadata
-	if evt.Delta != nil && evt.Delta.StopSequence != nil {
+	if evt.Delta != nil && evt.Delta.StopSequence != nil && *evt.Delta.StopSequence != "" {
 		pm = anthropicMessagesAnthropicMetadata(map[string]any{"stopSequence": *evt.Delta.StopSequence})
 	}
 	utils.Finish(&s.lifecycle, &events, struct {
@@ -918,18 +918,23 @@ func anthropicMessagesDeltaStopReason(delta *anthropicMessagesStreamDelta) *stri
 
 func anthropicMessagesOnError(s anthropicMessagesParserState, evt anthropicMessagesAnthropicEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
 	msg := "Anthropic Messages stream error"
+	raw := ""
 	if evt.Error != nil {
 		t := anthropicMessagesStrVal(evt.Error.Type, "")
-		m := anthropicMessagesStrVal(evt.Error.Message, "")
-		if t != "" && m != "" {
-			msg = fmt.Sprintf("%s: %s", t, m)
-		} else if m != "" {
-			msg = m
+		raw = anthropicMessagesStrVal(evt.Error.Message, "")
+		if t != "" && raw != "" {
+			msg = fmt.Sprintf("%s: %s", t, raw)
+		} else if raw != "" {
+			msg = raw
 		} else if t != "" {
 			msg = t
 		}
 	}
-	events := []schema.LLMEvent{schema.NewProviderErrorEvent(msg)}
+	opts := []schema.EventOption{}
+	if schema.IsContextOverflow(raw) {
+		opts = append(opts, schema.WithEventClassification(schema.ClassificationContextOverflow))
+	}
+	events := []schema.LLMEvent{schema.NewProviderErrorEvent(msg, opts...)}
 	return s, events
 }
 

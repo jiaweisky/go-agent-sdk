@@ -551,7 +551,7 @@ func bedrockConverseStep(state any, event any) (any, []schema.LLMEvent, error) {
 		if evt.ServiceUnavailableException != nil {
 			msg = evt.ServiceUnavailableException.Message
 		}
-		return s, []schema.LLMEvent{schema.NewProviderErrorEvent(msg)}, nil
+		return s, []schema.LLMEvent{schema.NewProviderErrorEvent(msg, schema.WithEventRetryable(true))}, nil
 	}
 	if evt.ValidationException != nil || evt.ThrottlingException != nil {
 		msg := "Bedrock Converse error"
@@ -561,11 +561,14 @@ func bedrockConverseStep(state any, event any) (any, []schema.LLMEvent, error) {
 		if evt.ThrottlingException != nil {
 			msg = evt.ThrottlingException.Message
 		}
-		var classification schema.ProviderFailureClassification
-		if evt.ValidationException != nil && (strings.Contains(msg, "context_length_exceeded") || strings.Contains(strings.ToLower(msg), "context length")) {
-			classification = "context-overflow"
+		opts := []schema.EventOption{}
+		if evt.ValidationException != nil && schema.IsContextOverflow(msg) {
+			opts = append(opts, schema.WithEventClassification(schema.ClassificationContextOverflow))
 		}
-		return s, []schema.LLMEvent{schema.NewProviderErrorEvent(msg, schema.WithEventClassification(classification))}, nil
+		if evt.ThrottlingException != nil {
+			opts = append(opts, schema.WithEventRetryable(true))
+		}
+		return s, []schema.LLMEvent{schema.NewProviderErrorEvent(msg, opts...)}, nil
 	}
 	return s, nil, nil
 }

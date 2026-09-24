@@ -3,9 +3,11 @@ package protocols
 import (
 	"context"
 	"iter"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/user/go-agent-sdk/llm/protocols/utils"
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/llm/schema"
 )
@@ -369,6 +371,105 @@ func TestOpenAIResponsesMockSSEReasoningSummaryPartsStored(t *testing.T) {
 	for _, end := range ends {
 		if end.ProviderMetadata["openai"]["itemId"] != "rs_1" {
 			t.Fatalf("reasoning end metadata = %+v", end.ProviderMetadata)
+		}
+	}
+}
+
+func TestAnthropicMessagesMockSSEEventSequence(t *testing.T) {
+	events := runStream(t, AnthropicMessagesHTTPRoute, []string{
+		`{"type":"message_start","message":{"usage":{"input_tokens":5}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`,
+	})
+	want := []schema.LLMEventType{
+		schema.EventStepStart,
+		schema.EventTextStart,
+		schema.EventTextDelta,
+		schema.EventTextEnd,
+		schema.EventStepFinish,
+		schema.EventFinish,
+	}
+	if got := eventTypes(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+}
+
+func TestAnthropicMessagesMockSSEStopSequence(t *testing.T) {
+	events := runStream(t, AnthropicMessagesHTTPRoute, []string{
+		`{"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":"\n\nHuman:"}}`,
+	})
+	finish := firstOfType(events, schema.EventFinish)
+	if finish == nil || finish.ProviderMetadata["anthropic"]["stopSequence"] != "\n\nHuman:" {
+		t.Fatalf("finish = %+v", finish)
+	}
+}
+
+func TestAnthropicMessagesMockSSEContextOverflow(t *testing.T) {
+	events := runStream(t, AnthropicMessagesHTTPRoute, []string{
+		`{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 210000 tokens > 200000 maximum"}}`,
+	})
+	evt := firstOfType(events, schema.EventProviderError)
+	if evt == nil || evt.Classification == nil || *evt.Classification != schema.ClassificationContextOverflow {
+		t.Fatalf("provider error = %+v", evt)
+	}
+}
+
+func TestOpenAIResponsesMockSSEContextOverflow(t *testing.T) {
+	events := runStream(t, OpenAIResponsesHTTPRoute, []string{
+		`{"type":"error","code":"context_length_exceeded","message":"too long"}`,
+	})
+	evt := firstOfType(events, schema.EventProviderError)
+	if evt == nil || evt.Classification == nil || *evt.Classification != schema.ClassificationContextOverflow {
+		t.Fatalf("provider error = %+v", evt)
+	}
+}
+
+func TestBedrockConverseErrorClassification(t *testing.T) {
+	state := bedrockConverseParserState{tools: utils.Empty(), lifecycle: utils.Initial()}
+	cases := []struct {
+		name      string
+		event     bedrockConverseBedrockEvent
+		overflow  bool
+		retryable bool
+	}{
+		{
+			name:     "validation context overflow",
+			event:    bedrockConverseBedrockEvent{ValidationException: &struct{ Message string }{Message: "Input is too long for requested model"}},
+			overflow: true,
+		},
+		{
+			name:  "validation unrelated",
+			event: bedrockConverseBedrockEvent{ValidationException: &struct{ Message string }{Message: "invalid tool schema"}},
+		},
+		{
+			name:      "throttling is retryable",
+			event:     bedrockConverseBedrockEvent{ThrottlingException: &struct{ Message string }{Message: "slow down"}},
+			retryable: true,
+		},
+		{
+			name:      "internal server error is retryable",
+			event:     bedrockConverseBedrockEvent{InternalServerException: &struct{ Message string }{Message: "boom"}},
+			retryable: true,
+		},
+	}
+	for _, tc := range cases {
+		_, events, err := bedrockConverseStep(state, tc.event)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		evt := firstOfType(events, schema.EventProviderError)
+		if evt == nil {
+			t.Fatalf("%s: no provider error", tc.name)
+		}
+		gotOverflow := evt.Classification != nil && *evt.Classification == schema.ClassificationContextOverflow
+		if gotOverflow != tc.overflow {
+			t.Fatalf("%s: classification = %v, want overflow=%v", tc.name, evt.Classification, tc.overflow)
+		}
+		gotRetryable := evt.Retryable != nil && *evt.Retryable
+		if gotRetryable != tc.retryable {
+			t.Fatalf("%s: retryable = %v, want %v", tc.name, evt.Retryable, tc.retryable)
 		}
 	}
 }

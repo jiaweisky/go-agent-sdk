@@ -933,15 +933,24 @@ func openaiResponsesOnResponseFinish(s openaiResponsesParserState, evt openaiRes
 }
 
 func openaiResponsesOnResponseFailed(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
-	msg := openaiResponsesProviderErrorMessage(evt, "OpenAI Responses response failed")
-	events := []schema.LLMEvent{schema.NewProviderErrorEvent(msg)}
-	return s, events
+	return s, []schema.LLMEvent{openaiResponsesProviderError(evt, "OpenAI Responses response failed")}
 }
 
 func openaiResponsesOnError(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
-	msg := openaiResponsesProviderErrorMessage(evt, "OpenAI Responses stream error")
-	events := []schema.LLMEvent{schema.NewProviderErrorEvent(msg)}
-	return s, events
+	return s, []schema.LLMEvent{openaiResponsesProviderError(evt, "OpenAI Responses stream error")}
+}
+
+func openaiResponsesProviderError(evt openaiResponsesResponsesEvent, fallback string) schema.LLMEvent {
+	code := openaiResponsesStrVal(evt.Code)
+	if code == "" && evt.Response != nil && evt.Response.Error != nil {
+		code = openaiResponsesStrVal(evt.Response.Error.Code)
+	}
+	message := openaiResponsesProviderErrorMessage(evt, fallback)
+	opts := []schema.EventOption{}
+	if code == "context_length_exceeded" || schema.IsContextOverflow(message) {
+		opts = append(opts, schema.WithEventClassification(schema.ClassificationContextOverflow))
+	}
+	return schema.NewProviderErrorEvent(message, opts...)
 }
 
 func openaiResponsesProviderErrorMessage(evt openaiResponsesResponsesEvent, fallback string) string {

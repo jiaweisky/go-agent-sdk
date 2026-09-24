@@ -42,6 +42,8 @@ var contextOverflowExclusions = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)too many requests`),
 }
 
+var contextOverflowNoBody = regexp.MustCompile(`(?i)^4(00|13)\s*(status code)?\s*\(no body\)`)
+
 // IsContextOverflow reports whether a provider error message indicates the
 // request exceeded the model's context window.
 func IsContextOverflow(message string) bool {
@@ -55,7 +57,7 @@ func IsContextOverflow(message string) bool {
 			return true
 		}
 	}
-	return false
+	return contextOverflowNoBody.MatchString(message)
 }
 
 // IsContextOverflowFailure reports whether err is an LLMError classified as a
