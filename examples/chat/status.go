@@ -19,10 +19,45 @@ func (c *chat) updateStatus(frame int) {
 
 // drawStatusLocked must be called with c.mu held.
 func (c *chat) drawStatusLocked(frame int) {
-	spinner := ""
-	if len(spinnerFrames) > 0 {
-		spinner = spinnerFrames[frame%len(spinnerFrames)]
+	line := c.statusLine(frame)
+	if line == "" {
+		c.console.setStatus("")
+		return
 	}
+	c.console.setStatus(dim + line + reset)
+}
+
+// statusLine renders what is running plus the usage totals, joined for the
+// bottom line.
+func (c *chat) statusLine(frame int) string {
+	parts := make([]string, 0, 2)
+	if work := c.workLabel(frame); work != "" {
+		parts = append(parts, work)
+	}
+	if usage := c.usageLine(); usage != "" {
+		parts = append(parts, usage)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// workLabel names what is running: the current tool of every busy task, or the
+// parent's current tool when only the parent is busy.
+func (c *chat) workLabel(frame int) string {
+	if parts := c.taskLabels(); len(parts) > 0 {
+		return spinner(frame) + " " + strings.Join(parts, " · ")
+	}
+	if !c.parentBusy {
+		return ""
+	}
+	label := "working"
+	if tool := c.currentTool(); tool != "" {
+		label = tool
+	}
+	return spinner(frame) + " " + label
+}
+
+// taskLabels names the current tool of every busy task, in start order.
+func (c *chat) taskLabels() []string {
 	parts := make([]string, 0, len(c.tasks.order))
 	for childID, record := range c.records() {
 		if !c.busy[childID] {
@@ -34,28 +69,15 @@ func (c *chat) drawStatusLocked(frame int) {
 		}
 		parts = append(parts, fmt.Sprintf("%s %s", taskHandle(record), label))
 	}
-	line := ""
-	switch {
-	case len(parts) > 0:
-		line = fmt.Sprintf("%s %s", spinner, strings.Join(parts, " · "))
-	case c.parentBusy:
-		label := "working"
-		if tool := c.currentTool(); tool != "" {
-			label = tool
-		}
-		line = fmt.Sprintf("%s %s", spinner, label)
+	return parts
+}
+
+// spinner returns the glyph for a frame, or "" when there are no frames.
+func spinner(frame int) string {
+	if len(spinnerFrames) == 0 {
+		return ""
 	}
-	if usage := c.usageLine(); usage != "" {
-		if line != "" {
-			line += " · "
-		}
-		line += usage
-	}
-	if line == "" {
-		c.console.setStatus("")
-		return
-	}
-	c.console.setStatus(dim + line + reset)
+	return spinnerFrames[frame%len(spinnerFrames)]
 }
 
 // usageLine renders the accumulated token/cost totals.

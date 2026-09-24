@@ -28,14 +28,9 @@ func main() {
 }
 
 func run() error {
-	// -C runs as if started in the given directory (like git -C): the workspace
-	// and the project's .config follow it. The example's own state and sample
-	// config stay next to the example (see util.ExampleDir).
-	dir := flag.String("C", "", "run as if started in this directory")
-	yolo := flag.Bool("yolo", false, "skip all permission prompts (approve every tool call)")
-	flag.Parse()
-	if *dir != "" {
-		if err := os.Chdir(*dir); err != nil {
+	dir, yolo := parseFlags()
+	if dir != "" {
+		if err := os.Chdir(dir); err != nil {
 			return err
 		}
 	}
@@ -50,26 +45,14 @@ func run() error {
 	}
 	defer restore()
 
-	client, err := util.Client(util.ExampleDir(), clientOptions(console, *yolo)...)
+	client, err := util.Client(util.ExampleDir(), clientOptions(console, yolo)...)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 
-	if !*yolo {
-		// The built-in "build" agent allows every tool, so nothing would ever ask.
-		// Append an "ask" rule for bash to demonstrate interactive approval.
-		if err := client.Plugin().Add("chat-permission-demo", func(pluginCtx *core.PluginContext) (func(), error) {
-			_, err := pluginCtx.Agents.Transform(func(draft core.AgentDraft) error {
-				draft.Update(schema.AgentID(agentName), func(info *schema.AgentInfo) {
-					info.Permissions = append(info.Permissions, schema.PermissionRule{
-						Action: "bash", Resource: "*", Effect: schema.PermissionEffectAsk,
-					})
-				})
-				return nil
-			})
-			return func() {}, err
-		}); err != nil {
+	if !yolo {
+		if err := addPermissionDemo(client); err != nil {
 			return err
 		}
 	}
@@ -84,20 +67,58 @@ func run() error {
 	// nested under their task.
 	renderer := newChat(console, client, session.ID(), os.Getenv("OPENCODE_MODEL"))
 	client.On(renderer.handle)
+	writeBanner(console, yolo)
 
+	return chatLoop(ctx, console, session, renderer)
+}
+
+// parseFlags reads the command line. -C runs as if started in the given
+// directory (like git -C): the workspace and the project's .config follow it,
+// while the example's own state and sample config stay next to the example (see
+// util.ExampleDir).
+func parseFlags() (dir string, yolo bool) {
+	flagDir := flag.String("C", "", "run as if started in this directory")
+	flagYolo := flag.Bool("yolo", false, "skip all permission prompts (approve every tool call)")
+	flag.Parse()
+	return *flagDir, *flagYolo
+}
+
+// addPermissionDemo appends an "ask" rule for bash to the build agent, which
+// otherwise allows every tool, so interactive approval has something to ask
+// about.
+func addPermissionDemo(client *agent.Client) error {
+	return client.Plugin().Add("chat-permission-demo", func(pluginCtx *core.PluginContext) (func(), error) {
+		_, err := pluginCtx.Agents.Transform(func(draft core.AgentDraft) error {
+			draft.Update(schema.AgentID(agentName), func(info *schema.AgentInfo) {
+				info.Permissions = append(info.Permissions, schema.PermissionRule{
+					Action: "bash", Resource: "*", Effect: schema.PermissionEffectAsk,
+				})
+			})
+			return nil
+		})
+		return func() {}, err
+	})
+}
+
+// writeBanner prints the startup banner.
+func writeBanner(console *console, yolo bool) {
 	if wd, err := os.Getwd(); err == nil {
 		console.write(dim + "(directory: " + wd + ")" + reset + "\n")
 	}
-	if *yolo {
+	if yolo {
 		console.write(yellow + "warning: --yolo skips all permission prompts" + reset + "\n")
 	}
 	console.write("Chat with go-agent-sdk (Esc or Ctrl+C to exit; interrupts a running turn)\n")
 	console.write(dim + "Commands: /skills  /agents  /mcps  /task [<#n>]" + reset + "\n\n")
+}
+
+// chatLoop prompts until stdin closes or the user interrupts a turn.
+func chatLoop(ctx context.Context, console *console, session *agent.Session, renderer *chat) error {
 	for {
 		input, err := console.prompt("You: ")
 		if input == "" {
 			if err != nil {
-				break
+				return nil
 			}
 			continue
 		}
@@ -105,27 +126,33 @@ func run() error {
 		if handleCommand(renderer, input) {
 			continue
 		}
-
-		renderer.beginTurn()
-		turnDone := make(chan struct{})
-		go func() {
-			defer close(turnDone)
-			sendTurn(ctx, console, session, input)
-		}()
-		// While the turn runs, Esc/Ctrl+C aborts it and exits the chat; the
-		// bottom status line animates a spinner for busy sessions.
-		interrupted := console.watchInterrupt(turnDone, session.Abort, renderer.updateStatus)
-		if interrupted {
-			<-turnDone
-			// Leave the terminal on a clean line before exiting.
-			console.setStatus("")
-			console.write("\n")
-			break
+		if runTurn(ctx, console, session, renderer, input) {
+			return nil
 		}
+	}
+}
+
+// runTurn sends one prompt and watches for an interrupt while it runs, returning
+// whether the user interrupted it (which exits the chat).
+func runTurn(ctx context.Context, console *console, session *agent.Session, renderer *chat, input string) bool {
+	renderer.beginTurn()
+	turnDone := make(chan struct{})
+	go func() {
+		defer close(turnDone)
+		sendTurn(ctx, console, session, input)
+	}()
+	// While the turn runs, Esc/Ctrl+C aborts it and exits the chat; the bottom
+	// status line animates a spinner for busy sessions.
+	if !console.watchInterrupt(turnDone, session.Abort, renderer.updateStatus) {
 		renderer.clearStatus()
 		console.write("\n")
+		return false
 	}
-	return nil
+	<-turnDone
+	// Leave the terminal on a clean line before exiting.
+	console.setStatus("")
+	console.write("\n")
+	return true
 }
 
 // handleCommand runs a slash command from the prompt, and reports whether the

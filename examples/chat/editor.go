@@ -51,109 +51,173 @@ type editor struct {
 	width func() int
 }
 
-func (e *editor) readLine(prompt string) (string, error) {
-	line := make([]rune, 0, 64)
-	pos := 0
-	historyIndex := len(e.history)
+// lineState is the editable state of one prompt: the runes typed so far, the
+// cursor, and the history position (len(history) means "the line being typed").
+type lineState struct {
+	runes        []rune
+	pos          int
+	historyIndex int
+}
 
-	e.draw(prompt, line, pos)
+func (e *editor) readLine(prompt string) (string, error) {
+	state := lineState{runes: make([]rune, 0, 64), historyIndex: len(e.history)}
+	e.draw(prompt, state.runes, state.pos)
 	for {
 		r, _, err := e.in.ReadRune()
 		if err != nil {
 			return "", err
 		}
-		switch r {
-		case keyEnter, keyLF:
-			fmt.Fprint(e.out, "\r\n")
-			result := string(line)
-			if strings.TrimSpace(result) != "" {
-				e.history = append(e.history, result)
-			}
-			return result, nil
-		case keyCtrlC: // Ctrl+C
-			fmt.Fprint(e.out, "\r\n")
-			return "", io.EOF
-		case keyCtrlD: // Ctrl+D
-			if len(line) == 0 {
-				fmt.Fprint(e.out, "\r\n")
-				return "", io.EOF
-			}
-		case keyBackspace, keyCtrlH: // Backspace (DEL / ^H)
-			if pos > 0 {
-				line = append(line[:pos-1], line[pos:]...)
-				pos--
-			}
-		case keyCtrlA: // Ctrl+A
-			pos = 0
-		case keyCtrlE: // Ctrl+E
-			pos = len(line)
-		case keyCtrlU: // Ctrl+U
-			line = line[:0]
-			pos = 0
-		case keyCtrlW: // Ctrl+W
-			for pos > 0 && line[pos-1] == keySpace {
-				line = append(line[:pos-1], line[pos:]...)
-				pos--
-			}
-			for pos > 0 && line[pos-1] != keySpace {
-				line = append(line[:pos-1], line[pos:]...)
-				pos--
-			}
-		case keyEsc: // escape
-			// A lone Esc has no buffered follow-up rune; a real escape sequence
-			// (arrows, etc.) is sent as one write and shows up shortly after.
-			if !e.waitPending(30 * time.Millisecond) {
-				fmt.Fprint(e.out, "\r\n")
-				return "", io.EOF
-			}
-			key, err := e.readEscape()
-			if err != nil {
-				return "", err
-			}
-			switch key {
-			case keyLeft: // left
-				if pos > 0 {
-					pos--
-				}
-			case keyRight: // right
-				if pos < len(line) {
-					pos++
-				}
-			case keyHome: // home
-				pos = 0
-			case keyEnd: // end
-				pos = len(line)
-			case keyUp: // history up
-				if historyIndex > 0 {
-					historyIndex--
-					line = []rune(e.history[historyIndex])
-					pos = len(line)
-				}
-			case keyDown: // history down
-				if historyIndex < len(e.history) {
-					historyIndex++
-					if historyIndex == len(e.history) {
-						line = line[:0]
-					} else {
-						line = []rune(e.history[historyIndex])
-					}
-					pos = len(line)
-				}
-			case seqDelete: // delete (ESC[3~)
-				if pos < len(line) {
-					line = append(line[:pos], line[pos+1:]...)
-				}
-			}
-		default:
-			if r >= keySpace {
-				line = append(line, 0)
-				copy(line[pos+1:], line[pos:])
-				line[pos] = r
-				pos++
-			}
+		submit, err := e.applyKey(&state, r)
+		if err != nil {
+			return "", err
 		}
-		e.draw(prompt, line, pos)
+		if submit {
+			return e.remember(state.runes), nil
+		}
+		e.draw(prompt, state.runes, state.pos)
 	}
+}
+
+// applyKey applies one key to the line, and reports whether it was submitted
+// (in which case the caller returns the line).
+func (e *editor) applyKey(state *lineState, r rune) (bool, error) {
+	switch r {
+	case keyEnter, keyLF:
+		fmt.Fprint(e.out, "\r\n")
+		return true, nil
+	case keyCtrlC:
+		fmt.Fprint(e.out, "\r\n")
+		return false, io.EOF
+	case keyCtrlD:
+		if len(state.runes) == 0 {
+			fmt.Fprint(e.out, "\r\n")
+			return false, io.EOF
+		}
+	case keyBackspace, keyCtrlH:
+		state.deleteBefore()
+	case keyCtrlA:
+		state.pos = 0
+	case keyCtrlE:
+		state.pos = len(state.runes)
+	case keyCtrlU:
+		state.runes = state.runes[:0]
+		state.pos = 0
+	case keyCtrlW:
+		state.deleteWordBefore()
+	case keyEsc:
+		return false, e.applyEscape(state)
+	default:
+		if r >= keySpace {
+			state.insert(r)
+		}
+	}
+	return false, nil
+}
+
+// applyEscape consumes an escape sequence, or a lone Esc, which ends input.
+func (e *editor) applyEscape(state *lineState) error {
+	// A lone Esc has no buffered follow-up rune; a real escape sequence (arrows,
+	// etc.) is sent as one write and shows up shortly after.
+	if !e.waitPending(30 * time.Millisecond) {
+		fmt.Fprint(e.out, "\r\n")
+		return io.EOF
+	}
+	key, err := e.readEscape()
+	if err != nil {
+		return err
+	}
+	switch key {
+	case keyLeft:
+		state.move(-1)
+	case keyRight:
+		state.move(1)
+	case keyHome:
+		state.pos = 0
+	case keyEnd:
+		state.pos = len(state.runes)
+	case keyUp:
+		state.historyUp(e.history)
+	case keyDown:
+		state.historyDown(e.history)
+	case seqDelete:
+		state.deleteAt()
+	}
+	return nil
+}
+
+// remember records a non-empty line in the history and returns it.
+func (e *editor) remember(line []rune) string {
+	result := string(line)
+	if strings.TrimSpace(result) != "" {
+		e.history = append(e.history, result)
+	}
+	return result
+}
+
+// insert writes r at the cursor.
+func (s *lineState) insert(r rune) {
+	s.runes = append(s.runes, 0)
+	copy(s.runes[s.pos+1:], s.runes[s.pos:])
+	s.runes[s.pos] = r
+	s.pos++
+}
+
+// deleteBefore removes the rune before the cursor.
+func (s *lineState) deleteBefore() {
+	if s.pos == 0 {
+		return
+	}
+	s.runes = append(s.runes[:s.pos-1], s.runes[s.pos:]...)
+	s.pos--
+}
+
+// deleteAt removes the rune under the cursor.
+func (s *lineState) deleteAt() {
+	if s.pos < len(s.runes) {
+		s.runes = append(s.runes[:s.pos], s.runes[s.pos+1:]...)
+	}
+}
+
+// deleteWordBefore removes the spaces before the cursor, then the word.
+func (s *lineState) deleteWordBefore() {
+	for s.pos > 0 && s.runes[s.pos-1] == keySpace {
+		s.deleteBefore()
+	}
+	for s.pos > 0 && s.runes[s.pos-1] != keySpace {
+		s.deleteBefore()
+	}
+}
+
+// move shifts the cursor by delta, staying inside the line.
+func (s *lineState) move(delta int) {
+	if next := s.pos + delta; next >= 0 && next <= len(s.runes) {
+		s.pos = next
+	}
+}
+
+// historyUp recalls the previous history entry.
+func (s *lineState) historyUp(history []string) {
+	if s.historyIndex == 0 {
+		return
+	}
+	s.historyIndex--
+	s.runes = []rune(history[s.historyIndex])
+	s.pos = len(s.runes)
+}
+
+// historyDown recalls the next history entry, or the line being typed once the
+// newest entry is passed.
+func (s *lineState) historyDown(history []string) {
+	if s.historyIndex >= len(history) {
+		return
+	}
+	s.historyIndex++
+	if s.historyIndex == len(history) {
+		s.runes = s.runes[:0]
+	} else {
+		s.runes = []rune(history[s.historyIndex])
+	}
+	s.pos = len(s.runes)
 }
 
 // waitPending reports whether another rune arrives within timeout. A lone Esc
@@ -188,12 +252,18 @@ func (e *editor) readEscape() (rune, error) {
 		}
 		return final, nil
 	case '[':
+		return e.readCSI()
 	default:
 		return r, nil
 	}
-	var last rune
+}
+
+// readCSI consumes the rest of an "ESC [ ..." sequence: a letter final is the
+// key itself, and a "~" final maps its numeric parameter.
+func (e *editor) readCSI() (rune, error) {
+	last := rune(0)
 	for {
-		r, _, err = e.in.ReadRune()
+		r, _, err := e.in.ReadRune()
 		if err != nil {
 			return 0, err
 		}
@@ -201,19 +271,24 @@ func (e *editor) readEscape() (rune, error) {
 		case (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'):
 			return r, nil
 		case r == keyTilde:
-			switch last {
-			case seqHome:
-				return keyHome, nil
-			case seqEnd:
-				return keyEnd, nil
-			case seqDelete:
-				return seqDelete, nil
-			}
-			return 0, nil
+			return tildeKey(last), nil
 		default:
 			last = r
 		}
 	}
+}
+
+// tildeKey maps the numeric parameter of an "ESC [ n ~" sequence to its key.
+func tildeKey(param rune) rune {
+	switch param {
+	case seqHome:
+		return keyHome
+	case seqEnd:
+		return keyEnd
+	case seqDelete:
+		return seqDelete
+	}
+	return 0
 }
 
 func (e *editor) draw(prompt string, line []rune, pos int) {

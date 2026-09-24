@@ -90,46 +90,78 @@ func isRule(line string) bool {
 func inline(s string) string {
 	var out strings.Builder
 	for i := 0; i < len(s); {
-		switch {
-		case s[i] == '`':
-			if end := strings.IndexByte(s[i+1:], '`'); end >= 0 {
-				out.WriteString(cyan + s[i+1:i+1+end] + reset)
-				i += end + 2
-				continue
-			}
-		case strings.HasPrefix(s[i:], "**"):
-			if end := strings.Index(s[i+2:], "**"); end >= 0 {
-				out.WriteString(bold + inline(s[i+2:i+2+end]) + reset)
-				i += end + 4
-				continue
-			}
-		case s[i] == '[':
-			close := strings.IndexByte(s[i:], ']')
-			if close >= 0 && i+close+1 < len(s) && s[i+close+1] == '(' {
-				if urlEnd := strings.IndexByte(s[i+close+2:], ')'); urlEnd >= 0 {
-					text := s[i+1 : i+close]
-					url := s[i+close+2 : i+close+2+urlEnd]
-					out.WriteString(underline + inline(text) + reset + dim + " (" + url + ")" + reset)
-					i += close + 2 + urlEnd + 1
-					continue
-				}
-			}
-		case s[i] == '*':
-			if end := strings.IndexByte(s[i+1:], '*'); end > 0 {
-				text := s[i+1 : i+1+end]
-				// Emphasis cannot start or end with a space, so arithmetic like
-				// "2 * 3 * 4" stays literal instead of rendering as italic.
-				if text == strings.TrimSpace(text) {
-					out.WriteString(italic + inline(text) + reset)
-					i += end + 2
-					continue
-				}
-			}
+		span, size, ok := inlineSpan(s[i:])
+		if !ok {
+			out.WriteByte(s[i])
+			i++
+			continue
 		}
-		out.WriteByte(s[i])
-		i++
+		out.WriteString(span)
+		i += size
 	}
 	return out.String()
+}
+
+// inlineSpan matches one inline span at the start of s, returning its rendering
+// and its length in bytes.
+func inlineSpan(s string) (string, int, bool) {
+	switch {
+	case s[0] == '`':
+		return codeSpan(s)
+	case strings.HasPrefix(s, "**"):
+		return boldSpan(s)
+	case s[0] == '[':
+		return linkSpan(s)
+	case s[0] == '*':
+		return italicSpan(s)
+	}
+	return "", 0, false
+}
+
+// codeSpan renders `code`.
+func codeSpan(s string) (string, int, bool) {
+	end := strings.IndexByte(s[1:], '`')
+	if end < 0 {
+		return "", 0, false
+	}
+	return cyan + s[1:1+end] + reset, end + 2, true
+}
+
+// boldSpan renders **bold**, recursing so nested spans still render.
+func boldSpan(s string) (string, int, bool) {
+	end := strings.Index(s[2:], "**")
+	if end < 0 {
+		return "", 0, false
+	}
+	return bold + inline(s[2:2+end]) + reset, end + 4, true
+}
+
+// linkSpan renders [text](url) as the underlined text followed by the dimmed URL.
+func linkSpan(s string) (string, int, bool) {
+	close := strings.IndexByte(s, ']')
+	if close < 0 || close+1 >= len(s) || s[close+1] != '(' {
+		return "", 0, false
+	}
+	urlEnd := strings.IndexByte(s[close+2:], ')')
+	if urlEnd < 0 {
+		return "", 0, false
+	}
+	text, url := s[1:close], s[close+2:close+2+urlEnd]
+	return underline + inline(text) + reset + dim + " (" + url + ")" + reset, close + 2 + urlEnd + 1, true
+}
+
+// italicSpan renders *italic*. Emphasis cannot start or end with a space, so
+// arithmetic like "2 * 3 * 4" stays literal instead of rendering as italic.
+func italicSpan(s string) (string, int, bool) {
+	end := strings.IndexByte(s[1:], '*')
+	if end <= 0 {
+		return "", 0, false
+	}
+	text := s[1 : 1+end]
+	if text != strings.TrimSpace(text) {
+		return "", 0, false
+	}
+	return italic + inline(text) + reset, end + 2, true
 }
 
 // markdownStream renders markdown line by line as text streams in.

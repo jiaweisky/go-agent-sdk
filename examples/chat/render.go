@@ -133,9 +133,7 @@ func (c *chat) handleParent(event agent.Event) {
 	case agent.ToolCalled:
 		c.openCall(e.CallID, e.Name)
 		if e.Name == coretool.SkillName {
-			// Skills are worth surfacing: unlike read/grep, a loaded skill
-			// changes how the model behaves for the rest of the turn.
-			c.console.write(fmt.Sprintf("%s[skill] %s%s\n", cyan, skillName(e.Input), reset))
+			c.writeSkill(e.Input)
 		}
 	case agent.ToolSuccess:
 		c.finishTool(e.CallID, "")
@@ -144,31 +142,58 @@ func (c *chat) handleParent(event agent.Event) {
 	case agent.SessionStatus:
 		c.parentBusy = e.Status == "busy"
 	case agent.ReasoningDelta:
-		if e.Delta != "" {
-			c.console.write(dim + e.Delta + reset)
-		}
+		c.writeReasoning(e.Delta)
 	case agent.ReasoningEnded:
-		if e.Text != "" {
-			c.console.write("\n")
-		}
+		c.endReasoning(e.Text)
 	case agent.TextDelta:
-		if e.Delta == "" {
-			return
-		}
-		if !c.labeled {
-			c.console.write("Assistant: ")
-			c.labeled = true
-		}
-		if c.stream == nil {
-			c.stream = newMarkdownStream(c.console.write)
-		}
-		c.stream.Write(e.Delta)
+		c.writeText(e.Delta)
 	case agent.TextEnded:
-		if c.stream != nil {
-			c.stream.Flush()
-		}
+		c.endText()
+	}
+}
+
+// writeSkill surfaces a loaded skill: unlike read/grep, it changes how the model
+// behaves for the rest of the turn.
+func (c *chat) writeSkill(input any) {
+	c.console.write(fmt.Sprintf("%s[skill] %s%s\n", cyan, skillName(input), reset))
+}
+
+// writeReasoning streams the model's reasoning, dimmed.
+func (c *chat) writeReasoning(delta string) {
+	if delta != "" {
+		c.console.write(dim + delta + reset)
+	}
+}
+
+// endReasoning closes a reasoning block that printed anything.
+func (c *chat) endReasoning(text string) {
+	if text != "" {
 		c.console.write("\n")
 	}
+}
+
+// writeText streams assistant text, printing the "Assistant:" label once per
+// turn.
+func (c *chat) writeText(delta string) {
+	if delta == "" {
+		return
+	}
+	if !c.labeled {
+		c.console.write("Assistant: ")
+		c.labeled = true
+	}
+	if c.stream == nil {
+		c.stream = newMarkdownStream(c.console.write)
+	}
+	c.stream.Write(delta)
+}
+
+// endText flushes the assistant text and ends its line.
+func (c *chat) endText() {
+	if c.stream != nil {
+		c.stream.Flush()
+	}
+	c.console.write("\n")
 }
 
 // openCall records a running tool call of the parent session. Task calls are
