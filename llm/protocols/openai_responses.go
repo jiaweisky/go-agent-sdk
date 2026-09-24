@@ -36,7 +36,7 @@ type openaiResponsesSummaryText struct {
 }
 type openaiResponsesReasoningItem struct {
 	Type             string                       `json:"type"`
-	ID               string                       `json:"id"`
+	ID               string                       `json:"-"`
 	Summary          []openaiResponsesSummaryText `json:"summary"`
 	EncryptedContent *string                      `json:"encrypted_content,omitempty"`
 }
@@ -270,9 +270,6 @@ func openaiResponsesLowerReasoning(part schema.ReasoningPart) *openaiResponsesRe
 	}
 	if ec, ok := raw["reasoningEncryptedContent"].(string); ok {
 		item.EncryptedContent = &ec
-	} else if _, isNull := raw["reasoningEncryptedContent"]; isNull {
-		empty := ""
-		item.EncryptedContent = &empty
 	}
 	return item
 }
@@ -344,6 +341,17 @@ func openaiResponsesOpenAIMetadata(m map[string]any) schema.ProviderMetadata {
 	return schema.ProviderMetadata{"openai": m}
 }
 
+func openaiResponsesReasoningMetadata(itemID string, encrypted *string) schema.ProviderMetadata {
+	var value any
+	if encrypted != nil {
+		value = *encrypted
+	}
+	return openaiResponsesOpenAIMetadata(map[string]any{
+		"itemId":                    itemID,
+		"reasoningEncryptedContent": value,
+	})
+}
+
 func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponsesInputItem, error) {
 	var input []openaiResponsesInputItem
 	if len(request.System) > 0 {
@@ -386,7 +394,7 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 
 		case schema.RoleAssistant:
 			var textParts []string
-			var reasoningItems []*openaiResponsesReasoningItem
+			reasoningItems := map[string]*openaiResponsesReasoningItem{}
 			var reasoningRefs map[string]bool
 			var hostedRefs map[string]bool
 			for _, p := range msg.Content {
@@ -407,8 +415,14 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 							input = append(input, openaiResponsesItemReference{Type: "item_reference", ID: r.ID})
 							reasoningRefs[r.ID] = true
 						}
+					} else if existing := reasoningItems[r.ID]; existing != nil {
+						existing.Summary = append(existing.Summary, r.Summary...)
+						if r.EncryptedContent != nil {
+							existing.EncryptedContent = r.EncryptedContent
+						}
 					} else {
-						reasoningItems = append(reasoningItems, r)
+						reasoningItems[r.ID] = r
+						input = append(input, r)
 					}
 				case schema.ToolCallPart:
 					if part.ProviderExecuted != nil && *part.ProviderExecuted {
@@ -457,7 +471,7 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 	if store != nil && !*store {
 		var filtered []openaiResponsesInputItem
 		for _, item := range input {
-			if r, ok := item.(openaiResponsesReasoningItem); ok && r.EncryptedContent == nil {
+			if r, ok := item.(*openaiResponsesReasoningItem); ok && r.EncryptedContent == nil {
 				continue
 			}
 			filtered = append(filtered, item)
@@ -657,8 +671,8 @@ func openaiResponsesOnReasoningDelta(state openaiResponsesParserState, evt opena
 	if itemID == "" {
 		itemID = "reasoning-0"
 	}
-	id := fmt.Sprintf("%s:%d", itemID, openaiResponsesIntVal(evt.SummaryIndex))
-	if _, ok := state.reasoningItems[itemID]; ok {
+	id := itemID
+	if _, tracked := state.reasoningItems[itemID]; evt.SummaryIndex != nil || tracked {
 		id = fmt.Sprintf("%s:%d", itemID, openaiResponsesIntVal(evt.SummaryIndex))
 	}
 	utils.ReasoningDelta(&state.lifecycle, &events, id, *evt.Delta)
@@ -737,7 +751,7 @@ func openaiResponsesOnReasoningSummaryPartAdded(s openaiResponsesParserState, ev
 		}
 	}
 	utils.ReasoningStart(&s.lifecycle, &events, fmt.Sprintf("%s:%d", itemID, idx),
-		openaiResponsesOpenAIMetadata(map[string]any{"itemId": itemID, "reasoningEncryptedContent": existing.EncryptedContent}))
+		openaiResponsesReasoningMetadata(itemID, existing.EncryptedContent))
 	existing.SummaryParts[idx] = "active"
 	return s, events, nil
 }
@@ -771,7 +785,7 @@ func openaiResponsesOnOutputItemAdded(s openaiResponsesParserState, evt openaiRe
 	if openaiResponsesIsReasoningItem(*item) {
 		var events []schema.LLMEvent
 		utils.ReasoningStart(&s.lifecycle, &events, fmt.Sprintf("%s:0", *item.ID),
-			openaiResponsesOpenAIMetadata(map[string]any{"itemId": *item.ID, "reasoningEncryptedContent": item.EncryptedContent}))
+			openaiResponsesReasoningMetadata(*item.ID, item.EncryptedContent))
 		if s.reasoningItems == nil {
 			s.reasoningItems = make(map[string]*openaiResponsesReasoningStreamItem)
 		}
@@ -868,7 +882,7 @@ func openaiResponsesOnOutputItemDone(s openaiResponsesParserState, evt openaiRes
 				for k, v := range ri.SummaryParts {
 					if v == "active" || v == "can-conclude" {
 						utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("%s:%d", *item.ID, k),
-							openaiResponsesOpenAIMetadata(map[string]any{"itemId": *item.ID}))
+							openaiResponsesReasoningMetadata(*item.ID, item.EncryptedContent))
 					}
 				}
 				delete(s.reasoningItems, *item.ID)
