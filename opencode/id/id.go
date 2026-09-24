@@ -88,16 +88,3 @@ func Create(prefix, direction string, timestamp ...int64) string {
 	timeHex := fmt.Sprintf("%012x", now)
 	return prefix + "_" + timeHex + randomBase62(length-12)
 }
-
-func Timestamp(id string) int64 {
-	prefix := strings.SplitN(id, "_", 2)[0]
-	if len(id) < len(prefix)+13 {
-		return 0
-	}
-	hex := id[len(prefix)+1 : len(prefix)+13]
-	encoded, ok := new(big.Int).SetString(hex, 16)
-	if !ok {
-		return 0
-	}
-	return new(big.Int).Div(encoded, big.NewInt(0x1000)).Int64()
-}

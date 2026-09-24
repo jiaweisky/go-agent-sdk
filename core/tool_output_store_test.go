@@ -1,8 +1,11 @@
 package core
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 )
@@ -59,5 +62,45 @@ func TestToolOutputStoreBoundStructuredWhenNoContent(t *testing.T) {
 	}
 	if len(result.OutputPaths) != 0 {
 		t.Fatalf("paths = %v", result.OutputPaths)
+	}
+}
+
+func TestToolOutputStoreCleanupRemovesExpiredFiles(t *testing.T) {
+	dir := t.TempDir()
+	store := NewToolOutputStore(Global{Data: dir}, ToolOutputSettings{})
+	managed := filepath.Join(dir, ToolOutputStoreManagedDirectory)
+	if err := EnsureDir(managed); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	expired := filepath.Join(managed, "tool_expired")
+	fresh := filepath.Join(managed, "tool_fresh")
+	other := filepath.Join(managed, "notes.txt")
+	for _, file := range []string{expired, fresh, other} {
+		if err := WriteFileBytes(file, []byte("x"), "w"); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+	past := time.Now().Add(-ToolOutputStoreRetention - time.Hour)
+	if err := os.Chtimes(expired, past, past); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	if err := store.Cleanup(); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if _, err := os.Stat(expired); !os.IsNotExist(err) {
+		t.Fatalf("expired file was not removed: %v", err)
+	}
+	for _, file := range []string{fresh, other} {
+		if _, err := os.Stat(file); err != nil {
+			t.Fatalf("%s was removed: %v", file, err)
+		}
+	}
+}
+
+func TestToolOutputStoreCleanupWithoutDirectory(t *testing.T) {
+	store := NewToolOutputStore(Global{Data: t.TempDir()}, ToolOutputSettings{})
+	if err := store.Cleanup(); err != nil {
+		t.Fatalf("cleanup: %v", err)
 	}
 }

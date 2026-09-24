@@ -1824,3 +1824,31 @@ func TestToolOutputSettings(t *testing.T) {
 		t.Fatalf("got = %+v", got)
 	}
 }
+
+func TestClientCleanupToolOutput(t *testing.T) {
+	store := core.NewToolOutputStore(core.Global{Data: t.TempDir()}, core.ToolOutputSettings{})
+	client := &Client{rt: &runtime{toolOutput: store}}
+	if err := client.CleanupToolOutput(); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if err := (&Client{}).CleanupToolOutput(); err != nil {
+		t.Fatalf("cleanup without a runtime: %v", err)
+	}
+}
+
+func TestRuntimeToolOutputCleanupStopsOnCancel(t *testing.T) {
+	store := core.NewToolOutputStore(core.Global{Data: t.TempDir()}, core.ToolOutputSettings{})
+	rt := &runtime{toolOutput: store}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rt.runToolOutputCleanup(ctx)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup loop did not stop on cancel")
+	}
+}

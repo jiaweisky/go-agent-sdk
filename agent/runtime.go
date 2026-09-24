@@ -36,6 +36,7 @@ type runtime struct {
 	agents        *core.Agent
 	skills        *core.Skill
 	outputStore   tool.OutputStore
+	toolOutput    *core.ToolOutputStore
 	mcpTools      map[string]tool.Tool
 	permission    *handlerPermission
 	question      *handlerQuestion
@@ -55,6 +56,7 @@ type runtime struct {
 	mcp         *mcp.Client
 	plugin      *core.Plugin
 	reference   *core.Reference
+	cancel      context.CancelFunc
 }
 
 // toolDispatcher routes materialization to the session-scoped registry. Every
@@ -204,7 +206,8 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	// Bound oversized tool results (see core.ToolOutputStore) before they are
 	// sent to the model; without this a single large grep/read can overflow the
 	// provider context window.
-	outputStore := tool.NewCoreOutputStore(core.NewToolOutputStore(global, toolOutputSettings(opts)))
+	toolOutput := core.NewToolOutputStore(global, toolOutputSettings(opts))
+	outputStore := tool.NewCoreOutputStore(toolOutput)
 
 	subagentDepth := opts.SubagentDepth
 	if subagentDepth <= 0 {
@@ -280,15 +283,17 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		snapshots = snapshot
 	}
 
+	lifetime, cancel := context.WithCancel(context.Background())
 	rt := &runtime{
 		db: db, events: events, store: store, agents: agents, skills: skills,
-		outputStore: outputStore,
-		permission:  permission, question: question, location: *location,
+		outputStore: outputStore, toolOutput: toolOutput,
+		permission: permission, question: question, location: *location,
 		projectID: projectID, models: models,
 		subagentDepth: subagentDepth,
 		hooks:         map[string]*SessionHooks{}, builtin: builtin, clientTools: opts.Tools,
 		dispatcher: &toolDispatcher{sessions: map[string]*tool.Registry{}},
 		reference:  referenceService,
+		cancel:     cancel,
 	}
 	task.rt = rt
 	rt.runner = runner.NewLLMRunner(runner.LLMRunner{
@@ -312,17 +317,39 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		return rt.runner.Run(ctx, runner.RunInput{SessionID: id, Force: force})
 	})
 	if err := rt.connectMCP(ctx, opts.MCP); err != nil {
+		cancel()
 		db.Close()
 		return nil, err
 	}
 	rt.plugin = core.NewPlugin(events, agents, skills)
 	for _, config := range opts.Plugins {
 		if err := rt.plugin.Add(schema.PluginID(config.ID), core.PluginEffect(config.Effect)); err != nil {
+			cancel()
 			db.Close()
 			return nil, err
 		}
 	}
+	go rt.runToolOutputCleanup(lifetime)
 	return rt, nil
+}
+
+const toolOutputCleanupInterval = time.Hour
+
+func (r *runtime) runToolOutputCleanup(ctx context.Context) {
+	if r.toolOutput == nil {
+		return
+	}
+	_ = r.toolOutput.Cleanup()
+	ticker := time.NewTicker(toolOutputCleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = r.toolOutput.Cleanup()
+		}
+	}
 }
 
 // connectMCP connects the configured MCP servers and collects their tools; each
@@ -365,6 +392,9 @@ func chooseLLM(opts *ClientOptions) route.LLMClient {
 }
 
 func (r *runtime) close() error {
+	if r.cancel != nil {
+		r.cancel()
+	}
 	if r.plugin != nil {
 		_ = r.plugin.Close()
 	}

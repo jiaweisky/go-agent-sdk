@@ -80,26 +80,11 @@ func TestCounterBreaksTimestampTies(t *testing.T) {
 	}
 }
 
-func TestTimestampRoundTripWithinMaskWindow(t *testing.T) {
-	const ts = int64(60_000_000_000)
-	if got := Timestamp(Create("ses", "ascending", ts)); got != ts {
-		t.Fatalf("Timestamp = %d, want %d", got, ts)
-	}
-}
-
 func TestDescendingOrdersNewestFirst(t *testing.T) {
 	const base = int64(1_000_000_000)
 	early := Create("ses", "descending", base)
 	late := Create("ses", "descending", base+1)
 	if !(early > late) {
 		t.Fatalf("descending ids are not ordered newest-first: early=%q late=%q", early, late)
-	}
-}
-
-func TestTimestampMalformed(t *testing.T) {
-	for _, value := range []string{"", "ses_short", "no-underscore", "ses_zzzzzzzzzzzz"} {
-		if got := Timestamp(value); got != 0 {
-			t.Fatalf("Timestamp(%q) = %d, want 0", value, got)
-		}
 	}
 }

@@ -541,6 +541,8 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 > MCP 已实现（见 §8，`mcp/` 包）。Plugin 已实现（窄化：`core/plugin.go` 的 lifecycle 管理器 + `agent` 接线，见 `PluginContext`）；TS 的动态工具（外部 JSON Schema）未移植，MCP 工具即通过 `jsonschema.Raw` 走这条路径。
 
 > **工具输出限额**：`core.ToolOutputStore`（`MAX_LINES=2000` / `MAX_BYTES=50KB`）会把超限的 tool result 落盘为 `tool-output/tool_*`，只把 head/tail 预览发给模型（`core/tool/output_store.go` 适配 `tool.OutputStore`，由 `agent/runtime.go` 通过 `tool.WithOutputStore` 注入）。**未注入时 registry 的 `store == nil`，限额被跳过**，一次大 `grep`/`read` 就能撑爆上下文窗口。
+>
+> 落盘目录是 `{Global.Data}/tool-output`，即 `$XDG_DATA_HOME/opencode/tool-output` 或 `~/.local/share/opencode/tool-output`（`ClientOptions.DataDir` 只管 SQLite，不影响这里）。`ToolOutputStore.Cleanup` 按文件 mtime 清理超过 7 天（`ToolOutputStoreRetention`）的文件：`agent` 层在 `newRuntime` 时起一个 goroutine，启动时跑一次、之后每小时一次，`Client.Close()` 时随 runtime 的 lifetime context 退出；也可用 `Client.CleanupToolOutput()` 手动触发（对齐 v2 `tool-output-store.ts` 的 `cleanupLayer` + `cleanupNode`）。
 
 ### 7.4 内置工具
 

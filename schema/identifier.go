@@ -63,22 +63,3 @@ func Create(descending bool, timestamp ...int64) string {
 
 	return timeHex + string(b)
 }
-
-func IdentifierTimestamp(id string) int64 {
-	prefixLen := -1
-	for i, c := range id {
-		if c == '_' {
-			prefixLen = i
-			break
-		}
-	}
-	if prefixLen < 0 || len(id) < prefixLen+13 {
-		return 0
-	}
-	hex := id[prefixLen+1 : prefixLen+13]
-	encoded, ok := new(big.Int).SetString(hex, 16)
-	if !ok {
-		return 0
-	}
-	return new(big.Int).Div(encoded, big.NewInt(0x1000)).Int64()
-}

@@ -347,6 +347,14 @@ func (c *Client) Reference() *core.Reference {
 }
 
 // Close closes active sessions and releases the runtime and its database.
+// CleanupToolOutput removes tool-output files older than the retention window.
+func (c *Client) CleanupToolOutput() error {
+	if c.rt == nil || c.rt.toolOutput == nil {
+		return nil
+	}
+	return c.rt.toolOutput.Cleanup()
+}
+
 func (c *Client) Close() error {
 	c.mu.Lock()
 	sessions := make([]*Session, 0, len(c.sessions))
