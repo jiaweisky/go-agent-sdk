@@ -2,12 +2,12 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/user/go-agent-sdk/core"
+	"github.com/user/go-agent-sdk/core/tool"
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/mcp"
 	"github.com/user/go-agent-sdk/schema"
@@ -78,9 +78,8 @@ type ClientOptions struct {
 	// default.
 	Shell string
 	// Locale orders model-visible lists (read-tool directory listings, skill and
-	// reference guidance, advertised subagent types), matching
-	// String.prototype.localeCompare. Empty uses the environment locale
-	// (LC_ALL, LC_COLLATE, LANG).
+	// reference guidance, advertised subagent types) with locale-aware
+	// collation. Empty uses the environment locale (LC_ALL, LC_COLLATE, LANG).
 	Locale string
 	// Compaction controls automatic history compaction. Nil uses the defaults.
 	Compaction *CompactionConfig
@@ -232,26 +231,34 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 		c.removeDerivedAgent(effectiveAgent, derivedAgent)
 		return nil, err
 	}
-	c.rt.dispatcher.set(string(sessionID), sessionRegistry)
-	c.rt.setHooks(string(sessionID), cfg.Hooks)
-	c.rt.permission.setHandler(string(sessionID), cfg.OnPermissionRequest)
-	c.rt.question.setHandler(string(sessionID), cfg.OnQuestion)
-
 	session := &Session{
 		client: c, id: sessionID, agentID: effectiveAgent, derivedAgent: derivedAgent,
 		hooks: cfg.Hooks, listeners: map[int]func(Event){},
 	}
-	unsub, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
+	if err := c.attachSession(session, sessionRegistry, cfg); err != nil {
+		c.removeDerivedAgent(effectiveAgent, derivedAgent)
+		return nil, err
+	}
+	return session, nil
+}
+
+// attachSession wires a session into the runtime: its tool registry, hooks,
+// per-session handlers and event subscription.
+func (c *Client) attachSession(session *Session, registry *tool.Registry, cfg *SessionConfig) error {
+	c.rt.dispatcher.set(session.ID(), registry)
+	c.rt.setHooks(session.ID(), cfg.Hooks)
+	c.rt.permission.setHandler(session.ID(), cfg.OnPermissionRequest)
+	c.rt.question.setHandler(session.ID(), cfg.OnQuestion)
+	unsubscribe, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
 		session.dispatch(payload)
 		return nil
 	})
 	if err != nil {
-		c.removeDerivedAgent(effectiveAgent, derivedAgent)
-		return nil, err
+		return err
 	}
-	session.unsub = unsub
+	session.unsub = unsubscribe
 	c.trackSession(session)
-	return session, nil
+	return nil
 }
 
 // sessionDefaults is the session's agent and model, with the client's defaults
@@ -323,17 +330,15 @@ func (c *Client) insertSession(cfg *SessionConfig, sessionID schema.SessionID, a
 	if title == "" {
 		title = "Session"
 	}
-	permissionJSON := "null"
-	if len(cfg.Permissions) > 0 {
-		if encoded, err := json.Marshal(cfg.Permissions); err == nil {
-			permissionJSON = string(encoded)
-		}
+	permissionJSON, err := encodePermissionRules(cfg.Permissions)
+	if err != nil {
+		return err
 	}
-	_, err := c.rt.db.DB.Exec(
+	_, err = c.rt.db.DB.Exec(
 		"INSERT INTO `session` (`id`,`project_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`revert`,`time_created`,`time_updated`) "+
 			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 		string(sessionID), string(c.rt.projectID), "session", string(c.rt.location.Directory),
-		title, "1", agentID, fmt.Sprintf(`{"id":%q,"providerID":%q}`, modelID, providerID), permissionJSON, `null`, now, now,
+		title, "1", agentID, encodeModelRef(schema.ModelID(modelID), schema.ProviderID(providerID)), permissionJSON, `null`, now, now,
 	)
 	return err
 }
@@ -435,16 +440,13 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *Sessi
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 	// A per-session ruleset passed on resume replaces the stored one.
-	sessionRules := schema.PermissionRuleset{}
-	if stored.Permission != nil {
-		sessionRules = *stored.Permission
-	}
+	sessionRules := permissionRulesOf(stored)
 	if len(cfg.Permissions) > 0 {
-		encoded, err := json.Marshal(cfg.Permissions)
+		encoded, err := encodePermissionRules(cfg.Permissions)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := c.rt.db.DB.Exec("UPDATE `session` SET `permission` = ? WHERE `id` = ?", string(encoded), sessionID); err != nil {
+		if _, err := c.rt.db.DB.Exec("UPDATE `session` SET `permission` = ? WHERE `id` = ?", encoded, sessionID); err != nil {
 			return nil, err
 		}
 		sessionRules = cfg.Permissions
@@ -453,26 +455,15 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *Sessi
 	if err != nil {
 		return nil, err
 	}
-	c.rt.dispatcher.set(sessionID, registry)
-	c.rt.setHooks(sessionID, cfg.Hooks)
-	c.rt.permission.setHandler(sessionID, cfg.OnPermissionRequest)
-	c.rt.question.setHandler(sessionID, cfg.OnQuestion)
-
 	session := &Session{
 		client: c, id: schema.SessionID(sessionID), agentID: agentIDOf(stored),
 		hooks: cfg.Hooks, listeners: map[int]func(Event){},
 	}
-	unsubscribe, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
-		session.dispatch(payload)
-		return nil
-	})
-	if err != nil {
+	if err := c.attachSession(session, registry, cfg); err != nil {
 		return nil, err
 	}
-	session.unsub = unsubscribe
-	c.trackSession(session)
 	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
-		_, _ = cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: sessionID, Agent: string(agentIDOf(stored)), Model: modelIDOf(stored)})
+		_, _ = cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: sessionID, Agent: agentIDOf(stored), Model: modelIDOf(stored)})
 	}
 	return session, nil
 }
@@ -544,4 +535,21 @@ func modelIDOf(info *schema.SessionInfo) string {
 		return ""
 	}
 	return string(info.Model.ID)
+}
+
+// permissionRulesOf returns the ruleset a stored session carries, or nil.
+func permissionRulesOf(info *schema.SessionInfo) schema.PermissionRuleset {
+	if info.Permission == nil {
+		return nil
+	}
+	return *info.Permission
+}
+
+// encodeModelRef renders a model reference as the JSON stored in a session row,
+// or "null" when no model id is known.
+func encodeModelRef(id schema.ModelID, providerID schema.ProviderID) string {
+	if id == "" {
+		return "null"
+	}
+	return fmt.Sprintf(`{"id":%q,"providerID":%q}`, string(id), string(providerID))
 }

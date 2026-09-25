@@ -1032,7 +1032,7 @@ func TestSessionQuestionHandler(t *testing.T) {
 
 func TestQuestionDefaultRejects(t *testing.T) {
 	inner := core.NewQuestion(core.QuestionConfig{})
-	question := newHandlerQuestion(inner, nil)
+	question := newQuestionHandler(inner, nil)
 	_, err := question.Ask(context.Background(), core.QuestionAskInput{
 		SessionID: "s1",
 		Questions: []schema.QuestionInfo{{Question: "ok?"}},

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -42,52 +43,78 @@ var ApproveAll PermissionHandlerFunc = func(PermissionRequest) (PermissionDecisi
 	return PermissionDecision{Allow: true}, nil
 }
 
-// handlerPermission decorates a core Permission service so that "ask" decisions
-// are answered by a PermissionHandlerFunc instead of blocking for an external
-// reply. A per-session handler overrides the client default.
-type handlerPermission struct {
-	inner core.Permission
-
+// sessionHandlers tracks per-session handler overrides over a default, so a
+// session can replace the client-wide handler. It is shared by the permission
+// and question decorators.
+type sessionHandlers[H any] struct {
 	mu       sync.Mutex
-	def      PermissionHandlerFunc
-	handlers map[string]PermissionHandlerFunc
+	def      H
+	handlers map[string]H
 }
 
-func (p *handlerPermission) setHandler(sessionID string, handler PermissionHandlerFunc) {
+func newSessionHandlers[H any](def H) *sessionHandlers[H] {
+	return &sessionHandlers[H]{def: def, handlers: map[string]H{}}
+}
+
+// set records a per-session handler.
+func (h *sessionHandlers[H]) set(sessionID string, handler H) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.handlers[sessionID] = handler
+}
+
+func (h *sessionHandlers[H]) remove(sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.handlers, sessionID)
+}
+
+// get returns the session's handler and whether one is registered.
+func (h *sessionHandlers[H]) get(sessionID string) (H, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	handler, ok := h.handlers[sessionID]
+	return handler, ok
+}
+
+// permissionHandler decorates a core Permission service so that "ask" decisions
+// are answered by a PermissionHandlerFunc instead of blocking for an external
+// reply. A per-session handler overrides the client default.
+type permissionHandler struct {
+	inner    core.Permission
+	handlers *sessionHandlers[PermissionHandlerFunc]
+}
+
+func newPermissionHandler(inner core.Permission, def PermissionHandlerFunc) *permissionHandler {
+	return &permissionHandler{inner: inner, handlers: newSessionHandlers(def)}
+}
+
+func (p *permissionHandler) setHandler(sessionID string, handler PermissionHandlerFunc) {
 	if handler == nil {
 		return
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.handlers == nil {
-		p.handlers = map[string]PermissionHandlerFunc{}
-	}
-	p.handlers[sessionID] = handler
+	p.handlers.set(sessionID, handler)
 }
 
-func (p *handlerPermission) removeHandler(sessionID string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	delete(p.handlers, sessionID)
+func (p *permissionHandler) removeHandler(sessionID string) {
+	p.handlers.remove(sessionID)
 }
 
-func (p *handlerPermission) handlerFor(sessionID string) PermissionHandlerFunc {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if handler, ok := p.handlers[sessionID]; ok && handler != nil {
+func (p *permissionHandler) handlerFor(sessionID string) PermissionHandlerFunc {
+	if handler, ok := p.handlers.get(sessionID); ok && handler != nil {
 		return handler
 	}
-	if p.def != nil {
-		return p.def
+	if handler := p.handlers.def; handler != nil {
+		return handler
 	}
 	return ApproveAll
 }
 
-func (p *handlerPermission) Ask(input core.PermissionAssertInput) (*core.PermissionAskResult, error) {
+func (p *permissionHandler) Ask(input core.PermissionAssertInput) (*core.PermissionAskResult, error) {
 	return p.inner.Ask(input)
 }
 
-func (p *handlerPermission) Assert(input core.PermissionAssertInput) error {
+func (p *permissionHandler) Assert(input core.PermissionAssertInput) error {
 	result, err := p.inner.Ask(input)
 	if err != nil {
 		return err
@@ -100,30 +127,24 @@ func (p *handlerPermission) Assert(input core.PermissionAssertInput) error {
 		// halt the turn, unlike a user decline.
 		return &core.PermissionBlockedError{}
 	}
-	agent := ""
-	if input.Agent != nil {
-		agent = *input.Agent
-	}
-	decision, err := p.handlerFor(input.SessionID)(PermissionRequest{
-		SessionID: input.SessionID,
-		Agent:     agent,
-		Action:    input.Action,
-		Resources: input.Resources,
-		Save:      input.Save,
-		Metadata:  input.Metadata,
-	})
+	decision, err := p.handlerFor(input.SessionID)(newPermissionRequest(input))
 	if err != nil {
 		return err
 	}
+	return p.reply(result.ID, input.Save, decision)
+}
+
+// reply records the handler's decision and returns the error matching it.
+func (p *permissionHandler) reply(requestID core.PermissionID, save []string, decision PermissionDecision) error {
 	if decision.Allow {
 		reply := core.PermissionReplyOnce
-		if decision.Always && len(input.Save) > 0 {
+		if decision.Always && len(save) > 0 {
 			reply = core.PermissionReplyAlways
 		}
-		_ = p.inner.Reply(core.PermissionReplyInput{RequestID: result.ID, Reply: reply})
+		_ = p.inner.Reply(core.PermissionReplyInput{RequestID: requestID, Reply: reply})
 		return nil
 	}
-	reply := core.PermissionReplyInput{RequestID: result.ID, Reply: core.PermissionReplyReject}
+	reply := core.PermissionReplyInput{RequestID: requestID, Reply: core.PermissionReplyReject}
 	if decision.Message != "" {
 		message := decision.Message
 		reply.Message = &message
@@ -132,23 +153,39 @@ func (p *handlerPermission) Assert(input core.PermissionAssertInput) error {
 	return &core.PermissionDeclinedError{}
 }
 
-func (p *handlerPermission) Reply(input core.PermissionReplyInput) error {
+// newPermissionRequest flattens a core assert input into the handler request.
+func newPermissionRequest(input core.PermissionAssertInput) PermissionRequest {
+	agent := ""
+	if input.Agent != nil {
+		agent = *input.Agent
+	}
+	return PermissionRequest{
+		SessionID: input.SessionID,
+		Agent:     agent,
+		Action:    input.Action,
+		Resources: input.Resources,
+		Save:      input.Save,
+		Metadata:  input.Metadata,
+	}
+}
+
+func (p *permissionHandler) Reply(input core.PermissionReplyInput) error {
 	return p.inner.Reply(input)
 }
 
-func (p *handlerPermission) Get(id core.PermissionID) *core.PermissionRequest {
+func (p *permissionHandler) Get(id core.PermissionID) *core.PermissionRequest {
 	return p.inner.Get(id)
 }
 
-func (p *handlerPermission) ForSession(sessionID string) []core.PermissionRequest {
+func (p *permissionHandler) ForSession(sessionID string) []core.PermissionRequest {
 	return p.inner.ForSession(sessionID)
 }
 
-func (p *handlerPermission) List() []core.PermissionRequest {
+func (p *permissionHandler) List() []core.PermissionRequest {
 	return p.inner.List()
 }
 
-func (p *handlerPermission) Close() error {
+func (p *permissionHandler) Close() error {
 	return p.inner.Close()
 }
 
@@ -166,18 +203,10 @@ func (s permissionSessionStore) Get(sessionID string) (*core.PermissionSessionIn
 	if info == nil {
 		return nil, false, nil
 	}
-	agent := ""
-	if info.Agent != nil {
-		agent = string(*info.Agent)
-	}
-	var permissions schema.PermissionRuleset
-	if info.Permission != nil {
-		permissions = *info.Permission
-	}
 	return &core.PermissionSessionInfo{
 		ID:          sessionID,
-		Agent:       agent,
-		Permissions: permissions,
+		Agent:       agentIDOf(info),
+		Permissions: permissionRulesOf(info),
 	}, true, nil
 }
 
@@ -255,4 +284,17 @@ func (p permissionEvents) PublishReplied(sessionID string, requestID core.Permis
 		"reply":     string(reply),
 	}, nil)
 	return err
+}
+
+// encodePermissionRules renders a ruleset as the JSON stored in a session row.
+// An empty ruleset encodes as JSON null.
+func encodePermissionRules(rules schema.PermissionRuleset) (string, error) {
+	if len(rules) == 0 {
+		return "null", nil
+	}
+	encoded, err := json.Marshal(rules)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }

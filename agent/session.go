@@ -5,7 +5,6 @@ import (
 	"iter"
 	"sync"
 
-	"github.com/user/go-agent-sdk/core/session"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -83,10 +82,9 @@ func (s *Session) On(handler func(Event)) func() {
 // The sequence ends with an Idle event.
 //
 // Events are handed off to the caller with backpressure: core events are
-// dispatched synchronously from the publisher (mirroring Event.listen), so a
-// slow consumer slows the turn instead of losing deltas. The buffer only
-// smooths bursts; closed releases a handler still waiting when the caller stops
-// iterating.
+// dispatched synchronously from the publisher, so a slow consumer slows the
+// turn instead of losing deltas. The buffer only smooths bursts; closed
+// releases a handler still waiting when the caller stops iterating.
 func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		events := newTurnEvents()
@@ -175,12 +173,7 @@ func (s *Session) run(ctx context.Context, msg MessageOptions) error {
 	if msg.Mode == "steer" {
 		delivery = schema.SessionDeliverySteer
 	}
-	if _, err := session.Admit(s.client.rt.db.DB, appEvents{events: s.client.rt.events}, session.AdmitInput{
-		ID:        schema.NewMessageID(),
-		SessionID: s.id,
-		Prompt:    schema.Prompt{Text: prompt},
-		Delivery:  delivery,
-	}); err != nil {
+	if err := s.client.rt.admit(s.id, prompt, delivery); err != nil {
 		return err
 	}
 	if err := s.client.rt.coord.Run(ctx, s.id); err != nil {
@@ -231,7 +224,7 @@ func (s *Session) dispatch(payload schema.EventPayload) {
 	}
 	s.mu.Unlock()
 	for _, event := range events {
-		if eventSessionID(event) != s.ID() {
+		if event.sessionID() != s.ID() {
 			continue
 		}
 		for _, handler := range handlers {
@@ -240,56 +233,5 @@ func (s *Session) dispatch(payload schema.EventPayload) {
 	}
 }
 
-// SessionIDOf returns the session id an event belongs to ("" when unknown).
-func SessionIDOf(event Event) string { return eventSessionID(event) }
-
-func eventSessionID(event Event) string {
-	switch value := event.(type) {
-	case TextDelta:
-		return value.SessionID
-	case TextEnded:
-		return value.SessionID
-	case ReasoningDelta:
-		return value.SessionID
-	case ReasoningEnded:
-		return value.SessionID
-	case ToolInputStarted:
-		return value.SessionID
-	case ToolProgress:
-		return value.SessionID
-	case ToolCalled:
-		return value.SessionID
-	case ReasoningStarted:
-		return value.SessionID
-	case Retried:
-		return value.SessionID
-	case SessionStatus:
-		return value.SessionID
-	case Usage:
-		return value.SessionID
-	case CompactionStarted:
-		return value.SessionID
-	case ShellStarted:
-		return value.SessionID
-	case ShellEnded:
-		return value.SessionID
-	case ToolSuccess:
-		return value.SessionID
-	case ToolFailed:
-		return value.SessionID
-	case StepStarted:
-		return value.SessionID
-	case StepEnded:
-		return value.SessionID
-	case StepFailed:
-		return value.SessionID
-	case CompactionEnded:
-		return value.SessionID
-	case ErrorEvent:
-		return value.SessionID
-	case Idle:
-		return value.SessionID
-	default:
-		return ""
-	}
-}
+// SessionIDOf returns the session id an event belongs to.
+func SessionIDOf(event Event) string { return event.sessionID() }

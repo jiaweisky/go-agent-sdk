@@ -61,37 +61,42 @@ func applySystemPrompt(info *schema.AgentInfo, cfg *SystemPromptConfig) {
 	if info.System != nil {
 		base = *info.System
 	}
+	var system string
 	switch cfg.Mode {
 	case SystemPromptReplace:
-		system := cfg.Content
-		info.System = &system
+		system = cfg.Content
 	case SystemPromptCustomize:
-		values := map[string]string{
-			SectionAgentSystem:  base,
-			SectionInstructions: cfg.Content,
-		}
-		extras := make([]string, 0, len(cfg.Sections))
-		for name, override := range cfg.Sections {
-			values[name] = applySection(values[name], override)
-			if name != SectionAgentSystem && name != SectionInstructions {
-				extras = append(extras, name)
-			}
-		}
-		sort.Strings(extras)
-		order := append([]string{SectionAgentSystem}, extras...)
-		order = append(order, SectionInstructions)
-		parts := make([]string, 0, len(order))
-		for _, name := range order {
-			if values[name] != "" {
-				parts = append(parts, values[name])
-			}
-		}
-		system := strings.Join(parts, "\n\n")
-		info.System = &system
+		system = customizeSystemPrompt(base, cfg)
 	default: // append
-		system := joinSections(base, cfg.Content)
-		info.System = &system
+		system = joinSections(base, cfg.Content)
 	}
+	info.System = &system
+}
+
+// customizeSystemPrompt renders the built-in and custom sections in order:
+// agent_system, custom sections sorted by id, then instructions.
+func customizeSystemPrompt(base string, cfg *SystemPromptConfig) string {
+	values := map[string]string{
+		SectionAgentSystem:  base,
+		SectionInstructions: cfg.Content,
+	}
+	extras := make([]string, 0, len(cfg.Sections))
+	for name, override := range cfg.Sections {
+		values[name] = applySection(values[name], override)
+		if name != SectionAgentSystem && name != SectionInstructions {
+			extras = append(extras, name)
+		}
+	}
+	sort.Strings(extras)
+	order := append([]string{SectionAgentSystem}, extras...)
+	order = append(order, SectionInstructions)
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		if values[name] != "" {
+			parts = append(parts, values[name])
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func applySection(current string, override SectionOverride) string {

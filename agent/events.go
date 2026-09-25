@@ -19,7 +19,7 @@ import (
 //	case agent.Idle:
 //	    // turn finished
 //	}
-type Event interface{ eventKind() string }
+type Event interface{ sessionID() string }
 
 // TextDelta is a streamed assistant text chunk.
 type TextDelta struct {
@@ -29,7 +29,7 @@ type TextDelta struct {
 	Delta     string
 }
 
-func (TextDelta) eventKind() string { return "text-delta" }
+func (e TextDelta) sessionID() string { return e.SessionID }
 
 // TextEnded is the completed assistant text for one text part.
 type TextEnded struct {
@@ -39,7 +39,7 @@ type TextEnded struct {
 	Text      string
 }
 
-func (TextEnded) eventKind() string { return "text-ended" }
+func (e TextEnded) sessionID() string { return e.SessionID }
 
 // ReasoningDelta is a streamed reasoning chunk (model dependent).
 type ReasoningDelta struct {
@@ -49,7 +49,7 @@ type ReasoningDelta struct {
 	Delta       string
 }
 
-func (ReasoningDelta) eventKind() string { return "reasoning-delta" }
+func (e ReasoningDelta) sessionID() string { return e.SessionID }
 
 // ReasoningEnded is the completed reasoning text for one part.
 type ReasoningEnded struct {
@@ -59,7 +59,7 @@ type ReasoningEnded struct {
 	Text        string
 }
 
-func (ReasoningEnded) eventKind() string { return "reasoning-ended" }
+func (e ReasoningEnded) sessionID() string { return e.SessionID }
 
 // ToolCalled reports a tool invocation started by the model.
 type ToolCalled struct {
@@ -70,7 +70,7 @@ type ToolCalled struct {
 	Input     any
 }
 
-func (ToolCalled) eventKind() string { return "tool-called" }
+func (e ToolCalled) sessionID() string { return e.SessionID }
 
 // ToolSuccess reports a completed tool invocation.
 type ToolSuccess struct {
@@ -81,7 +81,7 @@ type ToolSuccess struct {
 	Content   any
 }
 
-func (ToolSuccess) eventKind() string { return "tool-success" }
+func (e ToolSuccess) sessionID() string { return e.SessionID }
 
 // ToolFailed reports a failed tool invocation.
 type ToolFailed struct {
@@ -92,7 +92,7 @@ type ToolFailed struct {
 	Result    any
 }
 
-func (ToolFailed) eventKind() string { return "tool-failed" }
+func (e ToolFailed) sessionID() string { return e.SessionID }
 
 // ToolInputStarted reports that a tool call's input started streaming.
 type ToolInputStarted struct {
@@ -102,7 +102,7 @@ type ToolInputStarted struct {
 	Name      string
 }
 
-func (ToolInputStarted) eventKind() string { return "tool-input-started" }
+func (e ToolInputStarted) sessionID() string { return e.SessionID }
 
 // ToolProgress reports a tool's incremental progress.
 type ToolProgress struct {
@@ -113,7 +113,7 @@ type ToolProgress struct {
 	Content    any
 }
 
-func (ToolProgress) eventKind() string { return "tool-progress" }
+func (e ToolProgress) sessionID() string { return e.SessionID }
 
 // ReasoningStarted reports the start of a reasoning part.
 type ReasoningStarted struct {
@@ -122,7 +122,7 @@ type ReasoningStarted struct {
 	ReasoningID string
 }
 
-func (ReasoningStarted) eventKind() string { return "reasoning-started" }
+func (e ReasoningStarted) sessionID() string { return e.SessionID }
 
 // Retried reports a provider retry.
 type Retried struct {
@@ -131,7 +131,7 @@ type Retried struct {
 	Error     any
 }
 
-func (Retried) eventKind() string { return "retried" }
+func (e Retried) sessionID() string { return e.SessionID }
 
 // SessionStatus reports a session's run status ("busy" or "idle"), so callers can
 // animate a spinner only while a session is actually running.
@@ -140,7 +140,7 @@ type SessionStatus struct {
 	Status    string
 }
 
-func (SessionStatus) eventKind() string { return "session-status" }
+func (e SessionStatus) sessionID() string { return e.SessionID }
 
 // CompactionStarted reports that context compaction started.
 type CompactionStarted struct {
@@ -149,7 +149,7 @@ type CompactionStarted struct {
 	Reason    any
 }
 
-func (CompactionStarted) eventKind() string { return "compaction-started" }
+func (e CompactionStarted) sessionID() string { return e.SessionID }
 
 // ShellStarted reports a shell command started.
 type ShellStarted struct {
@@ -159,7 +159,7 @@ type ShellStarted struct {
 	Command   string
 }
 
-func (ShellStarted) eventKind() string { return "shell-started" }
+func (e ShellStarted) sessionID() string { return e.SessionID }
 
 // ShellEnded reports a shell command finished.
 type ShellEnded struct {
@@ -168,7 +168,7 @@ type ShellEnded struct {
 	Output    any
 }
 
-func (ShellEnded) eventKind() string { return "shell-ended" }
+func (e ShellEnded) sessionID() string { return e.SessionID }
 
 // StepStarted reports the start of an agent step.
 type StepStarted struct {
@@ -177,7 +177,7 @@ type StepStarted struct {
 	Agent     string
 }
 
-func (StepStarted) eventKind() string { return "step-started" }
+func (e StepStarted) sessionID() string { return e.SessionID }
 
 // StepEnded reports the end of an agent step.
 type StepEnded struct {
@@ -186,7 +186,7 @@ type StepEnded struct {
 	Finish    any
 }
 
-func (StepEnded) eventKind() string { return "step-ended" }
+func (e StepEnded) sessionID() string { return e.SessionID }
 
 // Usage carries the provider's original usage payload for one turn, verbatim
 // (keyed by provider name), so provider-specific billing buckets survive. The
@@ -197,7 +197,7 @@ type Usage struct {
 	ProviderMetadata map[string]map[string]any
 }
 
-func (Usage) eventKind() string { return "usage" }
+func (e Usage) sessionID() string { return e.SessionID }
 
 // StepFailed reports a failed agent step.
 type StepFailed struct {
@@ -206,7 +206,7 @@ type StepFailed struct {
 	Error     any
 }
 
-func (StepFailed) eventKind() string { return "step-failed" }
+func (e StepFailed) sessionID() string { return e.SessionID }
 
 // CompactionEnded reports that context compaction finished.
 type CompactionEnded struct {
@@ -215,7 +215,7 @@ type CompactionEnded struct {
 	Text      string
 }
 
-func (CompactionEnded) eventKind() string { return "compaction-ended" }
+func (e CompactionEnded) sessionID() string { return e.SessionID }
 
 // ErrorEvent reports a session-level failure.
 type ErrorEvent struct {
@@ -223,14 +223,14 @@ type ErrorEvent struct {
 	Err       error
 }
 
-func (ErrorEvent) eventKind() string { return "error" }
+func (e ErrorEvent) sessionID() string { return e.SessionID }
 
 // Idle is a synthetic event emitted by Session.Send when the turn settles.
 type Idle struct {
 	SessionID string
 }
 
-func (Idle) eventKind() string { return "idle" }
+func (e Idle) sessionID() string { return e.SessionID }
 
 // mapEvent converts a core session event payload into a high-level Event.
 // The bool is false for event types the high-level API does not surface.

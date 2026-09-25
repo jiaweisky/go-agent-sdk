@@ -129,59 +129,85 @@ func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.Perm
 	mat := h.inner.MaterializeFor(sessionID, permissions)
 	inner := mat.Settle
 	mat.Settle = func(ctx context.Context, input tool.ExecuteInput) (*tool.Settlement, error) {
-		var hooks *SessionHooks
-		if h.hooksFor != nil {
-			hooks = h.hooksFor(input.SessionID)
-		}
+		hooks := h.hooksForSession(input.SessionID)
 		if hooks == nil {
 			return inner(ctx, input)
 		}
-		args := input.Call.Input
-		var preContext string
-		if hooks.OnPreToolUse != nil {
-			out, err := hooks.OnPreToolUse(PreToolUseInput{
-				SessionID: input.SessionID, ToolCallID: input.Call.ID,
-				ToolName: input.Call.Name, Args: args,
-			})
-			if err != nil {
-				return hookError(err.Error()), nil
-			}
-			if out != nil {
-				if out.PermissionDecision == "deny" {
-					return hookError("Tool call denied by hook: " + input.Call.Name), nil
-				}
-				if out.ModifiedArgs != nil {
-					input.Call.Input = out.ModifiedArgs
-					args = out.ModifiedArgs
-				}
-				preContext = out.AdditionalContext
-			}
+		preContext, denied := applyPreToolUse(hooks, &input)
+		if denied != nil {
+			return denied, nil
 		}
 		settlement, err := inner(ctx, input)
 		if err != nil {
 			return nil, err
 		}
-		if settlement.Result.Type == "error" {
-			if hooks.OnPostToolUseFailure != nil {
-				if out, _ := hooks.OnPostToolUseFailure(PostToolUseFailureInput{
-					SessionID: input.SessionID, ToolCallID: input.Call.ID, ToolName: input.Call.Name,
-					Args: args, Error: stringify(settlement.Result.Value),
-				}); out != nil {
-					appendSettlementContext(settlement, out.AdditionalContext)
-				}
-			}
-		} else if hooks.OnPostToolUse != nil {
-			if out, _ := hooks.OnPostToolUse(PostToolUseInput{
-				SessionID: input.SessionID, ToolCallID: input.Call.ID, ToolName: input.Call.Name,
-				Args: args, Result: settlement.Result.Value,
-			}); out != nil {
-				appendSettlementContext(settlement, out.AdditionalContext)
-			}
-		}
+		applyPostToolUse(hooks, input, settlement)
 		appendSettlementContext(settlement, preContext)
 		return settlement, nil
 	}
 	return mat
+}
+
+// hooksForSession returns the session's hooks, or nil when none are registered.
+func (h hookedRegistry) hooksForSession(sessionID string) *SessionHooks {
+	if h.hooksFor == nil {
+		return nil
+	}
+	return h.hooksFor(sessionID)
+}
+
+// applyPreToolUse runs OnPreToolUse, letting it rewrite the call's arguments. It
+// returns the hook's additional context and, when the call must not run, the
+// settlement to return instead (a denial or a hook failure).
+func applyPreToolUse(hooks *SessionHooks, input *tool.ExecuteInput) (string, *tool.Settlement) {
+	if hooks.OnPreToolUse == nil {
+		return "", nil
+	}
+	out, err := hooks.OnPreToolUse(PreToolUseInput{
+		SessionID: input.SessionID, ToolCallID: input.Call.ID,
+		ToolName: input.Call.Name, Args: input.Call.Input,
+	})
+	if err != nil {
+		return "", hookError(err.Error())
+	}
+	if out == nil {
+		return "", nil
+	}
+	if out.PermissionDecision == "deny" {
+		return "", hookError("Tool call denied by hook: " + input.Call.Name)
+	}
+	if out.ModifiedArgs != nil {
+		input.Call.Input = out.ModifiedArgs
+	}
+	return out.AdditionalContext, nil
+}
+
+// applyPostToolUse runs OnPostToolUse (or OnPostToolUseFailure) and appends the
+// hook's context to the settlement.
+func applyPostToolUse(hooks *SessionHooks, input tool.ExecuteInput, settlement *tool.Settlement) {
+	if settlement.Result.Type == "error" {
+		if hooks.OnPostToolUseFailure == nil {
+			return
+		}
+		out, _ := hooks.OnPostToolUseFailure(PostToolUseFailureInput{
+			SessionID: input.SessionID, ToolCallID: input.Call.ID, ToolName: input.Call.Name,
+			Args: input.Call.Input, Error: ToolOutputText(settlement.Result.Value),
+		})
+		if out != nil {
+			appendSettlementContext(settlement, out.AdditionalContext)
+		}
+		return
+	}
+	if hooks.OnPostToolUse == nil {
+		return
+	}
+	out, _ := hooks.OnPostToolUse(PostToolUseInput{
+		SessionID: input.SessionID, ToolCallID: input.Call.ID, ToolName: input.Call.Name,
+		Args: input.Call.Input, Result: settlement.Result.Value,
+	})
+	if out != nil {
+		appendSettlementContext(settlement, out.AdditionalContext)
+	}
 }
 
 // appendSettlementContext adds hook-provided context to a tool result so it
@@ -195,14 +221,4 @@ func appendSettlementContext(settlement *tool.Settlement, text string) {
 
 func hookError(message string) *tool.Settlement {
 	return &tool.Settlement{Result: llmschema.ToolResultValue{Type: "error", Value: message}}
-}
-
-func stringify(value any) string {
-	if value == nil {
-		return ""
-	}
-	if text, ok := value.(string); ok {
-		return text
-	}
-	return ToolOutputText(value)
 }

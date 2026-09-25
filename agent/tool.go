@@ -128,9 +128,10 @@ func descriptionOf(field reflect.StructField) string {
 	return field.Tag.Get("description")
 }
 
-// build converts a user Tool into the core tool representation, asserting the
-// permission action before invoking the handler unless SkipPermission is set.
-func (t Tool) build(permission core.Permission) tool.Tool {
+// coreTool converts a user Tool into the core tool representation, asserting
+// the permission action before invoking the handler unless SkipPermission is
+// set.
+func (t Tool) coreTool(permission core.Permission) tool.Tool {
 	def := tool.Make(tool.Config[map[string]any, any, any]{
 		Description: t.Description,
 		Input:       t.Parameters,

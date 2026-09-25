@@ -2,13 +2,14 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"golang.org/x/text/language"
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/database"
@@ -39,8 +40,8 @@ type runtime struct {
 	outputStore   tool.OutputStore
 	toolOutput    *core.ToolOutputStore
 	mcpTools      map[string]tool.Tool
-	permission    *handlerPermission
-	question      *handlerQuestion
+	permission    *permissionHandler
+	question      *questionHandler
 	runner        *runner.LLMRunner
 	coord         *session.Coordinator[schema.SessionID]
 	location      core.Location
@@ -115,7 +116,7 @@ func (r *runtime) newSessionRegistry(agentID string, sessionRules schema.Permiss
 	tools = append(tools, r.clientTools...)
 	tools = append(tools, sessionTools...)
 	for _, userTool := range tools {
-		if _, err := registry.Register(map[string]tool.Tool{userTool.Name: userTool.build(r.permission)}); err != nil {
+		if _, err := registry.Register(map[string]tool.Tool{userTool.Name: userTool.coreTool(r.permission)}); err != nil {
 			return nil, err
 		}
 	}
@@ -123,13 +124,24 @@ func (r *runtime) newSessionRegistry(agentID string, sessionRules schema.Permiss
 }
 
 // publishSessionStatus emits the live session.status event so subscribers (and
-// the agent event stream) can tell when a session is busy or idle. Mirrors
-// SessionStatus.set; the SDK publishes it from its own drain lifecycle.
+// the agent event stream) can tell when a session is busy or idle. The SDK
+// publishes it from its own drain lifecycle.
 func (r *runtime) publishSessionStatus(id schema.SessionID, status schema.SessionStatusInfo) {
 	_, _ = r.events.Publish(schema.SessionStatusEventStatus, map[string]any{
 		"sessionID": id,
 		"status":    status,
 	}, nil)
+}
+
+// admit enqueues a prompt for a session's next turn.
+func (r *runtime) admit(sessionID schema.SessionID, prompt string, delivery schema.SessionDelivery) error {
+	_, err := session.Admit(r.db.DB, appEvents{events: r.events}, session.AdmitInput{
+		ID:        schema.NewMessageID(),
+		SessionID: sessionID,
+		Prompt:    schema.Prompt{Text: prompt},
+		Delivery:  delivery,
+	})
+	return err
 }
 
 func (r *runtime) setHooks(sessionID string, hooks *SessionHooks) {
@@ -190,7 +202,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	}
 	store := session.NewStore(db)
 	permission := buildPermission(opts, db, events, agents, store, location.Project.ID)
-	question := newHandlerQuestion(core.NewQuestion(core.QuestionConfig{Events: events}), opts.Question)
+	question := newQuestionHandler(core.NewQuestion(core.QuestionConfig{Events: events}), opts.Question)
 	skills, err := buildSkills(opts, global)
 	if err != nil {
 		return fail(err)
@@ -223,41 +235,60 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		reference:  references,
 		cancel:     cancel,
 	}
-	rt.builtin = builtinDeps{
-		db: db, events: events, permission: permission, question: question,
-		location: *location, global: global, shell: opts.Shell, skills: skills,
-		locale: locale, agents: agents, task: &taskRunner{rt: rt}, name: rt.name,
-	}
-	rt.runner = runner.NewLLMRunner(runner.LLMRunner{
-		Events:            appEvents{events: events},
-		LLM:               chooseLLM(opts),
-		Agents:            agents,
-		Tools:             hookedRegistry{inner: rt.dispatcher, hooksFor: rt.hooksFor},
-		Models:            models,
-		Store:             store,
-		Location:          *location,
-		SystemContext:     systemcontext.NewRegistry(),
-		SkillGuidance:     skill.NewGuidance(skills, allowAllEvaluator{}, locale),
-		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: references}, locale),
-		Compaction:        compactionSettings(opts),
-		Snapshots:         buildSnapshots(git, global, location),
-		DB:                db,
-	})
-	rt.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
-		rt.publishSessionStatus(id, schema.SessionStatusBusy{Type: "busy"})
-		defer rt.publishSessionStatus(id, schema.SessionStatusIdle{Type: "idle"})
-		return rt.runner.Run(ctx, runner.RunInput{SessionID: id, Force: force})
-	})
+	rt.buildBuiltins(opts, global, locale)
+	rt.buildRunner(opts, git, global, locale)
 	rt.connectMCP(ctx, opts.MCP)
-	rt.plugin = core.NewPlugin(events, agents, skills, references)
-	for _, config := range opts.Plugins {
-		if err := rt.plugin.Add(schema.PluginID(config.ID), core.PluginEffect(config.Effect)); err != nil {
-			cancel()
-			return fail(err)
-		}
+	if err := rt.loadPlugins(opts); err != nil {
+		cancel()
+		return fail(err)
 	}
 	go rt.runToolOutputCleanup(lifetime)
 	return rt, nil
+}
+
+// buildBuiltins assembles the dependency set the built-in tools register with.
+func (r *runtime) buildBuiltins(opts *ClientOptions, global core.Global, locale language.Tag) {
+	r.builtin = builtinDeps{
+		db: r.db, events: r.events, permission: r.permission, question: r.question,
+		location: r.location, global: global, shell: opts.Shell, skills: r.skills,
+		locale: locale, agents: r.agents, task: &deferredTaskRunner{rt: r}, name: r.name,
+	}
+}
+
+// buildRunner wires the LLM runner and the coordinator that drains sessions.
+func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Global, locale language.Tag) {
+	r.runner = runner.NewLLMRunner(runner.LLMRunner{
+		Events:            appEvents{events: r.events},
+		LLM:               chooseLLM(opts),
+		Agents:            r.agents,
+		Tools:             hookedRegistry{inner: r.dispatcher, hooksFor: r.hooksFor},
+		Models:            r.models,
+		Store:             r.store,
+		Location:          r.location,
+		SystemContext:     systemcontext.NewRegistry(),
+		SkillGuidance:     skill.NewGuidance(r.skills, ruleEvaluator{}, locale),
+		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: r.reference}, locale),
+		Compaction:        compactionSettings(opts),
+		Snapshots:         buildSnapshots(git, global, &r.location),
+		DB:                r.db,
+	})
+	r.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
+		r.publishSessionStatus(id, schema.SessionStatusBusy{Type: "busy"})
+		defer r.publishSessionStatus(id, schema.SessionStatusIdle{Type: "idle"})
+		return r.runner.Run(ctx, runner.RunInput{SessionID: id, Force: force})
+	})
+}
+
+// loadPlugins registers the configured plugins. A plugin that cannot start
+// leaves the runtime half-built; the caller releases it.
+func (r *runtime) loadPlugins(opts *ClientOptions) error {
+	r.plugin = core.NewPlugin(r.events, r.agents, r.skills, r.reference)
+	for _, config := range opts.Plugins {
+		if err := r.plugin.Add(schema.PluginID(config.ID), core.PluginEffect(config.Effect)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resolveWorkingDirectory returns the absolute project directory.
@@ -332,18 +363,15 @@ func buildPermission(
 	agents *core.Agent,
 	store *session.Store,
 	projectID schema.ProjectID,
-) *handlerPermission {
-	return &handlerPermission{
-		inner: core.NewPermission(core.PermissionConfig{
-			Sessions:  permissionSessionStore{store: store},
-			Agents:    permissionAgents{agents: agents},
-			Saved:     &permissionSaved{db: db},
-			Events:    permissionEvents{events: events},
-			ProjectID: string(projectID),
-		}),
-		def:      opts.Permission,
-		handlers: map[string]PermissionHandlerFunc{},
-	}
+) *permissionHandler {
+	inner := core.NewPermission(core.PermissionConfig{
+		Sessions:  permissionSessionStore{store: store},
+		Agents:    permissionAgents{agents: agents},
+		Saved:     &permissionSaved{db: db},
+		Events:    permissionEvents{events: events},
+		ProjectID: string(projectID),
+	})
+	return newPermissionHandler(inner, opts.Permission)
 }
 
 // buildSkills registers the skill directories the client was configured with.
@@ -575,11 +603,11 @@ func resolveModelInfo(opts *ClientOptions, id string) (schema.ModelInfo, error) 
 
 // --- task tool (subagent delegation) ---
 
-// taskRunner defers to the runtime once it is constructed; registerBuiltins
-// runs before the runtime value exists.
-type taskRunner struct{ rt *runtime }
+// deferredTaskRunner defers to the runtime once it is constructed;
+// registerBuiltins runs before the runtime value exists.
+type deferredTaskRunner struct{ rt *runtime }
 
-func (t *taskRunner) RunTask(ctx context.Context, input TaskRunInput) (TaskRunOutput, error) {
+func (t *deferredTaskRunner) RunTask(ctx context.Context, input TaskRunInput) (TaskRunOutput, error) {
 	return t.rt.runTask(ctx, input)
 }
 
@@ -629,11 +657,7 @@ func (r *runtime) resolveSubagent(parent *schema.SessionInfo, input TaskRunInput
 	if subagent == nil {
 		return nil, nil, fmt.Errorf("Unknown agent type: %s is not a valid agent type", input.SubagentType)
 	}
-	var parentPermission schema.PermissionRuleset
-	if parent.Permission != nil {
-		parentPermission = *parent.Permission
-	}
-	return subagent, DeriveSubagentSessionPermission(parentPermission, *subagent), nil
+	return subagent, DeriveSubagentSessionPermission(permissionRulesOf(parent), *subagent), nil
 }
 
 // childRunSettings is the agent and permission ruleset a child session runs with.
@@ -675,12 +699,7 @@ func (r *runtime) publishTaskProgress(input TaskRunInput, childID schema.Session
 
 // runChildSession admits the prompt and drains the child session's turn.
 func (r *runtime) runChildSession(ctx context.Context, childID schema.SessionID, prompt string) error {
-	if _, err := session.Admit(r.db.DB, appEvents{events: r.events}, session.AdmitInput{
-		ID:        schema.NewMessageID(),
-		SessionID: childID,
-		Prompt:    schema.Prompt{Text: prompt},
-		Delivery:  schema.SessionDeliveryQueue,
-	}); err != nil {
+	if err := r.admit(childID, prompt, schema.SessionDeliveryQueue); err != nil {
 		return err
 	}
 	runErr := r.coord.Run(ctx, childID)
@@ -728,11 +747,9 @@ func (r *runtime) resolveChildSession(
 	childID := schema.NewSessionID()
 	now := time.Now().UnixMilli()
 	title := input.Description + " (@" + input.SubagentType + " subagent)"
-	permissionJSON := "null"
-	if len(derived) > 0 {
-		if encoded, err := json.Marshal(derived); err == nil {
-			permissionJSON = string(encoded)
-		}
+	permissionJSON, err := encodePermissionRules(derived)
+	if err != nil {
+		return "", false, err
 	}
 	if _, err := r.db.DB.Exec(
 		"INSERT INTO `session` (`id`,`project_id`,`parent_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`time_created`,`time_updated`) "+
@@ -750,10 +767,10 @@ func childModelJSON(subagent *schema.AgentInfo, parent *schema.SessionInfo) stri
 	if ref == nil {
 		ref = parent.Model
 	}
-	if ref == nil || ref.ID == "" {
+	if ref == nil {
 		return "null"
 	}
-	return fmt.Sprintf(`{"id":%q,"providerID":%q}`, string(ref.ID), string(ref.ProviderID))
+	return encodeModelRef(ref.ID, ref.ProviderID)
 }
 
 // lastAssistantText returns the last text part of the last assistant message.
@@ -785,9 +802,10 @@ func (noopSnapshots) Files(core.SnapshotCompareInput) ([]schema.RelativePath, er
 	return nil, nil
 }
 
-type allowAllEvaluator struct{}
+// ruleEvaluator adapts core.PermissionEvaluate to skill's PermissionEvaluator.
+type ruleEvaluator struct{}
 
-func (allowAllEvaluator) Evaluate(action, resource string, rules schema.PermissionRuleset) schema.PermissionRule {
+func (ruleEvaluator) Evaluate(action, resource string, rules schema.PermissionRuleset) schema.PermissionRule {
 	return core.PermissionEvaluate(action, resource, rules)
 }
 
