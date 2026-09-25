@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/user/go-agent-sdk/agent"
+	"github.com/user/go-agent-sdk"
 	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/mcp"
 	"github.com/user/go-agent-sdk/schema"

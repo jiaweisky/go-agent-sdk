@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk/agent"
+	"github.com/user/go-agent-sdk"
 )
 
 func TestEditorEscExits(t *testing.T) {

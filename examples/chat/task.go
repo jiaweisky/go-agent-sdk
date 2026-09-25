@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/go-agent-sdk/agent"
+	"github.com/user/go-agent-sdk"
 	"github.com/user/go-agent-sdk/schema"
 )
 

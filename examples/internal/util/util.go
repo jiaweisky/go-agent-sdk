@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/user/go-agent-sdk/agent"
+	"github.com/user/go-agent-sdk"
 	"github.com/user/go-agent-sdk/core"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"

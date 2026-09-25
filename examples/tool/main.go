@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/user/go-agent-sdk/agent"
+	"github.com/user/go-agent-sdk"
 	"github.com/user/go-agent-sdk/examples/internal/util"
 )
 

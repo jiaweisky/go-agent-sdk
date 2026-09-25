@@ -106,6 +106,8 @@ Go 目录**直接镜像 opencode 的 TS monorepo 包结构**，不使用 `pkg/` 
 
 ```
 go-agent-sdk/                       opencode TS
+├── *.go          模块根包 agent：高层公开 API（对标 copilot-sdk/go，无 TS 对应目录）
+│   Client / Session / Send / On / DefineTool / Hooks / Permission
 ├── llm/          ← packages/llm/src/        (@opencode-ai/llm)
 │   ├── schema/     LLMRequest, LLMEvent, LLMError, ID 类型
 │   ├── route/      Route, Protocol, Endpoint, Auth, Framing, Executor, Transport
@@ -120,8 +122,6 @@ go-agent-sdk/                       opencode TS
 │   ├── tool/       工具框架 (tool, registry, write, ...)
 │   └── util/       通用工具 (wildcard, hash)
 ├── mcp/          ← packages/opencode/src/mcp/  (MCP client + 适配)
-├── agent/        ← 高层公开 API（对标 copilot-sdk/go 形态，无 TS 对应目录）
-│   Client / Session / Send / On / DefineTool / Hooks / Permission
 ├── defs/         从显式 ConfigDirs 加载 agent/skill 定义（无 CLI 发现）
 │   ├── config/     {agent,agents}/**/*.md、{mode,modes}/*.md 解析
 │   └── skill/      {skill,skills}/**/SKILL.md 扫描

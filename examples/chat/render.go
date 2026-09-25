@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/go-agent-sdk/agent"
+	"github.com/user/go-agent-sdk"
 	coretool "github.com/user/go-agent-sdk/core/tool"
 )
 

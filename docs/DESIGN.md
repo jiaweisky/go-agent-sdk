@@ -30,12 +30,12 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 | `llm/route/` | Route + Protocol + Transport + Framing + Auth + Endpoint | LLM 协议层核心 |
 | `llm/protocols/` | OpenAI Chat / Responses、Anthropic Messages、Bedrock Converse、Gemini | 各 provider 线协议 |
 | `llm/provider/` | Provider Facades（openai, anthropic, openrouter, ...） | 预配置默认值 |
-| `agent/`（已实现） | 高层公开 API（Client/Session/Send/On/DefineTool/Hooks） | 组装 core/session + llm + tool |
+| 根包 `agent`（已实现） | 高层公开 API（Client/Session/Send/On/DefineTool/Hooks） | 组装 core/session + llm + tool |
 | `core/tool/` | ToolRegistry + `registry.go` / `tool.go` | 注册、查询、权限过滤 |
 | 内置工具 | 11 个（`core/tool/`，见 §7.4） | read/write/edit/apply_patch/bash/glob/grep/webfetch/question/skill/todowrite |
 | `core/permission.go` | 规则引擎（allow / deny / ask） | 权限评估 |
 | `core/` | file-mutation / location-mutation / git / database / process ... | 支撑模块 |
-| `agent/` | `NewClient` / `CreateSession` / `Send` / `On` / `RegisterAgent` | 公开 API（已实现，见 §11） |
+| 根包 `agent` | `NewClient` / `CreateSession` / `Send` / `On` / `RegisterAgent` | 公开 API（已实现，见 §11） |
 | `schema/` | 基础类型 | JSON Schema、ID 生成 |
 
 ### 不包含（推迟到后续版本）
@@ -94,7 +94,7 @@ Go 目录直接镜像 opencode 的 TS monorepo 包结构（详见 §4）。依�
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  agent/             ← 高层公开 API（已实现）                     │
+│  根包 agent         ← 高层公开 API（已实现）                     │
 │  High-level API (Agent, Session, Prompt, Stream)               │
 └───────────────────────────┬────────────────────────────────────┘
                             │ depends on
@@ -152,6 +152,11 @@ Go 目录**直接镜像 opencode 的 TS monorepo 包结构**：`packages/<pkg>/s
 
 ```
 go-agent-sdk/                            opencode TS
+├── *.go            模块根包 agent（无 TS 对应目录，对标 copilot-sdk/go）
+│   ├── client.go / session.go / runtime.go    Client/Session/runtime 装配
+│   ├── task.go / task_run.go                   task（subagent）
+│   ├── events.go / hooks.go / permission.go    事件/钩子/权限
+│   └── ...
 ├── llm/            ← packages/llm/src/          (@opencode-ai/llm)
 │   ├── llm.go                       包入口、LLM re-exports (llm.ts)
 │   ├── tool.go                      LLM 层 Tool 定义 (tool.ts)
@@ -222,11 +227,6 @@ go-agent-sdk/                            opencode TS
 │   ├── skill/                       技能发现 (skill/index.ts 的 discoverSkills)
 │   │   └── skill.go                 DiscoverSkills（仅扫描给定目录）
 │   └── id/                          带前缀的单调 ID 生成 (id/id.ts)
-├── agent/          ← 无 TS 对应目录（高层公开 API，对标 copilot-sdk/go）
-│   ├── client.go / session.go / runtime.go    Client/Session/runtime 装配
-│   ├── task.go / question.go                  task（subagent）与 question 工具
-│   ├── events.go / hooks.go / permission.go   事件/钩子/权限
-│   └── ...
 └── schema/         ← packages/schema/src/        (@opencode-ai/schema)
     ├── schema.go                    schema.ts
     ├── identifier.go                identifier.ts
@@ -240,7 +240,7 @@ go-agent-sdk/                            opencode TS
 
 > 上面只是**代表性**目录，非完整清单（`schema/` 约 42 个文件、`core/` 模块更多）。
 
-> 已实现：高层 `agent/` 公开 API、core/session 主循环、12 个内置工具 + `task`、Skill、MCP、Plugin（窄化）、Reference 服务。尚未移植：`lsp` 工具。
+> 已实现：模块根包 `agent` 公开 API、core/session 主循环、12 个内置工具 + `task`、Skill、MCP、Plugin（窄化）、Reference 服务。尚未移植：`lsp` 工具。
 
 ---
 
@@ -398,7 +398,7 @@ type LLMClient interface {
 
 ## 6. Agent 循环
 
-> **已实现。** 对应 opencode `packages/core/src/agent*`、`packages/opencode/src/session/`；实现在 `core/session/`（`run_coordinator.go`、`runner/`、`compaction.go`、`context_epoch.go` 等）与 `agent/runtime.go`。
+> **已实现。** 对应 opencode `packages/core/src/agent*`、`packages/opencode/src/session/`；实现在 `core/session/`（`run_coordinator.go`、`runner/`、`compaction.go`、`context_epoch.go` 等）与根包 `runtime.go`。
 
 ### 6.1 Session Runner 主循环
 
@@ -444,7 +444,7 @@ type Agent struct {
 
 ### 6.3 Subagent (TaskTool) — 已实现
 
-对应 opencode `packages/opencode/src/tool/task.ts`。`task` 是一个内置工具：主 agent 调用它后，在**独立子会话**里运行另一个 agent，并把结果文本返回。实现在 `agent/task.go`（工具定义 + `DeriveSubagentSessionPermission`）与 `agent/runtime.go`（`runtime.runTask`）。
+对应 opencode `packages/opencode/src/tool/task.ts`。`task` 是一个内置工具：主 agent 调用它后，在**独立子会话**里运行另一个 agent，并把结果文本返回。实现在根包 `task.go`（工具定义 + `DeriveSubagentSessionPermission`）与 `task_run.go`（`runtime.runTask`）。
 
 **工具参数**：`description`、`prompt`、`subagent_type`、`task_id`（续跑同一子会话）、`command`、`background`（暂不支持，返回失败）。
 
@@ -542,7 +542,7 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 
 > MCP 已实现（见 §8，`mcp/` 包）。Plugin 已实现（窄化：`core/plugin.go` 的 lifecycle 管理器 + `agent` 接线，见 `PluginContext`）；TS 的动态工具（外部 JSON Schema）未移植，MCP 工具即通过 `jsonschema.Raw` 走这条路径。
 
-> **工具输出限额**：`core.ToolOutputStore`（`MAX_LINES=2000` / `MAX_BYTES=50KB`）会把超限的 tool result 落盘为 `tool-output/tool_*`，只把 head/tail 预览发给模型（`core/tool/output_store.go` 适配 `tool.OutputStore`，由 `agent/runtime.go` 通过 `tool.WithOutputStore` 注入）。**未注入时 registry 的 `store == nil`，限额被跳过**，一次大 `grep`/`read` 就能撑爆上下文窗口。
+> **工具输出限额**：`core.ToolOutputStore`（`MAX_LINES=2000` / `MAX_BYTES=50KB`）会把超限的 tool result 落盘为 `tool-output/tool_*`，只把 head/tail 预览发给模型（`core/tool/output_store.go` 适配 `tool.OutputStore`，由根包 `runtime.go` 通过 `tool.WithOutputStore` 注入）。**未注入时 registry 的 `store == nil`，限额被跳过**，一次大 `grep`/`read` 就能撑爆上下文窗口。
 >
 > 落盘目录是 `{Global.Data}/tool-output`，即 `{ClientOptions.Root}/data/tool-output`；`ClientOptions.Root` 必填。`ToolOutputStore.Cleanup` 按文件 mtime 清理超过 7 天（`ToolOutputStoreRetention`）的文件：`agent` 层在 `newRuntime` 时起一个 goroutine，启动时跑一次、之后每小时一次，`Client.Close()` 时随 runtime 的 lifetime context 退出；也可用 `Client.CleanupToolOutput()` 手动触发（对齐 v2 `tool-output-store.ts` 的 `cleanupLayer` + `cleanupNode`）。
 
@@ -557,7 +557,7 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 | Glob | `glob` | ✅ 已移植（`core/tool/glob.go`） |
 | Grep | `grep` | ✅ 已移植（`core/tool/grep.go`） |
 | WebFetch | `webfetch` | ✅ 已移植（`core/tool/webfetch.go`） |
-| Task | `task` | ✅ 已移植（`agent/task.go`；子会话 + 权限派生，见 §6.3） |
+| Task | `task` | ✅ 已移植（根包 `task.go`；子会话 + 权限派生，见 §6.3） |
 | Question | `question` | ✅ 已移植（`core/tool/question.go`） |
 | Skill | `skill` | ✅ 已移植（`core/tool/skill.go`） |
 | TodoWrite | `todowrite` | ✅ 已移植（`core/tool/todowrite.go`） |
@@ -666,10 +666,10 @@ func NewPermission(cfg PermissionConfig) Permission
 
 ## 11. SDK 层 (高级 API)
 
-公开入口位于顶层 `agent/` 包，导入路径 `github.com/user/go-agent-sdk/agent`。**已实现**，形态参考 `github/copilot-sdk/go`（`Client` → `CreateSession` → `Send`/`On`）。
+公开入口是模块根包 `agent`，导入路径 `github.com/user/go-agent-sdk`。**已实现**，形态参考 `github/copilot-sdk/go`（`Client` → `CreateSession` → `Send`/`On`）。
 
 ```go
-import "github.com/user/go-agent-sdk/agent"
+import "github.com/user/go-agent-sdk"
 
 // ─── Client ─────────────────────────────────────────────
 type ClientOptions struct {
@@ -836,7 +836,7 @@ type ToolFailure struct {
 
 ## 13. 流式事件模型
 
-> **已实现。** 规范事件是 `schema/session_event.go` 的 `SessionEvent*`（core session 事件，durable 落库 + live-only delta）；runner 通过 `LLMEventPublisher` 把 `llm/schema/LLMEvent` 翻译成 session 事件。agent 层再把 session 事件映射为高层 `agent.Event` 并集（`agent/events.go`），`Session.Send` 返回 `iter.Seq2[agent.Event, error]`（以 `Idle` 结束）；`Client.On` 可全局订阅（含子 agent 会话）。provider → 调用方的原始流仍是 `iter.Seq2[schema.LLMEvent, error]`（见 §5.3）。
+> **已实现。** 规范事件是 `schema/session_event.go` 的 `SessionEvent*`（core session 事件，durable 落库 + live-only delta）；runner 通过 `LLMEventPublisher` 把 `llm/schema/LLMEvent` 翻译成 session 事件。根包 `agent` 再把 session 事件映射为高层 `agent.Event` 并集（`events.go`），`Session.Send` 返回 `iter.Seq2[agent.Event, error]`（以 `Idle` 结束）；`Client.On` 可全局订阅（含子 agent 会话）。provider → 调用方的原始流仍是 `iter.Seq2[schema.LLMEvent, error]`（见 §5.3）。
 
 > **会话运行状态**：SDK 在 drain 生命周期发 `session.status`（`busy`/`idle`，live-only），agent 层映射为 `agent.SessionStatus`。订阅者据此判断某会话是否在运行，从而只在运行时渲染 spinner/心跳（对齐 TS `session.status`；TS 的发布者在 v1 CLI 层，Go 改为在 `runtime` 的 coordinator 闭包里发布）。
 
