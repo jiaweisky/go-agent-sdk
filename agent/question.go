@@ -34,6 +34,9 @@ type questionHandler struct {
 }
 
 func newQuestionHandler(inner core.Question, def QuestionHandlerFunc) *questionHandler {
+	if def == nil {
+		def = RejectQuestions
+	}
 	return &questionHandler{inner: inner, handlers: newSessionHandlers(def)}
 }
 
@@ -48,18 +51,8 @@ func (q *questionHandler) removeHandler(sessionID string) {
 	q.handlers.remove(sessionID)
 }
 
-func (q *questionHandler) handlerFor(sessionID string) QuestionHandlerFunc {
-	if handler, ok := q.handlers.get(sessionID); ok && handler != nil {
-		return handler
-	}
-	if handler := q.handlers.def; handler != nil {
-		return handler
-	}
-	return RejectQuestions
-}
-
 func (q *questionHandler) Ask(_ context.Context, input core.QuestionAskInput) ([]core.QuestionAnswer, error) {
-	return q.handlerFor(input.SessionID)(QuestionRequest{
+	return q.handlers.resolve(input.SessionID)(QuestionRequest{
 		SessionID: input.SessionID,
 		Questions: input.Questions,
 		Tool:      input.Tool,

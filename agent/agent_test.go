@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/user/go-agent-sdk/core"
+	"github.com/user/go-agent-sdk/core/tool"
 	"github.com/user/go-agent-sdk/core/util"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
@@ -668,6 +669,14 @@ func TestSessionListResumeDelete(t *testing.T) {
 		t.Fatalf("infos = %+v", infos)
 	}
 
+	// A session that is still attached cannot be resumed twice.
+	if _, err := client.ResumeSession(ctx, session.ID(), &SessionConfig{Agent: "build"}); err == nil {
+		t.Fatal("expected resume of an attached session to fail")
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
 	resumed, err := client.ResumeSession(ctx, session.ID(), &SessionConfig{Agent: "build"})
 	if err != nil {
 		t.Fatalf("resume: %v", err)
@@ -759,13 +768,18 @@ func TestSessionSystemPromptIsolation(t *testing.T) {
 	if base == nil || base.System == nil || *base.System != "You are a test." {
 		t.Fatalf("base agent system = %v", valueOr(base.System))
 	}
-	firstAgent := client.rt.agents.Get(schema.AgentID(first.agentID))
-	secondAgent := client.rt.agents.Get(schema.AgentID(second.agentID))
-	if firstAgent == nil || firstAgent.System == nil || *firstAgent.System != "S1" {
+	// The derived agents live in the runtime selector, not the shared registry,
+	// so they never leak into agent listings.
+	firstAgent, ok := client.rt.agentSelector.effectiveFor(first.id)
+	if !ok || firstAgent.System == nil || *firstAgent.System != "S1" {
 		t.Fatalf("first agent = %+v", firstAgent)
 	}
-	if secondAgent == nil || secondAgent.System == nil || *secondAgent.System != "S2" {
+	secondAgent, ok := client.rt.agentSelector.effectiveFor(second.id)
+	if !ok || secondAgent.System == nil || *secondAgent.System != "S2" {
 		t.Fatalf("second agent = %+v", secondAgent)
+	}
+	if client.rt.agents.Get(schema.AgentID(first.agentID)) != nil {
+		t.Fatalf("derived agent %q leaked into the shared registry", first.agentID)
 	}
 }
 
@@ -1235,7 +1249,7 @@ func TestSubagentTypesFilteredByTaskPermission(t *testing.T) {
 func TestTaskDescriptionUsesSessionRules(t *testing.T) {
 	client := newTestClient(t)
 	rules := schema.PermissionRuleset{{Action: TaskName, Resource: "explore", Effect: schema.PermissionEffectDeny}}
-	registry, err := client.rt.newSessionRegistry("build", rules, nil)
+	registry, err := client.rt.newSessionRegistry(client.rt.agents.Get(schema.AgentID("build")), rules, nil)
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -1993,5 +2007,106 @@ func TestClientRootControlsToolOutput(t *testing.T) {
 	want := filepath.Join(root, "data", "tool-output") + string(filepath.Separator)
 	if !strings.HasPrefix(result.OutputPaths[0], want) {
 		t.Fatalf("output path = %q, want it under %q", result.OutputPaths[0], want)
+	}
+}
+
+func TestCreateSessionRejectsUnknownAgent(t *testing.T) {
+	client := newTestClient(t)
+	if _, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "nope"}); err == nil {
+		t.Fatal("expected an unknown agent error")
+	}
+}
+
+func TestResumeCustomSystemPrompt(t *testing.T) {
+	root := t.TempDir()
+	newClient := func() *Client {
+		client, err := NewClient(&ClientOptions{
+			Protocol: "openai-responses", Credentials: APIKey("k"),
+			Model: "test-model", Root: root, LLM: fakeLLM{reply: "x"},
+		})
+		if err != nil {
+			t.Fatalf("new client: %v", err)
+		}
+		return client
+	}
+
+	client1 := newClient()
+	session, err := client1.CreateSession(context.Background(), &SessionConfig{
+		Agent:        "build",
+		SystemPrompt: &SystemPromptConfig{Mode: SystemPromptReplace, Content: "S1"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// The row keeps the base agent, not the in-memory derived id.
+	infos, err := client1.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(infos) != 1 || infos[0].Agent != "build" {
+		t.Fatalf("stored agent = %+v, want build", infos)
+	}
+	id := session.ID()
+	if err := session.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if err := client1.Close(); err != nil {
+		t.Fatalf("close client: %v", err)
+	}
+
+	client2 := newClient()
+	defer client2.Close()
+	resumed, err := client2.ResumeSession(context.Background(), id, &SessionConfig{
+		Agent:        "build",
+		SystemPrompt: &SystemPromptConfig{Mode: SystemPromptReplace, Content: "S1"},
+	})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	defer resumed.Close()
+	info, ok := client2.rt.agentSelector.effectiveFor(resumed.id)
+	if !ok || info.System == nil || *info.System != "S1" {
+		t.Fatalf("resumed agent = %+v", info)
+	}
+}
+
+func TestDeleteSessionClearsSessionState(t *testing.T) {
+	client := newTestClient(t)
+	session, err := client.CreateSession(context.Background(), &SessionConfig{
+		Agent:        "build",
+		SystemPrompt: &SystemPromptConfig{Mode: SystemPromptReplace, Content: "S1"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer session.Close()
+	if _, ok := client.rt.agentSelector.effectiveFor(session.id); !ok {
+		t.Fatal("derived override was not registered")
+	}
+	if err := client.DeleteSession(context.Background(), session.ID()); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, ok := client.rt.agentSelector.effectiveFor(session.id); ok {
+		t.Fatal("derived override survived DeleteSession")
+	}
+	if client.sessionByID(session.ID()) != nil {
+		t.Fatal("session handle survived DeleteSession")
+	}
+}
+
+func TestHookedRegistryUnknownSessionSettlesWithError(t *testing.T) {
+	// A session with no registry materializes no tools; a stray tool call must
+	// settle with an error instead of calling a nil Settle.
+	reg := hookedRegistry{inner: &toolDispatcher{sessions: map[string]*tool.Registry{}}}
+	mat := reg.MaterializeFor("ses_missing", nil)
+	if mat.Settle == nil {
+		t.Fatal("Settle is nil for an unknown session")
+	}
+	settlement, err := mat.Settle(context.Background(), tool.ExecuteInput{})
+	if err != nil {
+		t.Fatalf("settle: %v", err)
+	}
+	if settlement == nil || settlement.Result.Type != "error" {
+		t.Fatalf("settlement = %+v, want an error result", settlement)
 	}
 }

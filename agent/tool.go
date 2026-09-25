@@ -82,31 +82,36 @@ func SchemaForType(t reflect.Type) *jsonschema.Schema {
 	case reflect.Slice, reflect.Array:
 		return jsonschema.Array(SchemaForType(t.Elem()))
 	case reflect.Struct:
-		fields := make([]jsonschema.Field, 0, t.NumField())
-		for i := 0; i < t.NumField(); i++ {
-			field := t.Field(i)
-			if !field.IsExported() {
-				continue
-			}
-			name, opts := parseJSONTag(field.Tag.Get("json"), field.Name)
-			if name == "-" {
-				continue
-			}
-			child := SchemaForType(field.Type)
-			if description := descriptionOf(field); description != "" {
-				child = child.With(jsonschema.Description(description))
-			}
-			optional := strings.Contains(opts, "omitempty") || field.Type.Kind() == reflect.Pointer
-			if optional {
-				fields = append(fields, jsonschema.Optional(name, child))
-			} else {
-				fields = append(fields, jsonschema.Required(name, child))
-			}
-		}
-		return jsonschema.Object(fields...)
+		return schemaForStruct(t)
 	default:
 		return jsonschema.Raw(map[string]any{})
 	}
+}
+
+// schemaForStruct builds an object schema from a struct's exported, non-ignored
+// fields.
+func schemaForStruct(t reflect.Type) *jsonschema.Schema {
+	fields := make([]jsonschema.Field, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		name, opts := parseJSONTag(field.Tag.Get("json"), field.Name)
+		if name == "-" {
+			continue
+		}
+		child := SchemaForType(field.Type)
+		if description := descriptionOf(field); description != "" {
+			child = child.With(jsonschema.Description(description))
+		}
+		if strings.Contains(opts, "omitempty") || field.Type.Kind() == reflect.Pointer {
+			fields = append(fields, jsonschema.Optional(name, child))
+		} else {
+			fields = append(fields, jsonschema.Required(name, child))
+		}
+	}
+	return jsonschema.Object(fields...)
 }
 
 func parseJSONTag(tag, fallback string) (string, string) {

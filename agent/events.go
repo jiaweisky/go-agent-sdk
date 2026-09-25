@@ -238,7 +238,18 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 	data, _ := payload.Data.(map[string]any)
 	sessionID := fieldString(data, "sessionID")
 	messageID := fieldString(data, "assistantMessageID")
-	switch payload.Type {
+	if event, ok := mapContentEvent(payload.Type, data, sessionID, messageID); ok {
+		return event, true
+	}
+	if event, ok := mapToolEvent(payload.Type, data, sessionID, messageID); ok {
+		return event, true
+	}
+	return mapRunEvent(payload.Type, data, sessionID, messageID)
+}
+
+// mapContentEvent maps assistant text and reasoning streaming events.
+func mapContentEvent(eventType string, data map[string]any, sessionID, messageID string) (Event, bool) {
+	switch eventType {
 	case schema.SessionEventTextDelta.Type:
 		return TextDelta{
 			SessionID: sessionID, MessageID: messageID,
@@ -259,6 +270,17 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 			SessionID: sessionID, MessageID: messageID,
 			ReasoningID: fieldString(data, "reasoningID"), Text: fieldString(data, "text"),
 		}, true
+	case schema.SessionEventReasoningStarted.Type:
+		return ReasoningStarted{
+			SessionID: sessionID, MessageID: messageID, ReasoningID: fieldString(data, "reasoningID"),
+		}, true
+	}
+	return nil, false
+}
+
+// mapToolEvent maps tool invocation and shell events.
+func mapToolEvent(eventType string, data map[string]any, sessionID, messageID string) (Event, bool) {
+	switch eventType {
 	case schema.SessionEventToolCalled.Type:
 		return ToolCalled{
 			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
@@ -284,16 +306,6 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
 			Structured: data["structured"], Content: data["content"],
 		}, true
-	case schema.SessionEventReasoningStarted.Type:
-		return ReasoningStarted{
-			SessionID: sessionID, MessageID: messageID, ReasoningID: fieldString(data, "reasoningID"),
-		}, true
-	case schema.SessionEventRetried.Type:
-		return Retried{SessionID: sessionID, Attempt: data["attempt"], Error: data["error"]}, true
-	case schema.SessionStatusEventStatus.Type:
-		return SessionStatus{SessionID: sessionID, Status: sessionStatusType(data["status"])}, true
-	case schema.SessionEventCompactionStarted.Type:
-		return CompactionStarted{SessionID: sessionID, MessageID: fieldString(data, "messageID"), Reason: data["reason"]}, true
 	case schema.SessionEventShellStarted.Type:
 		return ShellStarted{
 			SessionID: sessionID, MessageID: messageID,
@@ -301,6 +313,19 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 		}, true
 	case schema.SessionEventShellEnded.Type:
 		return ShellEnded{SessionID: sessionID, CallID: fieldString(data, "callID"), Output: data["output"]}, true
+	}
+	return nil, false
+}
+
+// mapRunEvent maps step, compaction, retry and session-status events.
+func mapRunEvent(eventType string, data map[string]any, sessionID, messageID string) (Event, bool) {
+	switch eventType {
+	case schema.SessionEventRetried.Type:
+		return Retried{SessionID: sessionID, Attempt: data["attempt"], Error: data["error"]}, true
+	case schema.SessionStatusEventStatus.Type:
+		return SessionStatus{SessionID: sessionID, Status: sessionStatusType(data["status"])}, true
+	case schema.SessionEventCompactionStarted.Type:
+		return CompactionStarted{SessionID: sessionID, MessageID: fieldString(data, "messageID"), Reason: data["reason"]}, true
 	case schema.SessionEventStepStarted.Type:
 		return StepStarted{
 			SessionID: sessionID, MessageID: messageID, Agent: fieldString(data, "agent"),

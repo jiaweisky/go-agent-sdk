@@ -36,6 +36,7 @@ type runtime struct {
 	events        core.Event
 	store         *session.Store
 	agents        *core.Agent
+	agentSelector *sessionAgents
 	skills        *core.Skill
 	outputStore   tool.OutputStore
 	toolOutput    *core.ToolOutputStore
@@ -93,12 +94,57 @@ func (d *toolDispatcher) remove(sessionID string) {
 	delete(d.sessions, sessionID)
 }
 
+// sessionAgents resolves the agent a session runs with: the in-memory derived
+// agent when the session customized its system prompt, otherwise the agent id
+// stored on the session row. Keeping the derived copy here, rather than in the
+// shared registry, keeps it out of agent listings and leaves the registry's
+// transform stack untouched.
+type sessionAgents struct {
+	agents *core.Agent
+
+	mu        sync.Mutex
+	effective map[schema.SessionID]schema.AgentInfo
+}
+
+func newSessionAgents(agents *core.Agent) *sessionAgents {
+	return &sessionAgents{agents: agents, effective: map[schema.SessionID]schema.AgentInfo{}}
+}
+
+func (s *sessionAgents) set(sessionID schema.SessionID, info schema.AgentInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.effective[sessionID] = info
+}
+
+func (s *sessionAgents) take(sessionID schema.SessionID) (schema.AgentInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	info, ok := s.effective[sessionID]
+	delete(s.effective, sessionID)
+	return info, ok
+}
+
+func (s *sessionAgents) Select(sessionID schema.SessionID, id *string) core.AgentSelection {
+	if info, ok := s.effectiveFor(sessionID); ok {
+		selected := info
+		return core.AgentSelection{ID: selected.ID, Info: &selected}
+	}
+	return s.agents.Select(id)
+}
+
+func (s *sessionAgents) effectiveFor(sessionID schema.SessionID) (schema.AgentInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	info, ok := s.effective[sessionID]
+	return info, ok
+}
+
 // newSessionRegistry builds a registry with the built-ins plus the client and
 // session user tools, isolating session-scoped tools from other sessions.
-func (r *runtime) newSessionRegistry(agentID string, sessionRules schema.PermissionRuleset, sessionTools []Tool) (*tool.Registry, error) {
+func (r *runtime) newSessionRegistry(agent *schema.AgentInfo, sessionRules schema.PermissionRuleset, sessionTools []Tool) (*tool.Registry, error) {
 	registry := tool.NewRegistry(tool.WithOutputStore(r.outputStore))
 	var permissions schema.PermissionRuleset
-	if agent := r.agents.Get(schema.AgentID(agentID)); agent != nil {
+	if agent != nil {
 		permissions = agent.Permissions
 	}
 	if len(sessionRules) > 0 {
@@ -152,21 +198,67 @@ func (r *runtime) setHooks(sessionID string, hooks *SessionHooks) {
 	}
 }
 
+func (r *runtime) removeHooks(sessionID string) {
+	r.hooksMu.Lock()
+	defer r.hooksMu.Unlock()
+	delete(r.hooks, sessionID)
+}
+
 func (r *runtime) hooksFor(sessionID string) *SessionHooks {
 	r.hooksMu.Lock()
 	defer r.hooksMu.Unlock()
 	return r.hooks[sessionID]
 }
 
+// detach drops the per-session runtime state registered by attachSession: the
+// tool registry, hooks, permission/question handlers and the derived agent
+// override. The event listener and the Client.sessions entry belong to
+// Session.Close.
+func (r *runtime) detach(sessionID string) {
+	r.dispatcher.remove(sessionID)
+	r.removeHooks(sessionID)
+	r.permission.removeHandler(sessionID)
+	r.question.removeHandler(sessionID)
+	r.agentSelector.take(schema.SessionID(sessionID))
+}
+
+// resolveRuntimePaths resolves the working directory plus the home and state
+// root the runtime derives its global directories from.
+func resolveRuntimePaths(opts *ClientOptions) (directory, home, root string, err error) {
+	directory, err = resolveWorkingDirectory(opts.WorkingDirectory)
+	if err != nil {
+		return "", "", "", err
+	}
+	home, root, err = resolveHomeAndRoot(opts)
+	if err != nil {
+		return "", "", "", err
+	}
+	return directory, home, root, nil
+}
+
+// initRuntimeState creates the event log, registers its projectors and records
+// the project location the session tables reference.
+func initRuntimeState(db *database.Database, directory string) (core.Event, core.Git, *core.Location, error) {
+	events := core.NewEvent(core.EventConfig{
+		DB:      db.DB,
+		Durable: schema.Durable(schema.SessionEventDurableDefinitions),
+	})
+	if err := core.RegisterSessionProjectors(events); err != nil {
+		return nil, core.Git{}, nil, err
+	}
+	git := core.NewGit(core.NewAppProcess())
+	location, err := ensureProject(db, git, directory)
+	if err != nil {
+		return nil, core.Git{}, nil, err
+	}
+	return events, git, location, nil
+}
+
 // newRuntime builds the process-wide services: the database and event log, the
 // project location, the agent/skill/reference registries, the permission and
 // question handlers, and the runner the coordinator drives.
 func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
-	directory, err := resolveWorkingDirectory(opts.WorkingDirectory)
-	if err != nil {
-		return nil, err
-	}
-	home, root, err := resolveHomeAndRoot(opts)
+	directory, home, root, err := resolveRuntimePaths(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -181,17 +273,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db.Close()
 		return nil, err
 	}
-
-	events := core.NewEvent(core.EventConfig{
-		DB:      db.DB,
-		Durable: schema.Durable(schema.SessionEventDurableDefinitions),
-	})
-	if err := core.RegisterSessionProjectors(events); err != nil {
-		return fail(err)
-	}
-
-	git := core.NewGit(core.NewAppProcess())
-	location, err := ensureProject(db, git, directory)
+	events, git, location, err := initRuntimeState(db, directory)
 	if err != nil {
 		return fail(err)
 	}
@@ -231,17 +313,20 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		subagentDepth: subagentDepth(opts.SubagentDepth),
 		name:          applicationName(opts.Name),
 		hooks:         map[string]*SessionHooks{}, clientTools: opts.Tools,
-		dispatcher: &toolDispatcher{sessions: map[string]*tool.Registry{}},
-		reference:  references,
-		cancel:     cancel,
+		dispatcher:    &toolDispatcher{sessions: map[string]*tool.Registry{}},
+		agentSelector: newSessionAgents(agents),
+		reference:     references,
+		cancel:        cancel,
 	}
 	rt.buildBuiltins(opts, global, locale)
 	rt.buildRunner(opts, git, global, locale)
-	rt.connectMCP(ctx, opts.MCP)
 	if err := rt.loadPlugins(opts); err != nil {
 		cancel()
 		return fail(err)
 	}
+	// Connect MCP last: it creates the only client whose lifetime rt.close
+	// owns, so an earlier startup failure never leaves one connected.
+	rt.connectMCP(ctx, opts.MCP)
 	go rt.runToolOutputCleanup(lifetime)
 	return rt, nil
 }
@@ -260,7 +345,7 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 	r.runner = runner.NewLLMRunner(runner.LLMRunner{
 		Events:            appEvents{events: r.events},
 		LLM:               chooseLLM(opts),
-		Agents:            r.agents,
+		Agents:            r.agentSelector,
 		Tools:             hookedRegistry{inner: r.dispatcher, hooksFor: r.hooksFor},
 		Models:            r.models,
 		Store:             r.store,
@@ -573,23 +658,28 @@ func buildModelResolver(opts *ClientOptions) (runner.ModelResolver, error) {
 		}
 	}
 	return func(stored schema.SessionInfo) (route.Model, error) {
-		id := opts.Model
-		if stored.Model != nil && stored.Model.ID != "" {
-			id = string(stored.Model.ID)
-		}
-		info, err := resolveModelInfo(opts, id)
+		return resolveStoredModel(opts, stored)
+	}, nil
+}
+
+// resolveStoredModel resolves a stored session's model metadata and credential.
+func resolveStoredModel(opts *ClientOptions, stored schema.SessionInfo) (route.Model, error) {
+	id := opts.Model
+	if stored.Model != nil && stored.Model.ID != "" {
+		id = string(stored.Model.ID)
+	}
+	info, err := resolveModelInfo(opts, id)
+	if err != nil {
+		return route.Model{}, err
+	}
+	var credential schema.Credential
+	if opts.Credentials != nil {
+		credential, err = opts.Credentials(info.ProviderID)
 		if err != nil {
 			return route.Model{}, err
 		}
-		var credential schema.Credential
-		if opts.Credentials != nil {
-			credential, err = opts.Credentials(info.ProviderID)
-			if err != nil {
-				return route.Model{}, err
-			}
-		}
-		return runner.ResolveModel(stored, info, credential)
-	}, nil
+	}
+	return runner.ResolveModel(stored, info, credential)
 }
 
 // resolveModelInfo returns the model metadata: the caller's ModelInfo when set,
@@ -599,224 +689,4 @@ func resolveModelInfo(opts *ClientOptions, id string) (schema.ModelInfo, error) 
 		return opts.ModelInfo(id)
 	}
 	return NewModelInfo(opts.Protocol, id, "", schema.ModelLimit{})
-}
-
-// --- task tool (subagent delegation) ---
-
-// deferredTaskRunner defers to the runtime once it is constructed;
-// registerBuiltins runs before the runtime value exists.
-type deferredTaskRunner struct{ rt *runtime }
-
-func (t *deferredTaskRunner) RunTask(ctx context.Context, input TaskRunInput) (TaskRunOutput, error) {
-	return t.rt.runTask(ctx, input)
-}
-
-func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (TaskRunOutput, error) {
-	parent, err := r.store.Get(schema.SessionID(input.ParentSessionID))
-	if err != nil {
-		return TaskRunOutput{}, err
-	}
-	if parent == nil {
-		return TaskRunOutput{}, fmt.Errorf("parent session not found: %s", input.ParentSessionID)
-	}
-	subagent, derived, err := r.resolveSubagent(parent, input)
-	if err != nil {
-		return TaskRunOutput{}, err
-	}
-
-	childID, reused, err := r.resolveChildSession(input, parent, subagent, derived)
-	if err != nil {
-		return TaskRunOutput{}, err
-	}
-	childAgent, childRules := r.childRunSettings(childID, reused, input.SubagentType, derived)
-	registry, err := r.newSessionRegistry(childAgent, childRules, nil)
-	if err != nil {
-		return TaskRunOutput{}, err
-	}
-	r.dispatcher.set(string(childID), registry)
-	defer r.dispatcher.remove(string(childID))
-
-	r.publishTaskProgress(input, childID, subagent, parent)
-	if err := r.runChildSession(ctx, childID, input.Prompt); err != nil {
-		return TaskRunOutput{}, err
-	}
-	text, err := r.lastAssistantText(childID)
-	if err != nil {
-		return TaskRunOutput{}, err
-	}
-	return TaskRunOutput{SessionID: string(childID), Text: text}, nil
-}
-
-// resolveSubagent checks the nesting limit and returns the subagent to run,
-// together with the permission ruleset its session starts from.
-func (r *runtime) resolveSubagent(parent *schema.SessionInfo, input TaskRunInput) (*schema.AgentInfo, schema.PermissionRuleset, error) {
-	if err := r.checkSubagentDepth(parent); err != nil {
-		return nil, nil, err
-	}
-	subagent := r.agents.Get(schema.AgentID(input.SubagentType))
-	if subagent == nil {
-		return nil, nil, fmt.Errorf("Unknown agent type: %s is not a valid agent type", input.SubagentType)
-	}
-	return subagent, DeriveSubagentSessionPermission(permissionRulesOf(parent), *subagent), nil
-}
-
-// childRunSettings is the agent and permission ruleset a child session runs with.
-// A resumed session keeps the agent and ruleset it was created with.
-func (r *runtime) childRunSettings(childID schema.SessionID, reused bool, subagentType string, derived schema.PermissionRuleset) (string, schema.PermissionRuleset) {
-	if !reused {
-		return subagentType, derived
-	}
-	existing, err := r.store.Get(childID)
-	if err != nil || existing == nil {
-		return subagentType, derived
-	}
-	agentID, rules := subagentType, derived
-	if existing.Agent != nil {
-		agentID = string(*existing.Agent)
-	}
-	if existing.Permission != nil {
-		rules = *existing.Permission
-	}
-	return agentID, rules
-}
-
-// publishTaskProgress reports the running task state on the parent session,
-// mirroring the tool's progress metadata. The child session id links the
-// subagent's events to this task.
-func (r *runtime) publishTaskProgress(input TaskRunInput, childID schema.SessionID, subagent *schema.AgentInfo, parent *schema.SessionInfo) {
-	if input.Progress == nil {
-		return
-	}
-	_ = input.Progress(map[string]any{
-		"sessionId":       string(childID),
-		"parentSessionId": input.ParentSessionID,
-		"subagentType":    input.SubagentType,
-		"description":     input.Description,
-		"prompt":          input.Prompt,
-		"model":           childModelJSON(subagent, parent),
-	}, nil)
-}
-
-// runChildSession admits the prompt and drains the child session's turn.
-func (r *runtime) runChildSession(ctx context.Context, childID schema.SessionID, prompt string) error {
-	if err := r.admit(childID, prompt, schema.SessionDeliveryQueue); err != nil {
-		return err
-	}
-	runErr := r.coord.Run(ctx, childID)
-	if ctx.Err() != nil {
-		r.coord.Interrupt(childID)
-	}
-	return runErr
-}
-
-// checkSubagentDepth counts the parent chain; nesting beyond the limit fails.
-func (r *runtime) checkSubagentDepth(parent *schema.SessionInfo) error {
-	depth := 0
-	current := parent
-	for current.ParentID != nil {
-		depth++
-		next, err := r.store.Get(*current.ParentID)
-		if err != nil {
-			return err
-		}
-		if next == nil {
-			break
-		}
-		current = next
-	}
-	if depth >= r.subagentDepth {
-		return fmt.Errorf("Subagent depth limit reached (%d). Increase subagent depth to allow nested subagents", r.subagentDepth)
-	}
-	return nil
-}
-
-// resolveChildSession reuses the session named by task_id, or inserts a new
-// child session carrying parent_id and the derived permission ruleset.
-func (r *runtime) resolveChildSession(
-	input TaskRunInput,
-	parent *schema.SessionInfo,
-	subagent *schema.AgentInfo,
-	derived schema.PermissionRuleset,
-) (schema.SessionID, bool, error) {
-	if input.TaskID != nil && *input.TaskID != "" {
-		existing, err := r.store.Get(schema.SessionID(*input.TaskID))
-		if err == nil && existing != nil {
-			return existing.ID, true, nil
-		}
-	}
-	childID := schema.NewSessionID()
-	now := time.Now().UnixMilli()
-	title := input.Description + " (@" + input.SubagentType + " subagent)"
-	permissionJSON, err := encodePermissionRules(derived)
-	if err != nil {
-		return "", false, err
-	}
-	if _, err := r.db.DB.Exec(
-		"INSERT INTO `session` (`id`,`project_id`,`parent_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`time_created`,`time_updated`) "+
-			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-		string(childID), string(r.projectID), input.ParentSessionID, "session", string(r.location.Directory),
-		title, "1", input.SubagentType, childModelJSON(subagent, parent), permissionJSON, now, now,
-	); err != nil {
-		return "", false, err
-	}
-	return childID, false, nil
-}
-
-func childModelJSON(subagent *schema.AgentInfo, parent *schema.SessionInfo) string {
-	ref := subagent.Model
-	if ref == nil {
-		ref = parent.Model
-	}
-	if ref == nil {
-		return "null"
-	}
-	return encodeModelRef(ref.ID, ref.ProviderID)
-}
-
-// lastAssistantText returns the last text part of the last assistant message.
-func (r *runtime) lastAssistantText(sessionID schema.SessionID) (string, error) {
-	messages, err := r.store.Context(sessionID)
-	if err != nil {
-		return "", err
-	}
-	for i := len(messages) - 1; i >= 0; i-- {
-		assistant, ok := messages[i].(schema.SessionMessageAssistant)
-		if !ok {
-			continue
-		}
-		for j := len(assistant.Content) - 1; j >= 0; j-- {
-			if text, ok := assistant.Content[j].(schema.SessionMessageAssistantText); ok {
-				return text.Text, nil
-			}
-		}
-	}
-	return "", nil
-}
-
-// --- narrow no-op adapters ---
-
-type noopSnapshots struct{}
-
-func (noopSnapshots) Capture() (*core.SnapshotID, error) { return nil, nil }
-func (noopSnapshots) Files(core.SnapshotCompareInput) ([]schema.RelativePath, error) {
-	return nil, nil
-}
-
-// ruleEvaluator adapts core.PermissionEvaluate to skill's PermissionEvaluator.
-type ruleEvaluator struct{}
-
-func (ruleEvaluator) Evaluate(action, resource string, rules schema.PermissionRuleset) schema.PermissionRule {
-	return core.PermissionEvaluate(action, resource, rules)
-}
-
-// referenceLister adapts *core.Reference to reference.Guidance's Lister.
-type referenceLister struct{ reference *core.Reference }
-
-func (l referenceLister) List() ([]reference.Info, error) {
-	infos := l.reference.List()
-	result := make([]reference.Info, 0, len(infos))
-	for _, info := range infos {
-		result = append(result, reference.Info{Name: info.Name, Path: string(info.Path), Description: info.Description})
-	}
-	return result, nil
 }

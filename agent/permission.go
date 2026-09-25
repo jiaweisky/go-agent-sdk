@@ -69,12 +69,16 @@ func (h *sessionHandlers[H]) remove(sessionID string) {
 	delete(h.handlers, sessionID)
 }
 
-// get returns the session's handler and whether one is registered.
-func (h *sessionHandlers[H]) get(sessionID string) (H, bool) {
+// resolve returns the session's handler, falling back to the default. The
+// default is normalized to non-nil by the concrete constructors, so it is
+// always safe to return.
+func (h *sessionHandlers[H]) resolve(sessionID string) H {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	handler, ok := h.handlers[sessionID]
-	return handler, ok
+	if handler, ok := h.handlers[sessionID]; ok {
+		return handler
+	}
+	return h.def
 }
 
 // permissionHandler decorates a core Permission service so that "ask" decisions
@@ -86,6 +90,9 @@ type permissionHandler struct {
 }
 
 func newPermissionHandler(inner core.Permission, def PermissionHandlerFunc) *permissionHandler {
+	if def == nil {
+		def = ApproveAll
+	}
 	return &permissionHandler{inner: inner, handlers: newSessionHandlers(def)}
 }
 
@@ -98,16 +105,6 @@ func (p *permissionHandler) setHandler(sessionID string, handler PermissionHandl
 
 func (p *permissionHandler) removeHandler(sessionID string) {
 	p.handlers.remove(sessionID)
-}
-
-func (p *permissionHandler) handlerFor(sessionID string) PermissionHandlerFunc {
-	if handler, ok := p.handlers.get(sessionID); ok && handler != nil {
-		return handler
-	}
-	if handler := p.handlers.def; handler != nil {
-		return handler
-	}
-	return ApproveAll
 }
 
 func (p *permissionHandler) Ask(input core.PermissionAssertInput) (*core.PermissionAskResult, error) {
@@ -127,15 +124,16 @@ func (p *permissionHandler) Assert(input core.PermissionAssertInput) error {
 		// halt the turn, unlike a user decline.
 		return &core.PermissionBlockedError{}
 	}
-	decision, err := p.handlerFor(input.SessionID)(newPermissionRequest(input))
+	decision, err := p.handlers.resolve(input.SessionID)(newPermissionRequest(input))
 	if err != nil {
 		return err
 	}
-	return p.reply(result.ID, input.Save, decision)
+	return p.applyDecision(result.ID, input.Save, decision)
 }
 
-// reply records the handler's decision and returns the error matching it.
-func (p *permissionHandler) reply(requestID core.PermissionID, save []string, decision PermissionDecision) error {
+// applyDecision records the handler's decision and returns the error matching
+// it.
+func (p *permissionHandler) applyDecision(requestID core.PermissionID, save []string, decision PermissionDecision) error {
 	if decision.Allow {
 		reply := core.PermissionReplyOnce
 		if decision.Always && len(save) > 0 {
@@ -189,8 +187,8 @@ func (p *permissionHandler) Close() error {
 	return p.inner.Close()
 }
 
-// permissionSessionStore adapts the session store so permission asserts and
-// tool materialization read the same session row (a single source of truth).
+// permissionSessionStore adapts the session store for permission asserts, so
+// agent and session rules are read from the durable session row.
 type permissionSessionStore struct {
 	store *session.Store
 }

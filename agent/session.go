@@ -10,12 +10,15 @@ import (
 
 // SessionConfig configures a session.
 type SessionConfig struct {
-	// Agent is the agent name; defaults to "build".
+	// Agent is the agent name; defaults to "build". ResumeSession keeps the
+	// agent the session was created with and ignores this field.
 	Agent string
-	// Model overrides the client default model.
+	// Model overrides the client default model. ResumeSession keeps the model
+	// the session was created with and ignores this field.
 	Model string
 	Title string
-	// SystemPrompt customizes the system prompt.
+	// SystemPrompt customizes the system prompt for this session. Pass it again
+	// to ResumeSession to reapply the customization; it is not persisted.
 	SystemPrompt *SystemPromptConfig
 	// Permissions are merged over the agent's permissions for this session
 	// (session rules win). Use it for per-session rules without registering a
@@ -45,9 +48,8 @@ type Session struct {
 	id     schema.SessionID
 	// agentID is the effective agent (a derived agent when the session
 	// customizes the system prompt).
-	agentID      string
-	derivedAgent bool
-	hooks        *SessionHooks
+	agentID string
+	hooks   *SessionHooks
 
 	mu        sync.Mutex
 	listeners map[int]func(Event)
@@ -159,30 +161,50 @@ func drainTurn(events *turnEvents, sessionID string, yield func(Event, error) bo
 }
 
 func (s *Session) run(ctx context.Context, msg MessageOptions) error {
-	prompt := msg.Prompt
-	if s.hooks != nil && s.hooks.OnUserPromptSubmitted != nil {
-		out, err := s.hooks.OnUserPromptSubmitted(UserPromptSubmittedInput{SessionID: s.ID(), Prompt: prompt})
-		if err != nil {
-			return err
-		}
-		if out != nil && out.ModifiedPrompt != "" {
-			prompt = out.ModifiedPrompt
-		}
+	prompt, err := s.applyPromptHook(msg.Prompt)
+	if err != nil {
+		return err
 	}
-	delivery := schema.SessionDeliveryQueue
-	if msg.Mode == "steer" {
-		delivery = schema.SessionDeliverySteer
-	}
-	if err := s.client.rt.admit(s.id, prompt, delivery); err != nil {
+	if err := s.client.rt.admit(s.id, prompt, deliveryForMode(msg.Mode)); err != nil {
 		return err
 	}
 	if err := s.client.rt.coord.Run(ctx, s.id); err != nil {
-		if s.hooks != nil && s.hooks.OnErrorOccurred != nil {
-			_, _ = s.hooks.OnErrorOccurred(ErrorOccurredInput{SessionID: s.ID(), Error: err.Error()})
-		}
+		s.notifyError(err)
 		return err
 	}
 	return nil
+}
+
+// applyPromptHook runs OnUserPromptSubmitted and returns the possibly rewritten
+// prompt.
+func (s *Session) applyPromptHook(prompt string) (string, error) {
+	if s.hooks == nil || s.hooks.OnUserPromptSubmitted == nil {
+		return prompt, nil
+	}
+	out, err := s.hooks.OnUserPromptSubmitted(UserPromptSubmittedInput{SessionID: s.ID(), Prompt: prompt})
+	if err != nil {
+		return "", err
+	}
+	if out != nil && out.ModifiedPrompt != "" {
+		return out.ModifiedPrompt, nil
+	}
+	return prompt, nil
+}
+
+// deliveryForMode maps MessageOptions.Mode to a delivery kind; "steer" steers
+// the active turn, anything else queues.
+func deliveryForMode(mode string) schema.SessionDelivery {
+	if mode == "steer" {
+		return schema.SessionDeliverySteer
+	}
+	return schema.SessionDeliveryQueue
+}
+
+// notifyError reports a failed turn to OnErrorOccurred.
+func (s *Session) notifyError(err error) {
+	if s.hooks != nil && s.hooks.OnErrorOccurred != nil {
+		_, _ = s.hooks.OnErrorOccurred(ErrorOccurredInput{SessionID: s.ID(), Error: err.Error()})
+	}
 }
 
 // Abort interrupts the session's active turn.
@@ -201,10 +223,7 @@ func (s *Session) Close() error {
 	if unsubscribe != nil {
 		unsubscribe()
 	}
-	s.client.rt.dispatcher.remove(s.ID())
-	s.client.rt.permission.removeHandler(s.ID())
-	s.client.rt.question.removeHandler(s.ID())
-	s.client.removeDerivedAgent(s.agentID, s.derivedAgent)
+	s.client.rt.detach(s.ID())
 	s.client.untrackSession(s)
 	if s.hooks != nil && s.hooks.OnSessionEnd != nil {
 		_, _ = s.hooks.OnSessionEnd(SessionEndInput{SessionID: s.ID(), Reason: "closed"})

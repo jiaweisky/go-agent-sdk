@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/core/tool"
@@ -156,7 +155,7 @@ type Client struct {
 	rt   *runtime
 
 	mu       sync.Mutex
-	sessions map[*Session]struct{}
+	sessions map[string]*Session
 }
 
 // NewClient builds a client and its backing runtime.
@@ -174,41 +173,46 @@ func NewClientContext(ctx context.Context, opts *ClientOptions) (*Client, error)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{opts: *opts, rt: rt, sessions: map[*Session]struct{}{}}, nil
+	return &Client{opts: *opts, rt: rt, sessions: map[string]*Session{}}, nil
 }
 
 // RegisterAgent registers or updates a named agent.
 func (c *Client) RegisterAgent(name string, cfg AgentConfig) error {
 	_, err := c.rt.agents.Transform(func(draft core.AgentDraft) error {
 		draft.Update(schema.AgentID(name), func(info *schema.AgentInfo) {
-			if cfg.System != "" {
-				system := cfg.System
-				info.System = &system
-			}
-			if cfg.Description != "" {
-				description := cfg.Description
-				info.Description = &description
-			}
-			if cfg.Mode != nil {
-				info.Mode = *cfg.Mode
-			}
-			if cfg.Hidden != nil {
-				info.Hidden = *cfg.Hidden
-			}
-			if cfg.Steps > 0 {
-				steps := schema.PositiveInt(cfg.Steps)
-				info.Steps = &steps
-			}
-			if cfg.Model != "" {
-				info.Model = &schema.ModelRef{ID: schema.ModelID(cfg.Model)}
-			}
-			if cfg.Permissions != nil {
-				info.Permissions = core.PermissionMerge(info.Permissions, cfg.Permissions)
-			}
+			applyAgentConfig(info, cfg)
 		})
 		return nil
 	})
 	return err
+}
+
+// applyAgentConfig merges the non-zero fields of cfg into info.
+func applyAgentConfig(info *schema.AgentInfo, cfg AgentConfig) {
+	if cfg.System != "" {
+		system := cfg.System
+		info.System = &system
+	}
+	if cfg.Description != "" {
+		description := cfg.Description
+		info.Description = &description
+	}
+	if cfg.Mode != nil {
+		info.Mode = *cfg.Mode
+	}
+	if cfg.Hidden != nil {
+		info.Hidden = *cfg.Hidden
+	}
+	if cfg.Steps > 0 {
+		steps := schema.PositiveInt(cfg.Steps)
+		info.Steps = &steps
+	}
+	if cfg.Model != "" {
+		info.Model = &schema.ModelRef{ID: schema.ModelID(cfg.Model)}
+	}
+	if cfg.Permissions != nil {
+		info.Permissions = core.PermissionMerge(info.Permissions, cfg.Permissions)
+	}
 }
 
 // CreateSession creates a new session bound to an agent.
@@ -224,27 +228,46 @@ func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Sessio
 	}
 	sessionRegistry, err := c.rt.newSessionRegistry(effectiveAgent, cfg.Permissions, cfg.Tools)
 	if err != nil {
-		c.removeDerivedAgent(effectiveAgent, derivedAgent)
 		return nil, err
 	}
-	if err := c.insertSession(cfg, sessionID, effectiveAgent, modelID); err != nil {
-		c.removeDerivedAgent(effectiveAgent, derivedAgent)
+	// The row keeps the durable base agent; the derived copy lives in the
+	// runtime selector for as long as the session does.
+	if err := c.insertSession(cfg, sessionID, agentID, modelID); err != nil {
 		return nil, err
+	}
+	return c.newSession(sessionID, effectiveAgent, derivedAgent, sessionRegistry, cfg)
+}
+
+// newSession registers a session's derived agent (when it has one), builds its
+// handle and attaches it to the runtime.
+func (c *Client) newSession(
+	id schema.SessionID,
+	effectiveAgent *schema.AgentInfo,
+	derivedAgent bool,
+	registry *tool.Registry,
+	cfg *SessionConfig,
+) (*Session, error) {
+	if derivedAgent {
+		c.rt.agentSelector.set(id, *effectiveAgent)
 	}
 	session := &Session{
-		client: c, id: sessionID, agentID: effectiveAgent, derivedAgent: derivedAgent,
+		client: c, id: id, agentID: string(effectiveAgent.ID),
 		hooks: cfg.Hooks, listeners: map[int]func(Event){},
 	}
-	if err := c.attachSession(session, sessionRegistry, cfg); err != nil {
-		c.removeDerivedAgent(effectiveAgent, derivedAgent)
+	if err := c.attachSession(session, registry, cfg); err != nil {
 		return nil, err
 	}
 	return session, nil
 }
 
 // attachSession wires a session into the runtime: its tool registry, hooks,
-// per-session handlers and event subscription.
+// per-session handlers and event subscription. It reserves the session id
+// first, so a second attach for the same id fails instead of silently
+// overwriting the first handle's state.
 func (c *Client) attachSession(session *Session, registry *tool.Registry, cfg *SessionConfig) error {
+	if err := c.trackSession(session); err != nil {
+		return err
+	}
 	c.rt.dispatcher.set(session.ID(), registry)
 	c.rt.setHooks(session.ID(), cfg.Hooks)
 	c.rt.permission.setHandler(session.ID(), cfg.OnPermissionRequest)
@@ -254,10 +277,11 @@ func (c *Client) attachSession(session *Session, registry *tool.Registry, cfg *S
 		return nil
 	})
 	if err != nil {
+		c.rt.detach(session.ID())
+		c.untrackSession(session)
 		return err
 	}
 	session.unsub = unsubscribe
-	c.trackSession(session)
 	return nil
 }
 
@@ -275,31 +299,27 @@ func (c *Client) sessionDefaults(cfg *SessionConfig) (agentID, modelID string) {
 	return agentID, modelID
 }
 
-// deriveAgent registers a per-session copy of the agent when the session
-// customizes the system prompt, so the shared agent is not mutated. It reports
-// the effective agent id and whether that id is derived.
+// deriveAgent validates the named agent and returns the agent the session runs
+// with. When the session customizes the system prompt, it returns an in-memory
+// copy with a session-scoped id so the shared agent is not mutated.
 func (c *Client) deriveAgent(
 	cfg *SessionConfig,
 	sessionID schema.SessionID,
 	agentID, modelID string,
-) (string, bool, error) {
-	var startContext string
-	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
-		if out, _ := cfg.Hooks.OnSessionStart(SessionStartInput{
-			SessionID: string(sessionID), Agent: agentID, Model: modelID,
-		}); out != nil {
-			startContext = out.AdditionalContext
-		}
-	}
-	if cfg.SystemPrompt == nil && startContext == "" {
-		return agentID, false, nil
-	}
+) (*schema.AgentInfo, bool, error) {
 	base := c.rt.agents.Get(schema.AgentID(agentID))
 	if base == nil {
-		return "", false, fmt.Errorf("unknown agent: %s", agentID)
+		return nil, false, fmt.Errorf("unknown agent: %s", agentID)
 	}
-	effectiveAgent := agentID + "#" + string(sessionID)
+	startContext, err := runSessionStartHook(cfg, sessionID, agentID, modelID)
+	if err != nil {
+		return nil, false, err
+	}
+	if cfg.SystemPrompt == nil && startContext == "" {
+		return base, false, nil
+	}
 	copied := *base
+	copied.ID = schema.AgentID(agentID + "#" + string(sessionID))
 	applySystemPrompt(&copied, cfg.SystemPrompt)
 	if startContext != "" {
 		system := ""
@@ -309,48 +329,24 @@ func (c *Client) deriveAgent(
 		combined := joinSections(system, startContext)
 		copied.System = &combined
 	}
-	if _, err := c.rt.agents.Transform(func(draft core.AgentDraft) error {
-		draft.Update(schema.AgentID(effectiveAgent), func(target *schema.AgentInfo) {
-			*target = copied
-		})
-		return nil
-	}); err != nil {
-		return "", false, err
-	}
-	return effectiveAgent, true, nil
+	return &copied, true, nil
 }
 
-// insertSession records the session row.
-func (c *Client) insertSession(cfg *SessionConfig, sessionID schema.SessionID, agentID, modelID string) error {
-	// The stored provider id is informational; resolution uses the resolved
-	// ModelInfo. It is the configured protocol (empty when ModelInfo is set).
-	providerID := string(c.opts.Protocol)
-	now := time.Now().UnixMilli()
-	title := cfg.Title
-	if title == "" {
-		title = "Session"
+// runSessionStartHook runs OnSessionStart and returns its additional context.
+func runSessionStartHook(cfg *SessionConfig, sessionID schema.SessionID, agentID, modelID string) (string, error) {
+	if cfg.Hooks == nil || cfg.Hooks.OnSessionStart == nil {
+		return "", nil
 	}
-	permissionJSON, err := encodePermissionRules(cfg.Permissions)
-	if err != nil {
-		return err
-	}
-	_, err = c.rt.db.DB.Exec(
-		"INSERT INTO `session` (`id`,`project_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`revert`,`time_created`,`time_updated`) "+
-			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-		string(sessionID), string(c.rt.projectID), "session", string(c.rt.location.Directory),
-		title, "1", agentID, encodeModelRef(schema.ModelID(modelID), schema.ProviderID(providerID)), permissionJSON, `null`, now, now,
-	)
-	return err
-}
-
-func (c *Client) removeDerivedAgent(agentID string, derived bool) {
-	if !derived {
-		return
-	}
-	_, _ = c.rt.agents.Transform(func(draft core.AgentDraft) error {
-		draft.Remove(schema.AgentID(agentID))
-		return nil
+	out, err := cfg.Hooks.OnSessionStart(SessionStartInput{
+		SessionID: string(sessionID), Agent: agentID, Model: modelID,
 	})
+	if err != nil {
+		return "", err
+	}
+	if out == nil {
+		return "", nil
+	}
+	return out.AdditionalContext, nil
 }
 
 // MCP returns the MCP client, or nil when no MCP servers are configured.
@@ -406,150 +402,13 @@ func (c *Client) CleanupToolOutput() error {
 func (c *Client) Close() error {
 	c.mu.Lock()
 	sessions := make([]*Session, 0, len(c.sessions))
-	for session := range c.sessions {
+	for _, session := range c.sessions {
 		sessions = append(sessions, session)
 	}
-	c.sessions = map[*Session]struct{}{}
+	c.sessions = map[string]*Session{}
 	c.mu.Unlock()
 	for _, session := range sessions {
 		_ = session.Close()
 	}
 	return c.rt.close()
-}
-
-// SessionInfo summarizes a stored session.
-type SessionInfo struct {
-	ID          string
-	Title       string
-	Agent       string
-	Directory   string
-	TimeCreated int64
-	TimeUpdated int64
-}
-
-// ResumeSession reattaches to an existing session.
-func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *SessionConfig) (*Session, error) {
-	if cfg == nil {
-		cfg = &SessionConfig{}
-	}
-	stored, err := c.rt.store.Get(schema.SessionID(sessionID))
-	if err != nil {
-		return nil, err
-	}
-	if stored == nil {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
-	}
-	// A per-session ruleset passed on resume replaces the stored one.
-	sessionRules := permissionRulesOf(stored)
-	if len(cfg.Permissions) > 0 {
-		encoded, err := encodePermissionRules(cfg.Permissions)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := c.rt.db.DB.Exec("UPDATE `session` SET `permission` = ? WHERE `id` = ?", encoded, sessionID); err != nil {
-			return nil, err
-		}
-		sessionRules = cfg.Permissions
-	}
-	registry, err := c.rt.newSessionRegistry(agentIDOf(stored), sessionRules, cfg.Tools)
-	if err != nil {
-		return nil, err
-	}
-	session := &Session{
-		client: c, id: schema.SessionID(sessionID), agentID: agentIDOf(stored),
-		hooks: cfg.Hooks, listeners: map[int]func(Event){},
-	}
-	if err := c.attachSession(session, registry, cfg); err != nil {
-		return nil, err
-	}
-	if cfg.Hooks != nil && cfg.Hooks.OnSessionStart != nil {
-		_, _ = cfg.Hooks.OnSessionStart(SessionStartInput{SessionID: sessionID, Agent: agentIDOf(stored), Model: modelIDOf(stored)})
-	}
-	return session, nil
-}
-
-func (c *Client) trackSession(session *Session) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.sessions == nil {
-		c.sessions = map[*Session]struct{}{}
-	}
-	c.sessions[session] = struct{}{}
-}
-
-func (c *Client) untrackSession(session *Session) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.sessions, session)
-}
-
-// SessionMessages returns the stored messages of any session, including
-// subagent child sessions.
-func (c *Client) SessionMessages(sessionID string) ([]schema.SessionMessage, error) {
-	return c.rt.store.Context(schema.SessionID(sessionID))
-}
-
-// ListSessions returns the sessions in the client's project, newest first.
-func (c *Client) ListSessions(ctx context.Context) ([]SessionInfo, error) {
-	rows, err := c.rt.db.DB.Query(
-		"SELECT `id`,`title`,`agent`,`directory`,`time_created`,`time_updated` FROM `session` WHERE `project_id` = ? ORDER BY `time_updated` DESC",
-		string(c.rt.projectID),
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []SessionInfo
-	for rows.Next() {
-		var info SessionInfo
-		var agent *string
-		if err := rows.Scan(&info.ID, &info.Title, &agent, &info.Directory, &info.TimeCreated, &info.TimeUpdated); err != nil {
-			return nil, err
-		}
-		if agent != nil {
-			info.Agent = *agent
-		}
-		result = append(result, info)
-	}
-	return result, rows.Err()
-}
-
-// DeleteSession permanently removes a session.
-func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
-	if _, err := c.rt.db.DB.Exec("DELETE FROM `session` WHERE `id` = ?", sessionID); err != nil {
-		return err
-	}
-	c.rt.dispatcher.remove(sessionID)
-	return nil
-}
-
-func agentIDOf(info *schema.SessionInfo) string {
-	if info.Agent == nil {
-		return ""
-	}
-	return string(*info.Agent)
-}
-
-func modelIDOf(info *schema.SessionInfo) string {
-	if info.Model == nil {
-		return ""
-	}
-	return string(info.Model.ID)
-}
-
-// permissionRulesOf returns the ruleset a stored session carries, or nil.
-func permissionRulesOf(info *schema.SessionInfo) schema.PermissionRuleset {
-	if info.Permission == nil {
-		return nil
-	}
-	return *info.Permission
-}
-
-// encodeModelRef renders a model reference as the JSON stored in a session row,
-// or "null" when no model id is known.
-func encodeModelRef(id schema.ModelID, providerID schema.ProviderID) string {
-	if id == "" {
-		return "null"
-	}
-	return fmt.Sprintf(`{"id":%q,"providerID":%q}`, string(id), string(providerID))
 }

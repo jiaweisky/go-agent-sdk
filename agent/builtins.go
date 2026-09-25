@@ -28,9 +28,8 @@ type builtinDeps struct {
 }
 
 // registerBuiltins registers the shipped built-in tools into a registry.
-// agentPermissions are the calling agent's rules (used to filter the task
-// tool's advertised subagent types); pass nil for the session-agnostic base
-// registry.
+// agentPermissions are the calling agent's rules, used to filter the task
+// tool's advertised subagent types.
 func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schema.PermissionRuleset) error {
 	mutation := core.NewLocationMutation(&deps.location)
 	files := core.NewFileMutation()
@@ -40,51 +39,63 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 	todos := core.NewSessionTodo(deps.db, deps.events)
 	directory := string(deps.location.Directory)
 
-	registrations := []func() (func(), error){
-		func() (func(), error) {
-			return tool.RegisterRead(tools, tool.ReadDeps{
+	registrations := []func() error{
+		func() error {
+			_, err := tool.RegisterRead(tools, tool.ReadDeps{
 				Mutation: mutation, Reader: tool.NewReadFileSystem(deps.locale), Image: image, Permission: deps.permission,
 			})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterWrite(tools, tool.WriteDeps{Mutation: mutation, Files: files, Permission: deps.permission})
+		func() error {
+			_, err := tool.RegisterWrite(tools, tool.WriteDeps{Mutation: mutation, Files: files, Permission: deps.permission})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterEdit(tools, tool.EditDeps{Mutation: mutation, Files: files, Permission: deps.permission})
+		func() error {
+			_, err := tool.RegisterEdit(tools, tool.EditDeps{Mutation: mutation, Files: files, Permission: deps.permission})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterApplyPatch(tools, tool.ApplyPatchDeps{Mutation: mutation, Files: files, Permission: deps.permission})
+		func() error {
+			_, err := tool.RegisterApplyPatch(tools, tool.ApplyPatchDeps{Mutation: mutation, Files: files, Permission: deps.permission})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterBash(tools, tool.BashDeps{Mutation: mutation, Process: process, Permission: deps.permission, Shell: deps.shell})
+		func() error {
+			_, err := tool.RegisterBash(tools, tool.BashDeps{Mutation: mutation, Process: process, Permission: deps.permission, Shell: deps.shell})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterGlob(tools, tool.GlobDeps{Ripgrep: ripgrepService, Directory: directory, Permission: deps.permission})
+		func() error {
+			_, err := tool.RegisterGlob(tools, tool.GlobDeps{Ripgrep: ripgrepService, Directory: directory, Permission: deps.permission})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterGrep(tools, tool.GrepDeps{Ripgrep: ripgrepService, Directory: directory, Permission: deps.permission})
+		func() error {
+			_, err := tool.RegisterGrep(tools, tool.GrepDeps{Ripgrep: ripgrepService, Directory: directory, Permission: deps.permission})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterTodoWrite(tools, tool.TodoWriteDeps{Todos: todos, Permission: deps.permission})
+		func() error {
+			_, err := tool.RegisterTodoWrite(tools, tool.TodoWriteDeps{Todos: todos, Permission: deps.permission})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterQuestion(tools, tool.QuestionDeps{Permission: deps.permission, Question: deps.question})
+		func() error {
+			_, err := tool.RegisterQuestion(tools, tool.QuestionDeps{Permission: deps.permission, Question: deps.question})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterWebFetch(tools, tool.WebFetchDeps{HTTPClient: http.DefaultClient, Permission: deps.permission, UserAgent: deps.name})
+		func() error {
+			_, err := tool.RegisterWebFetch(tools, tool.WebFetchDeps{HTTPClient: http.DefaultClient, Permission: deps.permission, UserAgent: deps.name})
+			return err
 		},
-		func() (func(), error) {
-			return tool.RegisterSkill(tools, tool.SkillToolDeps{Skills: deps.skills, Permission: deps.permission})
+		func() error {
+			_, err := tool.RegisterSkill(tools, tool.SkillToolDeps{Skills: deps.skills, Permission: deps.permission})
+			return err
 		},
-		func() (func(), error) {
-			return RegisterTask(tools, TaskToolDeps{
+		func() error {
+			_, err := RegisterTask(tools, TaskToolDeps{
 				Permission: deps.permission, Agents: deps.agents, Runner: deps.task,
 				AgentPermissions: agentPermissions, Locale: deps.locale,
 			})
+			return err
 		},
 	}
 	for _, register := range registrations {
-		if _, err := register(); err != nil {
+		if err := register(); err != nil {
 			return err
 		}
 	}

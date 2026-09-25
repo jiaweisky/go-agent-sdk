@@ -29,9 +29,11 @@ type RunnerEvents interface {
 	session.ContextEpochPublisher
 }
 
-// AgentSelector is the narrow AgentV2 surface the runner needs.
+// AgentSelector is the narrow agent surface the runner needs. The session id
+// lets embedders resolve a session-scoped agent override before falling back to
+// the stored agent.
 type AgentSelector interface {
-	Select(id *string) core.AgentSelection
+	Select(sessionID schema.SessionID, id *string) core.AgentSelection
 }
 
 // Snapshotter is the narrow Snapshot surface the runner needs.
@@ -40,10 +42,7 @@ type Snapshotter interface {
 	Files(input core.SnapshotCompareInput) ([]schema.RelativePath, error)
 }
 
-var (
-	_ AgentSelector = (*core.Agent)(nil)
-	_ Snapshotter   = (*core.Snapshot)(nil)
-)
+var _ Snapshotter = (*core.Snapshot)(nil)
 
 // ToolRegistry is the narrow tool-registry surface the runner needs. The
 // session id lets embedders scope tools per session.
@@ -352,7 +351,7 @@ func (r *LLMRunner) prepareTurnAttempt(
 		value := string(*stored.Agent)
 		agentID = &value
 	}
-	agent := r.Agents.Select(agentID)
+	agent := r.Agents.Select(sessionID, agentID)
 
 	initialized, err := r.initializeSystemContext(agent, sessionID)
 	if err != nil {

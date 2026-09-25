@@ -74,7 +74,7 @@ func (f *runnerTestLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmsc
 
 type runnerTestAgents struct{}
 
-func (runnerTestAgents) Select(*string) core.AgentSelection {
+func (runnerTestAgents) Select(schema.SessionID, *string) core.AgentSelection {
 	return core.AgentSelection{ID: "build"}
 }
 

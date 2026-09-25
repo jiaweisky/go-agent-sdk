@@ -219,25 +219,27 @@ func RegisterTask(tools tool.Tools, deps TaskToolDeps) (func(), error) {
 
 // DeriveSubagentSessionPermission combines the parent session's deny and
 // external_directory rules with default todowrite/task denies, unless the
-// subagent's own ruleset already permits them.
+// subagent's own ruleset already defines a rule for them.
 func DeriveSubagentSessionPermission(parent schema.PermissionRuleset, subagent schema.AgentInfo) schema.PermissionRuleset {
-	canTask := hasPermissionAction(subagent.Permissions, TaskName)
-	canTodo := hasPermissionAction(subagent.Permissions, "todowrite")
+	hasTaskRule := hasPermissionAction(subagent.Permissions, TaskName)
+	hasTodoRule := hasPermissionAction(subagent.Permissions, "todowrite")
 	result := make(schema.PermissionRuleset, 0, len(parent)+2)
 	for _, rule := range parent {
 		if rule.Action == "external_directory" || rule.Effect == schema.PermissionEffectDeny {
 			result = append(result, rule)
 		}
 	}
-	if !canTodo {
+	if !hasTodoRule {
 		result = append(result, schema.PermissionRule{Action: "todowrite", Resource: "*", Effect: schema.PermissionEffectDeny})
 	}
-	if !canTask {
+	if !hasTaskRule {
 		result = append(result, schema.PermissionRule{Action: TaskName, Resource: "*", Effect: schema.PermissionEffectDeny})
 	}
 	return result
 }
 
+// hasPermissionAction reports whether rules mention action at all, regardless
+// of effect.
 func hasPermissionAction(rules schema.PermissionRuleset, action string) bool {
 	for _, rule := range rules {
 		if rule.Action == action {

@@ -19,7 +19,8 @@ type SessionHooks struct {
 	OnPostToolUseFailure func(PostToolUseFailureInput) (*PostToolUseFailureOutput, error)
 	// OnUserPromptSubmitted runs before a prompt is admitted; it can rewrite it.
 	OnUserPromptSubmitted func(UserPromptSubmittedInput) (*UserPromptSubmittedOutput, error)
-	// OnSessionStart runs when a session is created.
+	// OnSessionStart runs when a session is created or resumed. An error aborts
+	// the call.
 	OnSessionStart func(SessionStartInput) (*SessionStartOutput, error)
 	// OnSessionEnd runs when a session is closed.
 	OnSessionEnd func(SessionEndInput) (*SessionEndOutput, error)
@@ -37,7 +38,9 @@ type PreToolUseInput struct {
 
 // PreToolUseOutput can deny a call or rewrite its arguments.
 type PreToolUseOutput struct {
-	// PermissionDecision is "allow", "deny", or "ask" (empty = allow).
+	// PermissionDecision may be "deny" to block the call; any other value
+	// (including empty) allows it. Permission is asserted separately, before
+	// this hook runs.
 	PermissionDecision string
 	ModifiedArgs       any
 	AdditionalContext  string
@@ -127,7 +130,18 @@ type hookedRegistry struct {
 
 func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization {
 	mat := h.inner.MaterializeFor(sessionID, permissions)
+	if mat == nil {
+		mat = &tool.Materialization{}
+	}
 	inner := mat.Settle
+	if inner == nil {
+		// The session has no registry (closed or unknown). Return an error
+		// settlement rather than a nil Settle the runner would call.
+		mat.Settle = func(context.Context, tool.ExecuteInput) (*tool.Settlement, error) {
+			return hookError("unknown session: " + sessionID), nil
+		}
+		return mat
+	}
 	mat.Settle = func(ctx context.Context, input tool.ExecuteInput) (*tool.Settlement, error) {
 		hooks := h.hooksForSession(input.SessionID)
 		if hooks == nil {
@@ -185,29 +199,37 @@ func applyPreToolUse(hooks *SessionHooks, input *tool.ExecuteInput) (string, *to
 // applyPostToolUse runs OnPostToolUse (or OnPostToolUseFailure) and appends the
 // hook's context to the settlement.
 func applyPostToolUse(hooks *SessionHooks, input tool.ExecuteInput, settlement *tool.Settlement) {
+	additional := postToolUseContext(hooks, input, settlement)
+	appendSettlementContext(settlement, additional)
+}
+
+// postToolUseContext runs the success or failure post-tool hook and returns its
+// additional context.
+func postToolUseContext(hooks *SessionHooks, input tool.ExecuteInput, settlement *tool.Settlement) string {
 	if settlement.Result.Type == "error" {
 		if hooks.OnPostToolUseFailure == nil {
-			return
+			return ""
 		}
 		out, _ := hooks.OnPostToolUseFailure(PostToolUseFailureInput{
 			SessionID: input.SessionID, ToolCallID: input.Call.ID, ToolName: input.Call.Name,
 			Args: input.Call.Input, Error: ToolOutputText(settlement.Result.Value),
 		})
 		if out != nil {
-			appendSettlementContext(settlement, out.AdditionalContext)
+			return out.AdditionalContext
 		}
-		return
+		return ""
 	}
 	if hooks.OnPostToolUse == nil {
-		return
+		return ""
 	}
 	out, _ := hooks.OnPostToolUse(PostToolUseInput{
 		SessionID: input.SessionID, ToolCallID: input.Call.ID, ToolName: input.Call.Name,
 		Args: input.Call.Input, Result: settlement.Result.Value,
 	})
 	if out != nil {
-		appendSettlementContext(settlement, out.AdditionalContext)
+		return out.AdditionalContext
 	}
+	return ""
 }
 
 // appendSettlementContext adds hook-provided context to a tool result so it
