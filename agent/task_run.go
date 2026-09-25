@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -168,18 +167,21 @@ func (r *runtime) resolveChildSession(
 		}
 	}
 	childID := schema.NewSessionID()
-	now := time.Now().UnixMilli()
 	title := input.Description + " (@" + input.SubagentType + " subagent)"
 	permissionJSON, err := encodePermissionRules(derived)
 	if err != nil {
 		return "", false, err
 	}
-	if _, err := r.db.DB.Exec(
-		"INSERT INTO `session` (`id`,`project_id`,`parent_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`time_created`,`time_updated`) "+
-			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-		string(childID), string(r.projectID), input.ParentSessionID, "session", string(r.location.Directory),
-		title, "1", input.SubagentType, childModelJSON(subagent, parent), permissionJSON, now, now,
-	); err != nil {
+	if err := insertSessionRow(r.db.DB, sessionRow{
+		ID:         childID,
+		ProjectID:  r.projectID,
+		ParentID:   &input.ParentSessionID,
+		Directory:  string(r.location.Directory),
+		Title:      title,
+		Agent:      input.SubagentType,
+		Model:      childModelJSON(subagent, parent),
+		Permission: permissionJSON,
+	}); err != nil {
 		return "", false, err
 	}
 	return childID, false, nil

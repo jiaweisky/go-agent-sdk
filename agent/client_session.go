@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -20,7 +21,9 @@ type SessionInfo struct {
 	TimeUpdated int64
 }
 
-// ResumeSession reattaches to an existing session.
+// ResumeSession reattaches to an existing session. The context is accepted for
+// API symmetry; resuming is synchronous and does not currently observe
+// cancellation.
 func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *SessionConfig) (*Session, error) {
 	if cfg == nil {
 		cfg = &SessionConfig{}
@@ -104,7 +107,8 @@ func (c *Client) SessionMessages(sessionID string) ([]schema.SessionMessage, err
 	return c.rt.store.Context(schema.SessionID(sessionID))
 }
 
-// ListSessions returns the sessions in the client's project, newest first.
+// ListSessions returns the sessions in the client's project, newest first. The
+// context is accepted for API symmetry; the query is synchronous.
 func (c *Client) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 	rows, err := c.rt.db.DB.Query(
 		"SELECT `id`,`title`,`agent`,`directory`,`time_created`,`time_updated` FROM `session` WHERE `project_id` = ? ORDER BY `time_updated` DESC",
@@ -130,7 +134,8 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 }
 
 // DeleteSession permanently removes a session, closing its live handle first
-// when one is attached.
+// when one is attached. The context is accepted for API symmetry; the delete is
+// synchronous.
 func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	if _, err := c.rt.db.DB.Exec("DELETE FROM `session` WHERE `id` = ?", sessionID); err != nil {
 		return err
@@ -142,12 +147,39 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// sessionRow is the durable field set a new session row is written with.
+type sessionRow struct {
+	ID         schema.SessionID
+	ProjectID  schema.ProjectID
+	ParentID   *string
+	Directory  string
+	Title      string
+	Agent      string
+	Model      string
+	Permission string
+	// Revert is the stored revert state: the JSON literal "null" for a fresh
+	// top-level session, nil for a child session.
+	Revert *string
+}
+
+// insertSessionRow writes one session row. It always supplies parent_id and
+// revert so top-level and child inserts share the same statement.
+func insertSessionRow(db *sql.DB, row sessionRow) error {
+	now := time.Now().UnixMilli()
+	_, err := db.Exec(
+		"INSERT INTO `session` (`id`,`project_id`,`parent_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`revert`,`time_created`,`time_updated`) "+
+			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+		string(row.ID), string(row.ProjectID), row.ParentID, "session", row.Directory,
+		row.Title, "1", row.Agent, row.Model, row.Permission, row.Revert, now, now,
+	)
+	return err
+}
+
 // insertSession records the session row.
 func (c *Client) insertSession(cfg *SessionConfig, sessionID schema.SessionID, agentID, modelID string) error {
 	// The stored provider id is informational; resolution uses the resolved
 	// ModelInfo. It is the configured protocol (empty when ModelInfo is set).
 	providerID := string(c.opts.Protocol)
-	now := time.Now().UnixMilli()
 	title := cfg.Title
 	if title == "" {
 		title = "Session"
@@ -156,13 +188,17 @@ func (c *Client) insertSession(cfg *SessionConfig, sessionID schema.SessionID, a
 	if err != nil {
 		return err
 	}
-	_, err = c.rt.db.DB.Exec(
-		"INSERT INTO `session` (`id`,`project_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`revert`,`time_created`,`time_updated`) "+
-			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-		string(sessionID), string(c.rt.projectID), "session", string(c.rt.location.Directory),
-		title, "1", agentID, modelRefJSON(schema.ModelID(modelID), schema.ProviderID(providerID)), permissionJSON, `null`, now, now,
-	)
-	return err
+	revert := "null"
+	return insertSessionRow(c.rt.db.DB, sessionRow{
+		ID:         sessionID,
+		ProjectID:  c.rt.projectID,
+		Directory:  string(c.rt.location.Directory),
+		Title:      title,
+		Agent:      agentID,
+		Model:      modelRefJSON(schema.ModelID(modelID), schema.ProviderID(providerID)),
+		Permission: permissionJSON,
+		Revert:     &revert,
+	})
 }
 
 func agentIDOf(info *schema.SessionInfo) string {

@@ -188,17 +188,6 @@ type StepEnded struct {
 
 func (e StepEnded) sessionID() string { return e.SessionID }
 
-// Usage carries the provider's original usage payload for one turn, verbatim
-// (keyed by provider name), so provider-specific billing buckets survive. The
-// SDK does not parse, normalize, or total it: subscribe via
-// Client.On/Session.On and interpret the provider's own fields yourself.
-type Usage struct {
-	SessionID        string
-	ProviderMetadata map[string]map[string]any
-}
-
-func (e Usage) sessionID() string { return e.SessionID }
-
 // StepFailed reports a failed agent step.
 type StepFailed struct {
 	SessionID string
@@ -224,6 +213,17 @@ type ErrorEvent struct {
 }
 
 func (e ErrorEvent) sessionID() string { return e.SessionID }
+
+// Usage carries the provider's original usage payload for one turn, verbatim
+// (keyed by provider name), so provider-specific billing buckets survive. The
+// SDK does not parse, normalize, or total it: subscribe via
+// Client.On/Session.On and interpret the provider's own fields yourself.
+type Usage struct {
+	SessionID        string
+	ProviderMetadata map[string]map[string]any
+}
+
+func (e Usage) sessionID() string { return e.SessionID }
 
 // Idle is a synthetic event emitted by Session.Send when the turn settles.
 type Idle struct {
@@ -384,6 +384,8 @@ func usageProviderMetadataFrom(value any) map[string]map[string]any {
 	return decoded.ProviderMetadata
 }
 
+// fieldString reads a string-ish field from a decoded event payload, rendering
+// non-strings with fmt.
 func fieldString(data map[string]any, key string) string {
 	if data == nil {
 		return ""

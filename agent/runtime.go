@@ -116,12 +116,10 @@ func (s *sessionAgents) set(sessionID schema.SessionID, info schema.AgentInfo) {
 	s.effective[sessionID] = info
 }
 
-func (s *sessionAgents) take(sessionID schema.SessionID) (schema.AgentInfo, bool) {
+func (s *sessionAgents) remove(sessionID schema.SessionID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	info, ok := s.effective[sessionID]
 	delete(s.effective, sessionID)
-	return info, ok
 }
 
 func (s *sessionAgents) Select(sessionID schema.SessionID, id *string) core.AgentSelection {
@@ -219,7 +217,7 @@ func (r *runtime) detach(sessionID string) {
 	r.removeHooks(sessionID)
 	r.permission.removeHandler(sessionID)
 	r.question.removeHandler(sessionID)
-	r.agentSelector.take(schema.SessionID(sessionID))
+	r.agentSelector.remove(schema.SessionID(sessionID))
 }
 
 // resolveRuntimePaths resolves the working directory plus the home and state
@@ -515,6 +513,8 @@ func buildSnapshots(git core.Git, global core.Global, location *core.Location) r
 
 const toolOutputCleanupInterval = time.Hour
 
+// runToolOutputCleanup periodically prunes expired tool-output files until the
+// context is cancelled.
 func (r *runtime) runToolOutputCleanup(ctx context.Context) {
 	if r.toolOutput == nil {
 		return
@@ -567,6 +567,8 @@ func (p mcpEventPublisher) Publish(def schema.EventDefinition, data any) error {
 	return err
 }
 
+// chooseLLM returns the caller's LLM client, or one over the default HTTP
+// transport.
 func chooseLLM(opts *ClientOptions) route.LLMClient {
 	if opts.LLM != nil {
 		return opts.LLM

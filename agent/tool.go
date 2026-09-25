@@ -114,6 +114,8 @@ func schemaForStruct(t reflect.Type) *jsonschema.Schema {
 	return jsonschema.Object(fields...)
 }
 
+// parseJSONTag returns a struct field's JSON name and remaining tag options,
+// falling back to the Go field name when the tag is absent.
 func parseJSONTag(tag, fallback string) (string, string) {
 	if tag == "" {
 		return fallback, ""
@@ -126,6 +128,8 @@ func parseJSONTag(tag, fallback string) (string, string) {
 	return name, strings.Join(parts[1:], ",")
 }
 
+// descriptionOf returns a field's description from its jsonschema or
+// description tag.
 func descriptionOf(field reflect.StructField) string {
 	if value := field.Tag.Get("jsonschema"); value != "" {
 		return value

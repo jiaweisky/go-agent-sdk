@@ -215,7 +215,9 @@ func applyAgentConfig(info *schema.AgentInfo, cfg AgentConfig) {
 	}
 }
 
-// CreateSession creates a new session bound to an agent.
+// CreateSession creates a new session bound to an agent. The context is
+// accepted for API symmetry; session creation is synchronous and does not
+// currently observe cancellation.
 func (c *Client) CreateSession(ctx context.Context, cfg *SessionConfig) (*Session, error) {
 	if cfg == nil {
 		cfg = &SessionConfig{}
@@ -247,15 +249,15 @@ func (c *Client) newSession(
 	registry *tool.Registry,
 	cfg *SessionConfig,
 ) (*Session, error) {
-	if derivedAgent {
-		c.rt.agentSelector.set(id, *effectiveAgent)
-	}
 	session := &Session{
 		client: c, id: id, agentID: string(effectiveAgent.ID),
 		hooks: cfg.Hooks, listeners: map[int]func(Event){},
 	}
 	if err := c.attachSession(session, registry, cfg); err != nil {
 		return nil, err
+	}
+	if derivedAgent {
+		c.rt.agentSelector.set(id, *effectiveAgent)
 	}
 	return session, nil
 }

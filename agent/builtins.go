@@ -12,6 +12,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
+// builtinDeps are the services the built-in tools register with.
 type builtinDeps struct {
 	db         *database.Database
 	events     core.Event

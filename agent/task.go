@@ -16,6 +16,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
+// TaskName is the task tool's registered name.
 const TaskName = "task"
 
 // TaskDescription is the task tool's description for the model.
@@ -39,6 +40,7 @@ Usage notes:
 6. Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since it is not aware of your user's intent. Tell it how to verify its work if possible (e.g., relevant test commands).
 7. If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.`
 
+// TaskInputSchema is the task tool's parameters schema.
 var TaskInputSchema = jsonschema.Object(
 	jsonschema.Required("description", jsonschema.String(jsonschema.Description("A short (3-5 words) description of the task"))),
 	jsonschema.Required("prompt", jsonschema.String(jsonschema.Description("The task for the agent to perform"))),
@@ -50,6 +52,7 @@ var TaskInputSchema = jsonschema.Object(
 		"Run the agent in the background. You will be notified when it completes. DO NOT sleep, poll, or proactively check on its progress"))),
 )
 
+// TaskOutputSchema is the task tool's structured output schema.
 var TaskOutputSchema = jsonschema.Object(
 	jsonschema.Required("title", jsonschema.String()),
 	jsonschema.Required("sessionID", jsonschema.String()),
@@ -158,6 +161,7 @@ func renderTaskOutput(output TaskOutput) string {
 	}, "\n")
 }
 
+// MakeTask builds the task tool from deps.
 func MakeTask(deps TaskToolDeps) *tool.Def[TaskInput, TaskOutput, TaskOutput] {
 	return tool.Make(tool.Config[TaskInput, TaskOutput, TaskOutput]{
 		Description: taskDescription(deps.Agents, deps.AgentPermissions, deps.Locale),
