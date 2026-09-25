@@ -77,6 +77,15 @@ func TestLiteralsAndNumbers(t *testing.T) {
 	}
 }
 
+func TestEnumOmitsUnknownType(t *testing.T) {
+	value := map[string]any{"a": 1}
+	got := Enum([]any{value}).Model()
+	expected := map[string]any{"enum": []any{value}}
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("enum = %#v", got)
+	}
+}
+
 func TestArrayAndUnion(t *testing.T) {
 	entry := Object(Required("path", String()))
 	array := Array(entry).Model()

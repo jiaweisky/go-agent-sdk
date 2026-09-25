@@ -12,6 +12,8 @@ func CompileValidation(validation map[string]any) (*jsonschema6.Schema, error) {
 	if validation == nil {
 		return nil, nil
 	}
+	// Round-trip through JSON so Go-native values (such as int constraints)
+	// are normalized to the JSON number type the compiler expects.
 	data, err := json.Marshal(validation)
 	if err != nil {
 		return nil, err
