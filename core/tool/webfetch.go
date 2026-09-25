@@ -81,7 +81,10 @@ type WebFetchOutput struct {
 	Output      string `json:"output"`
 }
 
-const webFetchBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+const (
+	webFetchBrowserUserAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+	webFetchFallbackUserAgent = "go-agent-sdk"
+)
 
 // WebFetchHTTPClient is the transport seam used by the tool, so callers can inject
 // fakes in tests.
@@ -92,6 +95,9 @@ type WebFetchHTTPClient interface {
 type WebFetchDeps struct {
 	HTTPClient WebFetchHTTPClient
 	Permission core.Permission
+	// UserAgent is sent on the Cloudflare-challenge retry. Empty uses
+	// webFetchFallbackUserAgent.
+	UserAgent string
 }
 
 func webFetchAcceptHeader(format string) string {
@@ -199,12 +205,16 @@ func webFetchFetch(deps WebFetchDeps, ctx context.Context, input WebFetchInput) 
 		client = http.DefaultClient
 	}
 
+	fallbackUserAgent := deps.UserAgent
+	if fallbackUserAgent == "" {
+		fallbackUserAgent = webFetchFallbackUserAgent
+	}
 	response, err := webFetchExecute(client, ctx, input.URL, input.Format, webFetchBrowserUserAgent)
 	if err != nil && webFetchIsCloudflareChallenge(err) {
 		if response != nil && response.Body != nil {
 			response.Body.Close()
 		}
-		response, err = webFetchExecute(client, ctx, input.URL, input.Format, "opencode")
+		response, err = webFetchExecute(client, ctx, input.URL, input.Format, fallbackUserAgent)
 	}
 	if err != nil {
 		if response != nil && response.Body != nil {

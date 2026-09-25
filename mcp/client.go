@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -42,21 +45,26 @@ func WithLogHandler(handler LogHandler) Option {
 type Client struct {
 	mu         sync.Mutex
 	directory  string
+	name       string
 	version    string
 	events     EventPublisher
 	logHandler LogHandler
 	sessions   map[string]*sdk.ClientSession
 	status     map[string]Status
 	defs       map[string][]*sdk.Tool
-	// timeouts holds the per-server call timeout, so Client.Tools can pass it to
-	// the adapted tools.
+	// timeouts holds the per-server call timeout, used when adapting tools and
+	// when refreshing their list.
 	timeouts map[string]time.Duration
 }
 
-// NewClient creates an MCP client rooted at directory.
-func NewClient(directory, version string, options ...Option) *Client {
+// NewClient creates an MCP client rooted at directory that identifies itself to
+// servers as name/version. name is required: it is the clientInfo the MCP
+// handshake sends, so an empty name makes the handshake invalid. Callers that
+// have no own name can pass DefaultName from the agent package.
+func NewClient(directory, name, version string, options ...Option) *Client {
 	client := &Client{
 		directory: directory,
+		name:      name,
 		version:   version,
 		sessions:  map[string]*sdk.ClientSession{},
 		status:    map[string]Status{},
@@ -69,45 +77,40 @@ func NewClient(directory, version string, options ...Option) *Client {
 	return client
 }
 
-// Connect connects to a configured server, trying the remote transports in
-// order (StreamableHTTP then SSE) as in index.ts's connectRemote.
+// Connect connects to a configured server. Remote configs are tried over
+// StreamableHTTP then SSE; a local config has a single command transport.
 func (c *Client) Connect(ctx context.Context, name string, cfg ServerConfig) Status {
 	if !cfg.isEnabled() {
-		c.setStatus(name, Status{Status: "disabled"})
-		return Status{Status: "disabled"}
+		c.setStatus(name, Status{Status: StatusDisabled})
+		return Status{Status: StatusDisabled}
 	}
 	if _, ok := c.Session(name); ok {
 		return c.StatusOf(name)
 	}
 	transports, err := transportsFor(cfg, c.directory)
 	if err != nil {
-		status := Status{Status: "failed", Error: err.Error()}
+		status := Status{Status: StatusFailed, Error: err.Error()}
 		c.setStatus(name, status)
 		return status
 	}
 	var last Status
 	for _, transport := range transports {
 		status := c.ConnectTransport(ctx, name, transport, cfg.timeout())
-		if status.Status == "connected" {
+		if status.Status == StatusConnected {
 			return status
 		}
 		last = status
-		// Auth failures stop the transport fallback, matching connectRemote.
-		if status.Status == "needs_auth" || status.Status == "needs_client_registration" {
+		// Auth failures stop the transport fallback.
+		if status.Status == StatusNeedsAuth || status.Status == StatusNeedsClientRegistration {
 			break
 		}
 	}
 	return last
 }
 
-// Add connects a server config, mirroring MCP.add.
-func (c *Client) Add(ctx context.Context, name string, cfg ServerConfig) Status {
-	return c.Connect(ctx, name, cfg)
-}
-
 // ConnectTransport connects a single transport, storing the session on success.
 func (c *Client) ConnectTransport(ctx context.Context, name string, transport sdk.Transport, timeout time.Duration) Status {
-	sdkClient := sdk.NewClient(&sdk.Implementation{Name: "opencode", Version: c.version}, &sdk.ClientOptions{
+	sdkClient := sdk.NewClient(&sdk.Implementation{Name: c.name, Version: c.version}, &sdk.ClientOptions{
 		ToolListChangedHandler: func(context.Context, *sdk.ToolListChangedRequest) {
 			c.refreshTools(name)
 			c.publishToolsChanged(name)
@@ -131,16 +134,16 @@ func (c *Client) ConnectTransport(ctx context.Context, name string, transport sd
 	}
 	c.mu.Lock()
 	c.sessions[name] = session
-	c.status[name] = Status{Status: "connected"}
+	c.status[name] = Status{Status: StatusConnected}
 	c.timeouts[name] = timeout
 	c.mu.Unlock()
-	go c.watch(name, session)
-	return Status{Status: "connected"}
+	go c.watchSession(name, session)
+	return Status{Status: StatusConnected}
 }
 
-// watch marks the session failed and publishes a change when the connection
-// closes, mirroring index.ts's client.onclose handling.
-func (c *Client) watch(name string, session *sdk.ClientSession) {
+// watchSession marks the session failed and publishes a change when the
+// connection closes.
+func (c *Client) watchSession(name string, session *sdk.ClientSession) {
 	_ = session.Wait()
 	c.mu.Lock()
 	closed := c.sessions[name] == session
@@ -148,7 +151,7 @@ func (c *Client) watch(name string, session *sdk.ClientSession) {
 		delete(c.sessions, name)
 		delete(c.defs, name)
 		delete(c.timeouts, name)
-		c.status[name] = Status{Status: "failed", Error: "Connection closed"}
+		c.status[name] = Status{Status: StatusFailed, Error: "Connection closed"}
 	}
 	c.mu.Unlock()
 	if closed {
@@ -161,12 +164,16 @@ func (c *Client) refreshTools(name string) {
 	if !ok {
 		return
 	}
-	tools, err := ListTools(context.Background(), session)
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeoutOf(name))
+	defer cancel()
+	tools, err := ListTools(ctx, session)
 	if err != nil {
 		return
 	}
 	c.mu.Lock()
-	c.defs[name] = tools
+	if c.sessions[name] == session {
+		c.defs[name] = tools
+	}
 	c.mu.Unlock()
 }
 
@@ -177,19 +184,42 @@ func (c *Client) publishToolsChanged(name string) {
 	_ = c.events.Publish(schema.McpEventToolsChanged, map[string]any{"server": name})
 }
 
-// classifyError maps a connect error to a Status, mirroring connectRemote's
-// auth handling (needs_auth / needs_client_registration).
+// registrationErrorHints and authErrorHints are substrings that identify a
+// failure when the SDK does not return a typed error.
+var (
+	registrationErrorHints = []string{"registration", "client_id"}
+	authErrorHints         = []string{"oauth", "authorization", "unauthorized"}
+)
+
+// classifyError maps a connect error to a Status. It checks the SDK's typed
+// errors first and falls back to the error text, because this client does not
+// wire interactive OAuth and most failures arrive as plain transport messages.
 func classifyError(err error) Status {
+	var registration *oauthex.ClientRegistrationError
+	switch {
+	case errors.As(err, &registration):
+		return Status{Status: StatusNeedsClientRegistration, Error: err.Error()}
+	case errors.Is(err, auth.ErrOAuth), errors.Is(err, auth.ErrInvalidToken):
+		return Status{Status: StatusNeedsAuth, Error: err.Error()}
+	}
 	message := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(message, "registration") || strings.Contains(message, "client_id"):
-		return Status{Status: "needs_client_registration", Error: err.Error()}
-	case strings.Contains(message, "oauth") || strings.Contains(message, "authorization") ||
-		strings.Contains(message, "unauthorized"):
-		return Status{Status: "needs_auth", Error: err.Error()}
+	case containsAny(message, registrationErrorHints):
+		return Status{Status: StatusNeedsClientRegistration, Error: err.Error()}
+	case containsAny(message, authErrorHints):
+		return Status{Status: StatusNeedsAuth, Error: err.Error()}
 	default:
-		return Status{Status: "failed", Error: err.Error()}
+		return Status{Status: StatusFailed, Error: err.Error()}
 	}
+}
+
+func containsAny(message string, hints []string) bool {
+	for _, hint := range hints {
+		if strings.Contains(message, hint) {
+			return true
+		}
+	}
+	return false
 }
 
 // Disconnect closes and forgets a server session.
@@ -198,6 +228,8 @@ func (c *Client) Disconnect(name string) {
 	session := c.sessions[name]
 	delete(c.sessions, name)
 	delete(c.status, name)
+	delete(c.defs, name)
+	delete(c.timeouts, name)
 	c.mu.Unlock()
 	if session != nil {
 		_ = session.Close()
@@ -210,6 +242,8 @@ func (c *Client) Close() {
 	sessions := c.sessions
 	c.sessions = map[string]*sdk.ClientSession{}
 	c.status = map[string]Status{}
+	c.defs = map[string][]*sdk.Tool{}
+	c.timeouts = map[string]time.Duration{}
 	c.mu.Unlock()
 	for _, session := range sessions {
 		_ = session.Close()
@@ -243,45 +277,43 @@ func (c *Client) Session(name string) (*sdk.ClientSession, bool) {
 }
 
 // Tools lists the tools of every connected server, keyed by "<server>_<tool>".
-func (c *Client) Tools(ctx context.Context) (map[string]AdaptedTool, error) {
+// A server that lacks the tools capability or fails to list contributes
+// nothing, matching Prompts, Resources and ResourceTemplates.
+func (c *Client) Tools(ctx context.Context) map[string]AdaptedTool {
 	result := map[string]AdaptedTool{}
-	c.mu.Lock()
-	sessions := make(map[string]*sdk.ClientSession, len(c.sessions))
-	for name, session := range c.sessions {
-		sessions[name] = session
-	}
-	timeouts := make(map[string]time.Duration, len(c.timeouts))
-	for name, timeout := range c.timeouts {
-		timeouts[name] = timeout
-	}
-	c.mu.Unlock()
+	sessions := c.snapshotSessions()
+	timeouts := c.snapshotTimeouts()
 	for server, session := range sessions {
-		// Servers that do not advertise the tools capability are skipped rather
-		// than failing the whole listing (index.ts guards defs the same way).
-		if !serverSupportsTools(session) {
-			continue
-		}
-		c.mu.Lock()
-		cached := c.defs[server]
-		c.mu.Unlock()
-		tools := cached
-		if tools == nil {
-			var err error
-			tools, err = ListTools(ctx, session)
-			if err != nil {
-				return nil, err
-			}
-			c.mu.Lock()
-			c.defs[server] = tools
-			c.mu.Unlock()
-		}
-		for _, def := range tools {
+		for _, def := range c.serverTools(ctx, server, session) {
 			result[ToolName(server, def.Name)] = AdaptedTool{
 				Def: def, Session: session, Server: server, Timeout: timeouts[server],
 			}
 		}
 	}
-	return result, nil
+	return result
+}
+
+// serverTools returns a server's cached tools, listing and caching them on a
+// miss. A server whose tools cannot be listed contributes none.
+func (c *Client) serverTools(ctx context.Context, server string, session *sdk.ClientSession) []*sdk.Tool {
+	c.mu.Lock()
+	cached := c.defs[server]
+	c.mu.Unlock()
+	if cached != nil {
+		return cached
+	}
+	tools, err := ListTools(ctx, session)
+	if err != nil {
+		return nil
+	}
+	c.mu.Lock()
+	// Drop the result if the server disconnected while we listed, so a stale
+	// cache cannot outlive its session.
+	if c.sessions[server] == session {
+		c.defs[server] = tools
+	}
+	c.mu.Unlock()
+	return tools
 }
 
 // PromptInfo is a discovered prompt plus its server.
@@ -311,72 +343,77 @@ type ResourceTemplateInfo struct {
 
 // Prompts lists the prompts of every connected server, keyed by
 // "<sanitized server>:<sanitized prompt>". A server that lacks the prompts
-// capability or fails to list contributes nothing, mirroring McpCatalog.fetch's
-// per-server error tolerance.
-func (c *Client) Prompts(ctx context.Context, clientName ...string) map[string]PromptInfo {
-	result := map[string]PromptInfo{}
-	for server, session := range c.filteredSessions(clientName) {
-		prompts, err := ListPrompts(ctx, session)
-		if err != nil {
-			continue
-		}
-		for _, prompt := range prompts {
-			result[promptKey(server, prompt.Name)] = PromptInfo{
-				Name: prompt.Name, Description: prompt.Description, Client: server,
-			}
-		}
-	}
-	return result
+// capability or fails to list contributes nothing.
+func (c *Client) Prompts(ctx context.Context, server ...string) map[string]PromptInfo {
+	return collectCatalog(ctx, c.filteredSessions(server), ListPrompts,
+		func(server string, prompt *sdk.Prompt) string { return sanitizedPromptKey(server, prompt.Name) },
+		func(server string, prompt *sdk.Prompt) PromptInfo {
+			return PromptInfo{Name: prompt.Name, Description: prompt.Description, Client: server}
+		})
 }
 
 // Resources lists the resources of every connected server, keyed by
 // "<escaped server>:<resource URI>". A server that lacks the resources
 // capability or fails to list contributes nothing.
-func (c *Client) Resources(ctx context.Context, clientName ...string) map[string]ResourceInfo {
-	result := map[string]ResourceInfo{}
-	for server, session := range c.filteredSessions(clientName) {
-		resources, err := ListResources(ctx, session)
-		if err != nil {
-			continue
-		}
-		for _, resource := range resources {
-			result[resourceKey(server, resource.URI)] = ResourceInfo{
+func (c *Client) Resources(ctx context.Context, server ...string) map[string]ResourceInfo {
+	return collectCatalog(ctx, c.filteredSessions(server), ListResources,
+		func(server string, resource *sdk.Resource) string { return escapedResourceKey(server, resource.URI) },
+		func(server string, resource *sdk.Resource) ResourceInfo {
+			return ResourceInfo{
 				Name: resource.Name, URI: resource.URI, Description: resource.Description,
 				MIMEType: resource.MIMEType, Client: server,
 			}
-		}
-	}
-	return result
+		})
 }
 
 // ResourceTemplates lists the resource templates of every connected server,
 // keyed by "<escaped server>:<URI template>". A server that lacks the resources
 // capability or fails to list contributes nothing.
-func (c *Client) ResourceTemplates(ctx context.Context, clientName ...string) map[string]ResourceTemplateInfo {
-	result := map[string]ResourceTemplateInfo{}
-	for server, session := range c.filteredSessions(clientName) {
-		templates, err := ListResourceTemplates(ctx, session)
-		if err != nil {
-			continue
-		}
-		for _, template := range templates {
-			result[resourceKey(server, template.URITemplate)] = ResourceTemplateInfo{
+func (c *Client) ResourceTemplates(ctx context.Context, server ...string) map[string]ResourceTemplateInfo {
+	return collectCatalog(ctx, c.filteredSessions(server), ListResourceTemplates,
+		func(server string, template *sdk.ResourceTemplate) string {
+			return escapedResourceKey(server, template.URITemplate)
+		},
+		func(server string, template *sdk.ResourceTemplate) ResourceTemplateInfo {
+			return ResourceTemplateInfo{
 				Name: template.Name, URITemplate: template.URITemplate, Description: template.Description,
 				MIMEType: template.MIMEType, Client: server,
 			}
+		})
+}
+
+// collectCatalog lists every server's entries and keys them, skipping servers
+// that lack the capability or fail to list.
+func collectCatalog[E any, T any](
+	ctx context.Context,
+	sessions map[string]*sdk.ClientSession,
+	list func(context.Context, *sdk.ClientSession) ([]E, error),
+	key func(server string, entry E) string,
+	info func(server string, entry E) T,
+) map[string]T {
+	result := map[string]T{}
+	for server, session := range sessions {
+		entries, err := list(ctx, session)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			result[key(server, entry)] = info(server, entry)
 		}
 	}
 	return result
 }
 
-func (c *Client) filteredSessions(clientName []string) map[string]*sdk.ClientSession {
+// filteredSessions returns every session, or only the named server's when a
+// non-empty server name is given.
+func (c *Client) filteredSessions(server []string) map[string]*sdk.ClientSession {
 	sessions := c.snapshotSessions()
-	if len(clientName) == 0 || clientName[0] == "" {
+	if len(server) == 0 || server[0] == "" {
 		return sessions
 	}
 	filtered := map[string]*sdk.ClientSession{}
-	if session, ok := sessions[clientName[0]]; ok {
-		filtered[clientName[0]] = session
+	if session, ok := sessions[server[0]]; ok {
+		filtered[server[0]] = session
 	}
 	return filtered
 }
@@ -391,40 +428,85 @@ func (c *Client) snapshotSessions() map[string]*sdk.ClientSession {
 	return result
 }
 
-// promptKey is "<sanitized server>:<sanitized prompt>".
-func promptKey(server, name string) string {
+func (c *Client) snapshotTimeouts() map[string]time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := make(map[string]time.Duration, len(c.timeouts))
+	for name, timeout := range c.timeouts {
+		result[name] = timeout
+	}
+	return result
+}
+
+func (c *Client) snapshotDefs() map[string][]*sdk.Tool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := make(map[string][]*sdk.Tool, len(c.defs))
+	for name, tools := range c.defs {
+		result[name] = tools
+	}
+	return result
+}
+
+// timeoutOf returns the connect timeout a server was registered with.
+func (c *Client) timeoutOf(name string) time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if timeout, ok := c.timeouts[name]; ok {
+		return timeout
+	}
+	return DefaultTimeout
+}
+
+// sanitizedPromptKey is "<sanitized server>:<sanitized prompt>".
+func sanitizedPromptKey(server, name string) string {
 	return Sanitize(server) + ":" + Sanitize(name)
 }
 
-// resourceKey is "<escaped server>:<uri>", escaping "%" and ":" so a
+// escapedResourceKey is "<escaped server>:<uri>", escaping "%" and ":" so a
 // "server:uri" key stays unambiguous.
-func resourceKey(server, uri string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(server, "%", "%25"), ":", "%3A") + ":" + uri
+func escapedResourceKey(server, uri string) string {
+	return escapeKeyPart(server) + ":" + uri
+}
+
+// escapeKeyPart percent-escapes the characters that would make a "server:uri"
+// key ambiguous.
+func escapeKeyPart(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "%", "%25"), ":", "%3A")
+}
+
+// sessionFor returns the session for a connected server.
+func (c *Client) sessionFor(server string) (*sdk.ClientSession, error) {
+	session, ok := c.Session(server)
+	if !ok {
+		return nil, fmt.Errorf("mcp server not connected: %s", server)
+	}
+	return session, nil
 }
 
 // CallTool invokes a tool on the named server.
 func (c *Client) CallTool(ctx context.Context, server, toolName string, args any) (*sdk.CallToolResult, error) {
-	session, ok := c.Session(server)
-	if !ok {
-		return nil, fmt.Errorf("mcp server not connected: %s", server)
+	session, err := c.sessionFor(server)
+	if err != nil {
+		return nil, err
 	}
 	return session.CallTool(ctx, &sdk.CallToolParams{Name: toolName, Arguments: args})
 }
 
 // GetPrompt fetches a prompt from the named server.
 func (c *Client) GetPrompt(ctx context.Context, server, name string, args map[string]string) (*sdk.GetPromptResult, error) {
-	session, ok := c.Session(server)
-	if !ok {
-		return nil, fmt.Errorf("mcp server not connected: %s", server)
+	session, err := c.sessionFor(server)
+	if err != nil {
+		return nil, err
 	}
 	return session.GetPrompt(ctx, &sdk.GetPromptParams{Name: name, Arguments: args})
 }
 
 // ReadResource reads a resource from the named server.
 func (c *Client) ReadResource(ctx context.Context, server, uri string) (*sdk.ReadResourceResult, error) {
-	session, ok := c.Session(server)
-	if !ok {
-		return nil, fmt.Errorf("mcp server not connected: %s", server)
+	session, err := c.sessionFor(server)
+	if err != nil {
+		return nil, err
 	}
 	return session.ReadResource(ctx, &sdk.ReadResourceParams{URI: uri})
 }
@@ -436,19 +518,11 @@ type ServerInstructions struct {
 	Tools        []string
 }
 
-// Instructions returns the instructions of every server that provides them,
-// mirroring MCP.instructions.
+// Instructions returns the usage instructions of every server that provides
+// them.
 func (c *Client) Instructions() []ServerInstructions {
-	c.mu.Lock()
-	sessions := make(map[string]*sdk.ClientSession, len(c.sessions))
-	for name, session := range c.sessions {
-		sessions[name] = session
-	}
-	defs := make(map[string][]*sdk.Tool, len(c.defs))
-	for name, tools := range c.defs {
-		defs[name] = tools
-	}
-	c.mu.Unlock()
+	sessions := c.snapshotSessions()
+	defs := c.snapshotDefs()
 
 	var result []ServerInstructions
 	for name, session := range sessions {
@@ -469,9 +543,9 @@ func (c *Client) Instructions() []ServerInstructions {
 	return result
 }
 
-// ServerInfo is a connected server's initialize metadata (the protocol's
+// ServerMetadata is a connected server's initialize metadata (the protocol's
 // serverInfo / Implementation).
-type ServerInfo struct {
+type ServerMetadata struct {
 	Name        string
 	Title       string
 	Description string
@@ -480,19 +554,17 @@ type ServerInfo struct {
 
 // ServerInfo returns the initialize metadata of a connected server. The second
 // result is false when the server is not connected or reported no serverInfo.
-func (c *Client) ServerInfo(name string) (ServerInfo, bool) {
-	c.mu.Lock()
-	session := c.sessions[name]
-	c.mu.Unlock()
-	if session == nil {
-		return ServerInfo{}, false
+func (c *Client) ServerInfo(name string) (ServerMetadata, bool) {
+	session, ok := c.Session(name)
+	if !ok {
+		return ServerMetadata{}, false
 	}
 	initialized := session.InitializeResult()
 	if initialized == nil || initialized.ServerInfo == nil {
-		return ServerInfo{}, false
+		return ServerMetadata{}, false
 	}
 	info := initialized.ServerInfo
-	return ServerInfo{
+	return ServerMetadata{
 		Name:        info.Name,
 		Title:       info.Title,
 		Description: info.Description,
@@ -506,33 +578,56 @@ func (c *Client) setStatus(name string, status Status) {
 	c.mu.Unlock()
 }
 
-// transportsFor builds the candidate transports for a server config.
+// transportsFor builds the candidate transports for a server config. A remote
+// config yields both HTTP transports to try in order; a local config yields a
+// single command transport.
 func transportsFor(cfg ServerConfig, directory string) ([]sdk.Transport, error) {
 	if cfg.Type == "remote" {
-		httpClient := clientWithHeaders(cfg.Headers)
-		return []sdk.Transport{
-			&sdk.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: httpClient},
-			&sdk.SSEClientTransport{Endpoint: cfg.URL, HTTPClient: httpClient},
-		}, nil
+		return remoteTransports(cfg), nil
 	}
+	transport, err := localTransport(cfg, directory)
+	if err != nil {
+		return nil, err
+	}
+	return []sdk.Transport{transport}, nil
+}
+
+func remoteTransports(cfg ServerConfig) []sdk.Transport {
+	httpClient := clientWithHeaders(cfg.Headers)
+	return []sdk.Transport{
+		&sdk.StreamableClientTransport{Endpoint: cfg.URL, HTTPClient: httpClient},
+		&sdk.SSEClientTransport{Endpoint: cfg.URL, HTTPClient: httpClient},
+	}
+}
+
+func localTransport(cfg ServerConfig, directory string) (sdk.Transport, error) {
 	if len(cfg.Command) == 0 {
 		return nil, fmt.Errorf("mcp local server has no command")
 	}
 	command := exec.Command(cfg.Command[0], cfg.Command[1:]...)
-	if cfg.Cwd != "" {
-		if filepath.IsAbs(cfg.Cwd) {
-			command.Dir = cfg.Cwd
-		} else {
-			command.Dir = filepath.Join(directory, cfg.Cwd)
-		}
-	} else {
-		command.Dir = directory
+	command.Dir = commandDir(cfg.Cwd, directory)
+	command.Env = append(os.Environ(), environmentPairs(cfg.Environment)...)
+	return &sdk.CommandTransport{Command: command}, nil
+}
+
+// commandDir resolves a configured working directory against the client root.
+func commandDir(cwd, directory string) string {
+	switch {
+	case cwd == "":
+		return directory
+	case filepath.IsAbs(cwd):
+		return cwd
+	default:
+		return filepath.Join(directory, cwd)
 	}
-	command.Env = os.Environ()
-	for key, value := range cfg.Environment {
-		command.Env = append(command.Env, key+"="+value)
+}
+
+func environmentPairs(environment map[string]string) []string {
+	pairs := make([]string, 0, len(environment))
+	for key, value := range environment {
+		pairs = append(pairs, key+"="+value)
 	}
-	return []sdk.Transport{&sdk.CommandTransport{Command: command}}, nil
+	return pairs
 }
 
 func clientWithHeaders(headers map[string]string) *http.Client {

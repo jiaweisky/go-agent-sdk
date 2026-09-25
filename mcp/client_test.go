@@ -3,13 +3,16 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/user/go-agent-sdk/core/tool"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
 )
@@ -55,16 +58,23 @@ func TestMCPInputSchemaNormalization(t *testing.T) {
 
 func TestClassifyError(t *testing.T) {
 	cases := []struct {
-		message string
-		status  string
+		name   string
+		err    error
+		status string
 	}{
-		{"OAuth authorization required", "needs_auth"},
-		{"dynamic client registration failed", "needs_client_registration"},
-		{"connection refused", "failed"},
+		{"auth message", errors.New("OAuth authorization required"), StatusNeedsAuth},
+		{"registration message", errors.New("dynamic client registration failed"), StatusNeedsClientRegistration},
+		{"connection refused", errors.New("connection refused"), StatusFailed},
+		{
+			"typed registration",
+			&oauthex.ClientRegistrationError{ErrorCode: "invalid_redirect_uri"},
+			StatusNeedsClientRegistration,
+		},
+		{"typed oauth", fmt.Errorf("connect: %w", auth.ErrOAuth), StatusNeedsAuth},
 	}
 	for _, tc := range cases {
-		if got := classifyError(errors.New(tc.message)); got.Status != tc.status {
-			t.Fatalf("classify(%q) = %q, want %q", tc.message, got.Status, tc.status)
+		if got := classifyError(tc.err); got.Status != tc.status {
+			t.Fatalf("classify(%s) = %q, want %q", tc.name, got.Status, tc.status)
 		}
 	}
 }
@@ -89,7 +99,7 @@ func TestClientCatalogAccessors(t *testing.T) {
 	}
 	defer serverSession.Close()
 
-	client := NewClient(t.TempDir(), "test")
+	client := NewClient(t.TempDir(), "test-client", "test")
 	defer client.Close()
 	if status := client.ConnectTransport(ctx, "srv", clientTransport, 5*time.Second); status.Status != "connected" {
 		t.Fatalf("status = %+v", status)
@@ -152,17 +162,14 @@ func TestAdaptMCPToolEndToEnd(t *testing.T) {
 	}
 	defer serverSession.Close()
 
-	client := NewClient(t.TempDir(), "test")
+	client := NewClient(t.TempDir(), "test-client", "test")
 	defer client.Close()
 	status := client.ConnectTransport(ctx, "srv", clientTransport, 5*time.Second)
 	if status.Status != "connected" {
 		t.Fatalf("status = %+v", status)
 	}
 
-	tools, err := client.Tools(ctx)
-	if err != nil {
-		t.Fatalf("tools: %v", err)
-	}
+	tools := client.Tools(ctx)
 	adapted, ok := tools["srv_echo"]
 	if !ok {
 		t.Fatalf("tools = %+v", tools)
@@ -188,6 +195,46 @@ func TestAdaptMCPToolEndToEnd(t *testing.T) {
 	}
 }
 
+func TestDisconnectClearsCachedTools(t *testing.T) {
+	ctx := context.Background()
+	client := NewClient(t.TempDir(), "test-client", "test")
+	defer client.Close()
+
+	connect := func(toolName string) {
+		t.Helper()
+		server := sdk.NewServer(&sdk.Implementation{Name: "srv", Version: "1.0.0"}, nil)
+		sdk.AddTool(server, &sdk.Tool{Name: toolName},
+			func(_ context.Context, _ *sdk.CallToolRequest, _ echoInput) (*sdk.CallToolResult, any, error) {
+				return &sdk.CallToolResult{}, nil, nil
+			})
+		serverTransport, clientTransport := sdk.NewInMemoryTransports()
+		serverSession, err := server.Connect(ctx, serverTransport, nil)
+		if err != nil {
+			t.Fatalf("server connect: %v", err)
+		}
+		t.Cleanup(func() { _ = serverSession.Close() })
+		if status := client.ConnectTransport(ctx, "srv", clientTransport, 5*time.Second); status.Status != StatusConnected {
+			t.Fatalf("status = %+v", status)
+		}
+	}
+
+	connect("old")
+	tools := client.Tools(ctx)
+	if _, ok := tools["srv_old"]; !ok {
+		t.Fatalf("tools = %+v, want srv_old", tools)
+	}
+	client.Disconnect("srv")
+
+	connect("new")
+	tools = client.Tools(ctx)
+	if _, ok := tools["srv_old"]; ok {
+		t.Fatalf("stale tool after reconnect: %+v", tools)
+	}
+	if _, ok := tools["srv_new"]; !ok {
+		t.Fatalf("tools = %+v, want srv_new", tools)
+	}
+}
+
 func TestServerInfoFromInitialize(t *testing.T) {
 	ctx := context.Background()
 	server := sdk.NewServer(&sdk.Implementation{
@@ -196,7 +243,7 @@ func TestServerInfoFromInitialize(t *testing.T) {
 	clientTransport, serverTransport := sdk.NewInMemoryTransports()
 	go func() { _ = server.Run(ctx, serverTransport) }()
 
-	client := NewClient("", "test")
+	client := NewClient("", "test-client", "test")
 	defer client.Close()
 	if status := client.ConnectTransport(ctx, "weather", clientTransport, 5*time.Second); status.Status != "connected" {
 		t.Fatalf("connect status = %+v", status)

@@ -24,6 +24,7 @@ type builtinDeps struct {
 	locale     language.Tag
 	agents     *core.Agent
 	task       TaskRunner
+	name       string
 }
 
 // registerBuiltins registers the shipped built-in tools into a registry.
@@ -70,7 +71,7 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 			return tool.RegisterQuestion(tools, tool.QuestionDeps{Permission: deps.permission, Question: deps.question})
 		},
 		func() (func(), error) {
-			return tool.RegisterWebFetch(tools, tool.WebFetchDeps{HTTPClient: http.DefaultClient, Permission: deps.permission})
+			return tool.RegisterWebFetch(tools, tool.WebFetchDeps{HTTPClient: http.DefaultClient, Permission: deps.permission, UserAgent: deps.name})
 		},
 		func() (func(), error) {
 			return tool.RegisterSkill(tools, tool.SkillToolDeps{Skills: deps.skills, Permission: deps.permission})

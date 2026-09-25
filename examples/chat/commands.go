@@ -108,7 +108,7 @@ func (c *chat) writeMCPServer(client *mcp.Client, name string, status mcp.Status
 
 // serverMeta renders a server's "Title Name Version" metadata, dropping the
 // parts it does not report.
-func serverMeta(info mcp.ServerInfo) string {
+func serverMeta(info mcp.ServerMetadata) string {
 	meta := info.Title
 	if meta == "" {
 		meta = info.Name

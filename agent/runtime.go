@@ -47,6 +47,7 @@ type runtime struct {
 	projectID     schema.ProjectID
 	models        runner.ModelResolver
 	subagentDepth int
+	name          string
 
 	hooksMu sync.Mutex
 	hooks   map[string]*SessionHooks
@@ -216,6 +217,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		permission: permission, question: question, location: *location,
 		projectID: location.Project.ID, models: models,
 		subagentDepth: subagentDepth(opts.SubagentDepth),
+		name:          applicationName(opts.Name),
 		hooks:         map[string]*SessionHooks{}, clientTools: opts.Tools,
 		dispatcher: &toolDispatcher{sessions: map[string]*tool.Registry{}},
 		reference:  references,
@@ -224,7 +226,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	rt.builtin = builtinDeps{
 		db: db, events: events, permission: permission, question: question,
 		location: *location, global: global, shell: opts.Shell, skills: skills,
-		locale: locale, agents: agents, task: &taskRunner{rt: rt},
+		locale: locale, agents: agents, task: &taskRunner{rt: rt}, name: rt.name,
 	}
 	rt.runner = runner.NewLLMRunner(runner.LLMRunner{
 		Events:            appEvents{events: events},
@@ -246,10 +248,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		defer rt.publishSessionStatus(id, schema.SessionStatusIdle{Type: "idle"})
 		return rt.runner.Run(ctx, runner.RunInput{SessionID: id, Force: force})
 	})
-	if err := rt.connectMCP(ctx, opts.MCP); err != nil {
-		cancel()
-		return fail(err)
-	}
+	rt.connectMCP(ctx, opts.MCP)
 	rt.plugin = core.NewPlugin(events, agents, skills, references)
 	for _, config := range opts.Plugins {
 		if err := rt.plugin.Add(schema.PluginID(config.ID), core.PluginEffect(config.Effect)); err != nil {
@@ -420,29 +419,32 @@ func (r *runtime) runToolOutputCleanup(ctx context.Context) {
 	}
 }
 
-// connectMCP connects the configured MCP servers and collects their tools; each
-// session registry picks them up from r.mcpTools.
-func (r *runtime) connectMCP(ctx context.Context, configs []MCPConfig) error {
-	if len(configs) == 0 {
-		return nil
+// applicationName resolves the MCP client identity, defaulting to DefaultName.
+func applicationName(name string) string {
+	if name == "" {
+		return DefaultName
 	}
-	client := mcp.NewClient(string(r.location.Directory), installation.InstallationVersion, mcp.WithEvents(mcpEventPublisher{events: r.events}))
+	return name
+}
+
+// connectMCP connects the configured MCP servers and collects their tools; each
+// session registry picks them up from r.mcpTools. Servers that fail to connect
+// or list tools simply contribute none.
+func (r *runtime) connectMCP(ctx context.Context, configs []MCPConfig) {
+	if len(configs) == 0 {
+		return
+	}
+	client := mcp.NewClient(string(r.location.Directory), r.name, installation.InstallationVersion, mcp.WithEvents(mcpEventPublisher{events: r.events}))
 	for _, cfg := range configs {
 		client.Connect(ctx, cfg.Name, cfg.Server)
-	}
-	tools, err := client.Tools(ctx)
-	if err != nil {
-		client.Close()
-		return err
 	}
 	if r.mcpTools == nil {
 		r.mcpTools = map[string]tool.Tool{}
 	}
-	for name, adapted := range tools {
+	for name, adapted := range client.Tools(ctx) {
 		r.mcpTools[name] = adapted.CoreTool()
 	}
 	r.mcp = client
-	return nil
 }
 
 type mcpEventPublisher struct{ events core.Event }

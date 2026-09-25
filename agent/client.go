@@ -15,6 +15,9 @@ import (
 
 // ClientOptions configures a Client.
 type ClientOptions struct {
+	// Name is the application name reported to MCP servers as the client
+	// identity (MCP clientInfo). Empty uses DefaultName.
+	Name string
 	// WorkingDirectory is the project/worktree root. Defaults to the process cwd.
 	WorkingDirectory string
 	// Root is the base directory for every piece of SDK-managed state. It is
@@ -82,6 +85,10 @@ type ClientOptions struct {
 	// Compaction controls automatic history compaction. Nil uses the defaults.
 	Compaction *CompactionConfig
 }
+
+// DefaultName is the application name reported to MCP servers when
+// ClientOptions.Name is empty.
+const DefaultName = "go-agent-sdk"
 
 // ToolOutputConfig bounds oversized tool results. Zero values use the defaults.
 type ToolOutputConfig struct {

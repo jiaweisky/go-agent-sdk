@@ -14,7 +14,7 @@ import (
 
 // AdaptMCPTool binds an MCP tool definition to its session and returns a core
 // tool.
-func AdaptMCPTool(def *sdk.Tool, session *sdk.ClientSession, server string, timeout time.Duration) tool.Tool {
+func AdaptMCPTool(def *sdk.Tool, session *sdk.ClientSession, timeout time.Duration) tool.Tool {
 	return tool.Make(tool.Config[map[string]any, any, any]{
 		Description: def.Description,
 		Input:       jsonschema.Raw(MCPInputSchema(def)),
@@ -68,7 +68,7 @@ type AdaptedTool struct {
 
 // CoreTool converts the adapted tool into a core tool.
 func (t AdaptedTool) CoreTool() tool.Tool {
-	return AdaptMCPTool(t.Def, t.Session, t.Server, t.Timeout)
+	return AdaptMCPTool(t.Def, t.Session, t.Timeout)
 }
 
 func mcpErrorText(result *sdk.CallToolResult) string {
@@ -85,37 +85,51 @@ func mcpErrorText(result *sdk.CallToolResult) string {
 func RenderMCPResult(output any) string {
 	switch value := output.(type) {
 	case *sdk.CallToolResult:
-		if parts := mcpTextParts(value); len(parts) > 0 {
-			return strings.Join(parts, "\n")
-		}
-		if value.StructuredContent != nil {
-			if data, err := json.Marshal(value.StructuredContent); err == nil {
-				return string(data)
-			}
-		}
+		return renderCallToolResult(value)
 	case map[string]any:
-		var parts []string
-		if content, ok := value["content"].([]any); ok {
-			for _, item := range content {
-				block, ok := item.(map[string]any)
-				if !ok || block["type"] != "text" {
-					continue
-				}
-				if text, ok := block["text"].(string); ok && strings.TrimSpace(text) != "" {
-					parts = append(parts, text)
-				}
+		return renderResultMap(value)
+	}
+	return ""
+}
+
+func renderCallToolResult(result *sdk.CallToolResult) string {
+	if parts := mcpTextParts(result); len(parts) > 0 {
+		return strings.Join(parts, "\n")
+	}
+	return renderStructured(result.StructuredContent)
+}
+
+// renderResultMap renders the JSON-decoded shape of a call result.
+func renderResultMap(value map[string]any) string {
+	var parts []string
+	if content, ok := value["content"].([]any); ok {
+		for _, item := range content {
+			block, ok := item.(map[string]any)
+			if !ok || block["type"] != "text" {
+				continue
 			}
-		}
-		if len(parts) > 0 {
-			return strings.Join(parts, "\n")
-		}
-		if structured, ok := value["structuredContent"]; ok && structured != nil {
-			if data, err := json.Marshal(structured); err == nil {
-				return string(data)
+			if text, ok := block["text"].(string); ok && strings.TrimSpace(text) != "" {
+				parts = append(parts, text)
 			}
 		}
 	}
-	return ""
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n")
+	}
+	return renderStructured(value["structuredContent"])
+}
+
+// renderStructured marshals structured content as JSON, or returns "" when
+// there is none.
+func renderStructured(value any) string {
+	if value == nil {
+		return ""
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func mcpTextParts(result *sdk.CallToolResult) []string {

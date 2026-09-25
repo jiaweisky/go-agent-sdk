@@ -19,10 +19,14 @@ func ToolName(server, name string) string {
 	return Sanitize(server) + "_" + Sanitize(name)
 }
 
-// ListTools lists a server's tools; the SDK iterator handles pagination. It keeps
-// Tool.OutputSchema as `any` and does not validate it, so no tolerant fallback is
-// needed when a server's outputSchema is unusual.
+// ListTools lists a server's tools; a server without the tools capability
+// yields none. The SDK iterator handles pagination, and the tool output schema
+// is passed through unvalidated.
 func ListTools(ctx context.Context, session *sdk.ClientSession) ([]*sdk.Tool, error) {
+	caps := serverCapabilities(session)
+	if caps == nil || caps.Tools == nil {
+		return nil, nil
+	}
 	var tools []*sdk.Tool
 	for tool, err := range session.Tools(ctx, nil) {
 		if err != nil {
@@ -41,12 +45,6 @@ func serverCapabilities(session *sdk.ClientSession) *sdk.ServerCapabilities {
 		return nil
 	}
 	return initialized.Capabilities
-}
-
-// serverSupportsTools reports whether a server advertises the tools capability.
-func serverSupportsTools(session *sdk.ClientSession) bool {
-	caps := serverCapabilities(session)
-	return caps != nil && caps.Tools != nil
 }
 
 // ListPrompts lists a server's prompts; a server without the prompts capability

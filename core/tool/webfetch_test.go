@@ -289,7 +289,25 @@ func TestWebFetch_RetriesCloudflareChallenge(t *testing.T) {
 	if ua := client.requests[0].Header.Get("User-Agent"); !strings.Contains(ua, "Mozilla/5.0") {
 		t.Fatalf("unexpected first user agent: %q", ua)
 	}
-	if ua := client.requests[1].Header.Get("User-Agent"); ua != "opencode" {
+	if ua := client.requests[1].Header.Get("User-Agent"); ua != "go-agent-sdk" {
+		t.Fatalf("unexpected second user agent: %q", ua)
+	}
+}
+
+func TestWebFetch_RetriesWithConfiguredUserAgent(t *testing.T) {
+	client := &webFetchTestClient{responses: []func(*http.Request) (*http.Response, error){
+		func(*http.Request) (*http.Response, error) {
+			return webFetchResponse("challenge", http.StatusForbidden, map[string]string{"cf-mitigated": "challenge"}), nil
+		},
+		webFetchTextResponse("ok", "text/plain"),
+	}}
+	deps := WebFetchDeps{HTTPClient: client, Permission: &bashTestPermission{}, UserAgent: "custom-agent"}
+
+	result := settleWebFetch(t, deps, map[string]any{"url": "https://1.1.1.1", "format": "text"})
+	if result.Result.Type != "text" || result.Result.Value != "ok" {
+		t.Fatalf("unexpected result: %+v", result.Result)
+	}
+	if ua := client.requests[1].Header.Get("User-Agent"); ua != "custom-agent" {
 		t.Fatalf("unexpected second user agent: %q", ua)
 	}
 }
