@@ -57,21 +57,20 @@ func WithMCP(configs ...agent.MCPConfig) Option {
 
 // Client builds a client from environment variables:
 //
-//	OPENCODE_PROVIDER     openai (default) | anthropic | openai-compatible | gemini
-//	OPENCODE_PROVIDER_ID  provider id for openai-compatible (optional)
-//	OPENCODE_BASE_URL     provider base URL (optional)
-//	OPENCODE_API_KEY      provider API key (falls back to OPENAI_API_KEY for
+//	AGENT_PROVIDER     openai (default) | anthropic | openai-compatible | gemini
+//	AGENT_PROVIDER_ID  provider id for openai-compatible (optional)
+//	AGENT_BASE_URL     provider base URL (optional)
+//	AGENT_API_KEY      provider API key (falls back to OPENAI_API_KEY for
 //	                      openai, ANTHROPIC_API_KEY for anthropic; none for
 //	                      openai-compatible)
-//	OPENCODE_MODEL        model id (required; provider-specific, so no default)
+//	AGENT_MODEL        model id (required; provider-specific, so no default)
 //
-// Credentials are passed in explicitly; the SDK does not read them from
-// ~/.config/opencode. Call LoadDotEnv from main to read a .env file in the
-// working directory (without overriding variables already set in the
-// environment).
+// Credentials are passed in explicitly; the SDK does not read them from a
+// config file. Call LoadDotEnv from main to read a .env file in the working
+// directory (without overriding variables already set in the environment).
 //
 // Note on openai-compatible: unlike openai/anthropic it has no env fallback, so
-// OPENCODE_API_KEY is required — without it the request fails with "Missing auth
+// AGENT_API_KEY is required — without it the request fails with "Missing auth
 // credential: value". (A keyless local endpoint would instead need the
 // ClientOptions.ModelInfo path, where a missing key maps to route.None() and no
 // auth header is sent.)
@@ -79,12 +78,12 @@ func WithMCP(configs ...agent.MCPConfig) Option {
 // The default permission handler is agent.ApproveAll; override it with
 // WithPermission.
 func Client(dir string, options ...Option) (*agent.Client, error) {
-	providerType := envOr("OPENCODE_PROVIDER", "openai")
+	providerType := envOr("AGENT_PROVIDER", "openai")
 	// The model id is provider-specific, so require it explicitly rather than
 	// silently defaulting to another provider's model.
-	model := os.Getenv("OPENCODE_MODEL")
+	model := os.Getenv("AGENT_MODEL")
 	if model == "" {
-		return nil, fmt.Errorf("OPENCODE_MODEL is required (the model id is provider-specific)")
+		return nil, fmt.Errorf("AGENT_MODEL is required (the model id is provider-specific)")
 	}
 	protocol, err := protocolFor(providerType)
 	if err != nil {
@@ -97,7 +96,7 @@ func Client(dir string, options ...Option) (*agent.Client, error) {
 				"requests will fail with 'Missing auth credential: value'\r\n",
 			providerType, apiKeyHint(providerType))
 	}
-	baseURL := os.Getenv("OPENCODE_BASE_URL")
+	baseURL := os.Getenv("AGENT_BASE_URL")
 	var limit schema.ModelLimit
 	if value := envLimits(); value != nil {
 		limit = schema.ModelLimit{Context: value.Context, Output: value.Output}
@@ -113,7 +112,7 @@ func Client(dir string, options ...Option) (*agent.Client, error) {
 			if err != nil {
 				return info, err
 			}
-			if providerID := os.Getenv("OPENCODE_PROVIDER_ID"); providerID != "" {
+			if providerID := os.Getenv("AGENT_PROVIDER_ID"); providerID != "" {
 				info.ProviderID = schema.ProviderID(providerID)
 			}
 			return info, nil
@@ -140,7 +139,7 @@ func Client(dir string, options ...Option) (*agent.Client, error) {
 	return client, nil
 }
 
-// protocolFor maps the OPENCODE_PROVIDER value to a native protocol id.
+// protocolFor maps the AGENT_PROVIDER value to a native protocol id.
 func protocolFor(providerType string) (schema.ProtocolID, error) {
 	switch providerType {
 	case "", "openai":
@@ -152,15 +151,15 @@ func protocolFor(providerType string) (schema.ProtocolID, error) {
 	case "gemini":
 		return "gemini", nil
 	default:
-		return "", fmt.Errorf("unsupported OPENCODE_PROVIDER %q", providerType)
+		return "", fmt.Errorf("unsupported AGENT_PROVIDER %q", providerType)
 	}
 }
 
 // resolveAPIKey is the credential the provider's route auth uses:
-// OPENCODE_API_KEY first, then the provider's conventional env var. The generic
+// AGENT_API_KEY first, then the provider's conventional env var. The generic
 // openai-compatible provider has no fallback.
 func resolveAPIKey(providerType string) string {
-	if key := os.Getenv("OPENCODE_API_KEY"); key != "" {
+	if key := os.Getenv("AGENT_API_KEY"); key != "" {
 		return key
 	}
 	switch providerType {
@@ -168,7 +167,7 @@ func resolveAPIKey(providerType string) string {
 		return os.Getenv("ANTHROPIC_API_KEY")
 	case "openai-compatible":
 		// No env fallback: its route auth is BearerAuth(..., nil), so only the
-		// explicit OPENCODE_API_KEY (above) can satisfy it.
+		// explicit AGENT_API_KEY (above) can satisfy it.
 		return ""
 	default: // "openai", "" and the unknown-provider fallback route
 		return os.Getenv("OPENAI_API_KEY")
@@ -178,11 +177,11 @@ func resolveAPIKey(providerType string) string {
 func apiKeyHint(providerType string) string {
 	switch providerType {
 	case "anthropic":
-		return "OPENCODE_API_KEY / ANTHROPIC_API_KEY"
+		return "AGENT_API_KEY / ANTHROPIC_API_KEY"
 	case "openai-compatible":
-		return "OPENCODE_API_KEY"
+		return "AGENT_API_KEY"
 	default:
-		return "OPENCODE_API_KEY / OPENAI_API_KEY"
+		return "AGENT_API_KEY / OPENAI_API_KEY"
 	}
 }
 
@@ -264,12 +263,12 @@ func projectRoot(start string) string {
 	return filepath.VolumeName(start) + string(filepath.Separator)
 }
 
-// envLimits reads OPENCODE_CONTEXT_LIMIT / OPENCODE_OUTPUT_LIMIT so the runner
+// envLimits reads AGENT_CONTEXT_LIMIT / AGENT_OUTPUT_LIMIT so the runner
 // can compact history before the provider rejects an oversized request. Without
 // limits, automatic compaction is disabled.
 func envLimits() *llmschema.ModelLimits {
-	context := envInt("OPENCODE_CONTEXT_LIMIT")
-	output := envInt("OPENCODE_OUTPUT_LIMIT")
+	context := envInt("AGENT_CONTEXT_LIMIT")
+	output := envInt("AGENT_OUTPUT_LIMIT")
 	if context == 0 && output == 0 {
 		return nil
 	}

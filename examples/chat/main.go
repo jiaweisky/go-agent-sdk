@@ -65,7 +65,7 @@ func run() error {
 
 	// Client.On sees every session, so subagent (task) sessions are rendered
 	// nested under their task.
-	renderer := newChat(console, client, session.ID(), os.Getenv("OPENCODE_MODEL"))
+	renderer := newChat(console, client, session.ID(), os.Getenv("AGENT_MODEL"))
 	client.On(renderer.handle)
 	writeBanner(console, yolo)
 
@@ -270,10 +270,10 @@ func parseAnswer(input string, options []schema.QuestionOption) []string {
 }
 
 // weatherMCP configures an optional local weather MCP server (stdio). It is
-// enabled only when OPENCODE_WEATHER_MCP points at the server entry script;
+// enabled only when AGENT_WEATHER_MCP points at the server entry script;
 // AMAP_API_KEY is passed through to the server. No path or key is hardcoded.
 func weatherMCP() []agent.MCPConfig {
-	server := os.Getenv("OPENCODE_WEATHER_MCP")
+	server := os.Getenv("AGENT_WEATHER_MCP")
 	if server == "" {
 		return nil
 	}

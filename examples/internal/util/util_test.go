@@ -7,7 +7,7 @@ import (
 )
 
 func TestResolveAPIKey(t *testing.T) {
-	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("AGENT_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
@@ -31,18 +31,18 @@ func TestResolveAPIKey(t *testing.T) {
 	if got := resolveAPIKey("openai-compatible"); got != "" {
 		t.Fatalf("openai-compatible = %q", got)
 	}
-	// OPENCODE_API_KEY wins for every provider.
-	t.Setenv("OPENCODE_API_KEY", "sk-opencode")
+	// AGENT_API_KEY wins for every provider.
+	t.Setenv("AGENT_API_KEY", "sk-test")
 	for _, provider := range []string{"openai", "anthropic", "openai-compatible"} {
-		if got := resolveAPIKey(provider); got != "sk-opencode" {
-			t.Fatalf("%s = %q, want sk-opencode", provider, got)
+		if got := resolveAPIKey(provider); got != "sk-test" {
+			t.Fatalf("%s = %q, want sk-test", provider, got)
 		}
 	}
 }
 
 func TestLoadDotEnv(t *testing.T) {
 	dir := t.TempDir()
-	content := "# comment\nOPENCODE_DOTENV_TEST=hello\nQUOTED=\"world\"\n"
+	content := "# comment\nAGENT_DOTENV_TEST=hello\nQUOTED=\"world\"\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -55,11 +55,11 @@ func TestLoadDotEnv(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
 
-	t.Setenv("OPENCODE_DOTENV_TEST", "original") // registers restore
-	_ = os.Unsetenv("OPENCODE_DOTENV_TEST")
+	t.Setenv("AGENT_DOTENV_TEST", "original") // registers restore
+	_ = os.Unsetenv("AGENT_DOTENV_TEST")
 
 	LoadDotEnv()
-	if got := os.Getenv("OPENCODE_DOTENV_TEST"); got != "hello" {
+	if got := os.Getenv("AGENT_DOTENV_TEST"); got != "hello" {
 		t.Fatalf("value = %q, want hello", got)
 	}
 	if got := os.Getenv("QUOTED"); got != "world" {

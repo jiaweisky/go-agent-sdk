@@ -6,30 +6,30 @@ Runnable examples for the go-agent-sdk high-level `agent` package.
 
 | Variable | Description | Default |
 |---|---|---|
-| `OPENCODE_MODEL` | Model id (required; provider-specific, so there is no default) | — |
-| `OPENCODE_PROVIDER` | Provider type: `openai`, `anthropic`, `openai-compatible`, or `gemini` | `openai` |
-| `OPENCODE_PROVIDER_ID` | Provider id for `openai-compatible` (e.g. `deepseek`) | `openai-compatible` |
-| `OPENCODE_BASE_URL` | Provider base URL | provider default |
-| `OPENCODE_API_KEY` | Provider API key (falls back to `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) | — |
-| `OPENCODE_CONTEXT_LIMIT` | Model context limit; with `OPENCODE_OUTPUT_LIMIT` it enables automatic compaction | — |
-| `OPENCODE_OUTPUT_LIMIT` | Model output limit | — |
+| `AGENT_MODEL` | Model id (required; provider-specific, so there is no default) | — |
+| `AGENT_PROVIDER` | Provider type: `openai`, `anthropic`, `openai-compatible`, or `gemini` | `openai` |
+| `AGENT_PROVIDER_ID` | Provider id for `openai-compatible` (e.g. `deepseek`) | `openai-compatible` |
+| `AGENT_BASE_URL` | Provider base URL | provider default |
+| `AGENT_API_KEY` | Provider API key (falls back to `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) | — |
+| `AGENT_CONTEXT_LIMIT` | Model context limit; with `AGENT_OUTPUT_LIMIT` it enables automatic compaction | — |
+| `AGENT_OUTPUT_LIMIT` | Model output limit | — |
 
 Example:
 
 ```sh
-export OPENCODE_PROVIDER=openai
-export OPENCODE_API_KEY=sk-...
-export OPENCODE_MODEL=gpt-4o
+export AGENT_PROVIDER=openai
+export AGENT_API_KEY=sk-...
+export AGENT_MODEL=gpt-4o
 ```
 
 For an OpenAI-compatible endpoint:
 
 ```sh
-export OPENCODE_PROVIDER=openai-compatible
-export OPENCODE_PROVIDER_ID=deepseek
-export OPENCODE_BASE_URL=https://api.deepseek.com/v1
-export OPENCODE_API_KEY=...
-export OPENCODE_MODEL=deepseek-chat
+export AGENT_PROVIDER=openai-compatible
+export AGENT_PROVIDER_ID=deepseek
+export AGENT_BASE_URL=https://api.deepseek.com/v1
+export AGENT_API_KEY=...
+export AGENT_MODEL=deepseek-chat
 ```
 
 ## chat
