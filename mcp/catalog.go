@@ -9,12 +9,12 @@ import (
 
 var sanitizePattern = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
-// Sanitize mirrors McpCatalog.sanitize.
+// Sanitize replaces every character a tool name cannot contain with "_".
 func Sanitize(value string) string {
 	return sanitizePattern.ReplaceAllString(value, "_")
 }
 
-// ToolName mirrors McpCatalog.toolName: "<sanitized server>_<sanitized name>".
+// ToolName is "<sanitized server>_<sanitized tool>".
 func ToolName(server, name string) string {
 	return Sanitize(server) + "_" + Sanitize(name)
 }
@@ -43,15 +43,14 @@ func serverCapabilities(session *sdk.ClientSession) *sdk.ServerCapabilities {
 	return initialized.Capabilities
 }
 
-// serverSupportsTools mirrors `client.getServerCapabilities()?.tools`, the guard
-// index.ts applies before calling McpCatalog.defs.
+// serverSupportsTools reports whether a server advertises the tools capability.
 func serverSupportsTools(session *sdk.ClientSession) bool {
 	caps := serverCapabilities(session)
 	return caps != nil && caps.Tools != nil
 }
 
-// ListPrompts mirrors McpCatalog.prompts: servers that do not advertise the
-// prompts capability are not queried and yield no prompts.
+// ListPrompts lists a server's prompts; a server without the prompts capability
+// yields none.
 func ListPrompts(ctx context.Context, session *sdk.ClientSession) ([]*sdk.Prompt, error) {
 	caps := serverCapabilities(session)
 	if caps == nil || caps.Prompts == nil {
@@ -67,8 +66,8 @@ func ListPrompts(ctx context.Context, session *sdk.ClientSession) ([]*sdk.Prompt
 	return prompts, nil
 }
 
-// ListResources mirrors McpCatalog.resources: servers that do not advertise the
-// resources capability are not queried and yield no resources.
+// ListResources lists a server's resources; a server without the resources
+// capability yields none.
 func ListResources(ctx context.Context, session *sdk.ClientSession) ([]*sdk.Resource, error) {
 	caps := serverCapabilities(session)
 	if caps == nil || caps.Resources == nil {
@@ -84,8 +83,8 @@ func ListResources(ctx context.Context, session *sdk.ClientSession) ([]*sdk.Reso
 	return resources, nil
 }
 
-// ListResourceTemplates mirrors McpCatalog.resourceTemplates: servers that do
-// not advertise the resources capability are not queried.
+// ListResourceTemplates lists a server's resource templates; a server without the
+// resources capability yields none.
 func ListResourceTemplates(ctx context.Context, session *sdk.ClientSession) ([]*sdk.ResourceTemplate, error) {
 	caps := serverCapabilities(session)
 	if caps == nil || caps.Resources == nil {

@@ -7,7 +7,8 @@ import (
 	"strings"
 )
 
-// DiffChange mirrors a jsdiff change object produced by `diffLines`.
+// DiffChange is one changed block: whether it was added, removed or kept, and its
+// lines.
 type DiffChange struct {
 	Count   int
 	Added   bool
@@ -17,9 +18,8 @@ type DiffChange struct {
 
 var diffLineSeparator = regexp.MustCompile(`(\n|\r\n)`)
 
-// diffTokenize mirrors jsdiff's line tokenizer: split into content lines and
-// newline separators, then merge each separator into its preceding content
-// line. The trailing empty token produced by a final newline is dropped.
+// diffTokenize splits text into lines, keeping each line's trailing newline. The
+// empty token a final newline produces is dropped.
 func diffTokenize(value string) []string {
 	matches := diffLineSeparator.FindAllStringIndex(value, -1)
 	parts := make([]string, 0, len(matches)*2+1)
@@ -67,7 +67,7 @@ type diffPath struct {
 	lastComponent *diffComponent
 }
 
-// DiffLines mirrors jsdiff's `diffLines` for the default (no-options) case.
+// DiffLines returns the line-level changes between two texts.
 func DiffLines(oldStr, newStr string) []DiffChange {
 	oldTokens := diffRemoveEmpty(diffTokenize(oldStr))
 	newTokens := diffRemoveEmpty(diffTokenize(newStr))
@@ -217,8 +217,8 @@ type diffHunk struct {
 	lines    []string
 }
 
-// diffSplitLines mirrors jsdiff's `splitLines`: it keeps the trailing newline
-// on every line except a final line that has no newline.
+// diffSplitLines splits text into lines, keeping the trailing newline on every
+// line except a final line that has none.
 func diffSplitLines(text string) []string {
 	hasTrailingNewline := strings.HasSuffix(text, "\n")
 	parts := strings.Split(text, "\n")
@@ -365,8 +365,7 @@ func formatPatch(oldFileName, newFileName string, hunks []diffHunk) string {
 	return strings.Join(ret, "\n") + "\n"
 }
 
-// CreateTwoFilesPatch mirrors jsdiff's `createTwoFilesPatch` for the default
-// (no-options) case.
+// CreateTwoFilesPatch renders a unified diff between two texts.
 func CreateTwoFilesPatch(oldFileName, newFileName, oldStr, newStr string) string {
 	return formatPatch(oldFileName, newFileName, structuredPatch(oldFileName, newFileName, oldStr, newStr))
 }

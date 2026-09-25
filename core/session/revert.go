@@ -9,7 +9,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// RevertMessageNotFoundError mirrors SessionRevert.MessageNotFoundError.
+// RevertMessageNotFoundError reports a revert target message that does not exist.
 type RevertMessageNotFoundError struct {
 	SessionID schema.SessionID
 	MessageID schema.MessageID
@@ -26,8 +26,8 @@ type RevertSnapshot interface {
 	Diff(from, to string, paths []schema.RelativePath) ([]schema.RevertFileDiff, error)
 }
 
-// RevertPlan mirrors SessionRevert.plan: it maps each file touched by later
-// assistant snapshots to the snapshot tree it should be restored from.
+// RevertPlan maps each file touched by later assistant snapshots to the snapshot
+// tree it should be restored from.
 func RevertPlan(db DB, sessionID schema.SessionID, messageID schema.MessageID) (map[schema.RelativePath]string, error) {
 	var boundary int64
 	err := db.QueryRow(
@@ -74,7 +74,7 @@ func RevertPlan(db DB, sessionID schema.SessionID, messageID schema.MessageID) (
 	return files, rows.Err()
 }
 
-// RevertStage mirrors SessionRevert.stage.
+// RevertStage records the files to restore and the snapshots to restore them from.
 func RevertStage(
 	db DB,
 	events EventPublisher,
@@ -157,7 +157,7 @@ func RevertStage(
 	return revert, nil
 }
 
-// RevertClear mirrors SessionRevert.clear.
+// RevertClear drops a staged revert.
 func RevertClear(events EventPublisher, snapshot RevertSnapshot, session schema.SessionInfo) error {
 	if session.Revert == nil {
 		return nil
@@ -178,7 +178,7 @@ func RevertClear(events EventPublisher, snapshot RevertSnapshot, session schema.
 	return err
 }
 
-// RevertCommit mirrors SessionRevert.commit.
+// RevertCommit applies a staged revert and publishes the event.
 func RevertCommit(events EventPublisher, session schema.SessionInfo) error {
 	if session.Revert == nil {
 		return nil

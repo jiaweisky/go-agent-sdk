@@ -10,7 +10,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// LifecycleConflict mirrors SessionInput.LifecycleConflict.
+// LifecycleConflict reports an input whose message already exists.
 type LifecycleConflict struct {
 	ID schema.MessageID
 }
@@ -68,7 +68,7 @@ func encodePrompt(prompt schema.Prompt) string {
 	return string(data)
 }
 
-// Find mirrors SessionInput.find.
+// Find returns the admitted input for a message id, or nil.
 func Find(db DB, id schema.MessageID) (*schema.SessionInputAdmitted, error) {
 	row := db.QueryRow("SELECT "+inputSelectColumns+" FROM `session_input` WHERE `id` = ?", string(id))
 	inputRow, err := scanInputRow(row)
@@ -85,7 +85,7 @@ func Find(db DB, id schema.MessageID) (*schema.SessionInputAdmitted, error) {
 	return &admitted, nil
 }
 
-// AdmitInput mirrors SessionInput.admit's input.
+// AdmitInput describes a prompt to admit.
 type AdmitInput struct {
 	ID        schema.MessageID
 	SessionID schema.SessionID
@@ -93,7 +93,7 @@ type AdmitInput struct {
 	Delivery  schema.SessionDelivery
 }
 
-// Admit mirrors SessionInput.admit.
+// Admit records a prompt as admitted and publishes the event.
 func Admit(db DB, events EventPublisher, input AdmitInput) (schema.SessionInputAdmitted, error) {
 	existing, err := Find(db, input.ID)
 	if err != nil {
@@ -129,7 +129,7 @@ func Admit(db DB, events EventPublisher, input AdmitInput) (schema.SessionInputA
 	}, nil
 }
 
-// ProjectAdmittedInput mirrors SessionInput.projectAdmitted's input.
+// ProjectAdmittedInput describes an admitted input to project.
 type ProjectAdmittedInput struct {
 	AdmittedSeq int64
 	ID          schema.MessageID
@@ -139,7 +139,7 @@ type ProjectAdmittedInput struct {
 	TimeCreated int64
 }
 
-// ProjectAdmitted mirrors SessionInput.projectAdmitted.
+// ProjectAdmitted applies an admitted input to the stored session state.
 func ProjectAdmitted(db DB, input ProjectAdmittedInput) error {
 	var existing string
 	err := db.QueryRow("SELECT `id` FROM `session_message` WHERE `id` = ?", string(input.ID)).Scan(&existing)
@@ -170,7 +170,7 @@ func ProjectAdmitted(db DB, input ProjectAdmittedInput) error {
 	return nil
 }
 
-// ProjectPromptedInput mirrors SessionInput.projectPrompted's input.
+// ProjectPromptedInput describes a prompted input to project.
 type ProjectPromptedInput struct {
 	ID          schema.MessageID
 	SessionID   schema.SessionID
@@ -180,7 +180,7 @@ type ProjectPromptedInput struct {
 	PromotedSeq int64
 }
 
-// ProjectPrompted mirrors SessionInput.projectPrompted.
+// ProjectPrompted applies a prompted input to the stored session state.
 func ProjectPrompted(db DB, input ProjectPromptedInput) error {
 	row := db.QueryRow(
 		"UPDATE `session_input` SET `promoted_seq` = ? WHERE `id` = ? AND `session_id` = ? AND `promoted_seq` IS NULL RETURNING "+inputSelectColumns,
@@ -224,7 +224,7 @@ func ProjectPrompted(db DB, input ProjectPromptedInput) error {
 	return err
 }
 
-// HasPending mirrors SessionInput.hasPending.
+// HasPending reports whether an admitted input of that delivery is still waiting.
 func HasPending(db DB, sessionID schema.SessionID, delivery schema.SessionDelivery) (bool, error) {
 	var id string
 	err := db.QueryRow(
@@ -240,7 +240,8 @@ func HasPending(db DB, sessionID schema.SessionID, delivery schema.SessionDelive
 	return true, nil
 }
 
-// Equivalent mirrors SessionInput.equivalent.
+// Equivalent reports whether an admitted input matches the same session, prompt
+// and delivery.
 func Equivalent(input schema.SessionInputAdmitted, sessionID schema.SessionID, prompt schema.Prompt, delivery schema.SessionDelivery) bool {
 	return input.Delivery == delivery && matchesPrompt(input, sessionID, prompt)
 }
@@ -282,7 +283,7 @@ func publishInputs(db DB, events EventPublisher, sessionID schema.SessionID, row
 	return len(rows), nil
 }
 
-// PromoteSteers mirrors SessionInput.promoteSteers.
+// PromoteSteers promotes every steering input admitted up to the cutoff.
 func PromoteSteers(db DB, events EventPublisher, sessionID schema.SessionID, cutoff int64) (int, error) {
 	rows, err := db.Query(
 		"SELECT "+inputSelectColumns+" FROM `session_input` WHERE `session_id` = ? AND `promoted_seq` IS NULL AND `delivery` = 'steer' AND `admitted_seq` <= ? ORDER BY `admitted_seq` ASC",
@@ -307,7 +308,8 @@ func PromoteSteers(db DB, events EventPublisher, sessionID schema.SessionID, cut
 	return publishInputs(db, events, sessionID, pending)
 }
 
-// PromoteNextQueued mirrors SessionInput.promoteNextQueued.
+// PromoteNextQueued promotes the oldest queued input, reporting whether there was
+// one.
 func PromoteNextQueued(db DB, events EventPublisher, sessionID schema.SessionID) (bool, error) {
 	row := db.QueryRow(
 		"SELECT "+inputSelectColumns+" FROM `session_input` WHERE `session_id` = ? AND `promoted_seq` IS NULL AND `delivery` = 'queue' ORDER BY `admitted_seq` ASC LIMIT 1",

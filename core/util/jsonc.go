@@ -5,10 +5,9 @@ import (
 	"errors"
 )
 
-// CleanJSONC strips JSONC line/block comments and trailing commas, returning
-// standard JSON suitable for encoding/json. It mirrors jsonc-parser's
-// `parse(text, errors, { allowTrailingComma: true })` followed by a decode:
-// callers treat a subsequent json.Unmarshal failure as an invalid document.
+// CleanJSONC strips JSONC line and block comments and trailing commas, returning
+// standard JSON suitable for encoding/json. A subsequent json.Unmarshal failure
+// means the document itself is invalid.
 func CleanJSONC(text string) ([]byte, error) {
 	var out bytes.Buffer
 	i := 0

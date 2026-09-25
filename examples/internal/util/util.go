@@ -156,7 +156,7 @@ func protocolFor(providerType string) (schema.ProtocolID, error) {
 	}
 }
 
-// resolveAPIKey mirrors the credential the provider's route auth uses:
+// resolveAPIKey is the credential the provider's route auth uses:
 // OPENCODE_API_KEY first, then the provider's conventional env var. The generic
 // openai-compatible provider has no fallback.
 func resolveAPIKey(providerType string) string {
@@ -255,7 +255,7 @@ func findDotEnv() (string, bool) {
 	}
 }
 
-// projectRoot mirrors core's project boundary (core/project.go): the directory
+// projectRoot is core's project boundary: the directory
 // holding the nearest .git, else the filesystem root.
 func projectRoot(start string) string {
 	if matches := core.Up([]string{".git"}, start); len(matches) > 0 {

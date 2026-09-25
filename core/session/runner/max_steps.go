@@ -1,6 +1,6 @@
 package runner
 
-// MaxStepsPrompt mirrors MAX_STEPS_PROMPT.
+// MaxStepsPrompt is appended to the conversation when the step limit is reached.
 const MaxStepsPrompt = `CRITICAL - MAXIMUM STEPS REACHED
 
 The maximum number of steps allowed for this task has been reached. Tools are disabled until next user input. Respond with text only.

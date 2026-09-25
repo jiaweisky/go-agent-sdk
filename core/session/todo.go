@@ -7,7 +7,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// Todo mirrors SessionTodo.Service.
+// Todo is the session todo service.
 type Todo struct {
 	db     *database.Database
 	events EventPublisher

@@ -6,12 +6,12 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// MemoryState mirrors SessionMessageUpdater.MemoryState.
+// MemoryState is the in-memory view of a session's messages.
 type MemoryState struct {
 	Messages []schema.SessionMessage
 }
 
-// Adapter mirrors SessionMessageUpdater.Adapter.
+// Adapter applies session events to a message store.
 type Adapter interface {
 	GetCurrentAssistant() (*schema.SessionMessageAssistant, bool)
 	GetAssistant(messageID schema.MessageID) (*schema.SessionMessageAssistant, bool)
@@ -43,7 +43,7 @@ func sessionMessageID(message schema.SessionMessage) schema.MessageID {
 	return ""
 }
 
-// Memory mirrors SessionMessageUpdater.memory.
+// Memory returns the in-memory adapter.
 func Memory(state *MemoryState) Adapter {
 	assistantIndex := func(messageID schema.MessageID) int {
 		for i := len(state.Messages) - 1; i >= 0; i-- {
@@ -199,7 +199,7 @@ func updateOwnedAssistant(adapter Adapter, messageID schema.MessageID, recipe fu
 	return adapter.UpdateAssistant(*assistant)
 }
 
-// Update mirrors SessionMessageUpdater.update.
+// Update applies one event through the adapter.
 func Update(adapter Adapter, event schema.EventPayload) error {
 	switch event.Type {
 	case schema.SessionEventAgentSwitched.Type:

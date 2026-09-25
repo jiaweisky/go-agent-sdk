@@ -12,8 +12,8 @@ import (
 	"github.com/user/go-agent-sdk/jsonschema"
 )
 
-// AdaptMCPTool mirrors McpCatalog.convertTool: it binds an MCP tool definition
-// to its session and returns a core tool.
+// AdaptMCPTool binds an MCP tool definition to its session and returns a core
+// tool.
 func AdaptMCPTool(def *sdk.Tool, session *sdk.ClientSession, server string, timeout time.Duration) tool.Tool {
 	return tool.Make(tool.Config[map[string]any, any, any]{
 		Description: def.Description,
@@ -41,9 +41,8 @@ func AdaptMCPTool(def *sdk.Tool, session *sdk.ClientSession, server string, time
 	})
 }
 
-// MCPInputSchema mirrors convertTool's input-schema normalization: the schema is
-// spread from the server, forced to an object with a properties map and
-// additionalProperties:false.
+// MCPInputSchema normalizes a server's input schema: forced to an object with a
+// properties map and additionalProperties:false.
 func MCPInputSchema(def *sdk.Tool) map[string]any {
 	schema := map[string]any{}
 	if raw, ok := def.InputSchema.(map[string]any); ok {

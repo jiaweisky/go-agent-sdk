@@ -13,8 +13,8 @@ import (
 
 const GrepName = "grep"
 
-// GrepMaxSafeInteger mirrors Number.MAX_SAFE_INTEGER, the default match bound
-// used when the caller does not supply a limit.
+// GrepMaxSafeInteger is the default match bound, used when the caller supplies no
+// limit.
 const GrepMaxSafeInteger = int64(1)<<53 - 1
 
 // grepDefaultLimit returns Number.MAX_SAFE_INTEGER clamped to the platform int
@@ -202,8 +202,8 @@ func executeGrep(deps GrepDeps, input GrepInput, ctx Context) (GrepOutput, error
 	return result, nil
 }
 
-// grepResolve mirrors path.resolve: absolute inputs are returned cleaned and
-// relative inputs are resolved against the base directory.
+// grepResolve resolves a path against the base directory; an absolute input is
+// returned cleaned.
 func grepResolve(directory, value string) string {
 	if filepath.IsAbs(value) {
 		return filepath.Clean(value)

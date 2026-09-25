@@ -10,7 +10,7 @@ import (
 	"github.com/user/go-agent-sdk/core/util"
 )
 
-// Info mirrors Reference.Info (only the fields guidance needs).
+// Info is a reference as the guidance needs it.
 type Info struct {
 	Name        string
 	Path        string
@@ -22,14 +22,14 @@ type Lister interface {
 	List() ([]Info, error)
 }
 
-// Summary mirrors ReferenceGuidance.Summary.
+// Summary is a reference's name, path and description, for the system context.
 type Summary struct {
 	Name        string  `json:"name"`
 	Path        string  `json:"path"`
 	Description *string `json:"description,omitempty"`
 }
 
-// Guidance mirrors the ReferenceGuidance service.
+// Guidance renders the available references into the system context.
 type Guidance struct {
 	references Lister
 	locale     language.Tag
@@ -39,7 +39,7 @@ func NewGuidance(references Lister, locale language.Tag) *Guidance {
 	return &Guidance{references: references, locale: locale}
 }
 
-// Load mirrors ReferenceGuidance.load.
+// Load renders the available references.
 func (g *Guidance) Load() (systemcontext.SystemContext, error) {
 	all, err := g.references.List()
 	if err != nil {

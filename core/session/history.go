@@ -8,7 +8,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// LatestCompaction mirrors SessionHistory.latestCompaction.
+// LatestCompaction is the sequence of the session's latest compaction, or nil.
 func LatestCompaction(db *database.Database, sessionID schema.SessionID) (*int64, error) {
 	return latestCompaction(db.DB, sessionID)
 }
@@ -106,7 +106,7 @@ func decodeMessageRows(rows []SessionMessageRow) ([]schema.SessionMessage, error
 	return result, nil
 }
 
-// Load mirrors SessionHistory.load.
+// Load returns the session's stored messages.
 func Load(db *database.Database, sessionID schema.SessionID) ([]schema.SessionMessage, error) {
 	baselineSeq, err := contextEpochBaselineSeq(db, sessionID)
 	if err != nil {
@@ -123,13 +123,13 @@ func Load(db *database.Database, sessionID schema.SessionID) ([]schema.SessionMe
 	return decodeMessageRows(rows)
 }
 
-// HistoryEntry mirrors SessionHistory.entriesForRunner entries.
+// HistoryEntry is one message with its sequence, for the runner's baseline.
 type HistoryEntry struct {
 	Seq     int64
 	Message schema.SessionMessage
 }
 
-// EntriesForRunner mirrors SessionHistory.entriesForRunner.
+// EntriesForRunner returns the messages after a baseline sequence, in order.
 func EntriesForRunner(db *database.Database, sessionID schema.SessionID, baselineSeq int64) ([]HistoryEntry, error) {
 	compaction, err := LatestCompaction(db, sessionID)
 	if err != nil {
@@ -150,7 +150,7 @@ func EntriesForRunner(db *database.Database, sessionID schema.SessionID, baselin
 	return result, nil
 }
 
-// LoadForRunner mirrors SessionHistory.loadForRunner.
+// LoadForRunner returns the messages the runner should send after a baseline.
 func LoadForRunner(db *database.Database, sessionID schema.SessionID, baselineSeq int64) ([]schema.SessionMessage, error) {
 	entries, err := EntriesForRunner(db, sessionID, baselineSeq)
 	if err != nil {

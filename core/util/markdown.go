@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// MarkdownResult mirrors the gray-matter result fields used by ConfigMarkdown.
+// MarkdownResult is a parsed markdown document: its frontmatter and its body.
 type MarkdownResult struct {
 	Data    any
 	Content string
@@ -21,8 +21,8 @@ var (
 	markdownLineBreak   = regexp.MustCompile(`\r?\n`)
 )
 
-// ParseMarkdown mirrors ConfigMarkdown.parse: it extracts and parses YAML
-// frontmatter, retrying with SanitizeMarkdown when the YAML is invalid.
+// ParseMarkdown extracts and parses a markdown document's YAML frontmatter,
+// retrying with SanitizeMarkdown when the YAML is invalid.
 func ParseMarkdown(content string) (MarkdownResult, error) {
 	result, err := parseMarkdownRaw(content)
 	if err == nil {
@@ -38,7 +38,7 @@ func ParseMarkdown(content string) (MarkdownResult, error) {
 	return parseMarkdownRaw(sanitized)
 }
 
-// ParseMarkdownOption mirrors ConfigMarkdown.parseOption.
+// ParseMarkdownOption is ParseMarkdown for callers that do not need the error.
 func ParseMarkdownOption(content string) (MarkdownResult, bool) {
 	result, err := ParseMarkdown(content)
 	if err != nil {
@@ -47,8 +47,8 @@ func ParseMarkdownOption(content string) (MarkdownResult, bool) {
 	return result, true
 }
 
-// SanitizeMarkdown mirrors ConfigMarkdown.sanitize: unquoted colons in
-// frontmatter values are retried as YAML block scalars.
+// SanitizeMarkdown retries unquoted colons in frontmatter values as YAML block
+// scalars.
 func SanitizeMarkdown(content string) string {
 	match := markdownFrontmatter.FindStringSubmatchIndex(content)
 	if match == nil {

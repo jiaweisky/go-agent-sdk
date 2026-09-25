@@ -1,6 +1,6 @@
 // Package jsonschema provides a typed JSON Schema model for tool definitions.
 //
-// It mirrors the subset of Effect's Schema used by core tools. A single Schema
+// It covers the subset of JSON Schema the core tools need. A single Schema
 // yields two projections from one source:
 //
 //   - Model renders the JSON Schema sent to models. Object schemas are closed

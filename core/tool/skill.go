@@ -53,7 +53,7 @@ type SkillToolDeps struct {
 	Permission core.Permission
 }
 
-// SkillToModelOutput mirrors SkillTool.toModelOutput.
+// SkillToModelOutput renders a loaded skill and its files for the model.
 func SkillToModelOutput(skill core.SkillInfo, files []string) string {
 	directory := filepath.Dir(string(skill.Location))
 	lines := []string{

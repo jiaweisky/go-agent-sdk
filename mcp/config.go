@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// DefaultTimeout mirrors DEFAULT_TIMEOUT.
+// DefaultTimeout is the call timeout used when a server config sets none.
 const DefaultTimeout = 30 * time.Second
 
 // ServerConfig describes a configured MCP server. Type is "local" or "remote".
@@ -39,7 +39,7 @@ func (s ServerConfig) timeout() time.Duration {
 	return DefaultTimeout
 }
 
-// Status mirrors MCP.Status (the status union).
+// Status is a server's connection status.
 type Status struct {
 	// Status is one of: connected, disabled, failed, needs_auth,
 	// needs_client_registration.

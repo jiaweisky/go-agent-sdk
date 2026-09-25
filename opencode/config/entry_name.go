@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// ConfigEntryNameFromPath mirrors configEntryNameFromPath: strip a known prefix
-// from an already-relative path, then drop the extension.
+// ConfigEntryNameFromPath strips a known prefix from an already-relative path,
+// then drops the extension.
 func ConfigEntryNameFromPath(relativePath string, prefixes []string) string {
 	normalized := path.Clean(strings.ReplaceAll(relativePath, "\\", "/"))
 	candidate, matched := "", false

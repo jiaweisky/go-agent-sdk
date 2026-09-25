@@ -12,8 +12,8 @@ import (
 
 const GlobName = "glob"
 
-// GlobMaxSafeInteger mirrors Number.MAX_SAFE_INTEGER, the default result bound
-// used when the caller does not supply a limit.
+// GlobMaxSafeInteger is the default result bound, used when the caller supplies
+// no limit.
 const GlobMaxSafeInteger = int64(1)<<53 - 1
 
 // globDefaultLimit returns Number.MAX_SAFE_INTEGER clamped to the platform int
@@ -157,8 +157,8 @@ func executeGlob(deps GlobDeps, input GlobInput, ctx Context) (GlobOutput, error
 	return result, nil
 }
 
-// globResolve mirrors path.resolve: absolute inputs are returned cleaned and
-// relative inputs are resolved against the base directory.
+// globResolve resolves a path against the base directory; an absolute input is
+// returned cleaned.
 func globResolve(directory, value string) string {
 	if filepath.IsAbs(value) {
 		return filepath.Clean(value)

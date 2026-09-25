@@ -31,17 +31,17 @@ type Source[A any] struct {
 	Removed  func(previous A) string
 }
 
-// SourceSnapshot mirrors SystemContext.SourceSnapshot.
+// SourceSnapshot is one source's rendered value and its version.
 type SourceSnapshot struct {
 	Value   json.RawMessage `json:"value"`
 	Removed *string         `json:"removed,omitempty"`
 }
 
-// Snapshot mirrors SystemContext.Snapshot.
+// Snapshot is every source's snapshot, keyed by source key.
 type Snapshot map[Key]SourceSnapshot
 
-// DecodeSnapshot mirrors decoding SystemContext.Snapshot: it parses the stored
-// JSON and validates each source key and source snapshot shape.
+// DecodeSnapshot parses a stored snapshot and validates each source key and
+// source snapshot shape.
 func DecodeSnapshot(raw []byte) (Snapshot, error) {
 	var snapshot Snapshot
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
@@ -64,13 +64,14 @@ func DecodeSnapshot(raw []byte) (Snapshot, error) {
 	return snapshot, nil
 }
 
-// Generation mirrors SystemContext.Generation.
+// Generation is a rendered system context: its text and the snapshot it came
+// from.
 type Generation struct {
 	Baseline string
 	Snapshot Snapshot
 }
 
-// InitializationBlocked mirrors SystemContext.InitializationBlocked.
+// InitializationBlocked reports a source that could not be initialized.
 type InitializationBlocked struct {
 	Keys []Key
 }
@@ -79,7 +80,7 @@ func (e *InitializationBlocked) Error() string {
 	return fmt.Sprintf("System context initialization blocked by unavailable sources: %v", e.Keys)
 }
 
-// DuplicateKeyError mirrors SystemContext.DuplicateKeyError.
+// DuplicateKeyError reports two sources registered under the same key.
 type DuplicateKeyError struct {
 	Key Key
 }
@@ -88,7 +89,8 @@ func (e *DuplicateKeyError) Error() string {
 	return "Duplicate system context key: " + string(e.Key)
 }
 
-// ReconcileResult mirrors the tagged SystemContext.ReconcileResult union.
+// ReconcileResult is the outcome of reconciling a snapshot with a context: a
+// replacement, or the sources that changed.
 type ReconcileResult struct {
 	Tag        string // "Unchanged" | "Updated" | "ReplacementReady" | "ReplacementBlocked"
 	Text       string

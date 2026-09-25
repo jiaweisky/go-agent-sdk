@@ -83,8 +83,8 @@ type WebFetchOutput struct {
 
 const webFetchBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
 
-// WebFetchHTTPClient is the transport seam used by the tool. It mirrors the
-// Effect HttpClient capability so callers can inject fakes in tests.
+// WebFetchHTTPClient is the transport seam used by the tool, so callers can inject
+// fakes in tests.
 type WebFetchHTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }

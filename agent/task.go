@@ -18,7 +18,7 @@ import (
 
 const TaskName = "task"
 
-// TaskDescription mirrors packages/opencode/src/tool/task.txt.
+// TaskDescription is the task tool's description for the model.
 const TaskDescription = `Launch a new agent to handle complex, multistep tasks autonomously.
 
 When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
@@ -57,7 +57,7 @@ var TaskOutputSchema = jsonschema.Object(
 	jsonschema.Required("text", jsonschema.String()),
 )
 
-// TaskInput mirrors the task tool parameters.
+// TaskInput is the task tool's parameters.
 type TaskInput struct {
 	Description  string  `json:"description"`
 	Prompt       string  `json:"prompt"`
@@ -106,15 +106,15 @@ type TaskToolDeps struct {
 	Agents     *core.Agent
 	Runner     TaskRunner
 	// AgentPermissions are the calling agent's rules, used to filter the
-	// advertised subagent types (mirrors registry.describeTask).
+	// advertised subagent types.
 	AgentPermissions schema.PermissionRuleset
 	// Locale orders the advertised subagent types.
 	Locale language.Tag
 }
 
-// SubagentTypes mirrors the registry's describeTask: agents whose mode is not
-// "primary" and whose "task" permission is not denied for the caller, sorted by
-// name with the given locale.
+// SubagentTypes lists the agents the caller may delegate to: those whose mode is
+// not "primary" and whose "task" permission is not denied, sorted by name with the
+// given locale.
 func SubagentTypes(agents *core.Agent, permissions schema.PermissionRuleset, locale language.Tag) []schema.AgentInfo {
 	var items []schema.AgentInfo
 	for _, item := range agents.All() {
@@ -217,9 +217,9 @@ func RegisterTask(tools tool.Tools, deps TaskToolDeps) (func(), error) {
 	return tools.Register(map[string]tool.Tool{TaskName: MakeTask(deps)})
 }
 
-// DeriveSubagentSessionPermission mirrors deriveSubagentSessionPermission:
-// combine the parent session's deny + external_directory rules with default
-// todowrite/task denies unless the subagent's own ruleset already permits them.
+// DeriveSubagentSessionPermission combines the parent session's deny and
+// external_directory rules with default todowrite/task denies, unless the
+// subagent's own ruleset already permits them.
 func DeriveSubagentSessionPermission(parent schema.PermissionRuleset, subagent schema.AgentInfo) schema.PermissionRuleset {
 	canTask := hasPermissionAction(subagent.Permissions, TaskName)
 	canTodo := hasPermissionAction(subagent.Permissions, "todowrite")

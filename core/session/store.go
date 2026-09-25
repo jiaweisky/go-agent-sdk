@@ -8,7 +8,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// Store mirrors SessionStore.Service.
+// Store reads sessions, messages and their context from the database.
 type Store struct {
 	db *database.Database
 }
@@ -17,7 +17,7 @@ func NewStore(db *database.Database) *Store {
 	return &Store{db: db}
 }
 
-// Get mirrors SessionStore.get.
+// Get returns a session's info, or nil when it does not exist.
 func (s *Store) Get(sessionID schema.SessionID) (*schema.SessionInfo, error) {
 	row, err := scanSessionRow(s.db, sessionID)
 	if err != nil {
@@ -30,23 +30,23 @@ func (s *Store) Get(sessionID schema.SessionID) (*schema.SessionInfo, error) {
 	return &info, nil
 }
 
-// Context mirrors SessionStore.context.
+// Context returns the session's messages with their parts.
 func (s *Store) Context(sessionID schema.SessionID) ([]schema.SessionMessage, error) {
 	return Load(s.db, sessionID)
 }
 
-// RunnerContext mirrors SessionStore.runnerContext.
+// RunnerContext returns the messages after a baseline sequence.
 func (s *Store) RunnerContext(sessionID schema.SessionID, baselineSeq int64) ([]schema.SessionMessage, error) {
 	return LoadForRunner(s.db, sessionID, baselineSeq)
 }
 
-// StoreMessage mirrors SessionStore.message's return value.
+// StoreMessage is a stored message with its parts and sequence.
 type StoreMessage struct {
 	SessionID schema.SessionID
 	Message   schema.SessionMessage
 }
 
-// Message mirrors SessionStore.message.
+// Message returns one stored message, or nil.
 func (s *Store) Message(messageID schema.MessageID) (*StoreMessage, error) {
 	row := s.db.DB.QueryRow(
 		"SELECT `id`,`session_id`,`type`,`seq`,`time_created`,`time_updated`,`data` FROM `session_message` WHERE `id` = ?",

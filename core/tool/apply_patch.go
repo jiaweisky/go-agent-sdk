@@ -381,9 +381,8 @@ func applyPatchAssertFile(path string) error {
 	return nil
 }
 
-// applyPatchDecodeUtf8 mirrors `new TextDecoder("utf-8", {ignoreBOM: true})`:
-// invalid sequences become U+FFFD and a leading BOM is retained (the caller
-// strips it from `before`).
+// applyPatchDecodeUtf8 decodes UTF-8, replacing invalid sequences with U+FFFD and
+// keeping a leading BOM (the caller strips it from `before`).
 func applyPatchDecodeUtf8(content []byte) string {
 	return strings.ToValidUTF8(string(content), "\uFFFD")
 }

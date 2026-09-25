@@ -12,7 +12,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// LLMEventPublisherInput mirrors the Input type of createLLMEventPublisher.
+// LLMEventPublisherInput describes the session a publisher writes for.
 type LLMEventPublisherInput struct {
 	SessionID schema.SessionID
 	Agent     string
@@ -20,13 +20,13 @@ type LLMEventPublisherInput struct {
 	Snapshot  *string
 }
 
-// LLMEventTokenCache mirrors the cache shape of `tokens`.
+// LLMEventTokenCache is the cache read/write part of a step's tokens.
 type LLMEventTokenCache struct {
 	Read  int `json:"read"`
 	Write int `json:"write"`
 }
 
-// LLMEventTokens mirrors the `tokens` return value.
+// LLMEventTokens is a step's token usage, as the provider reported it.
 type LLMEventTokens struct {
 	Input     int                `json:"input"`
 	Output    int                `json:"output"`
@@ -37,7 +37,7 @@ type LLMEventTokens struct {
 	ProviderMetadata map[string]map[string]any `json:"providerMetadata,omitempty"`
 }
 
-// LLMEventStepSettlement mirrors the stepSettlement record.
+// LLMEventStepSettlement is the settled result of the last step.
 type LLMEventStepSettlement struct {
 	Finish string
 	Tokens LLMEventTokens
@@ -53,7 +53,7 @@ type llmToolEntry struct {
 	ProviderMetadata   llmschema.ProviderMetadata
 }
 
-// LLMEventPublisher mirrors the object returned by createLLMEventPublisher.
+// LLMEventPublisher translates streamed LLM events into durable session events.
 type LLMEventPublisher struct {
 	events session.EventPublisher
 	input  LLMEventPublisherInput
@@ -71,7 +71,7 @@ type LLMEventPublisher struct {
 	toolInput *llmFragmentSet
 }
 
-// NewLLMEventPublisher mirrors createLLMEventPublisher.
+// NewLLMEventPublisher builds a publisher for one session.
 func NewLLMEventPublisher(events session.EventPublisher, input LLMEventPublisherInput) *LLMEventPublisher {
 	p := &LLMEventPublisher{
 		events: events,
@@ -137,7 +137,7 @@ func (p *LLMEventPublisher) currentAssistantMessageID() (schema.MessageID, error
 	return *p.assistantMessageID, nil
 }
 
-// StartAssistant mirrors startAssistant.
+// StartAssistant opens the assistant message a step writes into.
 func (p *LLMEventPublisher) StartAssistant() (schema.MessageID, error) {
 	if p.assistantMessageID != nil {
 		return *p.assistantMessageID, nil
@@ -161,7 +161,7 @@ func (p *LLMEventPublisher) StartAssistant() (schema.MessageID, error) {
 	return id, nil
 }
 
-// Flush mirrors flush.
+// Flush closes the open text and reasoning parts.
 func (p *LLMEventPublisher) Flush() error {
 	if err := p.text.Flush(); err != nil {
 		return err
@@ -172,7 +172,7 @@ func (p *LLMEventPublisher) Flush() error {
 	return p.toolInput.Flush()
 }
 
-// FailAssistant mirrors failAssistant.
+// FailAssistant marks the assistant message as failed.
 func (p *LLMEventPublisher) FailAssistant(message string) error {
 	if p.assistantFailed {
 		return nil
@@ -195,7 +195,7 @@ func (p *LLMEventPublisher) FailAssistant(message string) error {
 	return err
 }
 
-// FailUnsettledTools mirrors failUnsettledTools.
+// FailUnsettledTools fails every tool call that never settled.
 func (p *LLMEventPublisher) FailUnsettledTools(message string, hostedOnly bool) error {
 	for _, callID := range p.toolOrder {
 		tool := p.tools[callID]
@@ -220,7 +220,7 @@ func (p *LLMEventPublisher) FailUnsettledTools(message string, hostedOnly bool) 
 	return nil
 }
 
-// AssistantMessageID mirrors assistantMessageID (the tool lookup).
+// AssistantMessageID is the assistant message a tool call belongs to.
 func (p *LLMEventPublisher) AssistantMessageID(callID string) (schema.MessageID, error) {
 	tool := p.tools[callID]
 	if tool == nil {
@@ -229,16 +229,16 @@ func (p *LLMEventPublisher) AssistantMessageID(callID string) (schema.MessageID,
 	return tool.AssistantMessageID, nil
 }
 
-// HasActiveAssistant mirrors hasActiveAssistant.
+// HasActiveAssistant reports whether an assistant message is open.
 func (p *LLMEventPublisher) HasActiveAssistant() bool { return p.assistantActive }
 
-// HasAssistantStarted mirrors hasAssistantStarted.
+// HasAssistantStarted reports whether an assistant message was opened.
 func (p *LLMEventPublisher) HasAssistantStarted() bool { return p.assistantMessageID != nil }
 
-// HasProviderError mirrors hasProviderError.
+// HasProviderError reports whether the step saw a provider error.
 func (p *LLMEventPublisher) HasProviderError() bool { return p.providerFailed }
 
-// StepSettlement mirrors stepSettlement.
+// StepSettlement is the last step's settlement, or nil.
 func (p *LLMEventPublisher) StepSettlement() *LLMEventStepSettlement { return p.stepSettlement }
 
 func (p *LLMEventPublisher) startToolInput(id, name string) error {
@@ -278,7 +278,7 @@ func (p *LLMEventPublisher) endToolInput(id, name string) error {
 	return p.toolInput.End(id, nil)
 }
 
-// Publish mirrors publish.
+// Publish folds one LLM event into the session's stored state and events.
 func (p *LLMEventPublisher) Publish(event llmschema.LLMEvent, outputPaths []string) error {
 	switch event.Type {
 	case llmschema.EventStepStart:
@@ -523,7 +523,8 @@ func runnerSettledOutput(value *llmschema.ToolOutput, result llmschema.ToolResul
 	return llmSettledOutput{Structured: runnerRecord(settled.Structured), Content: settled.Content}, nil
 }
 
-// llmToolProvider mirrors the `{ executed, metadata? }` provider object.
+// llmToolProvider is the tool's provider payload: whether it executed, and its
+// metadata.
 func llmToolProvider(executed bool, metadata llmschema.ProviderMetadata) map[string]any {
 	provider := map[string]any{"executed": executed}
 	if metadata != nil {
@@ -573,8 +574,8 @@ func llmSafe(value int) int {
 	return value
 }
 
-// llmFragmentSet mirrors the fragments() closure: ordered accumulation of
-// streamed chunks keyed by id.
+// llmFragmentSet accumulates streamed chunks, keyed by id and kept in first-seen
+// order.
 type llmFragmentSet struct {
 	name   string
 	chunks map[string][]string

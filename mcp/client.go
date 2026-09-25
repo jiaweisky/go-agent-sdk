@@ -48,8 +48,8 @@ type Client struct {
 	sessions   map[string]*sdk.ClientSession
 	status     map[string]Status
 	defs       map[string][]*sdk.Tool
-	// timeouts holds the per-server call timeout so Client.Tools can pass it to
-	// the adapted tools (mirrors convertTool's `timeout`).
+	// timeouts holds the per-server call timeout, so Client.Tools can pass it to
+	// the adapted tools.
 	timeouts map[string]time.Duration
 }
 
@@ -391,15 +391,13 @@ func (c *Client) snapshotSessions() map[string]*sdk.ClientSession {
 	return result
 }
 
-// promptKey mirrors McpCatalog.fetch's key for prompts:
-// sanitize(clientName) + ":" + sanitize(name).
+// promptKey is "<sanitized server>:<sanitized prompt>".
 func promptKey(server, name string) string {
 	return Sanitize(server) + ":" + Sanitize(name)
 }
 
-// resourceKey mirrors McpCatalog.fetch's key for resources and resource
-// templates: the client name with "%" and ":" escaped (so "server:uri" keys
-// stay unambiguous), then the raw URI or URI template.
+// resourceKey is "<escaped server>:<uri>", escaping "%" and ":" so a
+// "server:uri" key stays unambiguous.
 func resourceKey(server, uri string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(server, "%", "%25"), ":", "%3A") + ":" + uri
 }

@@ -204,8 +204,8 @@ func bashUnquote(value string) string {
 	return value
 }
 
-// bashResolve mirrors FSUtil.resolve: canonicalize the path, falling back to
-// the lexically resolved path when it does not exist.
+// bashResolve canonicalizes a path, falling back to the lexically resolved path
+// when it does not exist.
 func bashResolve(value string) (string, error) {
 	absolute, err := filepath.Abs(value)
 	if err != nil {

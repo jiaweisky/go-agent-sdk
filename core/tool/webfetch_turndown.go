@@ -11,9 +11,9 @@ import (
 )
 
 // This file is a Go port of turndown 7.2.0 (https://github.com/mixmark-io/turndown),
-// the library used by webfetch.ts convertHTMLToMarkdown. It implements the default
-// rule set (including keep/remove filters) and the option overrides applied by
-// webfetch. Behavior mirrors lib/turndown.cjs.js.
+// the library webfetch uses to convert HTML to markdown. It implements the default
+// rule set (including the keep/remove filters) and the option overrides webfetch
+// applies.
 
 var turndownBlockElements = map[string]bool{
 	"address": true, "article": true, "aside": true, "audio": true, "blockquote": true,
@@ -177,7 +177,7 @@ func (s *turndownState) postProcess(output string) string {
 	return strings.TrimRightFunc(output, turndownIsWhitespaceRune)
 }
 
-// turndownService mirrors the TurndownService entry point.
+// turndownService is the converter entry point.
 type turndownService struct {
 	options turndownOptions
 	rules   []turndownRule
@@ -822,13 +822,13 @@ func turndownIsWhitespaceRune(r rune) bool {
 	return r >= 0x2000 && r <= 0x200A
 }
 
-// turndownTrimSpace mirrors String.prototype.trim (which trims the JS \s class),
-// unlike strings.TrimSpace which follows unicode.IsSpace.
+// turndownTrimSpace trims the whitespace JavaScript's trim would, which differs
+// from strings.TrimSpace (unicode.IsSpace).
 func turndownTrimSpace(s string) string {
 	return strings.TrimFunc(s, turndownIsWhitespaceRune)
 }
 
-// turndownJSLength mirrors JavaScript String.prototype.length (UTF-16 code units).
+// turndownJSLength is the string length in UTF-16 code units.
 func turndownJSLength(s string) int {
 	return len(utf16.Encode([]rune(s)))
 }

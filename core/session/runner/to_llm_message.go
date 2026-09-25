@@ -72,7 +72,8 @@ func llmToolCall(tool schema.SessionMessageAssistantTool, providerMetadata llmsc
 	})
 }
 
-// llmToolResult mirrors toolResult. It reports false for non-terminal states.
+// llmToolResult renders a tool call's result; it reports false for non-terminal
+// states.
 func llmToolResult(tool schema.SessionMessageAssistantTool, providerMetadata llmschema.ProviderMetadata) (llmschema.ContentPart, bool) {
 	providerExecuted := tool.Provider != nil && tool.Provider.Executed
 	switch state := tool.State.(type) {
@@ -112,7 +113,8 @@ func llmToolResult(tool schema.SessionMessageAssistantTool, providerMetadata llm
 	return nil, false
 }
 
-// llmResultMetadata mirrors `provider.resultMetadata ?? provider.metadata`.
+// llmResultMetadata is the provider's result metadata, falling back to its
+// metadata.
 func llmResultMetadata(provider *schema.SessionMessageAssistantProvider) llmschema.ProviderMetadata {
 	if provider == nil {
 		return nil
@@ -272,8 +274,8 @@ func toLLMMessage(message schema.SessionMessage, model llmschema.ModelSchema) []
 	return nil
 }
 
-// ToLLMMessages mirrors toLLMMessages: it translates projected V2 Session
-// history into canonical @opencode-ai/llm context.
+// ToLLMMessages translates projected session history into the canonical LLM
+// context for a model.
 func ToLLMMessages(messages []schema.SessionMessage, model llmschema.ModelSchema) []llmschema.Message {
 	result := make([]llmschema.Message, 0, len(messages))
 	for _, message := range messages {

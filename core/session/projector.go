@@ -17,14 +17,14 @@ type ProjectRegistrar interface {
 	Project(def schema.EventDefinition, projector func(schema.EventPayload, DB) error) error
 }
 
-// SessionAlreadyProjected mirrors SessionProjector.SessionAlreadyProjected.
+// SessionAlreadyProjected reports an event that was already projected.
 type SessionAlreadyProjected struct{}
 
 func (e *SessionAlreadyProjected) Error() string {
 	return "session already projected"
 }
 
-// RegisterProjectors mirrors the SessionProjector.layer.
+// RegisterProjectors wires the session projectors into the event service.
 func RegisterProjectors(events ProjectRegistrar) error {
 	projectors := []struct {
 		def       schema.EventDefinition
@@ -435,7 +435,7 @@ func eventSessionID(event schema.EventPayload) schema.SessionID {
 	return probe.SessionID
 }
 
-// projectorAdapter mirrors SessionProjector's database adapter.
+// projectorAdapter adapts the database to the projector's storage surface.
 type projectorAdapter struct {
 	tx    DB
 	event schema.EventPayload

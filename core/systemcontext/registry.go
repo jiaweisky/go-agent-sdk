@@ -6,14 +6,14 @@ import (
 	"sync"
 )
 
-// Entry mirrors SystemContextRegistry.Entry.
+// Entry is one registered context source.
 type Entry struct {
 	Key  Key
 	Load func() (SystemContext, error)
 }
 
-// Registry mirrors the SystemContextRegistry service: an ordered set of named
-// context sources that can be registered (scoped) and combined.
+// Registry is an ordered set of named context sources that can be registered
+// (scoped) and combined.
 type Registry struct {
 	mu      sync.Mutex
 	entries []registryEntry

@@ -349,8 +349,8 @@ func TestWebFetch_TurndownParity(t *testing.T) {
 	}
 }
 
-// TestWebFetch_ExtractTextParity mirrors packages/core/test/tool-webfetch.test.ts
-// "ports HTML text and markdown conversions without active content".
+// TestWebFetch_ExtractTextParity pins the HTML text and markdown conversions,
+// including that active content is dropped.
 func TestWebFetch_ExtractTextParity(t *testing.T) {
 	html := "<h1>Hello</h1><script>bad()</script><p>world <strong>wide</strong></p><style>.bad {}</style>"
 	if got := ExtractTextFromHTML(html); got != "Helloworld wide" {

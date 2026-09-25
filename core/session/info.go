@@ -72,7 +72,7 @@ func nullInt64Ptr(value sql.NullInt64) *int64 {
 	return &value.Int64
 }
 
-// FromRow mirrors SessionInfo.fromRow.
+// FromRow converts a stored session row into session info.
 func FromRow(row SessionRow) schema.SessionInfo {
 	info := schema.SessionInfo{
 		ID:        schema.SessionID(row.ID),

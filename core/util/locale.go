@@ -45,7 +45,7 @@ func normalizeLocale(value string) string {
 	return strings.ReplaceAll(value, "_", "-")
 }
 
-// CompareLocale mirrors String.prototype.localeCompare with the given locale.
+// CompareLocale compares two strings with the given locale.
 func CompareLocale(left, right string, tag language.Tag) int {
 	return collate.New(tag).CompareString(left, right)
 }

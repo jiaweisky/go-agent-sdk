@@ -9,7 +9,7 @@ import (
 	"github.com/bmatcuk/doublestar"
 )
 
-// GlobOptions mirrors Glob.Options from util/glob.ts.
+// GlobOptions configures a glob scan.
 type GlobOptions struct {
 	Cwd      string
 	Absolute bool
@@ -18,11 +18,10 @@ type GlobOptions struct {
 	Symlink  bool
 }
 
-// GlobScan mirrors Glob.scan/scanSync: brace alternatives are expanded, then
-// each pattern is matched by walking the filesystem. Dot and Symlink follow the
-// npm glob options: when Dot is false, wildcard segments do not match entries
-// beginning with "." (literal dot segments still match); when Symlink is false,
-// symlinked directories are not traversed.
+// GlobScan expands brace alternatives and matches each pattern by walking the
+// filesystem. Dot and Symlink follow the npm glob options: when Dot is false,
+// wildcard segments do not match entries beginning with "." (literal dot segments
+// still match); when Symlink is false, symlinked directories are not traversed.
 func GlobScan(pattern string, options GlobOptions) ([]string, error) {
 	cwd := options.Cwd
 	if cwd == "" {
@@ -264,7 +263,8 @@ func splitBraceOptions(content string) []string {
 	return append(parts, content[last:])
 }
 
-// GlobMatch mirrors Glob.match (minimatch with dot:true).
+// GlobMatch reports whether the path matches the pattern, with dot matching
+// enabled.
 func GlobMatch(pattern, filepath string) bool {
 	ok, err := doublestar.Match(pattern, filepath)
 	return err == nil && ok

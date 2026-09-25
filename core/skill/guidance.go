@@ -11,7 +11,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// Summary mirrors SkillGuidance.Summary.
+// Summary is a skill's name and description, for the system context.
 type Summary struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -27,7 +27,7 @@ type PermissionEvaluator interface {
 	Evaluate(action, resource string, rules schema.PermissionRuleset) schema.PermissionRule
 }
 
-// Guidance mirrors the SkillGuidance service.
+// Guidance renders the available skills into the system context.
 type Guidance struct {
 	skills      Lister
 	permissions PermissionEvaluator
@@ -38,7 +38,7 @@ func NewGuidance(skills Lister, permissions PermissionEvaluator, locale language
 	return &Guidance{skills: skills, permissions: permissions, locale: locale}
 }
 
-// Load mirrors SkillGuidance.load.
+// Load renders the skills the agent may use.
 func (g *Guidance) Load(agent *schema.AgentInfo) (systemcontext.SystemContext, error) {
 	if agent == nil {
 		return systemcontext.Empty, nil

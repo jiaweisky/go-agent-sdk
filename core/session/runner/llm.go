@@ -51,8 +51,7 @@ type ToolRegistry interface {
 	MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization
 }
 
-// LLMRunner mirrors SessionRunner.layer: it runs one durable coding-agent
-// Session until it settles.
+// LLMRunner runs one durable coding-agent session until it settles.
 type LLMRunner struct {
 	Events            RunnerEvents
 	LLM               route.LLMClient
@@ -91,8 +90,8 @@ func (r *LLMRunner) compactionStream(ctx context.Context, request llmschema.LLMR
 	return stream
 }
 
-// errInterrupted mirrors Effect.interrupt: it wraps context.Canceled so callers
-// can distinguish an interrupted turn from a failed one via errors.Is.
+// errInterrupted wraps context.Canceled, so callers can distinguish an
+// interrupted turn from a failed one with errors.Is.
 var errInterrupted = fmt.Errorf("session runner interrupted: %w", context.Canceled)
 
 var sessionIDShape = regexp.MustCompile(`^ses_[0-9a-f]{64}$`)
@@ -115,7 +114,7 @@ func isInterrupt(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errInterrupted)
 }
 
-// Run mirrors SessionRunner.run.
+// Run drains the session's admitted inputs until it settles or is interrupted.
 func (r *LLMRunner) Run(ctx context.Context, input RunInput) error {
 	hasSteer, err := session.HasPending(r.DB.DB, input.SessionID, schema.SessionDeliverySteer)
 	if err != nil {
@@ -682,8 +681,8 @@ func (r *LLMRunner) runTurnAttempt(
 	return turnResult{NeedsContinuation: !publisher.HasProviderError() && needsContinuation, Step: currentStep}, nil
 }
 
-// isUserDeclined mirrors SessionRunner.isUserDeclined: a declined permission
-// prompt or rejected question halts the loop instead of becoming model output.
+// isUserDeclined reports whether the error is a declined permission prompt or a
+// rejected question, which halt the loop instead of becoming model output.
 func isUserDeclined(err error) bool {
 	var declined *core.PermissionDeclinedError
 	var rejected *core.QuestionRejectedError

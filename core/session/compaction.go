@@ -65,20 +65,21 @@ When combining:
 - If a blocker has been resolved, update the summary to reflect that while keeping any details still needed to continue the work.
 - Update "Objective" and "Next Move" to reflect the current work state.`
 
-// CompactionEntry mirrors SessionCompaction.Entry.
+// CompactionEntry is one entry of the compaction history.
 type CompactionEntry struct {
 	Seq     int64
 	Message schema.SessionMessage
 }
 
-// CompactionSettings mirrors SessionCompaction.Settings.
+// CompactionSettings bounds when and how much history is compacted.
 type CompactionSettings struct {
 	Auto   bool
 	Buffer int
 	Tokens int
 }
 
-// CompactionDependencies mirrors SessionCompaction.Dependencies.
+// CompactionDependencies is what compaction needs: the store, the events and the
+// settings.
 type CompactionDependencies struct {
 	Events EventPublisher
 	LLM    func(ctx context.Context, request llm.LLMRequest) iter.Seq2[llm.LLMEvent, error]
@@ -86,7 +87,7 @@ type CompactionDependencies struct {
 	Settings CompactionSettings
 }
 
-// CompactionInput mirrors SessionCompaction.Input.
+// CompactionInput describes the session whose history may be compacted.
 type CompactionInput struct {
 	SessionID schema.SessionID
 	Entries   []CompactionEntry
@@ -97,20 +98,21 @@ type CompactionInput struct {
 	Context context.Context
 }
 
-// CompactionPromptInput mirrors the buildPrompt argument.
+// CompactionPromptInput is what the compaction prompt is built from.
 type CompactionPromptInput struct {
 	PreviousSummary string
 	Context         []string
 }
 
-// Compaction mirrors the object returned by SessionCompaction.make.
+// Compaction compacts a session's history once it grows past the model's context
+// window.
 type Compaction struct {
 	events EventPublisher
 	llm    func(ctx context.Context, request llm.LLMRequest) iter.Seq2[llm.LLMEvent, error]
 	config CompactionSettings
 }
 
-// NewCompaction mirrors SessionCompaction.make.
+// NewCompaction builds the compaction service.
 func NewCompaction(dependencies CompactionDependencies) *Compaction {
 	return &Compaction{
 		events: dependencies.Events,
@@ -119,7 +121,7 @@ func NewCompaction(dependencies CompactionDependencies) *Compaction {
 	}
 }
 
-// CompactIfNeeded mirrors SessionCompaction.compactIfNeeded.
+// CompactIfNeeded compacts the history when it exceeds the configured threshold.
 func (c *Compaction) CompactIfNeeded(input CompactionInput) (bool, error) {
 	if !c.config.Auto {
 		return false, nil
@@ -140,7 +142,8 @@ func (c *Compaction) CompactIfNeeded(input CompactionInput) (bool, error) {
 	return c.CompactAfterOverflow(input)
 }
 
-// CompactAfterOverflow mirrors SessionCompaction.compactAfterOverflow.
+// CompactAfterOverflow compacts the history after the provider reported a context
+// overflow.
 func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
 	limits := compactionModelLimits(input.Model)
 	if limits == nil || limits.Context <= 0 {
@@ -257,7 +260,7 @@ type compactionEstimateInput struct {
 	Tools    []llm.ToolDefinition `json:"tools"`
 }
 
-// SerializeToolContent mirrors SessionCompaction.serializeToolContent.
+// SerializeToolContent renders tool content as text for the summary prompt.
 func SerializeToolContent(content []schema.ToolContent) string {
 	parts := make([]string, 0, len(content))
 	for _, item := range content {
@@ -275,7 +278,8 @@ func SerializeToolContent(content []schema.ToolContent) string {
 	return strings.Join(parts, "\n")
 }
 
-// BuildCompactionPrompt mirrors SessionCompaction.buildPrompt.
+// BuildCompactionPrompt renders the prompt that asks the model to summarize the
+// history.
 func BuildCompactionPrompt(input CompactionPromptInput) string {
 	conversation := "Here is the conversation so far:\n\n<conversation>\n" +
 		strings.Join(input.Context, "\n\n") + "\n</conversation>"
@@ -295,7 +299,7 @@ func BuildCompactionPrompt(input CompactionPromptInput) string {
 	}, "\n\n")
 }
 
-// DefaultCompactionSettings mirrors the built-in defaults.
+// DefaultCompactionSettings are the built-in compaction defaults.
 func DefaultCompactionSettings() CompactionSettings {
 	return CompactionSettings{Auto: true, Buffer: compactionDefaultBuffer, Tokens: compactionDefaultKeepTokens}
 }
@@ -425,13 +429,12 @@ func compactionTruncate(value string) string {
 	return compactionUTF16Slice(value, compactionToolOutputMaxChars) + "\n[truncated]"
 }
 
-// compactionUTF16Length mirrors String.prototype.length (UTF-16 code units).
+// compactionUTF16Length is the string length in UTF-16 code units.
 func compactionUTF16Length(value string) int {
 	return len(utf16.Encode([]rune(value)))
 }
 
-// compactionUTF16Slice mirrors String.prototype.slice(0, end) for the leading
-// run of UTF-16 code units.
+// compactionUTF16Slice returns the leading run of at most end UTF-16 code units.
 func compactionUTF16Slice(value string, end int) string {
 	units := utf16.Encode([]rune(value))
 	if end > len(units) {

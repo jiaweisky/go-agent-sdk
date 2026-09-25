@@ -6,18 +6,18 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// RunInput mirrors the SessionRunner.run argument.
+// RunInput describes the session to run.
 type RunInput struct {
 	SessionID schema.SessionID
 	Force     bool
 }
 
-// RunError mirrors SessionRunner.RunError (the union of runner error types:
-// llm.LLMError, ModelError, MessageDecodeError, ContextSnapshotDecodeError,
-// SystemContext.InitializationBlocked, ToolOutputStore.StorageError).
+// RunError is the union of the runner's error types: llm.LLMError, ModelError,
+// MessageDecodeError, ContextSnapshotDecodeError,
+// SystemContext.InitializationBlocked and ToolOutputStore.StorageError.
 type RunError = error
 
-// SessionRunner mirrors the SessionRunner service interface.
+// SessionRunner runs one session until it settles.
 type SessionRunner interface {
 	// Run drains eligible durable work. An explicit run performs one provider
 	// attempt even when no work is eligible. Cancelling ctx interrupts the

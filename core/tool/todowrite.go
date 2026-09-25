@@ -48,8 +48,8 @@ type TodoWriteDeps struct {
 	Permission core.Permission
 }
 
-// TodoWriteToModelOutput mirrors TodoWriteTool.toModelOutput: JSON.stringify with
-// a two-space indent and no HTML escaping.
+// TodoWriteToModelOutput renders the todo list as two-space-indented JSON, without
+// HTML escaping.
 func TodoWriteToModelOutput(output TodoWriteOutput) string {
 	todos := output.Todos
 	if todos == nil {

@@ -6,8 +6,8 @@ import (
 	"sync"
 )
 
-// Coordinator mirrors SessionRunCoordinator.Coordinator: it serializes execution
-// per key while allowing different keys to run concurrently.
+// Coordinator serializes execution per key while allowing different keys to run
+// concurrently.
 type Coordinator[K comparable] struct {
 	mu     sync.Mutex
 	active map[K]*coordinatorEntry

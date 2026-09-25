@@ -10,8 +10,8 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// ContextEpochPrepared mirrors the { baseline, baselineSeq } object returned by
-// SessionContextEpoch.initialize and SessionContextEpoch.prepare.
+// ContextEpochPrepared is a prepared epoch: its baseline and the sequence it was
+// prepared at.
 type ContextEpochPrepared struct {
 	Baseline    string
 	BaselineSeq int64
@@ -32,8 +32,8 @@ type contextEpochRow struct {
 	BaselineSeq int64
 }
 
-// ContextEpochInitialize mirrors SessionContextEpoch.initialize. It returns nil
-// when the session already has an epoch.
+// ContextEpochInitialize creates the session's epoch; it returns nil when the
+// session already has one.
 func ContextEpochInitialize(db DB, context systemcontext.SystemContext, sessionID schema.SessionID) (*ContextEpochPrepared, error) {
 	exists, err := contextEpochExists(db, sessionID)
 	if err != nil {
@@ -53,7 +53,7 @@ func ContextEpochInitialize(db DB, context systemcontext.SystemContext, sessionI
 	return &ContextEpochPrepared{Baseline: generation.Baseline, BaselineSeq: baselineSeq}, nil
 }
 
-// ContextEpochPrepare mirrors SessionContextEpoch.prepare.
+// ContextEpochPrepare rebuilds the epoch from the session's current context.
 func ContextEpochPrepare(
 	db DB,
 	events ContextEpochPublisher,
@@ -133,7 +133,7 @@ func ContextEpochPrepare(
 	return ContextEpochPrepared{Baseline: stored.Baseline, BaselineSeq: stored.BaselineSeq}, nil
 }
 
-// ContextEpochReset mirrors SessionContextEpoch.reset.
+// ContextEpochReset drops the session's epoch.
 func ContextEpochReset(db DB, sessionID schema.SessionID) error {
 	_, err := db.Exec("DELETE FROM `session_context_epoch` WHERE `session_id` = ?", string(sessionID))
 	return err
@@ -226,8 +226,8 @@ func requireEpochUpdated(result sql.Result) error {
 	return nil
 }
 
-// latestEventSequence mirrors EventV2.latestSequence: the latest durable
-// sequence for the aggregate, or -1 when none exists.
+// latestEventSequence is the latest durable sequence for the aggregate, or -1
+// when there is none.
 func latestEventSequence(db DB, sessionID schema.SessionID) (int64, error) {
 	var seq int64
 	err := db.QueryRow("SELECT `seq` FROM `event_sequence` WHERE `aggregate_id` = ?", string(sessionID)).Scan(&seq)

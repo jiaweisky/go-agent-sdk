@@ -8,7 +8,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// ModelNotSelectedError mirrors SessionRunnerModel.ModelNotSelectedError.
+// ModelNotSelectedError reports a session without a model.
 type ModelNotSelectedError struct {
 	SessionID schema.SessionID
 }
@@ -17,7 +17,7 @@ func (e *ModelNotSelectedError) Error() string {
 	return "No model is available for session " + string(e.SessionID)
 }
 
-// ModelUnavailableError mirrors SessionRunnerModel.ModelUnavailableError.
+// ModelUnavailableError reports a model the provider does not offer.
 type ModelUnavailableError struct {
 	ProviderID schema.ProviderID
 	ModelID    schema.ModelID
@@ -27,7 +27,7 @@ func (e *ModelUnavailableError) Error() string {
 	return "Model unavailable: " + string(e.ProviderID) + "/" + string(e.ModelID)
 }
 
-// VariantUnavailableError mirrors SessionRunnerModel.VariantUnavailableError.
+// VariantUnavailableError reports a variant the model does not have.
 type VariantUnavailableError struct {
 	ProviderID schema.ProviderID
 	ModelID    schema.ModelID
@@ -38,7 +38,7 @@ func (e *VariantUnavailableError) Error() string {
 	return "Variant unavailable for " + string(e.ProviderID) + "/" + string(e.ModelID) + ": " + string(e.Variant)
 }
 
-// UnsupportedApiError mirrors SessionRunnerModel.UnsupportedApiError.
+// UnsupportedApiError reports a model whose API the SDK does not speak.
 type UnsupportedApiError struct {
 	ProviderID schema.ProviderID
 	ModelID    schema.ModelID
@@ -49,10 +49,10 @@ func (e *UnsupportedApiError) Error() string {
 	return "Unsupported API for " + string(e.ProviderID) + "/" + string(e.ModelID) + ": " + e.API
 }
 
-// ModelResolver mirrors the SessionRunnerModel.Interface.resolve seam.
+// ModelResolver resolves a session's model to a route model.
 type ModelResolver func(session schema.SessionInfo) (route.Model, error)
 
-// runnerModelWithDefaults mirrors `withDefaults`.
+// runnerModelWithDefaults applies the model's defaults to a route.
 func runnerModelWithDefaults(model schema.ModelInfo, r route.Route) route.Route {
 	httpBody := model.Request.Body
 	if _, has := httpBody["apiKey"]; has {
@@ -79,7 +79,7 @@ func runnerModelWithDefaults(model schema.ModelInfo, r route.Route) route.Route 
 	})
 }
 
-// runnerModelWithVariant mirrors `withVariant`.
+// runnerModelWithVariant applies a model variant's overrides.
 func runnerModelWithVariant(model schema.ModelInfo, variantID *schema.ModelVariantID) (schema.ModelInfo, error) {
 	var id *string
 	if variantID == nil || *variantID == "default" {
@@ -185,7 +185,7 @@ func bedrockSigV4(aws *schema.AWSCredentials) *route.Auth {
 	})
 }
 
-// ResolveModel mirrors `resolve`.
+// ResolveModel resolves a session's model, applying its credential and variant.
 func ResolveModel(session schema.SessionInfo, model schema.ModelInfo, credential schema.Credential) (route.Model, error) {
 	var variant *schema.ModelVariantID
 	if session.Model != nil {

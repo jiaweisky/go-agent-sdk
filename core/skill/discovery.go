@@ -42,14 +42,14 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// IndexSkill mirrors SkillDiscovery.IndexSkill.
+// IndexSkill is one skill entry of a remote index.
 type IndexSkill struct {
 	Name    string   `json:"name"`
 	Version *string  `json:"version,omitempty"`
 	Files   []string `json:"files"`
 }
 
-// Index mirrors SkillDiscovery.Index.
+// Index is a remote skill index: its skills and their root.
 type Index struct {
 	Skills []IndexSkill `json:"skills"`
 }
@@ -67,8 +67,8 @@ func NewDiscovery(fs FileSystem, cacheDir string, client HTTPClient) *Discovery 
 	return &Discovery{fs: fs, cacheDir: cacheDir, client: client}
 }
 
-// Pull mirrors SkillDiscovery.pull: it fetches a skill index and downloads the
-// referenced skill directories, returning the ones that are present.
+// Pull fetches a skill index and downloads the referenced skill directories,
+// returning the ones that are present.
 func (d *Discovery) Pull(rawURL string) ([]schema.AbsolutePath, error) {
 	base := rawURL
 	if !strings.HasSuffix(base, "/") {
