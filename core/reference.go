@@ -30,7 +30,8 @@ type ReferenceDraft struct {
 	List   func() []ReferenceEntry
 }
 
-// Reference mirrors Reference.Service.
+// Reference is the registry of named reference sources injected into the system
+// context.
 type Reference struct {
 	state *State[*referenceData, ReferenceDraft]
 

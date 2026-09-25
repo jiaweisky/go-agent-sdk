@@ -1,6 +1,6 @@
 package core
 
-// FileSystemContent mirrors the `Content` struct from
+// FileSystemContent is a file's content and its encoding.
 // packages/core/src/filesystem.ts (encoding is "utf8" or "base64").
 type FileSystemContent struct {
 	URI      string  `json:"uri"`
@@ -10,14 +10,14 @@ type FileSystemContent struct {
 	MIME     string  `json:"mime"`
 }
 
-// FileSystemEntry mirrors `FileSystem.Entry` from
+// FileSystemEntry is one entry of a directory listing.
 // packages/schema/src/filesystem.ts (path is Location-relative).
 type FileSystemEntry struct {
 	Path string `json:"path"`
 	Type string `json:"type"`
 }
 
-// FileSystemSubmatch mirrors `FileSystem.Submatch` from
+// FileSystemSubmatch is one capture group of a glob match.
 // packages/schema/src/filesystem.ts.
 type FileSystemSubmatch struct {
 	Text  string `json:"text"`
@@ -25,7 +25,7 @@ type FileSystemSubmatch struct {
 	End   int    `json:"end"`
 }
 
-// FileSystemMatch mirrors `FileSystem.Match` from
+// FileSystemMatch is a glob match: its path and capture groups.
 // packages/schema/src/filesystem.ts.
 type FileSystemMatch struct {
 	Entry      FileSystemEntry      `json:"entry"`

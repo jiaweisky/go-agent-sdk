@@ -90,9 +90,8 @@ Rules:
 - If the conversation ends with an unanswered question to the user, preserve that exact question
 - If the conversation ends with an imperative statement or request to the user (e.g. "Now please run the command and paste the console output"), always include that exact request in the summary`
 
-// ApplyDefaultAgents mirrors the AgentPlugin effect (core/src/plugin/agent.ts):
-// it registers the built-in build/plan/general/explore/compaction/title/summary
-// agents and their default permission rulesets.
+// ApplyDefaultAgents registers the built-in agents (build, plan, general,
+// explore, compaction, title, summary) and their default permission rulesets.
 func ApplyDefaultAgents(agents *Agent, location *Location, global Global) error {
 	worktree := string(location.Directory)
 	truncationGlob := filepath.Join(global.Data, "tool-output", "*")

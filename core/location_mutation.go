@@ -179,8 +179,8 @@ func LocationMutationExternalDirectoryPermission(input LocationMutationExternalD
 	}
 }
 
-// locationMutationSlash mirrors FSUtil.slash: permission resources use forward
-// slashes on every platform.
+// locationMutationSlash converts a path to forward slashes, the form permission
+// resources use on every platform.
 func locationMutationSlash(value string) string {
 	return strings.ReplaceAll(value, "\\", "/")
 }

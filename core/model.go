@@ -24,8 +24,8 @@ type ModelRefParts struct {
 	ModelID    ModelID
 }
 
-// ParseModel mirrors ModelV2.parse: "provider/model" split on the first slash,
-// with the remainder treated as the model ID.
+// ParseModel splits a "provider/model" reference on the first slash, treating the
+// remainder as the model ID.
 func ParseModel(input string) ModelRefParts {
 	parts := strings.SplitN(input, "/", 2)
 	if len(parts) == 1 {

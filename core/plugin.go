@@ -8,7 +8,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// PluginID mirrors Plugin.ID.
+// PluginID identifies a plugin.
 type PluginID = schema.PluginID
 
 // PluginContext is the narrowed capability surface passed to a plugin: agents,
@@ -25,7 +25,7 @@ type PluginContext struct {
 // when the plugin is removed or reloaded.
 type PluginEffect func(ctx *PluginContext) (cleanup func(), err error)
 
-// Plugin mirrors PluginV2.Service: a per-id lifecycle manager for plugins.
+// Plugin is a per-id lifecycle manager for plugins.
 type Plugin struct {
 	events Event
 	locks  *effect.KeyedMutex[schema.PluginID]

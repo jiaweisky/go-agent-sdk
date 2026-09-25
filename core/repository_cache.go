@@ -8,7 +8,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// RepositoryCacheResult mirrors RepositoryCache.Result.
+// RepositoryCacheResult is a ready checkout.
 type RepositoryCacheResult struct {
 	Repository string
 	Host       string
@@ -19,14 +19,14 @@ type RepositoryCacheResult struct {
 	Branch     *string
 }
 
-// RepositoryCacheEnsureInput mirrors RepositoryCache.EnsureInput.
+// RepositoryCacheEnsureInput describes the checkout to prepare.
 type RepositoryCacheEnsureInput struct {
 	Reference *RepositoryReference
 	Refresh   bool
 	Branch    *string
 }
 
-// RepositoryCache mirrors RepositoryCache.Service: per-remote/branch local
+// RepositoryCache keeps one local checkout per remote and branch.
 // tracking checkouts. Locking is in-process (cross-process flock is not ported).
 type RepositoryCache struct {
 	git     Git
@@ -53,7 +53,7 @@ func (c *RepositoryCache) repositoryOptions() []RepositoryOption {
 	return []RepositoryOption{func(target *RepositoryOptions) { *target = options }}
 }
 
-// Ensure mirrors RepositoryCache.ensure.
+// Ensure returns the checkout, cloning or refreshing it as needed.
 func (c *RepositoryCache) Ensure(input RepositoryCacheEnsureInput) (RepositoryCacheResult, error) {
 	reference := input.Reference
 	if reference == nil {

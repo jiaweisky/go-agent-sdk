@@ -10,10 +10,10 @@ import (
 	"unicode/utf16"
 )
 
-// Ripgrep mirrors core/ripgrep.ts: a small core-owned ripgrep execution
-// adapter. It deliberately exposes raw process-oriented rows, not model text or
-// permission behavior. Search maps these rows into filesystem results; leaf
-// tools own presentation and permission prompts.
+// Ripgrep is a small ripgrep execution adapter. It deliberately exposes raw
+// process-oriented rows, not model text or permission behavior: search maps these
+// rows into filesystem results, and the leaf tools own presentation and
+// permission prompts.
 
 const (
 	ripgrepErrorBytes     = 8 * 1024
@@ -100,9 +100,8 @@ type ripgrepRunInput[A any] struct {
 	OnItem  func(A) error
 }
 
-// ripgrepRun mirrors the shared `run` helper in ripgrep.ts. The TypeScript
-// stream stops after limit+1 parsed rows; the buffered Go process adapter
-// reproduces that bound while iterating the collected stdout lines.
+// ripgrepRun runs ripgrep and parses its rows, stopping after limit+1 rows as the
+// stream bound requires.
 func ripgrepRun[A any](process AppProcess, binary RipgrepBinary, input ripgrepRunInput[A]) (*ripgrepRunResult[A], error) {
 	path, err := binary.Filepath()
 	if err != nil {
@@ -335,9 +334,8 @@ func ripgrepNormalizeRelative(value string) string {
 	return strings.ReplaceAll(value, "\\", "/")
 }
 
-// ripgrepTruncateText mirrors `text.length > 2_000 ? text.slice(0, 2_000)
-// .replace(/[\uD800-\uDBFF]$/, "") + "..." : text`: length and slicing operate
-// on UTF-16 code units, and a trailing lone high surrogate is dropped.
+// ripgrepTruncateText truncates text to 2000 UTF-16 code units, dropping a
+// trailing lone high surrogate and appending "...".
 func ripgrepTruncateText(value string) string {
 	const maximum = 2000
 	units := utf16.Encode([]rune(value))
@@ -355,8 +353,7 @@ func ripgrepIsInvalidPattern(stderr string) bool {
 	return strings.Contains(stderr, "regex parse error") || strings.Contains(stderr, "error parsing regex")
 }
 
-// ripgrepSplitLines mirrors Effect's Stream.splitLines, which splits on `\n`,
-// `\r`, and `\r\n` delimiters.
+// ripgrepSplitLines splits on `\n`, `\r`, and `\r\n` delimiters.
 func ripgrepSplitLines(value string) []string {
 	value = strings.ReplaceAll(value, "\r\n", "\n")
 	value = strings.ReplaceAll(value, "\r", "\n")

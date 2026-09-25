@@ -57,7 +57,7 @@ var (
 	patchHeredocOpen  = regexp.MustCompile(`^(?:cat\s+)?<<['"]?(\w+)['"]?\s*\n`)
 )
 
-// PatchParse mirrors Patch.parse.
+// PatchParse parses a patch document into its hunks.
 func PatchParse(patchText string) ([]PatchHunk, error) {
 	lines := strings.Split(patchStripHeredoc(patchTrimSpace(patchText)), "\n")
 	begin := -1
@@ -194,7 +194,7 @@ func patchParseUpdate(lines []string, start int) ([]PatchUpdateFileChunk, int, e
 	return chunks, index, nil
 }
 
-// PatchDerive mirrors Patch.derive.
+// PatchDerive computes the file update a patch produces against the original text.
 func PatchDerive(path string, chunks []PatchUpdateFileChunk, original string) (PatchFileUpdate, error) {
 	source := patchSplitBom(original)
 	lines := strings.Split(source.Text, "\n")
@@ -217,7 +217,7 @@ func PatchDerive(path string, chunks []PatchUpdateFileChunk, original string) (P
 	return PatchFileUpdate{Content: next.Text, Bom: source.Bom || next.Bom}, nil
 }
 
-// PatchJoinBom mirrors Patch.joinBom.
+// PatchJoinBom re-adds a stripped BOM to the patched text.
 func PatchJoinBom(text string, bom bool) string {
 	return patchJoinBom(text, bom)
 }
@@ -227,7 +227,7 @@ type patchBom struct {
 	Text string
 }
 
-// patchSplitBom mirrors patch.ts's splitBom, which removes at most one leading BOM.
+// patchSplitBom removes at most one leading BOM.
 func patchSplitBom(text string) patchBom {
 	if strings.HasPrefix(text, "\ufeff") {
 		return patchBom{Bom: true, Text: text[len("\ufeff"):]}
@@ -344,7 +344,7 @@ func patchNormalize(value string) string {
 	return patchNormalizeReplacer.Replace(value)
 }
 
-// patchTrimSpace mirrors JavaScript's String.prototype.trim, which also treats
+// patchTrimSpace trims the whitespace JavaScript's trim would, which also treats
 // U+FEFF as whitespace (unlike strings.TrimSpace).
 func patchTrimSpace(value string) string {
 	return strings.TrimFunc(value, patchIsTrimSpace)

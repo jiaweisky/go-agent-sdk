@@ -8,7 +8,7 @@ type (
 	AgentInfo  = schema.AgentInfo
 )
 
-// AgentDefaultID mirrors AgentV2.defaultID.
+// AgentDefaultID is the agent a session uses when it names none.
 const AgentDefaultID = schema.AgentID("build")
 
 type AgentSelection struct {

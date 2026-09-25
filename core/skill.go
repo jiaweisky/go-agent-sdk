@@ -20,7 +20,7 @@ type (
 	SkillInfo            = schema.SkillInfo
 )
 
-// SkillAvailable mirrors SkillV2.available.
+// SkillAvailable filters the skills to those the agent may use.
 func SkillAvailable(skills []schema.SkillInfo, agent schema.AgentInfo) []schema.SkillInfo {
 	var result []schema.SkillInfo
 	for _, skill := range skills {
@@ -46,7 +46,7 @@ type SkillDiscovery interface {
 	Pull(url string) ([]schema.AbsolutePath, error)
 }
 
-// Skill mirrors SkillV2.Service.
+// Skill is the skill registry.
 type Skill struct {
 	state     *State[*skillData, SkillDraft]
 	discovery SkillDiscovery
@@ -93,7 +93,7 @@ func (s *Skill) Sources() []schema.SkillSource {
 	return s.state.Get().sources
 }
 
-// List mirrors SkillV2.list, resolving and caching each configured source.
+// List resolves and caches every configured skill source.
 func (s *Skill) List() ([]schema.SkillInfo, error) {
 	skills := map[string]schema.SkillInfo{}
 	var order []string

@@ -235,8 +235,8 @@ func Overlaps(a, b string) bool {
 	return Contains(a, b) || Contains(b, a)
 }
 
-// ReadFileStringSafe mirrors FileSystem.readFileStringSafe: missing or
-// unreadable files yield ("", false) instead of an error.
+// ReadFileStringSafe reads a file as a string; a missing or unreadable file
+// yields ("", false) instead of an error.
 func ReadFileStringSafe(path string) (string, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -245,27 +245,28 @@ func ReadFileStringSafe(path string) (string, bool) {
 	return string(data), true
 }
 
-// Glob mirrors FileSystem.glob.
+// Glob returns the paths matching the pattern.
 func Glob(pattern string, options util.GlobOptions) ([]string, error) {
 	return util.GlobScan(pattern, options)
 }
 
-// GlobMatch mirrors FileSystem.globMatch.
+// GlobMatch reports whether the path matches the pattern.
 func GlobMatch(pattern, filepath string) bool {
 	return util.GlobMatch(pattern, filepath)
 }
 
-// Rename mirrors FileSystem.rename.
+// Rename moves a file, creating the destination directory when needed.
 func Rename(oldPath, newPath string) error {
 	return os.Rename(oldPath, newPath)
 }
 
-// RemoveAll mirrors fs.remove(path, { recursive: true, force: true }).
+// RemoveAll removes a path and everything under it.
 func RemoveAll(path string) error {
 	return os.RemoveAll(path)
 }
 
-// MimeType mirrors fs-util.ts's `mimeType(p) = lookup(p) || "application/octet-stream"`.
+// MimeType returns the MIME type for a path's extension, defaulting to
+// "application/octet-stream".
 // lookup is extension based; the "x." prefix replicates mime-types' path handling
 // so a dotless name is treated as its own extension.
 func MimeType(p string) string {

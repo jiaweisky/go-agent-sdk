@@ -14,7 +14,7 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// ImageResizerUnavailableError mirrors Image.ResizerUnavailableError from
+// ImageResizerUnavailableError reports that no image resizer is available.
 // packages/core/src/image.ts. The read tool treats it as "keep the original
 // content" rather than a failure.
 type ImageResizerUnavailableError struct{}
@@ -46,7 +46,7 @@ func (e *ImageSizeError) Error() string {
 	)
 }
 
-// ImageConfig mirrors the resolved `attachments.image` config in image.ts.
+// ImageConfig bounds the images the read tool accepts.
 type ImageConfig struct {
 	AutoResize     bool
 	MaxWidth       int

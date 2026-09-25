@@ -12,7 +12,7 @@ type (
 	ProviderInfo    = schema.ProviderInfo
 )
 
-// ProviderInfoEmpty mirrors ProviderV2.Info.empty.
+// ProviderInfoEmpty is an empty provider info, with its maps initialized.
 func ProviderInfoEmpty(id ProviderID) ProviderInfo {
 	return schema.ProviderInfoEmpty(id)
 }

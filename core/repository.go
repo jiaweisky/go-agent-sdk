@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// RepositoryReference mirrors Repository.Reference (remote or file).
+// RepositoryReference is a parsed repository: remote or file.
 type RepositoryReference struct {
 	Host     string
 	Path     string
@@ -46,7 +46,8 @@ func WithGitHubBaseURL(baseURL string) RepositoryOption {
 	return func(options *RepositoryOptions) { options.GitHubBaseURL = baseURL }
 }
 
-// RepositoryParse mirrors Repository.parse.
+// RepositoryParse parses a repository reference from a URL, a host/path, an scp
+// form, or an owner/repo shorthand.
 func RepositoryParse(input string, options ...RepositoryOption) *RepositoryReference {
 	config := RepositoryOptions{}
 	for _, option := range options {
@@ -90,17 +91,17 @@ func repositoryParse(input string, options RepositoryOptions) *RepositoryReferen
 	return repositoryBuildRemote(parsed.Host, segments, remote, parsed.Scheme, options)
 }
 
-// RepositoryIsFile mirrors Repository.isFile.
+// RepositoryIsFile reports whether the reference is a local file.
 func RepositoryIsFile(reference *RepositoryReference) bool {
 	return reference != nil && reference.Protocol != nil && *reference.Protocol == "file:"
 }
 
-// RepositoryIsRemote mirrors Repository.isRemote.
+// RepositoryIsRemote reports whether the reference is remote.
 func RepositoryIsRemote(reference *RepositoryReference) bool {
 	return reference != nil && !RepositoryIsFile(reference)
 }
 
-// RepositoryValidateBranch mirrors Repository.validateBranch.
+// RepositoryValidateBranch rejects a branch name that is not safe to check out.
 func RepositoryValidateBranch(branch string) error {
 	if repositoryBranch.MatchString(branch) && !strings.HasPrefix(branch, "-") && !strings.Contains(branch, "..") {
 		return nil
@@ -108,7 +109,7 @@ func RepositoryValidateBranch(branch string) error {
 	return fmt.Errorf("Branch must contain only alphanumeric characters, /, _, ., and -, and cannot start with - or contain ..")
 }
 
-// RepositoryCachePath mirrors Repository.cachePath.
+// RepositoryCachePath is the checkout directory for a repository and branch.
 func RepositoryCachePath(root string, reference *RepositoryReference, branch *string) string {
 	parts := append(strings.Split(reference.Host, ":"), reference.Segments...)
 	base := filepath.Join(append([]string{root}, parts...)...)
@@ -118,12 +119,12 @@ func RepositoryCachePath(root string, reference *RepositoryReference, branch *st
 	return base + "@" + url.PathEscape(*branch)
 }
 
-// RepositoryCacheIdentity mirrors Repository.cacheIdentity.
+// RepositoryCacheIdentity is the identity two references are compared by.
 func RepositoryCacheIdentity(reference *RepositoryReference) string {
 	return reference.Host + "/" + reference.Path
 }
 
-// RepositorySame mirrors Repository.same.
+// RepositorySame reports whether two references point at the same repository.
 func RepositorySame(left, right *RepositoryReference) bool {
 	if left == nil || right == nil {
 		return false

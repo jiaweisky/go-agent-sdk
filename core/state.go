@@ -2,9 +2,8 @@ package core
 
 import "sync"
 
-// StateOptions mirrors State.Options. Batch is the Go equivalent of the Effect
-// fiber-local batch: states wired to the same StateBatch defer their reloads
-// while that batch runs.
+// StateOptions describes a state: how to create it, how to draft a transform, how
+// to finalize one, and the batch that defers its reloads.
 type StateOptions[S any, D any] struct {
 	Initial  func() S
 	Draft    func(S) D
@@ -16,9 +15,9 @@ type stateTransform[D any] struct {
 	run func(D) error
 }
 
-// State mirrors State.create: a replayable transform stack over a materialized
-// state. Materialization applies every registered transform to a fresh value,
-// runs the optional finalizer, then publishes the result.
+// State is a replayable transform stack over a materialized value. Materializing
+// applies every registered transform to a fresh value, runs the optional
+// finalizer, then publishes the result.
 type State[S any, D any] struct {
 	mu         sync.Mutex
 	options    StateOptions[S, D]
@@ -97,9 +96,8 @@ func (s *State[S, D]) Transform(update func(D) error) (func() error, error) {
 	}, nil
 }
 
-// StateBatch mirrors State.batch. Effect carries the batch in a fiber-local
-// reference; Go has no equivalent, so a batch is an explicit object shared by
-// the states it should cover. Run defers their reloads and applies each once
+// StateBatch defers the reloads of the states it covers: a batch is an explicit
+// object shared by those states, and Run applies each pending reload once
 // afterwards, in registration order.
 type StateBatch struct {
 	mu     sync.Mutex

@@ -22,7 +22,7 @@ const (
 	SnapshotOperationRestore SnapshotOperation = "restore"
 )
 
-// SnapshotError mirrors Snapshot.Error.
+// SnapshotError is a snapshot failure.
 type SnapshotError struct {
 	Operation SnapshotOperation
 	Message   string
@@ -57,7 +57,8 @@ type SnapshotPreviewInput struct {
 	Context *int
 }
 
-// Snapshot mirrors Snapshot.Service.
+// Snapshot is the git-backed snapshot service: it captures the worktree so a
+// session can be reverted.
 type Snapshot struct {
 	git          Git
 	worktree     AbsolutePath
@@ -124,7 +125,8 @@ func (s *Snapshot) repository() (*GitRepository, error) {
 	return repository, nil
 }
 
-// Capture mirrors Snapshot.capture: it returns nil when disabled or when the
+// Capture records the worktree and returns its snapshot id; it returns nil when
+// snapshots are disabled or the
 // best-effort capture fails.
 func (s *Snapshot) Capture() (*SnapshotID, error) {
 	if !s.enabled {
@@ -170,7 +172,7 @@ func (s *Snapshot) compare(operation SnapshotOperation, input SnapshotCompareInp
 	}, nil
 }
 
-// Files mirrors Snapshot.files.
+// Files lists the files that differ between two snapshots.
 func (s *Snapshot) Files(input SnapshotCompareInput) ([]schema.RelativePath, error) {
 	comparison, err := s.compare(SnapshotOperationFiles, input)
 	if err != nil {
@@ -198,7 +200,7 @@ func (s *Snapshot) Files(input SnapshotCompareInput) ([]schema.RelativePath, err
 	return result, nil
 }
 
-// Diff mirrors Snapshot.diff.
+// Diff returns the diffs between two snapshots.
 func (s *Snapshot) Diff(input SnapshotDiffInput) ([]FileDiff, error) {
 	comparison, err := s.compare(SnapshotOperationDiff, input.SnapshotCompareInput)
 	if err != nil {
@@ -237,7 +239,7 @@ func (s *Snapshot) Diff(input SnapshotDiffInput) ([]FileDiff, error) {
 	return diff, nil
 }
 
-// Preview mirrors Snapshot.preview.
+// Preview returns the diffs a restore would apply.
 func (s *Snapshot) Preview(input SnapshotPreviewInput) ([]FileDiff, error) {
 	if !s.enabled {
 		return nil, &SnapshotError{Operation: SnapshotOperationPreview, Message: "Snapshots are disabled"}
@@ -270,7 +272,7 @@ func (s *Snapshot) Preview(input SnapshotPreviewInput) ([]FileDiff, error) {
 	return preview, nil
 }
 
-// Restore mirrors Snapshot.restore.
+// Restore applies a snapshot to the worktree.
 func (s *Snapshot) Restore(input SnapshotRestoreInput) error {
 	if !s.enabled {
 		return &SnapshotError{Operation: SnapshotOperationRestore, Message: "Snapshots are disabled"}
@@ -289,7 +291,7 @@ func (s *Snapshot) Restore(input SnapshotRestoreInput) error {
 	return nil
 }
 
-// Checkout mirrors Snapshot.checkout.
+// Checkout restores the worktree to a snapshot.
 func (s *Snapshot) Checkout(snapshot SnapshotID) error {
 	repository, err := s.repository()
 	if err != nil {

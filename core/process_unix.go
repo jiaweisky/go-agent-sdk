@@ -7,7 +7,7 @@ import (
 	"syscall"
 )
 
-// applyProcessAttrs mirrors ChildProcess's `detached` option on POSIX: the
+// applyProcessAttrs puts the child in its own process group when detached, so
 // child becomes the leader of a new process group so the whole group can be
 // signalled together.
 func applyProcessAttrs(cmd *exec.Cmd, detached bool) {
@@ -17,7 +17,7 @@ func applyProcessAttrs(cmd *exec.Cmd, detached bool) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-// processTerminate mirrors ChildProcess's killSignal default of SIGTERM,
+// processTerminate signals the child, defaulting to SIGTERM,
 // signalling the whole process group when the command is detached.
 func processTerminate(cmd *exec.Cmd, detached bool) error {
 	if cmd.Process == nil {

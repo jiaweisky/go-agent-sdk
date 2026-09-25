@@ -769,3 +769,97 @@ opencode 的 agent 与 skill 定义来自 `{agent,agents}/**/*.md`、`{mode,mode
 | `FiberSet.join(executes)` | `errgroup.Group` + goroutine |
 | `McpRequest({jsonrpc:"2.0"...})` | 普通 struct + `json.Marshal` |
 | `{agent,agents}/**/*.md` frontmatter | `*.md` + `*.yaml` 双支持 |
+
+## 十四、符号对照表（Go ↔ TS）
+
+移植复核时用来定位 TS 源。文件名本身遵循 AGENTS.md 的规则
+（`packages/<pkg>/src/<path>/<name>.ts` → `<pkg>/<path>/<name>.go`，kebab-case → snake_case）；
+下表只列**规则推不出来**的：TS 源文件与 Go 文件不同名时给出实际路径，符号名与 Go 名不同时给出对照。
+
+| Go | TS 源 | 非同名的符号 |
+|---|---|---|
+| `agent/task.go` | packages/opencode/src/tool/task.txt | `AgentPermissions` ↔ `registry.describeTask` |
+| `core/agent.go` | packages/core/src/agent.ts | `AgentDefaultID` ↔ `AgentV2.defaultID` |
+| `core/agent_defaults.go` | packages/core/src/plugin/agent.ts | — |
+| `core/filesystem.go` | packages/core/src/filesystem.ts, packages/schema/src/filesystem.ts | `FileSystemEntry` ↔ `FileSystem.Entry`, `FileSystemSubmatch` ↔ `FileSystem.Submatch`, `FileSystemMatch` ↔ `FileSystem.Match` |
+| `core/fs_util.go` | packages/core/src/fs-util.ts | `RemoveAll` ↔ `fs.remove` |
+| `core/image.go` | packages/core/src/image.ts | `ImageResizerUnavailableError` ↔ `Image.ResizerUnavailableError` |
+| `core/location_mutation.go` | packages/core/src/location-mutation.ts | `locationMutationSlash` ↔ `FSUtil.slash` |
+| `core/model.go` | packages/core/src/model.ts | `ParseModel` ↔ `ModelV2.parse` |
+| `core/patch.go` | packages/core/src/patch.ts | `PatchParse` ↔ `Patch.parse`, `PatchDerive` ↔ `Patch.derive`, `PatchJoinBom` ↔ `Patch.joinBom`, `patchSplitBom` ↔ `patch.ts` |
+| `core/plugin.go` | packages/core/src/plugin.ts | `PluginID` ↔ `Plugin.ID`, `Plugin` ↔ `PluginV2.Service` |
+| `core/process.go` | packages/core/src/process.ts | — |
+| `core/process_unix.go` | packages/core/src/process-unix.ts | `applyProcessAttrs` ↔ `ChildProcess`, `processTerminate` ↔ `ChildProcess` |
+| `core/process_windows.go` | packages/core/src/process-windows.ts | `applyProcessAttrs` ↔ `ChildProcess`, `processTerminate` ↔ `ChildProcess` |
+| `core/provider.go` | packages/core/src/provider.ts | `ProviderInfoEmpty` ↔ `ProviderV2.Info.empty` |
+| `core/reference.go` | packages/core/src/reference.ts | `Reference` ↔ `Reference.Service` |
+| `core/reference/guidance.go` | packages/core/src/reference/guidance.ts | — |
+| `core/repository.go` | packages/core/src/repository.ts | `RepositoryReference` ↔ `Repository.Reference`, `RepositoryParse` ↔ `Repository.parse`, `RepositoryIsFile` ↔ `Repository.isFile`, `RepositoryIsRemote` ↔ `Repository.isRemote`, `RepositoryValidateBranch` ↔ `Repository.validateBranch`, `RepositoryCachePath` ↔ `Repository.cachePath`, `RepositoryCacheIdentity` ↔ `Repository.cacheIdentity`, `RepositorySame` ↔ `Repository.same` |
+| `core/repository_cache.go` | packages/core/src/repository-cache.ts | `RepositoryCacheResult` ↔ `RepositoryCache.Result`, `RepositoryCacheEnsureInput` ↔ `RepositoryCache.EnsureInput`, `RepositoryCache` ↔ `RepositoryCache.Service` |
+| `core/ripgrep.go` | packages/core/src/ripgrep.ts | `ripgrepTruncateText` ↔ `text.length` |
+| `core/session/compaction.go` | packages/core/src/session/compaction.ts | `CompactionEntry` ↔ `SessionCompaction.Entry`, `CompactionSettings` ↔ `SessionCompaction.Settings`, `CompactionDependencies` ↔ `SessionCompaction.Dependencies`, `CompactionInput` ↔ `SessionCompaction.Input`, `NewCompaction` ↔ `SessionCompaction.make`, `BuildCompactionPrompt` ↔ `SessionCompaction.buildPrompt`, `compactionUTF16Length` ↔ `String.prototype.length`, `compactionUTF16Slice` ↔ `String.prototype.slice` |
+| `core/session/context_epoch.go` | packages/core/src/session/context-epoch.ts | `ContextEpochInitialize` ↔ `SessionContextEpoch.initialize`, `ContextEpochPrepare` ↔ `SessionContextEpoch.prepare`, `ContextEpochReset` ↔ `SessionContextEpoch.reset`, `latestEventSequence` ↔ `EventV2.latestSequence` |
+| `core/session/error.go` | packages/core/src/session/error.ts | — |
+| `core/session/history.go` | packages/core/src/session/history.ts | `HistoryEntry` ↔ `SessionHistory.entriesForRunner` |
+| `core/session/info.go` | packages/core/src/session/info.ts | — |
+| `core/session/input.go` | packages/core/src/session/input.ts | `AdmitInput` ↔ `SessionInput.admit`, `ProjectAdmittedInput` ↔ `SessionInput.projectAdmitted`, `ProjectPromptedInput` ↔ `SessionInput.projectPrompted` |
+| `core/session/message_updater.go` | packages/core/src/session/message-updater.ts | — |
+| `core/session/projector.go` | packages/core/src/session/projector.ts | `projectorAdapter` ↔ `SessionProjector` |
+| `core/session/revert.go` | packages/core/src/session/revert.ts | `RevertMessageNotFoundError` ↔ `SessionRevert.MessageNotFoundError`, `RevertPlan` ↔ `SessionRevert.plan`, `RevertStage` ↔ `SessionRevert.stage`, `RevertClear` ↔ `SessionRevert.clear`, `RevertCommit` ↔ `SessionRevert.commit` |
+| `core/session/run_coordinator.go` | packages/core/src/session/run-coordinator.ts | — |
+| `core/session/runner/llm.go` | packages/core/src/session/runner/llm.ts | `LLMRunner` ↔ `SessionRunner.layer`, `errInterrupted` ↔ `Effect.interrupt` |
+| `core/session/runner/max_steps.go` | packages/core/src/session/runner/max-steps.ts | `MaxStepsPrompt` ↔ `MAX_STEPS_PROMPT` |
+| `core/session/runner/model.go` | packages/core/src/session/runner/model.ts | `runnerModelWithDefaults` ↔ `withDefaults`, `runnerModelWithVariant` ↔ `withVariant` |
+| `core/session/runner/publish_llm_event.go` | packages/core/src/session/runner/publish-llm-event.ts | `NewLLMEventPublisher` ↔ `createLLMEventPublisher` |
+| `core/session/runner/runner.go` | packages/core/src/session/runner/runner.ts | — |
+| `core/session/runner/to_llm_message.go` | packages/core/src/session/runner/to-llm-message.ts | `llmToolResult` ↔ `toolResult`, `llmResultMetadata` ↔ `provider.resultMetadata` |
+| `core/session/store.go` | packages/core/src/session/store.ts | `Store` ↔ `SessionStore.Service`, `StoreMessage` ↔ `SessionStore.message` |
+| `core/session/todo.go` | packages/core/src/session/todo.ts | `Todo` ↔ `SessionTodo.Service` |
+| `core/skill.go` | packages/core/src/skill.ts | `SkillAvailable` ↔ `SkillV2.available`, `Skill` ↔ `SkillV2.Service` |
+| `core/skill/discovery.go` | packages/core/src/skill/discovery.ts | — |
+| `core/skill/guidance.go` | packages/core/src/skill/guidance.ts | — |
+| `core/snapshot.go` | packages/core/src/snapshot.ts | `SnapshotError` ↔ `Snapshot.Error`, `Snapshot` ↔ `Snapshot.Service` |
+| `core/state.go` | packages/core/src/state.ts | `StateOptions` ↔ `State.Options`, `State` ↔ `State.create`, `StateBatch` ↔ `State.batch` |
+| `core/systemcontext/registry.go` | packages/core/src/systemcontext/registry.ts | — |
+| `core/systemcontext/systemcontext.go` | packages/core/src/systemcontext/systemcontext.ts | — |
+| `core/tool/apply_patch.go` | packages/core/src/tool/apply-patch.ts | — |
+| `core/tool/bash.go` | packages/core/src/tool/bash.ts | `bashResolve` ↔ `FSUtil.resolve` |
+| `core/tool/glob.go` | packages/core/src/tool/glob.ts | `GlobMaxSafeInteger` ↔ `Number.MAX_SAFE_INTEGER`, `globResolve` ↔ `path.resolve` |
+| `core/tool/grep.go` | packages/core/src/tool/grep.ts | `GrepMaxSafeInteger` ↔ `Number.MAX_SAFE_INTEGER`, `grepResolve` ↔ `path.resolve` |
+| `core/tool/skill.go` | packages/core/src/tool/skill.ts | `SkillToModelOutput` ↔ `SkillTool.toModelOutput` |
+| `core/tool/todowrite.go` | packages/core/src/tool/todowrite.ts | `TodoWriteToModelOutput` ↔ `TodoWriteTool.toModelOutput` |
+| `core/tool/webfetch.go` | packages/core/src/tool/webfetch.ts | — |
+| `core/tool/webfetch_turndown.go` | packages/core/src/tool/webfetch-turndown.ts | `turndownTrimSpace` ↔ `String.prototype.trim` |
+| `core/tool_output_store.go` | packages/core/src/tool-output-store.ts | `ToolOutputStoreBoundInput` ↔ `ToolOutputStore.BoundInput`, `ToolOutputStoreBoundResult` ↔ `ToolOutputStore.BoundResult`, `ToolOutputStoreStorageError` ↔ `ToolOutputStore.StorageError` |
+| `core/util/diff.go` | packages/core/src/util/diff.ts | — |
+| `core/util/glob.go` | util/glob.ts | `GlobOptions` ↔ `Glob.Options`, `GlobScan` ↔ `Glob.scan`, `GlobMatch` ↔ `Glob.match` |
+| `core/util/jsonc.go` | packages/core/src/util/jsonc.ts | — |
+| `core/util/locale.go` | packages/core/src/util/locale.ts | `CompareLocale` ↔ `String.prototype.localeCompare` |
+| `core/util/markdown.go` | packages/core/src/util/markdown.ts | `ParseMarkdown` ↔ `ConfigMarkdown.parse`, `ParseMarkdownOption` ↔ `ConfigMarkdown.parseOption`, `SanitizeMarkdown` ↔ `ConfigMarkdown.sanitize` |
+| `examples/internal/util/util.go` | — | — |
+| `jsonschema/jsonschema.go` | — | — |
+| `mcp/catalog.go` | index.ts | `serverSupportsTools` ↔ `client.getServerCapabilities()`, `ListPrompts` ↔ `McpCatalog.prompts`, `ListResources` ↔ `McpCatalog.resources`, `ListResourceTemplates` ↔ `McpCatalog.resourceTemplates` |
+| `mcp/client.go` | packages/opencode/src/mcp/client.ts | `timeouts` ↔ `convertTool`, `promptKey` ↔ `McpCatalog.fetch`, `resourceKey` ↔ `McpCatalog.fetch` |
+| `mcp/config.go` | packages/opencode/src/mcp/config.ts | `DefaultTimeout` ↔ `DEFAULT_TIMEOUT` |
+| `mcp/tool.go` | packages/opencode/src/mcp/tool.ts | `AdaptMCPTool` ↔ `McpCatalog.convertTool`, `MCPInputSchema` ↔ `convertTool` |
+| `opencode/config/entry_name.go` | packages/opencode/src/config/entry-name.ts | — |
+| `schema/agent.go` | packages/schema/src/agent.ts | `AgentInfoEmpty` ↔ `Agent.Info.empty` |
+| `schema/json_required.go` | packages/schema/src/json-required.ts | `allowsJSONNull` ↔ `Schema.Unknown` |
+| `schema/llm.go` | packages/schema/src/llm.ts | — |
+| `schema/model.go` | packages/schema/src/model.ts | `ModelRef` ↔ `Model.Ref`, `ModelCapabilities` ↔ `Model.Capabilities`, `ModelCost` ↔ `Model.Cost`, `ModelRequest` ↔ `Model.Info.request`, `ModelInfo` ↔ `ModelV2.Info`, `ModelInfoEmpty` ↔ `Model.Info.empty` |
+| `schema/plugin.go` | packages/schema/src/plugin.ts | `PluginID` ↔ `Plugin.ID`, `PluginEventAdded` ↔ `Plugin.Event.Added` |
+| `schema/prompt.go` | packages/schema/src/prompt.ts | `PromptSource` ↔ `Prompt.Source`, `PromptFileAttachment` ↔ `Prompt.FileAttachment`, `PromptAgentAttachment` ↔ `Prompt.AgentAttachment`, `PromptFromUserMessage` ↔ `Prompt.Prompt.fromUserMessage` |
+| `schema/prompt_input.go` | packages/schema/src/prompt-input.ts | `PromptInputFileAttachment` ↔ `PromptInput.FileAttachment`, `PromptInput` ↔ `PromptInput.Prompt` |
+| `schema/provider.go` | packages/schema/src/provider.ts | `ProviderAISDK` ↔ `Provider.AISDK`, `ProviderNative` ↔ `Provider.Native`, `ProviderAPI` ↔ `Provider.Api`, `ProviderRequest` ↔ `Provider.Request`, `ProviderInfo` ↔ `ProviderV2.Info`, `ProviderInfoEmpty` ↔ `Provider.Info.empty` |
+| `schema/reference.go` | packages/schema/src/reference.ts | `ReferenceLocalSource` ↔ `Reference.LocalSource`, `ReferenceGitSource` ↔ `Reference.GitSource`, `ReferenceInfo` ↔ `Reference.Info`, `ReferenceEventUpdated` ↔ `Reference.Event.Updated` |
+| `schema/revert.go` | packages/schema/src/revert.ts | `RevertFileDiff` ↔ `Revert.FileDiff`, `RevertState` ↔ `Revert.State` |
+| `schema/session.go` | packages/schema/src/session.ts | `SessionInfo` ↔ `SessionV2.Info`, `SessionListAnchor` ↔ `Session.ListAnchor` |
+| `schema/session_delivery.go` | packages/schema/src/session-delivery.ts | `SessionDelivery` ↔ `SessionDelivery.Delivery` |
+| `schema/session_event.go` | packages/schema/src/session-event.ts | `SessionEventSource` ↔ `SessionEvent.Source`, `SessionEventRetryError` ↔ `SessionEvent.RetryError`, `SessionEventDurableDefinitions` ↔ `SessionEvent.DurableDefinitions`, `SessionEventDefinitions` ↔ `SessionEvent.Definitions` |
+| `schema/session_input.go` | packages/schema/src/session-input.ts | `SessionInputAdmitted` ↔ `SessionInput.Admitted` |
+| `schema/session_message.go` | packages/schema/src/session-message.ts | — |
+| `schema/session_status_event.go` | packages/schema/src/session-status-event.ts | — |
+| `schema/session_todo.go` | packages/schema/src/session-todo.ts | `SessionTodoInfo` ↔ `SessionTodo.Info` |
+| `schema/skill.go` | packages/schema/src/skill.ts | `SkillSourceEquals` ↔ `Skill.Source.equals`, `SkillSourceKey` ↔ `Skill.Source.key` |
+| `schema/v1/session.go` | packages/schema/src/v1/session.ts | `V1SessionSummary` ↔ `SessionV1.SessionSummary`, `V1SessionTokens` ↔ `SessionV1.SessionTokens`, `V1SessionRevert` ↔ `SessionV1.SessionRevert`, `V1SessionModel` ↔ `SessionV1.SessionModel`, `V1SessionTime` ↔ `SessionV1.SessionInfo.time`, `V1SessionInfo` ↔ `SessionV1.SessionInfo` |
+| `schema/workspace_event.go` | packages/schema/src/workspace-event.ts | `WorkspaceConnectionStatus` ↔ `WorkspaceEvent.ConnectionStatus` |

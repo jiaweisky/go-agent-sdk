@@ -13,7 +13,7 @@ import (
 )
 
 // ErrTimedOut is the cause carried by an AppProcessError when a run exceeds its
-// configured timeout. It mirrors the TypeScript AppProcess "Timed out" cause.
+// configured timeout.
 var ErrTimedOut = errors.New("Timed out")
 
 type AppProcessError struct {

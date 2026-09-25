@@ -19,20 +19,20 @@ const (
 	ToolOutputStoreManagedDirectory = "tool-output"
 )
 
-// ToolOutputStoreBoundInput mirrors ToolOutputStore.BoundInput.
+// ToolOutputStoreBoundInput describes a tool result to bound.
 type ToolOutputStoreBoundInput struct {
 	SessionID  schema.SessionID
 	ToolCallID string
 	Output     llmschema.ToolOutput
 }
 
-// ToolOutputStoreBoundResult mirrors ToolOutputStore.BoundResult.
+// ToolOutputStoreBoundResult is a bounded tool result.
 type ToolOutputStoreBoundResult struct {
 	Output      llmschema.ToolOutput
 	OutputPaths []string
 }
 
-// ToolOutputStoreStorageError mirrors ToolOutputStore.StorageError.
+// ToolOutputStoreStorageError is a failure writing a bounded result.
 type ToolOutputStoreStorageError struct {
 	Operation string
 	Cause     error
@@ -58,7 +58,7 @@ type ToolOutputSettings struct {
 	MaxBytes int
 }
 
-// ToolOutputStore mirrors the ToolOutputStore service.
+// ToolOutputStore bounds oversized tool results, spilling the overflow to files.
 type ToolOutputStore struct {
 	directory string
 	settings  ToolOutputSettings
@@ -71,7 +71,7 @@ func NewToolOutputStore(global Global, settings ToolOutputSettings) *ToolOutputS
 	}
 }
 
-// Limits mirrors ToolOutputStore.limits.
+// Limits returns the configured line and byte limits.
 func (s *ToolOutputStore) Limits() (maxLines int, maxBytes int) {
 	maxLines, maxBytes = ToolOutputStoreMaxLines, ToolOutputStoreMaxBytes
 	if s.settings.MaxLines > 0 {
@@ -83,7 +83,7 @@ func (s *ToolOutputStore) Limits() (maxLines int, maxBytes int) {
 	return maxLines, maxBytes
 }
 
-// Bound mirrors ToolOutputStore.bound.
+// Bound bounds a tool result, writing the overflow under the managed directory.
 func (s *ToolOutputStore) Bound(input ToolOutputStoreBoundInput) (ToolOutputStoreBoundResult, error) {
 	maxLines, maxBytes := s.Limits()
 	var media []llmschema.ToolContent
@@ -144,7 +144,7 @@ func (s *ToolOutputStore) write(content string) (string, error) {
 	return file, nil
 }
 
-// Cleanup mirrors ToolOutputStore.cleanup.
+// Cleanup removes managed files older than the retention window.
 func (s *ToolOutputStore) Cleanup() error {
 	entries, err := ReadDir(s.directory)
 	if err != nil {
