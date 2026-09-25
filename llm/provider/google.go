@@ -13,14 +13,7 @@ const GoogleProviderID = schema.ProviderID("google")
 
 // GoogleConfig configures the Google facade.
 type GoogleConfig struct {
-	Auth            *route.Auth
-	APIKey          *string
-	BaseURL         string
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
+	CommonConfig
 }
 
 // GoogleProvider is a configured Google facade: its id, its route, and its model
@@ -46,14 +39,8 @@ func googleAuth(input GoogleConfig) *route.Auth {
 	return cred.Header("x-goog-api-key")
 }
 
-func configuredGoogleRoute(geminiRoute route.Route, input GoogleConfig) route.Route {
-	defaults := route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
+func configureGoogleRoute(geminiRoute route.Route, input GoogleConfig) route.Route {
+	defaults := input.defaults()
 	var baseURL *string
 	if input.BaseURL != "" {
 		baseURL = &input.BaseURL
@@ -67,18 +54,12 @@ func configuredGoogleRoute(geminiRoute route.Route, input GoogleConfig) route.Ro
 
 // NewGoogle builds the Google facade over the Gemini route.
 func NewGoogle(geminiRoute route.Route, input GoogleConfig) GoogleProvider {
-	r := configuredGoogleRoute(geminiRoute, input)
+	r := configureGoogleRoute(geminiRoute, input)
 	return GoogleProvider{
 		ID:     GoogleProviderID,
 		Routes: []route.Route{r},
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
-			modelInput := route.RouteModelInput{ID: id}
-			if len(opts) > 0 {
-				opt := opts[0]
-				modelInput.Defaults = opt.Defaults
-				modelInput.Compatibility = opt.Compatibility
-			}
-			return r.Model(modelInput)
+			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
 	}
 }

@@ -16,7 +16,6 @@ import (
 )
 
 const bedrockConverseAdapter = "bedrock-converse"
-const bedrockConverseBedrockBreakpointCap = 4
 
 type bedrockConverseTextBlock struct {
 	Text string `json:"text"`
@@ -48,14 +47,11 @@ type bedrockConverseReasoningBlock struct {
 		} `json:"reasoningText,omitempty"`
 	} `json:"reasoningContent"`
 }
-type bedrockConverseBedrockMessage struct {
+type bedrockConverseMessage struct {
 	Role    string `json:"role"`
 	Content []any  `json:"content"`
 }
-type bedrockConverseSystemBlock struct {
-	Text string `json:"text"`
-}
-type bedrockConverseBedrockToolSpec struct {
+type bedrockConverseToolSpec struct {
 	ToolSpec struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
@@ -64,9 +60,9 @@ type bedrockConverseBedrockToolSpec struct {
 		} `json:"inputSchema"`
 	} `json:"toolSpec"`
 }
-type bedrockConverseBedrockBody struct {
+type bedrockConverseBody struct {
 	ModelID                      string                          `json:"modelId"`
-	Messages                     []bedrockConverseBedrockMessage `json:"messages"`
+	Messages                     []bedrockConverseMessage        `json:"messages"`
 	System                       []any                           `json:"system,omitempty"`
 	InferenceConfig              *bedrockConverseInferenceConfig `json:"inferenceConfig,omitempty"`
 	ToolConfig                   *bedrockConverseToolConfig      `json:"toolConfig,omitempty"`
@@ -83,7 +79,7 @@ type bedrockConverseToolConfig struct {
 	ToolChoice any   `json:"toolChoice,omitempty"`
 }
 
-type bedrockConverseBedrockUsage struct {
+type bedrockConverseUsage struct {
 	InputTokens           *int                    `json:"inputTokens,omitempty"`
 	OutputTokens          *int                    `json:"outputTokens,omitempty"`
 	TotalTokens           *int                    `json:"totalTokens,omitempty"`
@@ -93,17 +89,14 @@ type bedrockConverseBedrockUsage struct {
 }
 
 // UnmarshalJSON reads the usage payload Bedrock sends.
-func (u *bedrockConverseBedrockUsage) UnmarshalJSON(data []byte) error {
-	type plain bedrockConverseBedrockUsage
+func (u *bedrockConverseUsage) UnmarshalJSON(data []byte) error {
+	type plain bedrockConverseUsage
 	var decoded plain
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	*u = bedrockConverseBedrockUsage(decoded)
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err == nil {
-		u.ProviderMetadata = schema.ProviderMetadata{"bedrock": raw}
-	}
+	*u = bedrockConverseUsage(decoded)
+	u.ProviderMetadata = providerMetadata("bedrock", rawRecord(data))
 	return nil
 }
 
@@ -134,11 +127,11 @@ type bedrockConverseMessageStopEvent struct {
 	StopReason string `json:"stopReason"`
 }
 type bedrockConverseMetadataEvent struct {
-	Usage   *bedrockConverseBedrockUsage `json:"usage,omitempty"`
-	Metrics any                          `json:"metrics,omitempty"`
+	Usage   *bedrockConverseUsage `json:"usage,omitempty"`
+	Metrics any                   `json:"metrics,omitempty"`
 }
 
-type bedrockConverseBedrockEvent struct {
+type bedrockConverseEvent struct {
 	MessageStart                *struct{ Role string }                 `json:"messageStart,omitempty"`
 	ContentBlockStart           *bedrockConverseContentBlockStartEvent `json:"contentBlockStart,omitempty"`
 	ContentBlockDelta           *bedrockConverseContentBlockDeltaEvent `json:"contentBlockDelta,omitempty"`
@@ -156,7 +149,7 @@ type bedrockConverseParserState struct {
 	tools               map[string]*utils.PendingTool
 	pendingFinish       *bedrockConversePendingFinish
 	hasToolCalls        bool
-	lifecycle           utils.State
+	lifecycle           utils.LifecycleState
 	reasoningSignatures map[int]string
 }
 type bedrockConversePendingFinish struct {
@@ -164,19 +157,8 @@ type bedrockConversePendingFinish struct {
 	Usage  *schema.Usage
 }
 
-func bedrockConverseIntVal(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-
-func bedrockConverseBedrockMetadata(m map[string]any) schema.ProviderMetadata {
-	return schema.ProviderMetadata{"bedrock": m}
-}
-
-func bedrockConverseLowerToolSpec(td schema.ToolDefinition, inputSchema any) bedrockConverseBedrockToolSpec {
-	var spec bedrockConverseBedrockToolSpec
+func bedrockConverseLowerToolSpec(td schema.ToolDefinition, inputSchema any) bedrockConverseToolSpec {
+	var spec bedrockConverseToolSpec
 	spec.ToolSpec.Name = td.Name
 	spec.ToolSpec.Description = td.Description
 	spec.ToolSpec.InputSchema.JSON = inputSchema
@@ -187,7 +169,7 @@ func bedrockConverseLowerTools(compatibility string, bp *utils.Breakpoints, tool
 	var result []any
 	for _, t := range tools {
 		result = append(result, bedrockConverseLowerToolSpec(t, projectToolSchema(t.InputSchema, compatibility)))
-		if cp := utils.Block(bp, t.Cache); cp != nil {
+		if cp := utils.BedrockBlock(bp, t.Cache); cp != nil {
 			result = append(result, *cp)
 		}
 	}
@@ -196,7 +178,7 @@ func bedrockConverseLowerTools(compatibility string, bp *utils.Breakpoints, tool
 
 func bedrockConverseTextWithCache(bp *utils.Breakpoints, text string, cache *schema.CacheHint) []any {
 	blocks := []any{bedrockConverseTextBlock{Text: text}}
-	if cp := utils.Block(bp, cache); cp != nil {
+	if cp := utils.BedrockBlock(bp, cache); cp != nil {
 		blocks = append(blocks, *cp)
 	}
 	return blocks
@@ -211,7 +193,7 @@ func bedrockConverseLowerToolChoice(tc schema.ToolChoice) (any, error) {
 	)
 }
 
-func bedrockConverseBedrockFinishReason(reason string) schema.FinishReason {
+func bedrockConverseFinishReason(reason string) schema.FinishReason {
 	switch reason {
 	case "end_turn", "stop_sequence":
 		return schema.ReasonStop
@@ -225,22 +207,22 @@ func bedrockConverseBedrockFinishReason(reason string) schema.FinishReason {
 	return schema.ReasonUnknown
 }
 
-func bedrockConverseMapUsage(u *bedrockConverseBedrockUsage) *schema.Usage {
+func bedrockConverseMapUsage(u *bedrockConverseUsage) *schema.Usage {
 	if u == nil {
 		return nil
 	}
-	cacheTotal := bedrockConverseIntVal(u.CacheReadInputTokens) + bedrockConverseIntVal(u.CacheWriteInputTokens)
-	nonCached := bedrockConverseIntVal(u.InputTokens) - cacheTotal
+	cacheTotal := intVal(u.CacheReadInputTokens) + intVal(u.CacheWriteInputTokens)
+	nonCached := intVal(u.InputTokens) - cacheTotal
 	if nonCached < 0 {
 		nonCached = 0
 	}
 	return &schema.Usage{
-		InputTokens:           bedrockConverseIntVal(u.InputTokens),
-		OutputTokens:          bedrockConverseIntVal(u.OutputTokens),
+		InputTokens:           intVal(u.InputTokens),
+		OutputTokens:          intVal(u.OutputTokens),
 		NonCachedInputTokens:  nonCached,
-		CacheReadInputTokens:  bedrockConverseIntVal(u.CacheReadInputTokens),
-		CacheWriteInputTokens: bedrockConverseIntVal(u.CacheWriteInputTokens),
-		TotalTokens:           bedrockConverseIntVal(TotalTokens(u.InputTokens, u.OutputTokens, u.TotalTokens)),
+		CacheReadInputTokens:  intVal(u.CacheReadInputTokens),
+		CacheWriteInputTokens: intVal(u.CacheWriteInputTokens),
+		TotalTokens:           intVal(TotalTokens(u.InputTokens, u.OutputTokens, u.TotalTokens)),
 		ProviderMetadata:      u.ProviderMetadata,
 	}
 }
@@ -264,7 +246,7 @@ func bedrockConverseLowerToolResultContent(part schema.ToolResultPart) ([]bedroc
 		case schema.ToolTextContent:
 			items = append(items, bedrockConverseToolResultContentItem{Text: &v.Text})
 		case schema.ToolFileContent:
-			img, err := utils.Lower(schema.MediaPart{
+			img, err := utils.BedrockLower(schema.MediaPart{
 				Type: "media", MediaType: v.Mime, Data: v.URI, Filename: v.Name,
 			})
 			if err != nil {
@@ -329,112 +311,145 @@ func bedrockConverseFromRequest(request *schema.LLMRequest) (any, error) {
 		additional = map[string]any{"top_k": *gen.TopK}
 	}
 
-	return bedrockConverseBedrockBody{
+	return bedrockConverseBody{
 		ModelID: string(request.Model.ModelID()), Messages: messages,
 		System: sysBlocks, InferenceConfig: infCfg, ToolConfig: toolCfg,
 		AdditionalModelRequestFields: additional,
 	}, nil
 }
 
-func bedrockConverseLowerMessages(request *schema.LLMRequest, bp *utils.Breakpoints) ([]bedrockConverseBedrockMessage, error) {
-	msgs := []bedrockConverseBedrockMessage{}
+func bedrockConverseLowerMessages(request *schema.LLMRequest, bp *utils.Breakpoints) ([]bedrockConverseMessage, error) {
+	msgs := []bedrockConverseMessage{}
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
-			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
-			blocks := bedrockConverseTextWithCache(bp, update, nil)
-			if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
-				last := &msgs[len(msgs)-1]
-				last.Content = append(last.Content, blocks...)
-			} else {
-				msgs = append(msgs, bedrockConverseBedrockMessage{Role: "user", Content: blocks})
-			}
+			msgs = bedrockConverseLowerSystemMessage(msgs, bp, msg)
 		case schema.RoleUser:
-			var content []any
-			for _, p := range msg.Content {
-				switch part := p.(type) {
-				case schema.TextPart:
-					content = append(content, bedrockConverseTextWithCache(bp, part.Text, part.Cache)...)
-				case schema.MediaPart:
-					media, err := utils.Lower(part)
-					if err != nil {
-						return nil, err
-					}
-					content = append(content, media)
-				default:
-					return nil, fmt.Errorf("Bedrock Converse user only supports text and media")
-				}
+			m, err := bedrockConverseLowerUserMessage(bp, msg)
+			if err != nil {
+				return nil, err
 			}
-			msgs = append(msgs, bedrockConverseBedrockMessage{Role: "user", Content: content})
+			msgs = append(msgs, m)
 		case schema.RoleAssistant:
-			var content []any
-			for _, p := range msg.Content {
-				switch part := p.(type) {
-				case schema.TextPart:
-					content = append(content, bedrockConverseTextWithCache(bp, part.Text, part.Cache)...)
-				case schema.ReasoningPart:
-					var sig *string
-					if part.Encrypted != nil {
-						sig = part.Encrypted
-					} else if md := part.ProviderMetadata; md != nil {
-						if raw := md["bedrock"]; raw != nil {
-							if s, _ := raw["signature"].(string); s != "" {
-								sig = &s
-							}
-						}
-					}
-					rb := bedrockConverseReasoningBlock{}
-					rb.ReasoningContent.ReasoningText = &struct {
-						Text      string  `json:"text"`
-						Signature *string `json:"signature,omitempty"`
-					}{Text: part.Text, Signature: sig}
-					content = append(content, rb)
-				case schema.ToolCallPart:
-					var tub bedrockConverseToolUseBlock
-					tub.ToolUse.ToolUseID = part.ID
-					tub.ToolUse.Name = part.Name
-					tub.ToolUse.Input = part.Input
-					content = append(content, tub)
-				default:
-					return nil, fmt.Errorf("Bedrock Converse assistant only supports text, reasoning, tool-call")
-				}
+			m, err := bedrockConverseLowerAssistantMessage(bp, msg)
+			if err != nil {
+				return nil, err
 			}
-			msgs = append(msgs, bedrockConverseBedrockMessage{Role: "assistant", Content: content})
+			msgs = append(msgs, m)
 		case schema.RoleTool:
-			var content []any
-			for _, p := range msg.Content {
-				if part, ok := p.(schema.ToolResultPart); ok {
-					c, err := bedrockConverseLowerToolResultContent(part)
-					if err != nil {
-						return nil, err
-					}
-					status := "success"
-					if part.Result.Type == "error" {
-						status = "error"
-					}
-					content = append(content, bedrockConverseToolResultBlock{
-						ToolResult: struct {
-							ToolUseID string                                 `json:"toolUseId"`
-							Content   []bedrockConverseToolResultContentItem `json:"content"`
-							Status    string                                 `json:"status"`
-						}{ToolUseID: part.ID, Content: c, Status: status},
-					})
-					if cp := utils.Block(bp, part.Cache); cp != nil {
-						content = append(content, *cp)
-					}
-				}
+			m, err := bedrockConverseLowerToolMessage(bp, msg)
+			if err != nil {
+				return nil, err
 			}
-			msgs = append(msgs, bedrockConverseBedrockMessage{Role: "user", Content: content})
+			msgs = append(msgs, m)
 		}
 	}
 	return msgs, nil
+}
+
+func bedrockConverseLowerSystemMessage(msgs []bedrockConverseMessage, bp *utils.Breakpoints, msg schema.Message) []bedrockConverseMessage {
+	update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
+	blocks := bedrockConverseTextWithCache(bp, update, SystemUpdateCache(msg.Content))
+	if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
+		msgs[len(msgs)-1].Content = append(msgs[len(msgs)-1].Content, blocks...)
+		return msgs
+	}
+	return append(msgs, bedrockConverseMessage{Role: "user", Content: blocks})
+}
+
+func bedrockConverseLowerUserMessage(bp *utils.Breakpoints, msg schema.Message) (bedrockConverseMessage, error) {
+	var content []any
+	for _, p := range msg.Content {
+		switch part := p.(type) {
+		case schema.TextPart:
+			content = append(content, bedrockConverseTextWithCache(bp, part.Text, part.Cache)...)
+		case schema.MediaPart:
+			media, err := utils.BedrockLower(part)
+			if err != nil {
+				return bedrockConverseMessage{}, err
+			}
+			content = append(content, media)
+		default:
+			return bedrockConverseMessage{}, fmt.Errorf("Bedrock Converse user only supports text and media")
+		}
+	}
+	return bedrockConverseMessage{Role: "user", Content: content}, nil
+}
+
+func bedrockConverseLowerAssistantMessage(bp *utils.Breakpoints, msg schema.Message) (bedrockConverseMessage, error) {
+	var content []any
+	for _, p := range msg.Content {
+		switch part := p.(type) {
+		case schema.TextPart:
+			content = append(content, bedrockConverseTextWithCache(bp, part.Text, part.Cache)...)
+		case schema.ReasoningPart:
+			content = append(content, bedrockConverseLowerReasoning(part))
+		case schema.ToolCallPart:
+			var tub bedrockConverseToolUseBlock
+			tub.ToolUse.ToolUseID = part.ID
+			tub.ToolUse.Name = part.Name
+			tub.ToolUse.Input = part.Input
+			content = append(content, tub)
+		default:
+			return bedrockConverseMessage{}, fmt.Errorf("Bedrock Converse assistant only supports text, reasoning, tool-call")
+		}
+	}
+	return bedrockConverseMessage{Role: "assistant", Content: content}, nil
+}
+
+func bedrockConverseLowerReasoning(part schema.ReasoningPart) bedrockConverseReasoningBlock {
+	var sig *string
+	if part.Encrypted != nil {
+		sig = part.Encrypted
+	} else if md := part.ProviderMetadata; md != nil {
+		if raw := md["bedrock"]; raw != nil {
+			if s, _ := raw["signature"].(string); s != "" {
+				sig = &s
+			}
+		}
+	}
+	rb := bedrockConverseReasoningBlock{}
+	rb.ReasoningContent.ReasoningText = &struct {
+		Text      string  `json:"text"`
+		Signature *string `json:"signature,omitempty"`
+	}{Text: part.Text, Signature: sig}
+	return rb
+}
+
+func bedrockConverseLowerToolMessage(bp *utils.Breakpoints, msg schema.Message) (bedrockConverseMessage, error) {
+	var content []any
+	for _, p := range msg.Content {
+		part, ok := p.(schema.ToolResultPart)
+		if !ok {
+			continue
+		}
+		c, err := bedrockConverseLowerToolResultContent(part)
+		if err != nil {
+			return bedrockConverseMessage{}, err
+		}
+		status := "success"
+		if part.Result.Type == "error" {
+			status = "error"
+		}
+		content = append(content, bedrockConverseToolResultBlock{
+			ToolResult: struct {
+				ToolUseID string                                 `json:"toolUseId"`
+				Content   []bedrockConverseToolResultContentItem `json:"content"`
+				Status    string                                 `json:"status"`
+			}{ToolUseID: part.ID, Content: c, Status: status},
+		})
+		if cp := utils.BedrockBlock(bp, part.Cache); cp != nil {
+			content = append(content, *cp)
+		}
+	}
+	return bedrockConverseMessage{Role: "user", Content: content}, nil
 }
 
 func bedrockConverseDecodeEvent(frame string) (any, error) {
 	if frame == "" {
 		return nil, nil
 	}
-	var evt bedrockConverseBedrockEvent
+	var evt bedrockConverseEvent
 	if err := json.Unmarshal([]byte(frame), &evt); err != nil {
 		return nil, fmt.Errorf("Bedrock Converse: invalid event: %w", err)
 	}
@@ -443,136 +458,170 @@ func bedrockConverseDecodeEvent(frame string) (any, error) {
 
 func bedrockConverseStep(state any, event any) (any, []schema.LLMEvent, error) {
 	s := state.(bedrockConverseParserState)
-	evt, ok := event.(bedrockConverseBedrockEvent)
+	evt, ok := event.(bedrockConverseEvent)
 	if !ok {
-		return state, nil, nil
-	}
-
-	if evt.ContentBlockStart != nil && evt.ContentBlockStart.Start != nil && evt.ContentBlockStart.Start.ToolUse != nil {
-		idx := evt.ContentBlockStart.ContentBlockIndex
-		tu := evt.ContentBlockStart.Start.ToolUse
-		var events []schema.LLMEvent
-		utils.StepStart(&s.lifecycle, &events)
-		s.tools = utils.Start(s.tools, fmt.Sprint(idx), utils.PendingTool{ID: tu.ToolUseID, Name: tu.Name})
-		events = append(events, schema.NewToolInputStart(tu.ToolUseID, tu.Name))
-		return s, events, nil
-	}
-	if evt.ContentBlockDelta != nil && evt.ContentBlockDelta.Delta != nil {
-		d := evt.ContentBlockDelta.Delta
-		idx := evt.ContentBlockDelta.ContentBlockIndex
-		if d.Text != nil && *d.Text != "" {
-			var events []schema.LLMEvent
-			utils.TextDelta(&s.lifecycle, &events, fmt.Sprintf("text-%d", idx), *d.Text)
-			return s, events, nil
-		}
-		if d.ReasoningContent != nil {
-			var events []schema.LLMEvent
-			if d.ReasoningContent.Text != nil && *d.ReasoningContent.Text != "" {
-				utils.ReasoningDelta(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), *d.ReasoningContent.Text)
-			}
-			if d.ReasoningContent.Signature != nil {
-				if s.reasoningSignatures == nil {
-					s.reasoningSignatures = make(map[int]string)
-				}
-				s.reasoningSignatures[idx] = *d.ReasoningContent.Signature
-			}
-			return s, events, nil
-		}
-		if d.ToolUse != nil {
-			result, err := utils.AppendExisting(bedrockConverseAdapter, s.tools, fmt.Sprint(idx), d.ToolUse.Input,
-				"Bedrock Converse tool delta is missing its tool call")
-			if err != nil {
-				return state, nil, err
-			}
-			var events []schema.LLMEvent
-			if len(result.Events) > 0 {
-				utils.StepStart(&s.lifecycle, &events)
-			}
-			events = append(events, result.Events...)
-			s.tools = result.Tools
-			return s, events, nil
-		}
 		return s, nil, nil
 	}
-	if evt.ContentBlockStop != nil {
-		idx := evt.ContentBlockStop.ContentBlockIndex
-		result, err := utils.FinishTool(bedrockConverseAdapter, s.tools, fmt.Sprint(idx))
-		if err != nil {
-			return state, nil, err
-		}
-		var events []schema.LLMEvent
-		if len(result.Events) > 0 {
-			utils.StepStart(&s.lifecycle, &events)
-		} else {
-			var pm schema.ProviderMetadata
-			if s.reasoningSignatures != nil {
-				if sig, ok := s.reasoningSignatures[idx]; ok {
-					pm = bedrockConverseBedrockMetadata(map[string]any{"signature": sig})
-				}
-			}
-			utils.TextEnd(&s.lifecycle, &events, fmt.Sprintf("text-%d", idx))
-			utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), pm)
-		}
-		events = append(events, result.Events...)
-		for _, e := range result.Events {
-			if e.IsToolCall() {
-				s.hasToolCalls = true
-			}
-		}
-		if s.reasoningSignatures != nil {
-			delete(s.reasoningSignatures, idx)
-		}
-		s.tools = result.Tools
-		return s, events, nil
-	}
-	if evt.MessageStop != nil {
-		pending := &bedrockConversePendingFinish{Reason: bedrockConverseBedrockFinishReason(evt.MessageStop.StopReason)}
-		if s.pendingFinish != nil {
-			pending.Usage = s.pendingFinish.Usage
-		}
-		s.pendingFinish = pending
-		return s, nil, nil
-	}
-	if evt.Metadata != nil {
-		usage := bedrockConverseMapUsage(evt.Metadata.Usage)
-		reason := schema.ReasonStop
-		if s.pendingFinish != nil {
-			reason = s.pendingFinish.Reason
-		}
-		s.pendingFinish = &bedrockConversePendingFinish{Reason: reason, Usage: usage}
-		return s, nil, nil
-	}
-	if evt.InternalServerException != nil || evt.ModelStreamErrorException != nil || evt.ServiceUnavailableException != nil {
-		msg := "Bedrock Converse stream error"
-		if evt.InternalServerException != nil {
-			msg = evt.InternalServerException.Message
-		}
-		if evt.ModelStreamErrorException != nil {
-			msg = evt.ModelStreamErrorException.Message
-		}
-		if evt.ServiceUnavailableException != nil {
-			msg = evt.ServiceUnavailableException.Message
-		}
-		return s, []schema.LLMEvent{schema.NewProviderErrorEvent(msg, schema.WithEventRetryable(true))}, nil
-	}
-	if evt.ValidationException != nil || evt.ThrottlingException != nil {
-		msg := "Bedrock Converse error"
-		if evt.ValidationException != nil {
-			msg = evt.ValidationException.Message
-		}
-		if evt.ThrottlingException != nil {
-			msg = evt.ThrottlingException.Message
-		}
-		opts := []schema.EventOption{}
-		if evt.ValidationException != nil && schema.IsContextOverflow(msg) {
-			opts = append(opts, schema.WithEventClassification(schema.ClassificationContextOverflow))
-		}
-		if evt.ThrottlingException != nil {
-			opts = append(opts, schema.WithEventRetryable(true))
-		}
-		return s, []schema.LLMEvent{schema.NewProviderErrorEvent(msg, opts...)}, nil
+	switch {
+	case evt.ContentBlockStart != nil && evt.ContentBlockStart.Start != nil && evt.ContentBlockStart.Start.ToolUse != nil:
+		return bedrockConverseOnContentBlockStart(s, evt)
+	case evt.ContentBlockDelta != nil && evt.ContentBlockDelta.Delta != nil:
+		return bedrockConverseOnContentBlockDelta(s, evt)
+	case evt.ContentBlockStop != nil:
+		return bedrockConverseOnContentBlockStop(s, evt)
+	case evt.MessageStop != nil:
+		return bedrockConverseOnMessageStop(s, evt)
+	case evt.Metadata != nil:
+		return bedrockConverseOnMetadata(s, evt)
+	case evt.InternalServerException != nil || evt.ModelStreamErrorException != nil || evt.ServiceUnavailableException != nil:
+		return s, bedrockConverseRetryableError(evt), nil
+	case evt.ValidationException != nil || evt.ThrottlingException != nil:
+		return s, bedrockConverseTerminalError(evt), nil
 	}
 	return s, nil, nil
+}
+
+func bedrockConverseOnContentBlockStart(s bedrockConverseParserState, evt bedrockConverseEvent) (any, []schema.LLMEvent, error) {
+	idx := evt.ContentBlockStart.ContentBlockIndex
+	tu := evt.ContentBlockStart.Start.ToolUse
+	var events []schema.LLMEvent
+	utils.StepStart(&s.lifecycle, &events)
+	s.tools = utils.ToolStreamStart(s.tools, fmt.Sprint(idx), utils.PendingTool{ID: tu.ToolUseID, Name: tu.Name})
+	events = append(events, schema.NewToolInputStart(tu.ToolUseID, tu.Name))
+	return s, events, nil
+}
+
+func bedrockConverseOnContentBlockDelta(s bedrockConverseParserState, evt bedrockConverseEvent) (any, []schema.LLMEvent, error) {
+	d := evt.ContentBlockDelta.Delta
+	idx := evt.ContentBlockDelta.ContentBlockIndex
+	switch {
+	case d.Text != nil && *d.Text != "":
+		var events []schema.LLMEvent
+		utils.TextDelta(&s.lifecycle, &events, fmt.Sprintf("text-%d", idx), *d.Text)
+		return s, events, nil
+	case d.ReasoningContent != nil:
+		return bedrockConverseOnReasoningDelta(s, idx, d.ReasoningContent.Text, d.ReasoningContent.Signature)
+	case d.ToolUse != nil:
+		return bedrockConverseOnToolUseDelta(s, idx, d.ToolUse.Input)
+	}
+	return s, nil, nil
+}
+
+func bedrockConverseOnReasoningDelta(s bedrockConverseParserState, idx int, text, signature *string) (any, []schema.LLMEvent, error) {
+	var events []schema.LLMEvent
+	if text != nil && *text != "" {
+		utils.ReasoningDelta(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), *text)
+	}
+	if signature != nil {
+		if s.reasoningSignatures == nil {
+			s.reasoningSignatures = make(map[int]string)
+		}
+		s.reasoningSignatures[idx] = *signature
+	}
+	return s, events, nil
+}
+
+func bedrockConverseOnToolUseDelta(s bedrockConverseParserState, idx int, input string) (any, []schema.LLMEvent, error) {
+	result, err := utils.AppendExisting(bedrockConverseAdapter, s.tools, fmt.Sprint(idx), input,
+		"Bedrock Converse tool delta is missing its tool call")
+	if err != nil {
+		return s, nil, err
+	}
+	var events []schema.LLMEvent
+	if len(result.Events) > 0 {
+		utils.StepStart(&s.lifecycle, &events)
+	}
+	events = append(events, result.Events...)
+	s.tools = result.Tools
+	return s, events, nil
+}
+
+func bedrockConverseOnContentBlockStop(s bedrockConverseParserState, evt bedrockConverseEvent) (any, []schema.LLMEvent, error) {
+	idx := evt.ContentBlockStop.ContentBlockIndex
+	result, err := utils.FinishTool(bedrockConverseAdapter, s.tools, fmt.Sprint(idx))
+	if err != nil {
+		return s, nil, err
+	}
+	var events []schema.LLMEvent
+	if len(result.Events) > 0 {
+		utils.StepStart(&s.lifecycle, &events)
+	} else {
+		utils.TextEnd(&s.lifecycle, &events, fmt.Sprintf("text-%d", idx))
+		utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), s.reasoningSignature(idx))
+	}
+	events = append(events, result.Events...)
+	for _, e := range result.Events {
+		if e.IsToolCall() {
+			s.hasToolCalls = true
+		}
+	}
+	if s.reasoningSignatures != nil {
+		delete(s.reasoningSignatures, idx)
+	}
+	s.tools = result.Tools
+	return s, events, nil
+}
+
+func (s bedrockConverseParserState) reasoningSignature(idx int) schema.ProviderMetadata {
+	if s.reasoningSignatures == nil {
+		return nil
+	}
+	sig, ok := s.reasoningSignatures[idx]
+	if !ok {
+		return nil
+	}
+	return providerMetadata("bedrock", map[string]any{"signature": sig})
+}
+
+func bedrockConverseOnMessageStop(s bedrockConverseParserState, evt bedrockConverseEvent) (any, []schema.LLMEvent, error) {
+	pending := &bedrockConversePendingFinish{Reason: bedrockConverseFinishReason(evt.MessageStop.StopReason)}
+	if s.pendingFinish != nil {
+		pending.Usage = s.pendingFinish.Usage
+	}
+	s.pendingFinish = pending
+	return s, nil, nil
+}
+
+func bedrockConverseOnMetadata(s bedrockConverseParserState, evt bedrockConverseEvent) (any, []schema.LLMEvent, error) {
+	usage := bedrockConverseMapUsage(evt.Metadata.Usage)
+	reason := schema.ReasonStop
+	if s.pendingFinish != nil {
+		reason = s.pendingFinish.Reason
+	}
+	s.pendingFinish = &bedrockConversePendingFinish{Reason: reason, Usage: usage}
+	return s, nil, nil
+}
+
+func bedrockConverseRetryableError(evt bedrockConverseEvent) []schema.LLMEvent {
+	msg := "Bedrock Converse stream error"
+	if evt.InternalServerException != nil {
+		msg = evt.InternalServerException.Message
+	}
+	if evt.ModelStreamErrorException != nil {
+		msg = evt.ModelStreamErrorException.Message
+	}
+	if evt.ServiceUnavailableException != nil {
+		msg = evt.ServiceUnavailableException.Message
+	}
+	return []schema.LLMEvent{schema.NewProviderErrorEvent(msg, schema.WithEventRetryable(true))}
+}
+
+func bedrockConverseTerminalError(evt bedrockConverseEvent) []schema.LLMEvent {
+	msg := "Bedrock Converse error"
+	if evt.ValidationException != nil {
+		msg = evt.ValidationException.Message
+	}
+	if evt.ThrottlingException != nil {
+		msg = evt.ThrottlingException.Message
+	}
+	opts := []schema.EventOption{}
+	if evt.ValidationException != nil && schema.IsContextOverflow(msg) {
+		opts = append(opts, schema.WithEventClassification(schema.ClassificationContextOverflow))
+	}
+	if evt.ThrottlingException != nil {
+		opts = append(opts, schema.WithEventRetryable(true))
+	}
+	return []schema.LLMEvent{schema.NewProviderErrorEvent(msg, opts...)}
 }
 
 func bedrockConverseOnHalt(state any) []schema.LLMEvent {
@@ -585,11 +634,7 @@ func bedrockConverseOnHalt(state any) []schema.LLMEvent {
 	if reason == schema.ReasonStop && s.hasToolCalls {
 		reason = schema.ReasonToolCalls
 	}
-	utils.Finish(&s.lifecycle, &events, struct {
-		Reason           schema.FinishReason
-		Usage            *schema.Usage
-		ProviderMetadata schema.ProviderMetadata
-	}{Reason: reason, Usage: s.pendingFinish.Usage})
+	utils.LifecycleFinish(&s.lifecycle, &events, utils.FinishInput{Reason: reason, Usage: s.pendingFinish.Usage})
 	return events
 }
 
@@ -600,22 +645,30 @@ var BedrockConverseProtocol = route.Protocol{
 	Stream: route.ProtocolStream{
 		DecodeEvent: bedrockConverseDecodeEvent,
 		Initial: func(request *schema.LLMRequest) any {
-			return bedrockConverseParserState{tools: utils.Empty(), lifecycle: utils.Initial()}
+			return bedrockConverseParserState{tools: utils.ToolStreamEmpty(), lifecycle: utils.LifecycleInitial()}
 		},
 		Step: bedrockConverseStep, OnHalt: bedrockConverseOnHalt,
 	},
 }
 
-type bedrockConverseBedrockTransport struct{}
+type bedrockConverseTransport struct{}
+
+// bedrockConversePrepared is a prepared Bedrock request.
+type bedrockConversePrepared struct {
+	URL     string
+	Method  string
+	Body    string
+	Headers map[string]string
+}
 
 // ID identifies the Bedrock transport.
-func (bedrockConverseBedrockTransport) ID() string { return "bedrock-converse" }
+func (bedrockConverseTransport) ID() string { return "bedrock-converse" }
 
 // Prepare builds the Bedrock request for one call.
-func (bedrockConverseBedrockTransport) Prepare(input route.TransportPrepareInput) (any, error) {
-	body, ok := input.Body.(bedrockConverseBedrockBody)
+func (bedrockConverseTransport) Prepare(input route.TransportPrepareInput) (any, error) {
+	body, ok := input.Body.(bedrockConverseBody)
 	if !ok {
-		return nil, fmt.Errorf("bedrock converse: unexpected body type %T", input.Body)
+		return nil, fmt.Errorf("Bedrock Converse: unexpected body type %T", input.Body)
 	}
 	encodedModelID := url.PathEscape(body.ModelID)
 	path := fmt.Sprintf("/model/%s/converse-stream", encodedModelID)
@@ -633,7 +686,7 @@ func (bedrockConverseBedrockTransport) Prepare(input route.TransportPrepareInput
 	}
 	if input.Auth != nil {
 		authHdrs, err := input.Auth.Apply(route.AuthInput{
-			Request: input.Request, Method: "POST", URL: u,
+			Request: input.Request, URL: u,
 			Body: string(bodyText), Headers: headers,
 		})
 		if err != nil {
@@ -641,22 +694,12 @@ func (bedrockConverseBedrockTransport) Prepare(input route.TransportPrepareInput
 		}
 		headers = authHdrs
 	}
-	return struct {
-		URL     string
-		Method  string
-		Body    string
-		Headers map[string]string
-	}{URL: u, Method: "POST", Body: string(bodyText), Headers: headers}, nil
+	return bedrockConversePrepared{URL: u, Method: "POST", Body: string(bodyText), Headers: headers}, nil
 }
 
 // Frames sends the prepared request and yields its event-stream frames.
-func (bedrockConverseBedrockTransport) Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
-	p := prepared.(struct {
-		URL     string
-		Method  string
-		Body    string
-		Headers map[string]string
-	})
+func (bedrockConverseTransport) Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
+	p := prepared.(bedrockConversePrepared)
 	return func(yield func(any, error) bool) {
 		req, err := http.NewRequestWithContext(ctx, "POST", p.URL, strings.NewReader(p.Body))
 		if err != nil {
@@ -731,6 +774,6 @@ func BedrockConverseRoute(protocol route.Protocol) route.Route {
 		Provider:  "bedrock",
 		Protocol:  protocol,
 		Endpoint:  route.NewStaticPath(""),
-		Transport: bedrockConverseBedrockTransport{},
+		Transport: bedrockConverseTransport{},
 	})
 }

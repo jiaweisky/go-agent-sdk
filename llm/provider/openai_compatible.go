@@ -12,28 +12,8 @@ const OpenAICompatibleProviderID = schema.ProviderID("openai-compatible")
 
 // OpenAICompatibleGenericOptions configures a generic OpenAI-compatible facade.
 type OpenAICompatibleGenericOptions struct {
-	Auth            *route.Auth
-	APIKey          *string
-	Provider        string
-	BaseURL         string
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
-}
-
-// OpenAICompatibleFamilyOptions configures one OpenAI-compatible family (a known
-// provider and base URL).
-type OpenAICompatibleFamilyOptions struct {
-	Auth            *route.Auth
-	APIKey          *string
-	BaseURL         string
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
+	CommonConfig
+	Provider string
 }
 
 // OpenAICompatibleProvider is a configured OpenAI-compatible facade.
@@ -49,18 +29,12 @@ type OpenAICompatibleProvider struct {
 // OpenAICompatibleRoutes is the route every OpenAI-compatible facade is built on.
 var OpenAICompatibleRoutes []route.Route
 
-func configure(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
+func configureOpenAICompatible(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
 	prov := input.Provider
 	if prov == "" {
-		prov = "openai-compatible"
+		prov = string(OpenAICompatibleProviderID)
 	}
-	defaults := route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
+	defaults := input.defaults()
 	var baseURL *string
 	if input.BaseURL != "" {
 		baseURL = &input.BaseURL
@@ -68,45 +42,33 @@ func configure(openAICompatibleChatRoute route.Route, input OpenAICompatibleGene
 	r := openAICompatibleChatRoute.With(route.RoutePatch{
 		Provider: prov,
 		Endpoint: &route.EndpointPatch{BaseURL: baseURL},
-		Auth: route.BearerAuth(struct {
-			Auth   *route.Auth
-			APIKey *string
-		}{Auth: input.Auth, APIKey: input.APIKey}, nil),
+		Auth:     route.BearerAuth(route.BearerAuthOptions{Auth: input.Auth, APIKey: input.APIKey}, nil),
 		Defaults: &defaults,
 	})
 	return OpenAICompatibleProvider{
 		ID: schema.ProviderID(prov),
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
-			modelInput := route.RouteModelInput{
-				ID:       id,
-				Provider: prov,
-			}
-			if len(opts) > 0 {
-				opt := opts[0]
-				modelInput.Defaults = opt.Defaults
-				modelInput.Compatibility = opt.Compatibility
-			}
-			return r.Model(modelInput)
+			return bindModel(r, route.RouteModelInput{ID: id, Provider: prov}, opts...)
 		},
 		Configure: func(next OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
-			return configure(openAICompatibleChatRoute, next)
+			return configureOpenAICompatible(openAICompatibleChatRoute, next)
 		},
 	}
 }
 
-func define(openAICompatibleChatRoute route.Route, profile OpenAICompatibleProfile) OpenAICompatibleProvider {
-	facade := configure(openAICompatibleChatRoute, OpenAICompatibleGenericOptions{
-		Provider: profile.Provider,
-		BaseURL:  profile.BaseURL,
+func defineOpenAICompatibleProfile(openAICompatibleChatRoute route.Route, profile OpenAICompatibleProfile) OpenAICompatibleProvider {
+	facade := configureOpenAICompatible(openAICompatibleChatRoute, OpenAICompatibleGenericOptions{
+		CommonConfig: CommonConfig{BaseURL: profile.BaseURL},
+		Provider:     profile.Provider,
 	})
 	// Profile facades keep the provider id fixed and fall back to the profile
-	// BaseURL, mirroring `define`'s configureProfile.
+	// BaseURL.
 	facade.Configure = func(next OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
 		next.Provider = profile.Provider
 		if next.BaseURL == "" {
 			next.BaseURL = profile.BaseURL
 		}
-		return configure(openAICompatibleChatRoute, next)
+		return configureOpenAICompatible(openAICompatibleChatRoute, next)
 	}
 	return facade
 }
@@ -115,13 +77,12 @@ func define(openAICompatibleChatRoute route.Route, profile OpenAICompatibleProfi
 // endpoint. When input.Provider is empty the provider id defaults to
 // "openai-compatible".
 func NewOpenAICompatible(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
-	return configure(openAICompatibleChatRoute, input)
+	return configureOpenAICompatible(openAICompatibleChatRoute, input)
 }
 
 // The known OpenAI-compatible families, built by InitOpenAICompatible.
 var Baseten OpenAICompatibleProvider
 
-// The known OpenAI-compatible families, built by InitOpenAICompatible.
 var (
 	Cerebras   OpenAICompatibleProvider
 	DeepInfra  OpenAICompatibleProvider
@@ -135,11 +96,11 @@ var (
 // route.
 func InitOpenAICompatible(openAICompatibleChatRoute route.Route) {
 	OpenAICompatibleRoutes = []route.Route{openAICompatibleChatRoute}
-	Baseten = define(openAICompatibleChatRoute, Profiles["baseten"])
-	Cerebras = define(openAICompatibleChatRoute, Profiles["cerebras"])
-	DeepInfra = define(openAICompatibleChatRoute, Profiles["deepinfra"])
-	DeepSeek = define(openAICompatibleChatRoute, Profiles["deepseek"])
-	Fireworks = define(openAICompatibleChatRoute, Profiles["fireworks"])
-	Groq = define(openAICompatibleChatRoute, Profiles["groq"])
-	TogetherAI = define(openAICompatibleChatRoute, Profiles["togetherai"])
+	Baseten = defineOpenAICompatibleProfile(openAICompatibleChatRoute, OpenAICompatibleProfiles["baseten"])
+	Cerebras = defineOpenAICompatibleProfile(openAICompatibleChatRoute, OpenAICompatibleProfiles["cerebras"])
+	DeepInfra = defineOpenAICompatibleProfile(openAICompatibleChatRoute, OpenAICompatibleProfiles["deepinfra"])
+	DeepSeek = defineOpenAICompatibleProfile(openAICompatibleChatRoute, OpenAICompatibleProfiles["deepseek"])
+	Fireworks = defineOpenAICompatibleProfile(openAICompatibleChatRoute, OpenAICompatibleProfiles["fireworks"])
+	Groq = defineOpenAICompatibleProfile(openAICompatibleChatRoute, OpenAICompatibleProfiles["groq"])
+	TogetherAI = defineOpenAICompatibleProfile(openAICompatibleChatRoute, OpenAICompatibleProfiles["togetherai"])
 }

@@ -19,10 +19,6 @@ const OpenAIChatDefaultBaseURL = "https://api.openai.com/v1"
 // OpenAIChatPath is the Chat Completions endpoint path.
 const OpenAIChatPath = "/chat/completions"
 
-var openaiChatImageMIMEs = map[string]struct{}{
-	"image/png": {}, "image/jpeg": {}, "image/gif": {}, "image/webp": {},
-}
-
 type openaiChatTool struct {
 	Type     string             `json:"type"`
 	Function openaiChatFunction `json:"function"`
@@ -83,10 +79,7 @@ func (u *openaiChatUsage) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*u = openaiChatUsage(decoded)
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err == nil {
-		u.ProviderMetadata = schema.ProviderMetadata{"openai": raw}
-	}
+	u.ProviderMetadata = providerMetadata("openai", rawRecord(data))
 	return nil
 }
 
@@ -141,7 +134,7 @@ type openaiChatParserState struct {
 	toolCallEvents []schema.LLMEvent
 	usage          *schema.Usage
 	finishReason   schema.FinishReason
-	lifecycle      utils.State
+	lifecycle      utils.LifecycleState
 }
 
 func openaiChatLowerTool(tool schema.ToolDefinition, inputSchema any) openaiChatTool {
@@ -150,7 +143,7 @@ func openaiChatLowerTool(tool schema.ToolDefinition, inputSchema any) openaiChat
 		Function: openaiChatFunction{
 			Name:        tool.Name,
 			Description: tool.Description,
-			Parameters:  schemaMap(inputSchema),
+			Parameters:  toolParameters(inputSchema),
 		},
 	}
 }
@@ -179,7 +172,7 @@ func openaiChatLowerToolCall(part schema.ToolCallPart) openaiChatAssistantToolCa
 }
 
 func openaiChatLowerMedia(part schema.MediaPart) (*openaiChatUserContent, error) {
-	media, err := utils.ValidateMedia("OpenAI Chat", part, openaiChatImageMIMEs)
+	media, err := utils.ValidateMedia("OpenAI Chat", part, imageMIMESet)
 	if err != nil {
 		return nil, err
 	}
@@ -271,8 +264,6 @@ func openaiChatLowerToolMessage(part schema.ToolResultPart) openaiChatMessage {
 	}
 }
 
-func openaiChatSystemPartToText(v struct{ Text string }) string { return v.Text }
-
 func openaiChatFromRequest(request *schema.LLMRequest) (any, error) {
 	messages, err := openaiChatLowerMessages(request)
 	if err != nil {
@@ -332,31 +323,10 @@ func openaiChatLowerMessages(request *schema.LLMRequest) ([]openaiChatMessage, e
 		msgs = append(msgs, openaiChatMessage{Role: "system", Content: sysText})
 	}
 
-	var pendingImages []any
-	flushImages := func() {
-		if len(pendingImages) == 0 {
-			return
-		}
-		content := make([]openaiChatUserContent, len(pendingImages))
-		for i, img := range pendingImages {
-			content[i] = img.(openaiChatUserContent)
-		}
-		msgs = append(msgs, openaiChatMessage{Role: "user", Content: content})
-		pendingImages = nil
-	}
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
 			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
-			if len(pendingImages) > 0 {
-				content := []openaiChatUserContent{{Type: "text", Text: update}}
-				for _, img := range pendingImages {
-					content = append(content, img.(openaiChatUserContent))
-				}
-				msgs = append(msgs, openaiChatMessage{Role: "user", Content: content})
-				pendingImages = nil
-				continue
-			}
 			if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
 				prev := &msgs[len(msgs)-1]
 				if s, ok := prev.Content.(string); ok {
@@ -374,14 +344,12 @@ func openaiChatLowerMessages(request *schema.LLMRequest) ([]openaiChatMessage, e
 				}
 			}
 		case schema.RoleUser:
-			flushImages()
 			m, err := openaiChatLowerUserMessage(msg)
 			if err != nil {
 				return nil, err
 			}
 			msgs = append(msgs, m.(openaiChatMessage))
 		case schema.RoleAssistant:
-			flushImages()
 			m, err := openaiChatLowerAssistantMessage(msg)
 			if err != nil {
 				return nil, err
@@ -389,11 +357,10 @@ func openaiChatLowerMessages(request *schema.LLMRequest) ([]openaiChatMessage, e
 			msgs = append(msgs, m)
 		}
 	}
-	flushImages()
 	return msgs, nil
 }
 
-func openaiChatDecodeOpenAIChatEvent(frame string) (any, error) {
+func openaiChatDecodeEvent(frame string) (any, error) {
 	if frame == "" || frame == "[DONE]" {
 		return nil, nil
 	}
@@ -421,13 +388,6 @@ func openaiChatMapFinishReason(reason *string) schema.FinishReason {
 	return schema.ReasonUnknown
 }
 
-func openaiChatIntVal(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-
 func openaiChatMapUsage(usage *openaiChatUsage) *schema.Usage {
 	if usage == nil {
 		return nil
@@ -439,17 +399,17 @@ func openaiChatMapUsage(usage *openaiChatUsage) *schema.Usage {
 	if usage.CompletionTokensDetails != nil && usage.CompletionTokensDetails.ReasoningTokens != nil {
 		reasoning = *usage.CompletionTokensDetails.ReasoningTokens
 	}
-	nonCached := openaiChatIntVal(usage.PromptTokens)
-	if cached > 0 {
-		nonCached = openaiChatIntVal(usage.PromptTokens) - cached
+	nonCached := intVal(usage.PromptTokens) - cached
+	if nonCached < 0 {
+		nonCached = 0
 	}
 	return &schema.Usage{
-		InputTokens:          openaiChatIntVal(usage.PromptTokens),
-		OutputTokens:         openaiChatIntVal(usage.CompletionTokens),
+		InputTokens:          intVal(usage.PromptTokens),
+		OutputTokens:         intVal(usage.CompletionTokens),
 		NonCachedInputTokens: nonCached,
 		CacheReadInputTokens: cached,
 		ReasoningTokens:      reasoning,
-		TotalTokens:          openaiChatIntVal(TotalTokens(usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)),
+		TotalTokens:          intVal(TotalTokens(usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)),
 		ProviderMetadata:     usage.ProviderMetadata,
 	}
 }
@@ -458,11 +418,10 @@ func openaiChatStep(state any, event any) (any, []schema.LLMEvent, error) {
 	s := state.(openaiChatParserState)
 	evt, ok := event.(openaiChatEvent)
 	if !ok {
-		return state, nil, nil
+		return s, nil, nil
 	}
 	var events []schema.LLMEvent
-	u := openaiChatMapUsage(evt.Usage)
-	if u != nil {
+	if u := openaiChatMapUsage(evt.Usage); u != nil {
 		s.usage = u
 	}
 	if len(evt.Choices) == 0 {
@@ -473,57 +432,66 @@ func openaiChatStep(state any, event any) (any, []schema.LLMEvent, error) {
 	if choice.FinishReason != nil {
 		s.finishReason = openaiChatMapFinishReason(choice.FinishReason)
 	}
-	delta := choice.Delta
-	if delta != nil {
-		if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
-			utils.ReasoningDelta(&s.lifecycle, &events, "reasoning-0", *delta.ReasoningContent)
+	if choice.Delta != nil {
+		deltaEvents, err := openaiChatApplyDelta(&s, choice.Delta)
+		if err != nil {
+			return s, nil, err
 		}
-		if delta.Content != nil && *delta.Content != "" {
-			utils.ReasoningEnd(&s.lifecycle, &events, "reasoning-0")
-			utils.TextDelta(&s.lifecycle, &events, "text-0", *delta.Content)
-		}
-		if len(delta.ToolCalls) > 0 {
-			utils.ReasoningEnd(&s.lifecycle, &events, "reasoning-0")
-		}
-		for _, td := range delta.ToolCalls {
-			var id, name, text string
-			if td.ID != nil {
-				id = *td.ID
-			}
-			if td.Function != nil {
-				if td.Function.Name != nil {
-					name = *td.Function.Name
-				}
-				if td.Function.Arguments != nil {
-					text = *td.Function.Arguments
-				}
-			}
-			result, err := utils.AppendOrStart(openaiChatAdapter, s.tools, fmt.Sprint(td.Index),
-				struct {
-					ID   string
-					Name string
-					Text string
-				}{ID: id, Name: name, Text: text},
-				"OpenAI Chat tool call delta is missing id or name")
-			if err != nil {
-				return state, nil, err
-			}
-			s.tools = result.Tools
-			if len(result.Events) > 0 {
-				utils.StepStart(&s.lifecycle, &events)
-			}
-			events = append(events, result.Events...)
-		}
+		events = append(events, deltaEvents...)
 	}
 	if choice.FinishReason != nil && prevFinishReason == "" && len(s.tools) > 0 {
-		outcome, finishErr := utils.FinishAllTools(openaiChatAdapter, s.tools)
-		if finishErr != nil {
-			return state, nil, finishErr
+		outcome, err := utils.FinishAllTools(openaiChatAdapter, s.tools)
+		if err != nil {
+			return s, nil, err
 		}
 		s.tools = outcome.Tools
 		s.toolCallEvents = outcome.Events
 	}
 	return s, events, nil
+}
+
+func openaiChatApplyDelta(s *openaiChatParserState, delta *openaiChatDelta) ([]schema.LLMEvent, error) {
+	var events []schema.LLMEvent
+	if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
+		utils.ReasoningDelta(&s.lifecycle, &events, "reasoning-0", *delta.ReasoningContent)
+	}
+	if delta.Content != nil && *delta.Content != "" {
+		utils.ReasoningEnd(&s.lifecycle, &events, "reasoning-0")
+		utils.TextDelta(&s.lifecycle, &events, "text-0", *delta.Content)
+	}
+	if len(delta.ToolCalls) > 0 {
+		utils.ReasoningEnd(&s.lifecycle, &events, "reasoning-0")
+	}
+	for _, td := range delta.ToolCalls {
+		var id, name, text string
+		if td.ID != nil {
+			id = *td.ID
+		}
+		if td.Function != nil {
+			if td.Function.Name != nil {
+				name = *td.Function.Name
+			}
+			if td.Function.Arguments != nil {
+				text = *td.Function.Arguments
+			}
+		}
+		result, err := utils.AppendOrStart(openaiChatAdapter, s.tools, fmt.Sprint(td.Index),
+			struct {
+				ID   string
+				Name string
+				Text string
+			}{ID: id, Name: name, Text: text},
+			"OpenAI Chat tool call delta is missing id or name")
+		if err != nil {
+			return nil, err
+		}
+		s.tools = result.Tools
+		if len(result.Events) > 0 {
+			utils.StepStart(&s.lifecycle, &events)
+		}
+		events = append(events, result.Events...)
+	}
+	return events, nil
 }
 
 func openaiChatFinish(state any) []schema.LLMEvent {
@@ -539,11 +507,7 @@ func openaiChatFinish(state any) []schema.LLMEvent {
 	}
 	events = append(events, s.toolCallEvents...)
 	if reason != "" {
-		utils.Finish(&s.lifecycle, &events, struct {
-			Reason           schema.FinishReason
-			Usage            *schema.Usage
-			ProviderMetadata schema.ProviderMetadata
-		}{Reason: reason, Usage: s.usage})
+		utils.LifecycleFinish(&s.lifecycle, &events, utils.FinishInput{Reason: reason, Usage: s.usage})
 	}
 	return events
 }
@@ -556,11 +520,11 @@ var OpenAIChatProtocol = route.Protocol{
 		From:   openaiChatFromRequest,
 	},
 	Stream: route.ProtocolStream{
-		DecodeEvent: openaiChatDecodeOpenAIChatEvent,
+		DecodeEvent: openaiChatDecodeEvent,
 		Initial: func(request *schema.LLMRequest) any {
 			return openaiChatParserState{
-				tools:     utils.Empty(),
-				lifecycle: utils.Initial(),
+				tools:     utils.ToolStreamEmpty(),
+				lifecycle: utils.LifecycleInitial(),
 			}
 		},
 		Step:   openaiChatStep,

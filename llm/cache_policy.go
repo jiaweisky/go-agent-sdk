@@ -1,6 +1,10 @@
 package llm
 
-import "github.com/user/go-agent-sdk/llm/schema"
+import (
+	"encoding/json"
+
+	"github.com/user/go-agent-sdk/llm/schema"
+)
 
 var respectsInlineHints = map[string]struct{}{
 	"anthropic-messages": {},
@@ -134,22 +138,39 @@ func markMessages(messages []schema.Message, strategy any, hint schema.CacheHint
 		case "latest-assistant":
 			return markMessageAt(messages, lastIndexOfRole(messages, schema.RoleAssistant), hint)
 		}
+	case schema.CachePolicyMessages:
+		return markTailMessages(messages, s.Tail, hint)
+	case json.RawMessage:
+		var decoded schema.CachePolicyMessages
+		if err := json.Unmarshal(s, &decoded); err == nil && decoded.Tail != nil {
+			return markTailMessages(messages, decoded.Tail, hint)
+		}
+		var name string
+		if err := json.Unmarshal(s, &name); err == nil {
+			return markMessages(messages, name, hint)
+		}
 	case map[string]any:
-		if tail, ok := s["tail"]; ok {
-			if n, ok := tail.(float64); ok {
-				start := len(messages) - int(n)
-				if start < 0 {
-					start = 0
-				}
-				result := messages
-				for i := start; i < len(messages); i++ {
-					result = markMessageAt(result, i, hint)
-				}
-				return result
-			}
+		if tail, ok := s["tail"].(float64); ok {
+			n := int(tail)
+			return markTailMessages(messages, &n, hint)
 		}
 	}
 	return messages
+}
+
+func markTailMessages(messages []schema.Message, tail *int, hint schema.CacheHint) []schema.Message {
+	if tail == nil {
+		return messages
+	}
+	start := len(messages) - *tail
+	if start < 0 {
+		start = 0
+	}
+	result := messages
+	for i := start; i < len(messages); i++ {
+		result = markMessageAt(result, i, hint)
+	}
+	return result
 }
 
 // ApplyCachePolicy adds cache hints to the request for protocols that respect
@@ -182,18 +203,9 @@ func ApplyCachePolicy(request *schema.LLMRequest, protocolID string) *schema.LLM
 	if !changed {
 		return request
 	}
-	return &schema.LLMRequest{
-		ID:              request.ID,
-		Model:           request.Model,
-		System:          system,
-		Messages:        messages,
-		Tools:           tools,
-		ToolChoice:      request.ToolChoice,
-		Generation:      request.Generation,
-		ProviderOptions: request.ProviderOptions,
-		Http:            request.Http,
-		ResponseFormat:  request.ResponseFormat,
-		Cache:           request.Cache,
-		Metadata:        request.Metadata,
-	}
+	clone := request.Clone()
+	clone.Tools = tools
+	clone.System = system
+	clone.Messages = messages
+	return clone
 }

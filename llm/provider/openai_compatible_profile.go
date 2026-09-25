@@ -6,8 +6,8 @@ type OpenAICompatibleProfile struct {
 	BaseURL  string
 }
 
-// Profiles are the known OpenAI-compatible providers, keyed by provider id.
-var Profiles = map[string]OpenAICompatibleProfile{
+// OpenAICompatibleProfiles are the known OpenAI-compatible providers, keyed by provider id.
+var OpenAICompatibleProfiles = map[string]OpenAICompatibleProfile{
 	"baseten":    {Provider: "baseten", BaseURL: "https://inference.baseten.co/v1"},
 	"cerebras":   {Provider: "cerebras", BaseURL: "https://api.cerebras.ai/v1"},
 	"deepinfra":  {Provider: "deepinfra", BaseURL: "https://api.deepinfra.com/v1/openai"},
@@ -17,14 +17,4 @@ var Profiles = map[string]OpenAICompatibleProfile{
 	"openrouter": {Provider: "openrouter", BaseURL: "https://openrouter.ai/api/v1"},
 	"togetherai": {Provider: "togetherai", BaseURL: "https://api.together.xyz/v1"},
 	"xai":        {Provider: "xai", BaseURL: "https://api.x.ai/v1"},
-}
-
-// ByProvider indexes Profiles by their provider id.
-var ByProvider map[string]OpenAICompatibleProfile
-
-func init() {
-	ByProvider = make(map[string]OpenAICompatibleProfile, len(Profiles))
-	for _, p := range Profiles {
-		ByProvider[p.Provider] = p
-	}
 }

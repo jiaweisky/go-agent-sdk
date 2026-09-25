@@ -9,7 +9,6 @@ import (
 type ProtocolAuthScheme string
 
 const (
-	AuthNone   ProtocolAuthScheme = "none"
 	AuthBearer ProtocolAuthScheme = "bearer"
 	AuthHeader ProtocolAuthScheme = "header"
 	AuthSigV4  ProtocolAuthScheme = "sigv4"
@@ -25,8 +24,8 @@ type ProtocolEntry struct {
 	HeaderName string
 }
 
-// registry is the table of supported protocols, keyed by route id (each protocol
-// has exactly one HTTP route). It is populated once at init and read-only after.
+// registry is the table of supported protocols, keyed by route id. It is
+// populated once at init and read-only after.
 var registry = map[schema.ProtocolID]ProtocolEntry{
 	schema.ProtocolID(OpenAIResponsesHTTPRoute.ID):      {Route: OpenAIResponsesHTTPRoute, Scheme: AuthBearer},
 	schema.ProtocolID(OpenAIChatHTTPRoute.ID):           {Route: OpenAIChatHTTPRoute, Scheme: AuthBearer},

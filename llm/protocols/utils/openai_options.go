@@ -2,37 +2,20 @@ package utils
 
 import "github.com/user/go-agent-sdk/llm/schema"
 
-// OpenAIReasoningEfforts are the reasoning efforts the OpenAI API accepts.
-var OpenAIReasoningEfforts = []string{
-	"none", "minimal", "low", "medium", "high", "xhigh",
-}
-
-// OpenAIResponseIncludables are the extra outputs a Responses call may include.
-var OpenAIResponseIncludables = []string{
-	"file_search_call.results",
-	"web_search_call.results",
-	"web_search_call.action.sources",
-	"message.input_image.image_url",
-	"computer_call_output.output.image_url",
-	"code_interpreter_call.outputs",
-	"reasoning.encrypted_content",
-	"message.output_text.logprobs",
-}
-
-// OpenAIServiceTiers are the service tiers the OpenAI API accepts.
-var OpenAIServiceTiers = []string{"auto", "default", "flex", "priority"}
-
-var reasoningEffortSet = map[string]struct{}{
+// openAIReasoningEffortSet is the efforts IsReasoningEffort accepts.
+var openAIReasoningEffortSet = map[string]struct{}{
 	"none": {}, "minimal": {}, "low": {}, "medium": {}, "high": {}, "xhigh": {},
 }
 
-var reasoningEffortsSet = map[string]struct{}{
+// openAIReasoningEffortWithMaxSet additionally accepts "max": ReasoningEffort
+// extracts it from the request, but IsReasoningEffort rejects it downstream.
+var openAIReasoningEffortWithMaxSet = map[string]struct{}{
 	"none": {}, "minimal": {}, "low": {}, "medium": {}, "high": {}, "xhigh": {}, "max": {},
 }
 
 // IsReasoningEffort reports whether an effort is supported by OpenAI's API.
 func IsReasoningEffort(value string) bool {
-	_, ok := reasoningEffortSet[value]
+	_, ok := openAIReasoningEffortSet[value]
 	return ok
 }
 
@@ -89,7 +72,7 @@ func ReasoningEffort(request *schema.LLMRequest) *string {
 	if !ok {
 		return nil
 	}
-	if _, valid := reasoningEffortsSet[v]; !valid {
+	if _, valid := openAIReasoningEffortWithMaxSet[v]; !valid {
 		return nil
 	}
 	return &v

@@ -11,15 +11,8 @@ const OpenAIProviderID = schema.ProviderID("openai")
 
 // OpenAIConfig configures the OpenAI facade.
 type OpenAIConfig struct {
-	Auth            *route.Auth
-	APIKey          *string
-	BaseURL         string
-	QueryParams     map[string]string
-	ProviderOptions schema.ProviderOptions
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	Http            *schema.HttpOptions
+	CommonConfig
+	QueryParams map[string]string
 }
 
 // OpenAIProvider is a configured OpenAI facade: its id, its routes, and its model
@@ -33,20 +26,7 @@ type OpenAIProvider struct {
 }
 
 func openAIAuth(input OpenAIConfig) *route.Auth {
-	return route.BearerAuth(struct {
-		Auth   *route.Auth
-		APIKey *string
-	}{Auth: input.Auth, APIKey: input.APIKey}, []string{"OPENAI_API_KEY"})
-}
-
-func openAIDefaults(input OpenAIConfig) route.RouteDefaultsInput {
-	return route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
+	return route.BearerAuth(route.BearerAuthOptions{Auth: input.Auth, APIKey: input.APIKey}, []string{"OPENAI_API_KEY"})
 }
 
 func configureOpenAIRoute(r route.Route, input OpenAIConfig) route.Route {
@@ -64,35 +44,29 @@ func configureOpenAIRoute(r route.Route, input OpenAIConfig) route.Route {
 	})
 }
 
-func modelFactory(r route.Route, modelID string, baseOpts route.RouteDefaultsInput, textVerbosity *bool, modelOpts ...llm.ModelOptions) route.Model {
+func openAIModelFactory(r route.Route, modelID string, baseOpts route.RouteDefaultsInput, textVerbosity *bool, modelOpts ...llm.ModelOptions) route.Model {
 	merged := baseOpts
 	merged.ProviderOptions = withOpenAIOptions(modelID, baseOpts.ProviderOptions, textVerbosity)
-	modelInput := route.RouteModelInput{ID: modelID}
-	if len(modelOpts) > 0 {
-		opt := modelOpts[0]
-		modelInput.Defaults = opt.Defaults
-		modelInput.Compatibility = opt.Compatibility
-	}
-	return r.With(route.RoutePatch{Defaults: &merged}).Model(modelInput)
+	return bindModel(r.With(route.RoutePatch{Defaults: &merged}), route.RouteModelInput{ID: modelID}, modelOpts...)
 }
 
 // NewOpenAI builds the OpenAI facade over the Responses and Chat routes.
 func NewOpenAI(responsesRoute, chatRoute route.Route, input OpenAIConfig) OpenAIProvider {
 	responsesRoute = configureOpenAIRoute(responsesRoute, input)
 	chatRoute = configureOpenAIRoute(chatRoute, input)
-	base := openAIDefaults(input)
+	base := input.defaults()
 
 	return OpenAIProvider{
 		ID:     OpenAIProviderID,
 		Routes: []route.Route{responsesRoute, chatRoute},
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
-			return modelFactory(responsesRoute, id, base, ptr(true), opts...)
+			return openAIModelFactory(responsesRoute, id, base, ptr(true), opts...)
 		},
 		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
-			return modelFactory(responsesRoute, id, base, ptr(true), opts...)
+			return openAIModelFactory(responsesRoute, id, base, ptr(true), opts...)
 		},
 		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
-			return modelFactory(chatRoute, id, base, nil, opts...)
+			return openAIModelFactory(chatRoute, id, base, nil, opts...)
 		},
 	}
 }

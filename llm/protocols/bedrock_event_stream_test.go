@@ -313,17 +313,17 @@ func TestBedrockConverseLowerToolResultEmptyContent(t *testing.T) {
 
 func TestBedrockConverseKeepsUsageWhenMetadataPrecedesMessageStop(t *testing.T) {
 	input, output := 5, 2
-	state := any(bedrockConverseParserState{tools: utils.Empty(), lifecycle: utils.Initial()})
+	state := any(bedrockConverseParserState{tools: utils.ToolStreamEmpty(), lifecycle: utils.LifecycleInitial()})
 
-	next, _, err := bedrockConverseStep(state, bedrockConverseBedrockEvent{
+	next, _, err := bedrockConverseStep(state, bedrockConverseEvent{
 		Metadata: &bedrockConverseMetadataEvent{
-			Usage: &bedrockConverseBedrockUsage{InputTokens: &input, OutputTokens: &output},
+			Usage: &bedrockConverseUsage{InputTokens: &input, OutputTokens: &output},
 		},
 	})
 	if err != nil {
 		t.Fatalf("metadata: %v", err)
 	}
-	next, _, err = bedrockConverseStep(next, bedrockConverseBedrockEvent{
+	next, _, err = bedrockConverseStep(next, bedrockConverseEvent{
 		MessageStop: &bedrockConverseMessageStopEvent{StopReason: "end_turn"},
 	})
 	if err != nil {
@@ -341,7 +341,7 @@ func TestBedrockConverseSkipsEmptyDeltas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	state := any(bedrockConverseParserState{tools: utils.Empty(), lifecycle: utils.Initial()})
+	state := any(bedrockConverseParserState{tools: utils.ToolStreamEmpty(), lifecycle: utils.LifecycleInitial()})
 	next, events, err := bedrockConverseStep(state, event)
 	if err != nil {
 		t.Fatalf("delta: %v", err)

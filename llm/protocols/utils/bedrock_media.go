@@ -14,24 +14,24 @@ type ImageBlock struct {
 
 // ImageContent is a Bedrock image payload.
 type ImageContent struct {
-	Format string `json:"format"`
-	Source Source `json:"source"`
+	Format        string        `json:"format"`
+	BedrockSource BedrockSource `json:"source"`
 }
 
 // DocumentBlock is a Bedrock document content block.
 type DocumentBlock struct {
-	Document DocumentContent `json:"document"`
+	Document BedrockDocumentContent `json:"document"`
 }
 
-// DocumentContent is a Bedrock document payload.
-type DocumentContent struct {
-	Format string `json:"format"`
-	Name   string `json:"name"`
-	Source Source `json:"source"`
+// BedrockDocumentContent is a Bedrock document payload.
+type BedrockDocumentContent struct {
+	Format        string        `json:"format"`
+	Name          string        `json:"name"`
+	BedrockSource BedrockSource `json:"source"`
 }
 
-// Source is a Bedrock media source: bytes or a URI.
-type Source struct {
+// BedrockSource is a Bedrock media source carrying base64-encoded bytes.
+type BedrockSource struct {
 	Bytes string `json:"bytes"`
 }
 
@@ -62,10 +62,10 @@ func documentBlock(part schema.MediaPart, format, bytes string) DocumentBlock {
 		name = &s
 	}
 	return DocumentBlock{
-		Document: DocumentContent{
-			Format: format,
-			Name:   *name,
-			Source: Source{Bytes: bytes},
+		Document: BedrockDocumentContent{
+			Format:        format,
+			Name:          *name,
+			BedrockSource: BedrockSource{Bytes: bytes},
 		},
 	}
 }
@@ -86,8 +86,8 @@ func documentMIMESet() map[string]struct{} {
 	return m
 }
 
-// Lower converts a media part into the Bedrock block that carries it.
-func Lower(part schema.MediaPart) (any, error) {
+// BedrockLower converts a media part into the Bedrock block that carries it.
+func BedrockLower(part schema.MediaPart) (any, error) {
 	mime := strings.ToLower(part.MediaType)
 	if imageFormat, ok := imageFormats[mime]; ok {
 		media, err := ValidateMedia("Bedrock Converse", part, imageMIMESet())
@@ -96,8 +96,8 @@ func Lower(part schema.MediaPart) (any, error) {
 		}
 		return ImageBlock{
 			Image: ImageContent{
-				Format: imageFormat,
-				Source: Source{Bytes: media.Base64},
+				Format:        imageFormat,
+				BedrockSource: BedrockSource{Bytes: media.Base64},
 			},
 		}, nil
 	}

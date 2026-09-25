@@ -30,11 +30,6 @@ type GenerationOptions struct {
 	Stop             []string `json:"stop,omitempty"`
 }
 
-// NewGenerationOptions returns empty generation options.
-func NewGenerationOptions() *GenerationOptions {
-	return &GenerationOptions{}
-}
-
 // ModelLimits is a model's context and output token limits.
 type ModelLimits struct {
 	Context int `json:"context,omitempty"`
@@ -52,11 +47,6 @@ type ModelDefaults struct {
 	Generation      *GenerationOptions `json:"generation,omitempty"`
 	ProviderOptions ProviderOptions    `json:"providerOptions,omitempty"`
 	Http            *HttpOptions       `json:"http,omitempty"`
-}
-
-// NewModelDefaults builds model defaults.
-func NewModelDefaults(limits *ModelLimits, generation *GenerationOptions, providerOptions ProviderOptions, http *HttpOptions) *ModelDefaults {
-	return &ModelDefaults{Limits: limits, Generation: generation, ProviderOptions: providerOptions, Http: http}
 }
 
 // ModelToolSchemaCompatibility names a tool-schema shape a model requires.
@@ -143,16 +133,6 @@ func NewModel(input ModelInput) Model {
 		Provider:      ProviderID(input.Provider),
 		Defaults:      input.Defaults,
 		Compatibility: input.Compatibility,
-	}
-}
-
-// ModelInputFrom converts a model back to its input form.
-func ModelInputFrom(m Model) ModelInput {
-	return ModelInput{
-		ID:            string(m.ID),
-		Provider:      string(m.Provider),
-		Defaults:      m.Defaults,
-		Compatibility: m.Compatibility,
 	}
 }
 
@@ -309,7 +289,11 @@ func MergeJsonRecords(items ...map[string]any) map[string]any {
 			}
 		}
 		if allSet {
-			return defined[0]
+			result := make(map[string]any, len(defined[0]))
+			for k, v := range defined[0] {
+				result[k] = v
+			}
+			return result
 		}
 	}
 	result := make(map[string]any)
@@ -346,7 +330,11 @@ func MergeStringRecords(items ...map[string]string) map[string]string {
 		return nil
 	}
 	if len(defined) == 1 {
-		return defined[0]
+		result := make(map[string]string, len(defined[0]))
+		for k, v := range defined[0] {
+			result[k] = v
+		}
+		return result
 	}
 	result := make(map[string]string)
 	for _, item := range defined {

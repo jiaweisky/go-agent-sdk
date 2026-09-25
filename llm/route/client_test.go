@@ -35,7 +35,7 @@ func (m mockFrames) Frames(context.Context, any, *schema.LLMRequest, TransportRu
 // echoProtocol emits one text-delta per frame and halts on "halt", so the loop's
 // Step / Terminal / OnHalt wiring can be asserted without a real provider.
 func echoProtocol() Protocol {
-	return MakeProtocol(Protocol{
+	return Protocol{
 		ID:   "echo",
 		Body: ProtocolBody{From: func(*schema.LLMRequest) (any, error) { return nil, nil }},
 		Stream: ProtocolStream{
@@ -54,7 +54,7 @@ func echoProtocol() Protocol {
 				return []schema.LLMEvent{{Type: schema.EventFinish, Reason: schema.ReasonStop, Index: state.(int)}}
 			},
 		},
-	})
+	}
 }
 
 func streamRoute(transport Transport) Route {

@@ -57,11 +57,6 @@ func WithBaseURL(baseURL string) EndpointOption {
 	return func(e *Endpoint) { e.BaseURL = baseURL }
 }
 
-// WithQuery adds query values to the endpoint.
-func WithQuery(query map[string]string) EndpointOption {
-	return func(e *Endpoint) { e.Query = query }
-}
-
 // MergeEndpoint applies a patch to an endpoint.
 func MergeEndpoint(base Endpoint, patch EndpointPatch) Endpoint {
 	e := base
@@ -72,12 +67,14 @@ func MergeEndpoint(base Endpoint, patch EndpointPatch) Endpoint {
 		e.Path = patch.Path
 	}
 	if patch.Query != nil {
-		if e.Query == nil {
-			e.Query = make(map[string]string)
+		merged := make(map[string]string, len(e.Query)+len(patch.Query))
+		for k, v := range e.Query {
+			merged[k] = v
 		}
 		for k, v := range patch.Query {
-			e.Query[k] = v
+			merged[k] = v
 		}
+		e.Query = merged
 	}
 	return e
 }
@@ -90,10 +87,32 @@ func RenderEndpoint(endpoint Endpoint, input EndpointInput) (*url.URL, error) {
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range endpoint.Query {
-		q := u.Query()
-		q.Set(k, v)
-		u.RawQuery = q.Encode()
-	}
+	setQuery(u, endpoint.Query)
 	return u, nil
+}
+
+// setQuery sets query values on a URL.
+func setQuery(u *url.URL, query map[string]string) {
+	if len(query) == 0 {
+		return
+	}
+	q := u.Query()
+	for k, v := range query {
+		q.Set(k, v)
+	}
+	u.RawQuery = q.Encode()
+}
+
+// ApplyQuery sets query values on a URL string, returning it unchanged when it
+// cannot be parsed.
+func ApplyQuery(baseURL string, query map[string]string) string {
+	if len(query) == 0 {
+		return baseURL
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return baseURL
+	}
+	setQuery(u, query)
+	return u.String()
 }

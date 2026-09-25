@@ -73,7 +73,6 @@ type LLMErrorReason struct {
 	Kind    LLMErrorReasonKind
 	Message string
 
-	Parameter      *string
 	Classification *ProviderFailureClassification
 
 	Route    RouteID
@@ -85,34 +84,21 @@ type LLMErrorReason struct {
 	RetryAfterMs *int
 	Status       *int
 
-	RateLimit *HttpRateLimitDetails
-
 	URL *string
 	Raw *string
 
 	// TransportKind names the transport failure ("Timeout", "TransportError").
 	TransportKind *string
 
-	ProviderMetadata ProviderMetadata
-	Http             *HttpContext
+	Http *HttpContext
 }
 
 // ReasonOption sets an optional field of a reason.
 type ReasonOption func(*LLMErrorReason)
 
-// WithParameter records the request parameter the failure relates to.
-func WithParameter(p string) ReasonOption {
-	return func(r *LLMErrorReason) { r.Parameter = &p }
-}
-
 // WithClassification records a provider failure classification.
 func WithClassification(c ProviderFailureClassification) ReasonOption {
 	return func(r *LLMErrorReason) { r.Classification = &c }
-}
-
-// WithProviderMetadata records the provider metadata of the failed call.
-func WithProviderMetadata(m ProviderMetadata) ReasonOption {
-	return func(r *LLMErrorReason) { r.ProviderMetadata = m }
 }
 
 // WithHttpContext records what the transport saw.
@@ -125,11 +111,6 @@ func WithRetryAfterMs(ms int) ReasonOption {
 	return func(r *LLMErrorReason) { r.RetryAfterMs = &ms }
 }
 
-// WithRateLimit records the rate-limit headers of the response.
-func WithRateLimit(rl HttpRateLimitDetails) ReasonOption {
-	return func(r *LLMErrorReason) { r.RateLimit = &rl }
-}
-
 // WithStatus records the HTTP status of the failed call.
 func WithStatus(s int) ReasonOption {
 	return func(r *LLMErrorReason) { r.Status = &s }
@@ -140,8 +121,7 @@ func WithURL(url string) ReasonOption {
 	return func(r *LLMErrorReason) { r.URL = &url }
 }
 
-// WithRoute sets the route a reason refers to (NoRouteReason.route and
-// InvalidProviderOutputReason.route).
+// WithRoute sets the route a reason refers to.
 func WithRoute(route string) ReasonOption {
 	return func(r *LLMErrorReason) { r.Route = RouteID(route) }
 }

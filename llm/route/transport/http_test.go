@@ -27,7 +27,7 @@ func TestJSONRequestPartsAppliesEndpointQuery(t *testing.T) {
 			Path:    func(route.EndpointInput) string { return "/v1/chat" },
 			Query:   map[string]string{"api-version": "2024-02-01"},
 		},
-		EncodeBody: func(any) string { return "{}" },
+		EncodeBody: func(any) (string, error) { return "{}", nil },
 	})
 	if err != nil {
 		t.Fatalf("jsonRequestParts: %v", err)
@@ -156,7 +156,7 @@ func TestJSONRequestPartsOverlaysStructBody(t *testing.T) {
 			BaseURL: "https://example.test",
 			Path:    func(route.EndpointInput) string { return "/v1/chat" },
 		},
-		EncodeBody: func(b any) string { return "{}" },
+		EncodeBody: func(b any) (string, error) { return "{}", nil },
 	})
 	if err != nil {
 		t.Fatalf("jsonRequestParts: %v", err)
@@ -182,7 +182,7 @@ func TestJSONRequestPartsRejectsProtocolOwnedOverlay(t *testing.T) {
 			BaseURL: "https://example.test",
 			Path:    func(route.EndpointInput) string { return "/v1/chat" },
 		},
-		EncodeBody: func(b any) string { return "{}" },
+		EncodeBody: func(b any) (string, error) { return "{}", nil },
 	})
 	if err == nil {
 		t.Fatal("want an error for overlaying a protocol-owned field")

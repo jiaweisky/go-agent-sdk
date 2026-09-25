@@ -17,30 +17,16 @@ const (
 
 // CloudflareAIGatewayConfig configures the Cloudflare AI Gateway facade.
 type CloudflareAIGatewayConfig struct {
-	AccountID       string
-	GatewayID       string
-	BaseURL         string
-	Auth            *route.Auth
-	APIKey          *string
-	GatewayAPIKey   *string
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
+	CommonConfig
+	AccountID     string
+	GatewayID     string
+	GatewayAPIKey *string
 }
 
 // CloudflareWorkersAIConfig configures the Cloudflare Workers AI facade.
 type CloudflareWorkersAIConfig struct {
-	AccountID       string
-	BaseURL         string
-	Auth            *route.Auth
-	APIKey          *string
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
+	CommonConfig
+	AccountID string
 }
 
 // CloudflareAIGatewayProvider is a configured AI Gateway facade.
@@ -110,30 +96,8 @@ func cloudflareAIGatewayAuth(input CloudflareAIGatewayConfig) *route.Auth {
 }
 
 func cloudflareWorkersAIAuth(input CloudflareWorkersAIConfig) *route.Auth {
-	return route.BearerAuth(struct {
-		Auth   *route.Auth
-		APIKey *string
-	}{Auth: input.Auth, APIKey: input.APIKey}, []string{"CLOUDFLARE_API_KEY", "CLOUDFLARE_WORKERS_AI_TOKEN"})
-}
-
-func cloudflareAIGatewayDefaults(input CloudflareAIGatewayConfig) route.RouteDefaultsInput {
-	return route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
-}
-
-func cloudflareWorkersAIDefaults(input CloudflareWorkersAIConfig) route.RouteDefaultsInput {
-	return route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
+	return route.BearerAuth(route.BearerAuthOptions{Auth: input.Auth, APIKey: input.APIKey},
+		[]string{"CLOUDFLARE_API_KEY", "CLOUDFLARE_WORKERS_AI_TOKEN"})
 }
 
 // NewCloudflareAIGateway builds the AI Gateway facade over the OpenAI-compatible
@@ -143,7 +107,7 @@ func NewCloudflareAIGateway(openAICompatibleChatRoute route.Route, input Cloudfl
 		ID:       string(CloudflareAIGatewayProviderID),
 		Provider: string(CloudflareAIGatewayProviderID),
 	})
-	defaults := cloudflareAIGatewayDefaults(input)
+	defaults := input.defaults()
 	r := preconfigured.With(route.RoutePatch{
 		Endpoint: &route.EndpointPatch{BaseURL: ptr(AIGatewayBaseURL(input))},
 		Auth:     cloudflareAIGatewayAuth(input),
@@ -152,13 +116,7 @@ func NewCloudflareAIGateway(openAICompatibleChatRoute route.Route, input Cloudfl
 	return CloudflareAIGatewayProvider{
 		ID: CloudflareAIGatewayProviderID,
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
-			modelInput := route.RouteModelInput{ID: id}
-			if len(opts) > 0 {
-				opt := opts[0]
-				modelInput.Defaults = opt.Defaults
-				modelInput.Compatibility = opt.Compatibility
-			}
-			return r.Model(modelInput)
+			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
 	}
 }
@@ -170,7 +128,7 @@ func NewCloudflareWorkersAI(openAICompatibleChatRoute route.Route, input Cloudfl
 		ID:       string(CloudflareWorkersAIProviderID),
 		Provider: string(CloudflareWorkersAIProviderID),
 	})
-	defaults := cloudflareWorkersAIDefaults(input)
+	defaults := input.defaults()
 	r := preconfigured.With(route.RoutePatch{
 		Endpoint: &route.EndpointPatch{BaseURL: ptr(WorkersAIBaseURL(input))},
 		Auth:     cloudflareWorkersAIAuth(input),
@@ -179,13 +137,7 @@ func NewCloudflareWorkersAI(openAICompatibleChatRoute route.Route, input Cloudfl
 	return CloudflareWorkersAIProvider{
 		ID: CloudflareWorkersAIProviderID,
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
-			modelInput := route.RouteModelInput{ID: id}
-			if len(opts) > 0 {
-				opt := opts[0]
-				modelInput.Defaults = opt.Defaults
-				modelInput.Compatibility = opt.Compatibility
-			}
-			return r.Model(modelInput)
+			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
 	}
 }

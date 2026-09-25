@@ -11,14 +11,7 @@ const XAIProviderID = schema.ProviderID("xai")
 
 // XAIConfig configures the xAI facade.
 type XAIConfig struct {
-	Auth            *route.Auth
-	APIKey          *string
-	BaseURL         string
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
+	CommonConfig
 }
 
 // XAIProvider is a configured xAI facade: its id, its routes, and its model
@@ -32,28 +25,15 @@ type XAIProvider struct {
 }
 
 func xaiDefaultBaseURL() string {
-	return Profiles["xai"].BaseURL
+	return OpenAICompatibleProfiles["xai"].BaseURL
 }
 
 func xaiAuth(input XAIConfig) *route.Auth {
-	return route.BearerAuth(struct {
-		Auth   *route.Auth
-		APIKey *string
-	}{Auth: input.Auth, APIKey: input.APIKey}, []string{"XAI_API_KEY"})
-}
-
-func xaiDefaults(input XAIConfig) route.RouteDefaultsInput {
-	return route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
+	return route.BearerAuth(route.BearerAuthOptions{Auth: input.Auth, APIKey: input.APIKey}, []string{"XAI_API_KEY"})
 }
 
 func configureXAIRoute(r route.Route, input XAIConfig, baseURL string) route.Route {
-	defaults := xaiDefaults(input)
+	defaults := input.defaults()
 	var epBaseURL *string
 	if input.BaseURL != "" {
 		epBaseURL = &input.BaseURL
@@ -77,13 +57,13 @@ func NewXAI(responsesRoute, chatRoute route.Route, input XAIConfig) XAIProvider 
 		ID:     XAIProviderID,
 		Routes: []route.Route{respCfg, chatCfg},
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
-			return modelFactory(respCfg, id, xaiDefaults(input), nil, opts...)
+			return openAIModelFactory(respCfg, id, input.defaults(), nil, opts...)
 		},
 		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
-			return modelFactory(respCfg, id, xaiDefaults(input), nil, opts...)
+			return openAIModelFactory(respCfg, id, input.defaults(), nil, opts...)
 		},
 		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
-			return modelFactory(chatCfg, id, xaiDefaults(input), nil, opts...)
+			return openAIModelFactory(chatCfg, id, input.defaults(), nil, opts...)
 		},
 	}
 }

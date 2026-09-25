@@ -30,7 +30,7 @@ func (fb *BedrockFrameBuffer) Append(chunk []byte) {
 	fb.Offset = 0
 }
 
-// Compact drops the bytes already consumed, keeping the buffer small.
+// Compact drops the buffer once every byte in it has been consumed.
 func (fb *BedrockFrameBuffer) Compact() {
 	if fb.Offset > 0 && fb.Offset == len(fb.Buffer) {
 		fb.Buffer = nil
@@ -48,9 +48,6 @@ type BedrockFrame struct {
 func ParseBedrockEventStreamHeaders(data []byte) map[string]string {
 	result := make(map[string]string)
 	for i := 0; i < len(data); {
-		if i >= len(data) {
-			break
-		}
 		nameLen := int(data[i])
 		i++
 		if i+nameLen > len(data) {
@@ -131,12 +128,10 @@ func DecodeBedrockEventStreamFrames(fb *BedrockFrameBuffer, chunk []byte) ([]Bed
 				continue
 			}
 			var parsed map[string]any
-			if payload != "" {
-				if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-					return out, fmt.Errorf("Bedrock event stream: bad payload: %w", err)
-				}
-				delete(parsed, "p")
+			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+				return out, fmt.Errorf("Bedrock event stream: bad payload: %w", err)
 			}
+			delete(parsed, "p")
 			out = append(out, BedrockFrame{EventType: eventType, Payload: parsed})
 		}
 		fb.Offset += totalLen

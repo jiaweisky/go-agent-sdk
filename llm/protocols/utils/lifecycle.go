@@ -2,28 +2,28 @@ package utils
 
 import "github.com/user/go-agent-sdk/llm/schema"
 
-// State tracks the parts a protocol has already started, so each start and end is
-// emitted once.
-type State struct {
+// LifecycleState tracks the parts a protocol has already started, so each start
+// and end is emitted once.
+type LifecycleState struct {
 	StepStarted bool
 	Text        map[string]struct{}
 	Reasoning   map[string]struct{}
 }
 
-// Initial returns the state for a new stream.
-func Initial() State {
-	return State{
+// LifecycleInitial returns the state for a new stream.
+func LifecycleInitial() LifecycleState {
+	return LifecycleState{
 		Text:      make(map[string]struct{}),
 		Reasoning: make(map[string]struct{}),
 	}
 }
 
 // StepStart emits the start of a step, once per step.
-func StepStart(state *State, events *[]schema.LLMEvent) {
+func StepStart(state *LifecycleState, events *[]schema.LLMEvent) {
 	stepStart(state, events)
 }
 
-func stepStart(state *State, events *[]schema.LLMEvent) {
+func stepStart(state *LifecycleState, events *[]schema.LLMEvent) {
 	if state.StepStarted {
 		return
 	}
@@ -32,7 +32,7 @@ func stepStart(state *State, events *[]schema.LLMEvent) {
 }
 
 // TextDelta emits the start of a text part when needed and then the delta.
-func TextDelta(state *State, events *[]schema.LLMEvent, id, text string) {
+func TextDelta(state *LifecycleState, events *[]schema.LLMEvent, id, text string) {
 	stepStart(state, events)
 	if _, ok := state.Text[id]; ok {
 		*events = append(*events, schema.NewTextDelta(id, text))
@@ -43,55 +43,60 @@ func TextDelta(state *State, events *[]schema.LLMEvent, id, text string) {
 }
 
 // ReasoningStart emits the start of a reasoning part.
-func ReasoningStart(state *State, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
+func ReasoningStart(state *LifecycleState, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
 	if _, ok := state.Reasoning[id]; ok {
 		return
 	}
 	stepStart(state, events)
-	opts := []schema.EventOption{}
-	if len(providerMetadata) > 0 && providerMetadata[0] != nil {
-		opts = append(opts, schema.WithEventProviderMetadata(providerMetadata[0]))
-	}
+	opts := providerMetadataOptions(optionalMetadata(providerMetadata))
 	*events = append(*events, schema.NewReasoningStart(id, opts...))
 	state.Reasoning[id] = struct{}{}
 }
 
 // ReasoningDelta emits the start of a reasoning part when needed and then the
 // delta.
-func ReasoningDelta(state *State, events *[]schema.LLMEvent, id, text string, providerMetadata ...schema.ProviderMetadata) {
+func ReasoningDelta(state *LifecycleState, events *[]schema.LLMEvent, id, text string, providerMetadata ...schema.ProviderMetadata) {
 	ReasoningStart(state, events, id, providerMetadata...)
 	*events = append(*events, schema.NewReasoningDelta(id, text))
 }
 
 // ReasoningEnd emits the end of a reasoning part.
-func ReasoningEnd(state *State, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
+func ReasoningEnd(state *LifecycleState, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
 	if _, ok := state.Reasoning[id]; !ok {
 		return
 	}
 	stepStart(state, events)
-	opts := []schema.EventOption{}
-	if len(providerMetadata) > 0 && providerMetadata[0] != nil {
-		opts = append(opts, schema.WithEventProviderMetadata(providerMetadata[0]))
-	}
+	opts := providerMetadataOptions(optionalMetadata(providerMetadata))
 	*events = append(*events, schema.NewReasoningEnd(id, opts...))
 	delete(state.Reasoning, id)
 }
 
 // TextEnd emits the end of a text part.
-func TextEnd(state *State, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
+func TextEnd(state *LifecycleState, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
 	if _, ok := state.Text[id]; !ok {
 		return
 	}
 	stepStart(state, events)
-	opts := []schema.EventOption{}
-	if len(providerMetadata) > 0 && providerMetadata[0] != nil {
-		opts = append(opts, schema.WithEventProviderMetadata(providerMetadata[0]))
-	}
+	opts := providerMetadataOptions(optionalMetadata(providerMetadata))
 	*events = append(*events, schema.NewTextEnd(id, opts...))
 	delete(state.Text, id)
 }
 
-func closeOpenBlocks(state *State, events *[]schema.LLMEvent) {
+func optionalMetadata(values []schema.ProviderMetadata) schema.ProviderMetadata {
+	if len(values) > 0 {
+		return values[0]
+	}
+	return nil
+}
+
+func providerMetadataOptions(pm schema.ProviderMetadata) []schema.EventOption {
+	if pm == nil {
+		return nil
+	}
+	return []schema.EventOption{schema.WithEventProviderMetadata(pm)}
+}
+
+func closeOpenBlocks(state *LifecycleState, events *[]schema.LLMEvent) {
 	for id := range state.Reasoning {
 		*events = append(*events, schema.NewReasoningEnd(id))
 	}
@@ -102,12 +107,16 @@ func closeOpenBlocks(state *State, events *[]schema.LLMEvent) {
 	state.Reasoning = make(map[string]struct{})
 }
 
-// Finish emits the end of the step and of the response.
-func Finish(state *State, events *[]schema.LLMEvent, input struct {
+// FinishInput is the finish reason, usage and provider metadata of a completed
+// step.
+type FinishInput struct {
 	Reason           schema.FinishReason
 	Usage            *schema.Usage
 	ProviderMetadata schema.ProviderMetadata
-}) {
+}
+
+// LifecycleFinish emits the end of the step and of the response.
+func LifecycleFinish(state *LifecycleState, events *[]schema.LLMEvent, input FinishInput) {
 	stepStart(state, events)
 	closeOpenBlocks(state, events)
 	stepFinishOpts := []schema.EventOption{}

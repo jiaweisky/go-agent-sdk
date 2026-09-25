@@ -260,8 +260,8 @@ func projectCombiners(m, result map[string]any) {
 	}
 }
 
-// Convert rewrites a JSON schema into the shape Gemini accepts, or nil when it
+// GeminiConvert rewrites a JSON schema into the shape Gemini accepts, or nil when it
 // carries nothing Gemini can use.
-func Convert(schema any) map[string]any {
+func GeminiConvert(schema any) map[string]any {
 	return projectNode(sanitizeNode(schema))
 }

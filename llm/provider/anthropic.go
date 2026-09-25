@@ -13,14 +13,7 @@ const AnthropicProviderID = schema.ProviderID("anthropic")
 
 // AnthropicConfig configures the Anthropic facade.
 type AnthropicConfig struct {
-	Auth            *route.Auth
-	APIKey          *string
-	BaseURL         string
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
+	CommonConfig
 }
 
 // AnthropicProvider is a configured Anthropic facade: its id, its route, and its
@@ -31,7 +24,7 @@ type AnthropicProvider struct {
 	Model  func(id string, opts ...llm.ModelOptions) route.Model
 }
 
-func auth(input AnthropicConfig) *route.Auth {
+func anthropicAuth(input AnthropicConfig) *route.Auth {
 	if input.Auth != nil {
 		return input.Auth
 	}
@@ -46,39 +39,27 @@ func auth(input AnthropicConfig) *route.Auth {
 	return cred.Header("x-api-key")
 }
 
-func configuredRoute(anthropicMessagesRoute route.Route, input AnthropicConfig) route.Route {
-	defaults := route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
+func configureAnthropicRoute(anthropicMessagesRoute route.Route, input AnthropicConfig) route.Route {
+	defaults := input.defaults()
 	var baseURL *string
 	if input.BaseURL != "" {
 		baseURL = &input.BaseURL
 	}
 	return anthropicMessagesRoute.With(route.RoutePatch{
 		Endpoint: &route.EndpointPatch{BaseURL: baseURL},
-		Auth:     auth(input),
+		Auth:     anthropicAuth(input),
 		Defaults: &defaults,
 	})
 }
 
 // NewAnthropic builds the Anthropic facade over the Anthropic Messages route.
 func NewAnthropic(anthropicMessagesRoute route.Route, input AnthropicConfig) AnthropicProvider {
-	r := configuredRoute(anthropicMessagesRoute, input)
+	r := configureAnthropicRoute(anthropicMessagesRoute, input)
 	return AnthropicProvider{
 		ID:     AnthropicProviderID,
 		Routes: []route.Route{r},
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
-			modelInput := route.RouteModelInput{ID: id}
-			if len(opts) > 0 {
-				opt := opts[0]
-				modelInput.Defaults = opt.Defaults
-				modelInput.Compatibility = opt.Compatibility
-			}
-			return r.Model(modelInput)
+			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
 	}
 }

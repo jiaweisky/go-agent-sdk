@@ -427,30 +427,30 @@ func TestOpenAIResponsesMockSSEContextOverflow(t *testing.T) {
 }
 
 func TestBedrockConverseErrorClassification(t *testing.T) {
-	state := bedrockConverseParserState{tools: utils.Empty(), lifecycle: utils.Initial()}
+	state := bedrockConverseParserState{tools: utils.ToolStreamEmpty(), lifecycle: utils.LifecycleInitial()}
 	cases := []struct {
 		name      string
-		event     bedrockConverseBedrockEvent
+		event     bedrockConverseEvent
 		overflow  bool
 		retryable bool
 	}{
 		{
 			name:     "validation context overflow",
-			event:    bedrockConverseBedrockEvent{ValidationException: &struct{ Message string }{Message: "Input is too long for requested model"}},
+			event:    bedrockConverseEvent{ValidationException: &struct{ Message string }{Message: "Input is too long for requested model"}},
 			overflow: true,
 		},
 		{
 			name:  "validation unrelated",
-			event: bedrockConverseBedrockEvent{ValidationException: &struct{ Message string }{Message: "invalid tool schema"}},
+			event: bedrockConverseEvent{ValidationException: &struct{ Message string }{Message: "invalid tool schema"}},
 		},
 		{
 			name:      "throttling is retryable",
-			event:     bedrockConverseBedrockEvent{ThrottlingException: &struct{ Message string }{Message: "slow down"}},
+			event:     bedrockConverseEvent{ThrottlingException: &struct{ Message string }{Message: "slow down"}},
 			retryable: true,
 		},
 		{
 			name:      "internal server error is retryable",
-			event:     bedrockConverseBedrockEvent{InternalServerException: &struct{ Message string }{Message: "boom"}},
+			event:     bedrockConverseEvent{InternalServerException: &struct{ Message string }{Message: "boom"}},
 			retryable: true,
 		},
 	}

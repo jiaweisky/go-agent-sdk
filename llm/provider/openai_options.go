@@ -17,9 +17,6 @@ type OpenAIOptionsInput struct {
 	ServiceTier      *string  `json:"serviceTier,omitempty"`
 }
 
-// OpenAIProviderOptionsInput is the raw form of the provider options.
-type OpenAIProviderOptionsInput = schema.ProviderOptions
-
 func openAIProviderOptions(opts *OpenAIOptionsInput) schema.ProviderOptions {
 	if opts == nil {
 		return nil
@@ -52,7 +49,7 @@ func openAIProviderOptions(opts *OpenAIOptionsInput) schema.ProviderOptions {
 	return schema.ProviderOptions{"openai": openai}
 }
 
-func gpt5DefaultOptions(modelID string, textVerbosity *bool) schema.ProviderOptions {
+func openAIGPT5DefaultOptions(modelID string, textVerbosity *bool) schema.ProviderOptions {
 	id := strings.ToLower(modelID)
 	if !strings.Contains(id, "gpt-5") ||
 		strings.Contains(id, "gpt-5-chat") ||
@@ -77,7 +74,7 @@ func gpt5DefaultOptions(modelID string, textVerbosity *bool) schema.ProviderOpti
 func openAIDefaultOptions(modelID string, textVerbosity *bool) schema.ProviderOptions {
 	return schema.MergeProviderOptions(
 		openAIProviderOptions(&OpenAIOptionsInput{Store: ptr(false)}),
-		gpt5DefaultOptions(modelID, textVerbosity),
+		openAIGPT5DefaultOptions(modelID, textVerbosity),
 	)
 }
 

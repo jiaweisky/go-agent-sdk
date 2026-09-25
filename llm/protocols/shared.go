@@ -48,11 +48,14 @@ func projectToolSchema(inputSchema any, compatibility string) any {
 	return utils.ModelCompatibility(s, compatibility)
 }
 
-// ToolAccumulator accumulates the events of a tool call as they stream.
-type ToolAccumulator struct {
-	ID    string
-	Name  string
-	Input string
+// toolParameters normalizes a tool schema into the shape the OpenAI protocols
+// send: a top-level object with flattened `anyOf` variants.
+func toolParameters(inputSchema any) map[string]any {
+	params := schemaMap(inputSchema)
+	if params == nil {
+		return nil
+	}
+	return utils.ToolSchemaOpenAI(params)
 }
 
 // TotalTokens returns the total when the provider reports it, and the sum of the
@@ -76,38 +79,7 @@ func TotalTokens(inputTokens, outputTokens, total *int) *int {
 	return &sum
 }
 
-// SubtractTokens returns total minus subtrahend, or nil when either is nil.
-func SubtractTokens(total, subtrahend *int) *int {
-	if total == nil {
-		return nil
-	}
-	if subtrahend == nil {
-		return total
-	}
-	diff := *total - *subtrahend
-	if diff < 0 {
-		diff = 0
-	}
-	return &diff
-}
-
-// SumTokens adds the values that are set, or nil when none are.
-func SumTokens(values ...*int) *int {
-	allNil := true
-	sum := 0
-	for _, v := range values {
-		if v != nil {
-			allNil = false
-			sum += *v
-		}
-	}
-	if allNil {
-		return nil
-	}
-	return &sum
-}
-
-// JoinText joins the non-empty texts, without a separator.
+// JoinText joins the parts' texts with a newline.
 func JoinText(parts []struct{ Text string }) string {
 	texts := make([]string, len(parts))
 	for i, p := range parts {
@@ -116,10 +88,10 @@ func JoinText(parts []struct{ Text string }) string {
 	return strings.Join(texts, "\n")
 }
 
-// PartText extracts the text of a content part for system-update lowering.
+// partText extracts the text of a content part for system-update lowering.
 // Content parts are structs, so formatting them directly would emit Go struct
 // dumps; only text/reasoning parts carry text.
-func PartText(part schema.ContentPart) string {
+func partText(part schema.ContentPart) string {
 	switch v := part.(type) {
 	case schema.TextPart:
 		return v.Text
@@ -141,9 +113,21 @@ func PartText(part schema.ContentPart) string {
 func SystemUpdateParts(content []schema.ContentPart) []struct{ Text string } {
 	parts := make([]struct{ Text string }, len(content))
 	for i := range content {
-		parts[i].Text = PartText(content[i])
+		parts[i].Text = partText(content[i])
 	}
 	return parts
+}
+
+// SystemUpdateCache returns the cache hint of a system update's last text part,
+// or nil.
+func SystemUpdateCache(content []schema.ContentPart) *schema.CacheHint {
+	if len(content) == 0 {
+		return nil
+	}
+	if tp, ok := content[len(content)-1].(schema.TextPart); ok {
+		return tp.Cache
+	}
+	return nil
 }
 
 func escapeSystemUpdateText(text string) string {
@@ -159,11 +143,6 @@ func WrapSystemUpdate(parts []struct{ Text string }) string {
 	return "<system-update>\n" + escapeSystemUpdateText(JoinText(parts)) + "\n</system-update>"
 }
 
-// TrimBaseURL drops trailing slashes from a base URL.
-func TrimBaseURL(value string) string {
-	return strings.TrimRight(value, "/")
-}
-
 // ToolResultText renders a tool result part as text.
 func ToolResultText(part schema.ToolResultPart) string {
 	switch part.Result.Type {
@@ -177,26 +156,6 @@ func ToolResultText(part schema.ToolResultPart) string {
 	}
 }
 
-// ErrorText renders an error as text, or "Unknown stream error" for nil.
-func ErrorText(err error) string {
-	if err != nil {
-		return err.Error()
-	}
-	return "Unknown stream error"
-}
-
-// ParseToolInput decodes a tool call's JSON input. The canonical implementation
-// lives in llm/protocols/utils (the leaf package that both this package and
-// tool-stream can import); this re-exports it.
-func ParseToolInput(route, name, raw string) (any, error) {
-	return utils.ParseToolInput(route, name, raw)
-}
-
-// EventError builds the shared invalid-provider-output error.
-func EventError(route, message string, raw ...string) *schema.LLMError {
-	return utils.EventError(route, message, raw...)
-}
-
 // InvalidRequest builds an invalid-request error for a route.
 func InvalidRequest(message string) *schema.LLMError {
 	return &schema.LLMError{
@@ -206,17 +165,17 @@ func InvalidRequest(message string) *schema.LLMError {
 	}
 }
 
-// ImageMIMEs are the image types the protocols accept.
-var ImageMIMEs = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+// imageMIMEs are the image types the protocols accept.
+var imageMIMEs = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
 
-// VideoMIMEs are the video types the protocols accept.
-var VideoMIMEs = []string{"video/mp4", "video/webm", "video/quicktime"}
+// videoMIMEs are the video types the protocols accept.
+var videoMIMEs = []string{"video/mp4", "video/webm", "video/quicktime"}
 
-// AudioMIMEs are the audio types the protocols accept.
-var AudioMIMEs = []string{"audio/wav", "audio/mp3", "audio/aiff", "audio/aac", "audio/ogg", "audio/flac"}
+// audioMIMEs are the audio types the protocols accept.
+var audioMIMEs = []string{"audio/wav", "audio/mp3", "audio/aiff", "audio/aac", "audio/ogg", "audio/flac"}
 
-// MediaMIMEs are every media type the protocols accept.
-var MediaMIMEs = append(append([]string{}, ImageMIMEs...), append(VideoMIMEs, AudioMIMEs...)...)
+// mediaMIMEs are every media type the protocols accept.
+var mediaMIMEs = append(append([]string{}, imageMIMEs...), append(videoMIMEs, audioMIMEs...)...)
 
 // mediaMIMESet builds a lookup set from a MIME list.
 func mediaMIMESet(values []string) map[string]struct{} {
@@ -227,61 +186,44 @@ func mediaMIMESet(values []string) map[string]struct{} {
 	return set
 }
 
-// SupportsContent reports whether a part's type is one of the accepted types.
-func SupportsContent(part schema.ContentPart, types []string) bool {
-	switch part.(type) {
-	case schema.TextPart:
-		for _, t := range types {
-			if t == "text" {
-				return true
-			}
-		}
-	case schema.MediaPart:
-		for _, t := range types {
-			if t == "media" {
-				return true
-			}
-		}
-	case schema.ToolCallPart:
-		for _, t := range types {
-			if t == "tool-call" {
-				return true
-			}
-		}
-	case schema.ToolResultPart:
-		for _, t := range types {
-			if t == "tool-result" {
-				return true
-			}
-		}
-	case schema.ReasoningPart:
-		for _, t := range types {
-			if t == "reasoning" {
-				return true
-			}
-		}
+// imageMIMESet is the lookup set of image types the protocols accept.
+var imageMIMESet = mediaMIMESet(imageMIMEs)
+
+// intVal dereferences p, or returns 0 when p is nil.
+func intVal(p *int) int {
+	if p == nil {
+		return 0
 	}
-	return false
+	return *p
 }
 
-// FormatContentTypes renders accepted types for an error message.
-func FormatContentTypes(types []string) string {
-	if len(types) == 0 {
-		return ""
+// providerMetadata keys a raw payload by provider name, or returns nil when the
+// payload is nil.
+func providerMetadata(provider string, raw map[string]any) schema.ProviderMetadata {
+	if raw == nil {
+		return nil
 	}
-	if len(types) == 1 {
-		return types[0]
-	}
-	if len(types) == 2 {
-		return types[0] + " and " + types[1]
-	}
-	return strings.Join(types[:len(types)-1], ", ") + ", and " + types[len(types)-1]
+	return schema.ProviderMetadata{provider: raw}
 }
 
-// UnsupportedContent builds the error for a message that carries content the
-// protocol cannot send.
-func UnsupportedContent(route string, role schema.MessageRole, types []string) *schema.LLMError {
-	return InvalidRequest(fmt.Sprintf("%s %s messages only support %s content for now", route, role, FormatContentTypes(types)))
+// rawRecord decodes a JSON object into a map, or returns nil when it is not one.
+func rawRecord(data []byte) map[string]any {
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	return raw
+}
+
+// strVal dereferences p, or returns def when p is nil and def is given.
+func strVal(p *string, def ...string) string {
+	if p != nil {
+		return *p
+	}
+	if len(def) > 0 {
+		return def[0]
+	}
+	return ""
 }
 
 // MatchToolChoice maps a tool choice to the value a protocol sends: the mode

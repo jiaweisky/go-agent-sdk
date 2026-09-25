@@ -26,6 +26,6 @@ type TransportPrepareInput struct {
 	Request    *schema.LLMRequest
 	Endpoint   Endpoint
 	Auth       *Auth
-	EncodeBody func(body any) string
+	EncodeBody func(body any) (string, error)
 	Headers    func(input *schema.LLMRequest) map[string]string
 }

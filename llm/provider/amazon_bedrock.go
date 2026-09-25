@@ -9,20 +9,14 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
-// AmazonAmazonBedrockProviderID is the provider id models.dev uses for Bedrock.
-const AmazonAmazonBedrockProviderID = schema.ProviderID("amazon-bedrock")
+// AmazonBedrockProviderID is the provider id used for Bedrock.
+const AmazonBedrockProviderID = schema.ProviderID("amazon-bedrock")
 
 // AmazonBedrockConfig configures the Amazon Bedrock facade.
 type AmazonBedrockConfig struct {
-	APIKey          *string
-	Region          string
-	BaseURL         string
-	Credentials     *utils.Credentials
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
+	CommonConfig
+	Region      string
+	Credentials *utils.Credentials
 }
 
 // AmazonBedrockProvider is a configured Bedrock facade: its id, its route, and
@@ -51,13 +45,7 @@ func bedrockAuth(input AmazonBedrockConfig) *route.Auth {
 }
 
 func bedrockDefaults(input AmazonBedrockConfig) route.RouteDefaultsInput {
-	return route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
+	return input.defaults()
 }
 
 // NewAmazonBedrock builds the Bedrock facade over the Bedrock Converse route.
@@ -75,21 +63,15 @@ func NewAmazonBedrock(bedrockConverseRoute route.Route, input AmazonBedrockConfi
 	}
 	defaults := bedrockDefaults(input)
 	r := bedrockConverseRoute.With(route.RoutePatch{
-		Provider: string(AmazonAmazonBedrockProviderID),
+		Provider: string(AmazonBedrockProviderID),
 		Endpoint: &route.EndpointPatch{BaseURL: &baseURL},
 		Auth:     bedrockAuth(input),
 		Defaults: &defaults,
 	})
 	return AmazonBedrockProvider{
-		ID: AmazonAmazonBedrockProviderID,
+		ID: AmazonBedrockProviderID,
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
-			modelInput := route.RouteModelInput{ID: id}
-			if len(opts) > 0 {
-				opt := opts[0]
-				modelInput.Defaults = opt.Defaults
-				modelInput.Compatibility = opt.Compatibility
-			}
-			return r.Model(modelInput)
+			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
 	}
 }

@@ -3,13 +3,13 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
-// ParseToolInput decodes a tool call's JSON input. This is the canonical
-// implementation; llm/protocols re-exports it because utils is the leaf package
-// both of them can import.
+// ParseToolInput decodes a tool call's JSON input.
 func ParseToolInput(route, name, raw string) (any, error) {
 	input := raw
 	if input == "" {
@@ -58,8 +58,8 @@ type FinishOutcome struct {
 	Events []schema.LLMEvent
 }
 
-// Empty returns an empty set of pending tool calls.
-func Empty() map[string]*PendingTool {
+// ToolStreamEmpty returns an empty set of pending tool calls.
+func ToolStreamEmpty() map[string]*PendingTool {
 	return make(map[string]*PendingTool)
 }
 
@@ -83,11 +83,7 @@ func withoutTool(tools map[string]*PendingTool, key string) map[string]*PendingT
 }
 
 func inputStart(tool *PendingTool) schema.LLMEvent {
-	opts := []schema.EventOption{}
-	if tool.ProviderMetadata != nil {
-		opts = append(opts, schema.WithEventProviderMetadata(tool.ProviderMetadata))
-	}
-	return schema.NewToolInputStart(tool.ID, tool.Name, opts...)
+	return schema.NewToolInputStart(tool.ID, tool.Name, providerMetadataOptions(tool.ProviderMetadata)...)
 }
 
 func inputDelta(tool *PendingTool, text string) schema.LLMEvent {
@@ -107,9 +103,7 @@ func toolCall(route string, tool *PendingTool, inputOverride ...string) (schema.
 	if tool.ProviderExecuted != nil && *tool.ProviderExecuted {
 		opts = append(opts, schema.WithEventProviderExecuted(true))
 	}
-	if tool.ProviderMetadata != nil {
-		opts = append(opts, schema.WithEventProviderMetadata(tool.ProviderMetadata))
-	}
+	opts = append(opts, providerMetadataOptions(tool.ProviderMetadata)...)
 	return schema.NewToolCall(tool.ID, tool.Name, parsed, opts...), nil
 }
 
@@ -128,8 +122,8 @@ func appendTool(tools map[string]*PendingTool, key string, tool *PendingTool, te
 	}
 }
 
-// Start records a tool call that has just begun.
-func Start(tools map[string]*PendingTool, key string, tool PendingTool) map[string]*PendingTool {
+// ToolStreamStart records a tool call that has just begun.
+func ToolStreamStart(tools map[string]*PendingTool, key string, tool PendingTool) map[string]*PendingTool {
 	return start(tools, key, tool)
 }
 
@@ -209,10 +203,7 @@ func FinishTool(route string, tools map[string]*PendingTool, key string) (Finish
 	if err != nil {
 		return FinishOutcome{}, err
 	}
-	opts := []schema.EventOption{}
-	if tool.ProviderMetadata != nil {
-		opts = append(opts, schema.WithEventProviderMetadata(tool.ProviderMetadata))
-	}
+	opts := providerMetadataOptions(tool.ProviderMetadata)
 	return FinishOutcome{
 		Tools: withoutTool(tools, key),
 		Events: []schema.LLMEvent{
@@ -232,10 +223,7 @@ func FinishToolWithInput(route string, tools map[string]*PendingTool, key string
 	if err != nil {
 		return FinishOutcome{}, err
 	}
-	opts := []schema.EventOption{}
-	if tool.ProviderMetadata != nil {
-		opts = append(opts, schema.WithEventProviderMetadata(tool.ProviderMetadata))
-	}
+	opts := providerMetadataOptions(tool.ProviderMetadata)
 	return FinishOutcome{
 		Tools: withoutTool(tools, key),
 		Events: []schema.LLMEvent{
@@ -245,10 +233,30 @@ func FinishToolWithInput(route string, tools map[string]*PendingTool, key string
 	}, nil
 }
 
-// FinishAllTools completes every pending tool call, in key order.
+// FinishAllTools completes every pending tool call. Numeric keys are ordered
+// numerically, other keys lexicographically.
 func FinishAllTools(route string, tools map[string]*PendingTool) (FinishOutcome, error) {
+	keys := make([]string, 0, len(tools))
+	for key := range tools {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		ni, iErr := strconv.Atoi(keys[i])
+		nj, jErr := strconv.Atoi(keys[j])
+		switch {
+		case iErr == nil && jErr == nil:
+			return ni < nj
+		case iErr == nil:
+			return true
+		case jErr == nil:
+			return false
+		default:
+			return keys[i] < keys[j]
+		}
+	})
 	var allEvents []schema.LLMEvent
-	for _, tool := range tools {
+	for _, key := range keys {
+		tool := tools[key]
 		if tool == nil {
 			continue
 		}
@@ -256,17 +264,14 @@ func FinishAllTools(route string, tools map[string]*PendingTool) (FinishOutcome,
 		if err != nil {
 			return FinishOutcome{}, err
 		}
-		opts := []schema.EventOption{}
-		if tool.ProviderMetadata != nil {
-			opts = append(opts, schema.WithEventProviderMetadata(tool.ProviderMetadata))
-		}
+		opts := providerMetadataOptions(tool.ProviderMetadata)
 		allEvents = append(allEvents,
 			schema.NewToolInputEnd(tool.ID, tool.Name, opts...),
 			call,
 		)
 	}
 	return FinishOutcome{
-		Tools:  Empty(),
+		Tools:  ToolStreamEmpty(),
 		Events: allEvents,
 	}, nil
 }

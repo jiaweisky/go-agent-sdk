@@ -11,7 +11,7 @@ type Usage struct {
 	TotalTokens           int
 	// ProviderMetadata carries the provider's original usage payload keyed by
 	// provider name (e.g. {"openai": {...raw usage...}}), for fields we don't
-	// normalize and for billing-level audit trails. Mirrors provider-error.ts.
+	// normalize and for billing-level audit trails.
 	ProviderMetadata ProviderMetadata
 }
 
@@ -23,18 +23,6 @@ func (u *Usage) VisibleOutputTokens() int {
 		return 0
 	}
 	return n
-}
-
-// UsageFrom reads usage from a map, a struct, or another Usage.
-func UsageFrom(input any) *Usage {
-	switch v := input.(type) {
-	case *Usage:
-		return v
-	case Usage:
-		return &v
-	default:
-		return nil
-	}
 }
 
 // LLMEventType is the kind of an event in a streamed response.
@@ -336,65 +324,12 @@ func LLMResponseComplete(state *ResponseState) *LLMResponse {
 	}
 }
 
-// LLMResponseFromEvents assembles a complete response from a finished event
-// stream.
-func LLMResponseFromEvents(events []LLMEvent) *LLMResponse {
-	state := EmptyResponseState()
-	for _, e := range events {
-		ReduceResponseState(&state, e)
-	}
-	return LLMResponseComplete(&state)
-}
-
-// LLMResponseText returns the response's text, or "" for nil.
-func LLMResponseText(r *LLMResponse) string {
-	var text string
-	for _, e := range r.Events {
-		if e.IsTextDelta() {
-			text += e.Text
-		}
-	}
-	return text
-}
-
-// LLMResponseUsage returns the response's usage, or nil.
-func LLMResponseUsage(r *LLMResponse) *Usage {
-	if r.Usage != nil {
-		return r.Usage
-	}
-	for _, e := range r.Events {
-		if e.Usage != nil {
-			return e.Usage
-		}
-	}
-	return nil
-}
-
-// LLMResponseReasoning returns the response's reasoning text, or "" for nil.
-func LLMResponseReasoning(r *LLMResponse) string {
-	var text string
-	for _, e := range r.Events {
-		if e.IsReasoningDelta() {
-			text += e.Text
-		}
-	}
-	return text
-}
-
-// LLMResponseToolCalls returns the response's tool calls, or nil for nil.
-func LLMResponseToolCalls(r *LLMResponse) []LLMEvent {
-	return r.ToolCalls()
-}
-
 // ReduceResponseState folds one event into the response state.
 func ReduceResponseState(state *ResponseState, event LLMEvent) {
 	state.Events = append(state.Events, event)
 
 	switch event.Type {
 	case EventFinish:
-		if event.Usage != nil {
-			state.Usage = event.Usage
-		}
 		state.FinishReason = &event.Reason
 	case EventProviderError:
 		if state.FinishReason == nil {
@@ -414,25 +349,11 @@ func ReduceResponseState(state *ResponseState, event LLMEvent) {
 	case EventReasoningEnd:
 		reduceReasoningEnd(state, event)
 	case EventToolInputStart:
-		state.ToolInputs[event.ID] = ToolInputAssembly{
-			Name: event.Name, Text: "", ProviderMetadata: event.ProviderMetadata,
-		}
+		reduceToolInputStart(state, event)
 	case EventToolInputDelta:
-		cur, ok := state.ToolInputs[event.ID]
-		if !ok {
-			cur = ToolInputAssembly{Name: event.Name}
-		}
-		cur.Text += event.Text
-		state.ToolInputs[event.ID] = cur
+		reduceToolInputDelta(state, event)
 	case EventToolInputEnd:
-		cur, ok := state.ToolInputs[event.ID]
-		if !ok {
-			cur = ToolInputAssembly{Name: event.Name}
-		}
-		if event.ProviderMetadata != nil {
-			cur.ProviderMetadata = event.ProviderMetadata
-		}
-		state.ToolInputs[event.ID] = cur
+		reduceToolInputEnd(state, event)
 	case EventToolCall:
 		delete(state.ToolInputs, event.ID)
 		state.Message.Content = append(state.Message.Content,
@@ -445,6 +366,32 @@ func ReduceResponseState(state *ResponseState, event LLMEvent) {
 	if event.Usage != nil {
 		state.Usage = event.Usage
 	}
+}
+
+func reduceToolInputStart(state *ResponseState, event LLMEvent) {
+	state.ToolInputs[event.ID] = ToolInputAssembly{
+		Name: event.Name, Text: "", ProviderMetadata: event.ProviderMetadata,
+	}
+}
+
+func reduceToolInputDelta(state *ResponseState, event LLMEvent) {
+	cur, ok := state.ToolInputs[event.ID]
+	if !ok {
+		cur = ToolInputAssembly{Name: event.Name}
+	}
+	cur.Text += event.Text
+	state.ToolInputs[event.ID] = cur
+}
+
+func reduceToolInputEnd(state *ResponseState, event LLMEvent) {
+	cur, ok := state.ToolInputs[event.ID]
+	if !ok {
+		cur = ToolInputAssembly{Name: event.Name}
+	}
+	if event.ProviderMetadata != nil {
+		cur.ProviderMetadata = event.ProviderMetadata
+	}
+	state.ToolInputs[event.ID] = cur
 }
 
 func ensureText(state *ResponseState, id string, providerMetadata ProviderMetadata) {

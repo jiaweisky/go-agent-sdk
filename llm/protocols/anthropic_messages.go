@@ -3,6 +3,7 @@ package protocols
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/user/go-agent-sdk/llm/protocols/utils"
 	"github.com/user/go-agent-sdk/llm/route"
@@ -18,10 +19,6 @@ const AnthropicMessagesDefaultBaseURL = "https://api.anthropic.com/v1"
 // AnthropicMessagesPath is the Anthropic Messages endpoint path.
 const AnthropicMessagesPath = "/messages"
 const anthropicMessagesBreakpointCap = 4
-
-var anthropicMessagesImageMIMEs = map[string]struct{}{
-	"image/png": {}, "image/jpeg": {}, "image/gif": {}, "image/webp": {},
-}
 
 type anthropicMessagesTextBlock struct {
 	Type         string                         `json:"type"`
@@ -51,13 +48,6 @@ type anthropicMessagesToolUseBlock struct {
 	Input        any                            `json:"input"`
 	CacheControl *anthropicMessagesCacheControl `json:"cache_control,omitempty"`
 }
-type anthropicMessagesServerToolUseBlock struct {
-	Type         string                         `json:"type"`
-	ID           string                         `json:"id"`
-	Name         string                         `json:"name"`
-	Input        any                            `json:"input"`
-	CacheControl *anthropicMessagesCacheControl `json:"cache_control,omitempty"`
-}
 type anthropicMessagesServerToolResultBlock struct {
 	Type         string                         `json:"type"`
 	ToolUseID    string                         `json:"tool_use_id"`
@@ -76,44 +66,44 @@ type anthropicMessagesCacheControl struct {
 	TTL  *string `json:"ttl,omitempty"`
 }
 
-type anthropicMessagesAnthropicMessage struct {
+type anthropicMessagesMessage struct {
 	Role    string `json:"role"`
 	Content []any  `json:"content"`
 }
 
-type anthropicMessagesAnthropicTool struct {
+type anthropicMessagesTool struct {
 	Name         string                         `json:"name"`
 	Description  string                         `json:"description"`
 	InputSchema  any                            `json:"input_schema"`
 	CacheControl *anthropicMessagesCacheControl `json:"cache_control,omitempty"`
 }
 
-type anthropicMessagesAnthropicToolChoice struct {
+type anthropicMessagesToolChoice struct {
 	Type string `json:"type"`
 	Name string `json:"name,omitempty"`
 }
 
-type anthropicMessagesAnthropicThinking struct {
+type anthropicMessagesThinking struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens"`
 }
 
 type anthropicMessagesBody struct {
-	Model         string                              `json:"model"`
-	System        []anthropicMessagesTextBlock        `json:"system,omitempty"`
-	Messages      []anthropicMessagesAnthropicMessage `json:"messages"`
-	Tools         []anthropicMessagesAnthropicTool    `json:"tools,omitempty"`
-	ToolChoice    any                                 `json:"tool_choice,omitempty"`
-	Stream        bool                                `json:"stream"`
-	MaxTokens     int                                 `json:"max_tokens"`
-	Temperature   *float64                            `json:"temperature,omitempty"`
-	TopP          *float64                            `json:"top_p,omitempty"`
-	TopK          *float64                            `json:"top_k,omitempty"`
-	StopSequences []string                            `json:"stop_sequences,omitempty"`
-	Thinking      *anthropicMessagesAnthropicThinking `json:"thinking,omitempty"`
+	Model         string                       `json:"model"`
+	System        []anthropicMessagesTextBlock `json:"system,omitempty"`
+	Messages      []anthropicMessagesMessage   `json:"messages"`
+	Tools         []anthropicMessagesTool      `json:"tools,omitempty"`
+	ToolChoice    any                          `json:"tool_choice,omitempty"`
+	Stream        bool                         `json:"stream"`
+	MaxTokens     int                          `json:"max_tokens"`
+	Temperature   *float64                     `json:"temperature,omitempty"`
+	TopP          *float64                     `json:"top_p,omitempty"`
+	TopK          *float64                     `json:"top_k,omitempty"`
+	StopSequences []string                     `json:"stop_sequences,omitempty"`
+	Thinking      *anthropicMessagesThinking   `json:"thinking,omitempty"`
 }
 
-type anthropicMessagesAnthropicUsage struct {
+type anthropicMessagesUsage struct {
 	InputTokens          *int                    `json:"input_tokens,omitempty"`
 	OutputTokens         *int                    `json:"output_tokens,omitempty"`
 	CacheCreationInput   *int                    `json:"cache_creation_input_tokens,omitempty"`
@@ -122,17 +112,14 @@ type anthropicMessagesAnthropicUsage struct {
 }
 
 // UnmarshalJSON reads the usage payload Anthropic sends.
-func (u *anthropicMessagesAnthropicUsage) UnmarshalJSON(data []byte) error {
-	type plain anthropicMessagesAnthropicUsage
+func (u *anthropicMessagesUsage) UnmarshalJSON(data []byte) error {
+	type plain anthropicMessagesUsage
 	var decoded plain
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	*u = anthropicMessagesAnthropicUsage(decoded)
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err == nil {
-		u.ProviderMetadata = schema.ProviderMetadata{"anthropic": raw}
-	}
+	*u = anthropicMessagesUsage(decoded)
+	u.ProviderMetadata = providerMetadata("anthropic", rawRecord(data))
 	return nil
 }
 
@@ -158,34 +145,33 @@ type anthropicMessagesStreamDelta struct {
 	StopSequence *string `json:"stop_sequence,omitempty"`
 }
 
-type anthropicMessagesAnthropicError struct {
+type anthropicMessagesError struct {
 	Type    *string `json:"type,omitempty"`
 	Message *string `json:"message,omitempty"`
 }
 
-type anthropicMessagesAnthropicEvent struct {
-	Type         string                           `json:"type"`
-	Index        *int                             `json:"index,omitempty"`
-	Message      *anthropicMessagesMessageEntry   `json:"message,omitempty"`
-	ContentBlock *anthropicMessagesStreamBlock    `json:"content_block,omitempty"`
-	Delta        *anthropicMessagesStreamDelta    `json:"delta,omitempty"`
-	Usage        *anthropicMessagesAnthropicUsage `json:"usage,omitempty"`
-	Error        *anthropicMessagesAnthropicError `json:"error,omitempty"`
+type anthropicMessagesEvent struct {
+	Type         string                         `json:"type"`
+	Index        *int                           `json:"index,omitempty"`
+	Message      *anthropicMessagesMessageEntry `json:"message,omitempty"`
+	ContentBlock *anthropicMessagesStreamBlock  `json:"content_block,omitempty"`
+	Delta        *anthropicMessagesStreamDelta  `json:"delta,omitempty"`
+	Usage        *anthropicMessagesUsage        `json:"usage,omitempty"`
+	Error        *anthropicMessagesError        `json:"error,omitempty"`
 }
 
 type anthropicMessagesMessageEntry struct {
-	Usage *anthropicMessagesAnthropicUsage `json:"usage,omitempty"`
+	Usage *anthropicMessagesUsage `json:"usage,omitempty"`
 }
 
 type anthropicMessagesParserState struct {
 	tools     map[string]*utils.PendingTool
 	usage     *schema.Usage
-	lifecycle utils.State
+	lifecycle utils.LifecycleState
 }
 
 type anthropicMessagesBreakpointTracker struct {
 	remaining int
-	dropped   int
 }
 
 func anthropicMessagesNewBreakpoints(cap int) anthropicMessagesBreakpointTracker {
@@ -200,7 +186,6 @@ func (b *anthropicMessagesBreakpointTracker) next(hint *schema.CacheHint) *anthr
 		return nil
 	}
 	if b.remaining <= 0 {
-		b.dropped++
 		return nil
 	}
 	b.remaining--
@@ -209,10 +194,6 @@ func (b *anthropicMessagesBreakpointTracker) next(hint *schema.CacheHint) *anthr
 		return &anthropicMessagesCacheControl{Type: "ephemeral", TTL: &t}
 	}
 	return &anthropicMessagesCacheControl{Type: "ephemeral"}
-}
-
-func anthropicMessagesAnthropicMetadata(m map[string]any) schema.ProviderMetadata {
-	return schema.ProviderMetadata{"anthropic": m}
 }
 
 func anthropicMessagesSignatureFromMetadata(md schema.ProviderMetadata) *string {
@@ -234,26 +215,16 @@ var anthropicMessagesServerToolResultNames = map[string]string{
 }
 
 func anthropicMessagesServerToolResultWire(partName string) string {
-	switch partName {
-	case "web_search":
-		return "web_search_tool_result"
-	case "code_execution":
-		return "code_execution_tool_result"
-	case "web_fetch":
-		return "web_fetch_tool_result"
+	for wire, name := range anthropicMessagesServerToolResultNames {
+		if name == partName {
+			return wire
+		}
 	}
 	return ""
 }
 
-func anthropicMessagesIntVal(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-
-func anthropicMessagesLowerTool(bp *anthropicMessagesBreakpointTracker, td schema.ToolDefinition, inputSchema any) anthropicMessagesAnthropicTool {
-	return anthropicMessagesAnthropicTool{
+func anthropicMessagesLowerTool(bp *anthropicMessagesBreakpointTracker, td schema.ToolDefinition, inputSchema any) anthropicMessagesTool {
+	return anthropicMessagesTool{
 		Name:         td.Name,
 		Description:  td.Description,
 		InputSchema:  inputSchema,
@@ -263,10 +234,10 @@ func anthropicMessagesLowerTool(bp *anthropicMessagesBreakpointTracker, td schem
 
 func anthropicMessagesLowerToolChoice(tc schema.ToolChoice) (any, error) {
 	return MatchToolChoice("Anthropic Messages", tc,
-		anthropicMessagesAnthropicToolChoice{Type: "auto"},
+		anthropicMessagesToolChoice{Type: "auto"},
 		nil,
-		anthropicMessagesAnthropicToolChoice{Type: "any"},
-		func(name string) any { return anthropicMessagesAnthropicToolChoice{Type: "tool", Name: name} },
+		anthropicMessagesToolChoice{Type: "any"},
+		func(name string) any { return anthropicMessagesToolChoice{Type: "tool", Name: name} },
 	)
 }
 
@@ -279,8 +250,8 @@ func anthropicMessagesLowerToolCall(part schema.ToolCallPart) anthropicMessagesT
 	}
 }
 
-func anthropicMessagesLowerServerToolCall(part schema.ToolCallPart) anthropicMessagesServerToolUseBlock {
-	return anthropicMessagesServerToolUseBlock{
+func anthropicMessagesLowerServerToolCall(part schema.ToolCallPart) anthropicMessagesToolUseBlock {
+	return anthropicMessagesToolUseBlock{
 		Type:  "server_tool_use",
 		ID:    part.ID,
 		Name:  part.Name,
@@ -289,7 +260,7 @@ func anthropicMessagesLowerServerToolCall(part schema.ToolCallPart) anthropicMes
 }
 
 func anthropicMessagesLowerImage(part schema.MediaPart) (*anthropicMessagesImageBlock, error) {
-	media, err := utils.ValidateMedia("Anthropic Messages", part, anthropicMessagesImageMIMEs)
+	media, err := utils.ValidateMedia("Anthropic Messages", part, imageMIMESet)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +279,7 @@ func anthropicMessagesLowerToolResultContentItem(item schema.ToolContent) (any, 
 	case schema.ToolTextContent:
 		return anthropicMessagesTextBlock{Type: "text", Text: v.Text}, nil
 	case schema.ToolFileContent:
-		media, err := utils.ValidateToolFile("Anthropic Messages", v, anthropicMessagesImageMIMEs)
+		media, err := utils.ValidateToolFile("Anthropic Messages", v, imageMIMESet)
 		if err != nil {
 			return nil, err
 		}
@@ -415,52 +386,16 @@ func anthropicMessagesFromRequest(request *schema.LLMRequest) (any, error) {
 		}
 		toolChoice = choice
 	}
-	outputLimit := 4096
-	if defaults := request.Model.GetDefaults(); defaults != nil && defaults.Limits != nil {
-		outputLimit = defaults.Limits.Output
-	} else if defaults := request.Model.GetRouteDefaults(); defaults != nil && defaults.Limits != nil {
-		outputLimit = defaults.Limits.Output
-	}
-	if gen != nil && gen.MaxTokens != nil {
-		outputLimit = *gen.MaxTokens
-	}
 
-	var tools []anthropicMessagesAnthropicTool
-	if len(request.Tools) > 0 && (request.ToolChoice == nil || request.ToolChoice.Type != "none") {
-		for _, t := range request.Tools {
-			tools = append(tools, anthropicMessagesLowerTool(&bp, t, ProjectToolSchema(request.Model, t.InputSchema)))
-		}
-	}
-
-	var system []anthropicMessagesTextBlock
-	for _, p := range request.System {
-		block := anthropicMessagesTextBlock{Type: "text", Text: p.Text}
-		if cc := bp.next(p.Cache); cc != nil {
-			block.CacheControl = cc
-		}
-		system = append(system, block)
-	}
-
+	tools := anthropicMessagesLowerTools(request, &bp)
+	system := anthropicMessagesLowerSystem(request, &bp)
 	messages, err := anthropicMessagesLowerMessages(request, &bp)
 	if err != nil {
 		return nil, err
 	}
-
-	if bp.dropped > 0 {
-		// log dropped breakpoints
-	}
-
-	var thinking *anthropicMessagesAnthropicThinking
-	if raw := request.ProviderOptions["anthropic"]; len(raw) > 0 {
-		if m, ok := raw["thinking"].(map[string]any); ok {
-			if t, _ := m["type"].(string); t == "enabled" {
-				budget, ok := anthropicMessagesThinkingBudget(m)
-				if !ok {
-					return nil, InvalidRequest("Anthropic thinking provider option requires budgetTokens")
-				}
-				thinking = &anthropicMessagesAnthropicThinking{Type: "enabled", BudgetTokens: budget}
-			}
-		}
+	thinking, err := anthropicMessagesLowerThinking(request)
+	if err != nil {
+		return nil, err
 	}
 
 	var genTemperature *float64
@@ -481,7 +416,7 @@ func anthropicMessagesFromRequest(request *schema.LLMRequest) (any, error) {
 		Tools:         tools,
 		ToolChoice:    toolChoice,
 		Stream:        true,
-		MaxTokens:     outputLimit,
+		MaxTokens:     anthropicMessagesOutputLimit(request),
 		Temperature:   genTemperature,
 		TopP:          genTopP,
 		TopK:          genTopK,
@@ -490,122 +425,216 @@ func anthropicMessagesFromRequest(request *schema.LLMRequest) (any, error) {
 	}, nil
 }
 
-func anthropicMessagesLowerMessages(request *schema.LLMRequest, bp *anthropicMessagesBreakpointTracker) ([]anthropicMessagesAnthropicMessage, error) {
-	msgs := []anthropicMessagesAnthropicMessage{}
+// anthropicMessagesOutputLimit resolves the max output tokens: model defaults,
+// then route defaults, then an explicit generation override.
+func anthropicMessagesOutputLimit(request *schema.LLMRequest) int {
+	outputLimit := 4096
+	if defaults := request.Model.GetDefaults(); defaults != nil && defaults.Limits != nil {
+		outputLimit = defaults.Limits.Output
+	} else if defaults := request.Model.GetRouteDefaults(); defaults != nil && defaults.Limits != nil {
+		outputLimit = defaults.Limits.Output
+	}
+	if gen := request.Generation; gen != nil && gen.MaxTokens != nil {
+		outputLimit = *gen.MaxTokens
+	}
+	return outputLimit
+}
+
+func anthropicMessagesLowerTools(request *schema.LLMRequest, bp *anthropicMessagesBreakpointTracker) []anthropicMessagesTool {
+	var tools []anthropicMessagesTool
+	if len(request.Tools) == 0 || (request.ToolChoice != nil && request.ToolChoice.Type == "none") {
+		return tools
+	}
+	for _, t := range request.Tools {
+		tools = append(tools, anthropicMessagesLowerTool(bp, t, ProjectToolSchema(request.Model, t.InputSchema)))
+	}
+	return tools
+}
+
+func anthropicMessagesLowerSystem(request *schema.LLMRequest, bp *anthropicMessagesBreakpointTracker) []anthropicMessagesTextBlock {
+	var system []anthropicMessagesTextBlock
+	for _, p := range request.System {
+		block := anthropicMessagesTextBlock{Type: "text", Text: p.Text}
+		if cc := bp.next(p.Cache); cc != nil {
+			block.CacheControl = cc
+		}
+		system = append(system, block)
+	}
+	return system
+}
+
+func anthropicMessagesLowerThinking(request *schema.LLMRequest) (*anthropicMessagesThinking, error) {
+	raw := request.ProviderOptions["anthropic"]
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	m, ok := raw["thinking"].(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	if t, _ := m["type"].(string); t != "enabled" {
+		return nil, nil
+	}
+	budget, ok := anthropicMessagesThinkingBudget(m)
+	if !ok {
+		return nil, InvalidRequest("Anthropic thinking provider option requires budgetTokens")
+	}
+	return &anthropicMessagesThinking{Type: "enabled", BudgetTokens: budget}, nil
+}
+
+func anthropicMessagesLowerMessages(request *schema.LLMRequest, bp *anthropicMessagesBreakpointTracker) ([]anthropicMessagesMessage, error) {
+	msgs := []anthropicMessagesMessage{}
 	nativeSystem := anthropicMessagesSupportsNativeSystemUpdate(request)
 
 	for i, msg := range request.Messages {
-		if msg.Role == "system" {
-			if anthropicMessagesSplitsLocalToolResults(request.Messages, i) {
-				return nil, fmt.Errorf("Anthropic Messages system updates cannot split a local tool call from its tool result")
+		switch msg.Role {
+		case "system":
+			next, err := anthropicMessagesLowerSystemMessage(msgs, request, i, msg, nativeSystem, bp)
+			if err != nil {
+				return nil, err
 			}
-			if nativeSystem && anthropicMessagesCanUseNativeSystemUpdate(request.Messages, i) {
-				ns, err := anthropicMessagesLowerNativeSystemUpdate(msg, bp)
-				if err != nil {
-					return nil, err
-				}
-				msgs = append(msgs, ns)
-				continue
+			msgs = next
+		case "user":
+			content, err := anthropicMessagesLowerUserContent(msg)
+			if err != nil {
+				return nil, err
 			}
-			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
-			block := anthropicMessagesTextBlock{Type: "text", Text: update}
-			if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
-				last := &msgs[len(msgs)-1]
-				last.Content = append(last.Content, block)
-			} else {
-				msgs = append(msgs, anthropicMessagesAnthropicMessage{Role: "user", Content: []any{block}})
+			msgs = append(msgs, anthropicMessagesMessage{Role: "user", Content: content})
+		case "assistant":
+			content, err := anthropicMessagesLowerAssistantContent(msg)
+			if err != nil {
+				return nil, err
 			}
-			continue
-		}
-		if msg.Role == "user" {
-			var content []any
-			for _, p := range msg.Content {
-				switch part := p.(type) {
-				case schema.TextPart:
-					content = append(content, anthropicMessagesTextBlock{Type: "text", Text: part.Text})
-				case schema.MediaPart:
-					img, err := anthropicMessagesLowerImage(part)
-					if err != nil {
-						return nil, err
-					}
-					content = append(content, *img)
-				default:
-					return nil, fmt.Errorf("Anthropic Messages user messages only support text and media")
-				}
+			msgs = append(msgs, anthropicMessagesMessage{Role: "assistant", Content: content})
+		case "tool":
+			content, err := anthropicMessagesLowerToolContent(msg)
+			if err != nil {
+				return nil, err
 			}
-			msgs = append(msgs, anthropicMessagesAnthropicMessage{Role: "user", Content: content})
-			continue
-		}
-		if msg.Role == "assistant" {
-			var content []any
-			for _, p := range msg.Content {
-				switch part := p.(type) {
-				case schema.TextPart:
-					content = append(content, anthropicMessagesTextBlock{Type: "text", Text: part.Text})
-				case schema.ReasoningPart:
-					sig := anthropicMessagesSignatureFromMetadata(part.ProviderMetadata)
-					tb := anthropicMessagesThinkingBlock{Type: "thinking", Thinking: part.Text}
-					if part.Encrypted != nil {
-						tb.Signature = part.Encrypted
-					} else if sig != nil {
-						tb.Signature = sig
-					}
-					content = append(content, tb)
-				case schema.ToolCallPart:
-					if part.ProviderExecuted != nil && *part.ProviderExecuted {
-						content = append(content, anthropicMessagesLowerServerToolCall(part))
-					} else {
-						content = append(content, anthropicMessagesLowerToolCall(part))
-					}
-				case schema.ToolResultPart:
-					if part.ProviderExecuted != nil && *part.ProviderExecuted {
-						wireType := anthropicMessagesServerToolResultWire(part.Name)
-						if wireType == "" {
-							return nil, fmt.Errorf("Anthropic Messages does not know how to round-trip server tool result for %s", part.Name)
-						}
-						content = append(content, anthropicMessagesServerToolResultBlock{
-							Type:      wireType,
-							ToolUseID: part.ID,
-							Content:   part.Result.Value,
-						})
-					}
-				default:
-					return nil, fmt.Errorf("Anthropic Messages assistant messages only support text, reasoning, and tool-call content")
-				}
-			}
-			msgs = append(msgs, anthropicMessagesAnthropicMessage{Role: "assistant", Content: content})
-			continue
-		}
-		if msg.Role == "tool" {
-			var content []any
-			for _, p := range msg.Content {
-				if part, ok := p.(schema.ToolResultPart); ok {
-					c, err := anthropicMessagesLowerToolResultContent(part)
-					if err != nil {
-						return nil, err
-					}
-					isErr := part.Result.Type == "error"
-					var errPtr *bool
-					if isErr {
-						ptr := true
-						errPtr = &ptr
-					}
-					content = append(content, anthropicMessagesToolResultBlock{
-						Type:      "tool_result",
-						ToolUseID: part.ID,
-						Content:   c,
-						IsError:   errPtr,
-					})
-				}
-			}
-			msgs = append(msgs, anthropicMessagesAnthropicMessage{Role: "user", Content: content})
-			continue
+			msgs = append(msgs, anthropicMessagesMessage{Role: "user", Content: content})
 		}
 	}
 	return msgs, nil
 }
 
-func anthropicMessagesLowerNativeSystemUpdate(msg schema.Message, bp *anthropicMessagesBreakpointTracker) (anthropicMessagesAnthropicMessage, error) {
+// anthropicMessagesLowerSystemMessage lowers a system message, appending the
+// wrapped update to a trailing user message when it cannot be sent natively.
+func anthropicMessagesLowerSystemMessage(
+	msgs []anthropicMessagesMessage,
+	request *schema.LLMRequest,
+	index int,
+	msg schema.Message,
+	nativeSystem bool,
+	bp *anthropicMessagesBreakpointTracker,
+) ([]anthropicMessagesMessage, error) {
+	if anthropicMessagesSplitsLocalToolResults(request.Messages, index) {
+		return nil, fmt.Errorf("Anthropic Messages system updates cannot split a local tool call from its tool result")
+	}
+	if nativeSystem && anthropicMessagesCanUseNativeSystemUpdate(request.Messages, index) {
+		ns, err := anthropicMessagesLowerNativeSystemUpdate(msg, bp)
+		if err != nil {
+			return nil, err
+		}
+		return append(msgs, ns), nil
+	}
+	update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
+	block := anthropicMessagesTextBlock{Type: "text", Text: update}
+	if cc := bp.next(SystemUpdateCache(msg.Content)); cc != nil {
+		block.CacheControl = cc
+	}
+	if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
+		msgs[len(msgs)-1].Content = append(msgs[len(msgs)-1].Content, block)
+		return msgs, nil
+	}
+	return append(msgs, anthropicMessagesMessage{Role: "user", Content: []any{block}}), nil
+}
+
+func anthropicMessagesLowerUserContent(msg schema.Message) ([]any, error) {
+	var content []any
+	for _, p := range msg.Content {
+		switch part := p.(type) {
+		case schema.TextPart:
+			content = append(content, anthropicMessagesTextBlock{Type: "text", Text: part.Text})
+		case schema.MediaPart:
+			img, err := anthropicMessagesLowerImage(part)
+			if err != nil {
+				return nil, err
+			}
+			content = append(content, *img)
+		default:
+			return nil, fmt.Errorf("Anthropic Messages user messages only support text and media")
+		}
+	}
+	return content, nil
+}
+
+func anthropicMessagesLowerAssistantContent(msg schema.Message) ([]any, error) {
+	var content []any
+	for _, p := range msg.Content {
+		switch part := p.(type) {
+		case schema.TextPart:
+			content = append(content, anthropicMessagesTextBlock{Type: "text", Text: part.Text})
+		case schema.ReasoningPart:
+			sig := anthropicMessagesSignatureFromMetadata(part.ProviderMetadata)
+			tb := anthropicMessagesThinkingBlock{Type: "thinking", Thinking: part.Text}
+			if part.Encrypted != nil {
+				tb.Signature = part.Encrypted
+			} else if sig != nil {
+				tb.Signature = sig
+			}
+			content = append(content, tb)
+		case schema.ToolCallPart:
+			if part.ProviderExecuted != nil && *part.ProviderExecuted {
+				content = append(content, anthropicMessagesLowerServerToolCall(part))
+			} else {
+				content = append(content, anthropicMessagesLowerToolCall(part))
+			}
+		case schema.ToolResultPart:
+			if part.ProviderExecuted != nil && *part.ProviderExecuted {
+				wireType := anthropicMessagesServerToolResultWire(part.Name)
+				if wireType == "" {
+					return nil, fmt.Errorf("Anthropic Messages does not know how to round-trip server tool result for %s", part.Name)
+				}
+				content = append(content, anthropicMessagesServerToolResultBlock{
+					Type:      wireType,
+					ToolUseID: part.ID,
+					Content:   part.Result.Value,
+				})
+			}
+		default:
+			return nil, fmt.Errorf("Anthropic Messages assistant messages only support text, reasoning, and tool-call content")
+		}
+	}
+	return content, nil
+}
+
+func anthropicMessagesLowerToolContent(msg schema.Message) ([]any, error) {
+	var content []any
+	for _, p := range msg.Content {
+		part, ok := p.(schema.ToolResultPart)
+		if !ok {
+			continue
+		}
+		c, err := anthropicMessagesLowerToolResultContent(part)
+		if err != nil {
+			return nil, err
+		}
+		var errPtr *bool
+		if part.Result.Type == "error" {
+			isErr := true
+			errPtr = &isErr
+		}
+		content = append(content, anthropicMessagesToolResultBlock{
+			Type:      "tool_result",
+			ToolUseID: part.ID,
+			Content:   c,
+			IsError:   errPtr,
+		})
+	}
+	return content, nil
+}
+
+func anthropicMessagesLowerNativeSystemUpdate(msg schema.Message, bp *anthropicMessagesBreakpointTracker) (anthropicMessagesMessage, error) {
 	var content []any
 	for _, p := range msg.Content {
 		if tp, ok := p.(schema.TextPart); ok {
@@ -616,14 +645,14 @@ func anthropicMessagesLowerNativeSystemUpdate(msg schema.Message, bp *anthropicM
 			content = append(content, block)
 		}
 	}
-	return anthropicMessagesAnthropicMessage{Role: "system", Content: content}, nil
+	return anthropicMessagesMessage{Role: "system", Content: content}, nil
 }
 
 func anthropicMessagesDecodeEvent(frame string) (any, error) {
 	if frame == "" {
 		return nil, nil
 	}
-	var evt anthropicMessagesAnthropicEvent
+	var evt anthropicMessagesEvent
 	if err := json.Unmarshal([]byte(frame), &evt); err != nil {
 		return nil, fmt.Errorf("Anthropic Messages: invalid stream event: %s: %w", frame, err)
 	}
@@ -647,21 +676,21 @@ func anthropicMessagesMapFinishReason(reason *string) schema.FinishReason {
 	return schema.ReasonUnknown
 }
 
-func anthropicMessagesMapUsage(u *anthropicMessagesAnthropicUsage) *schema.Usage {
+func anthropicMessagesMapUsage(u *anthropicMessagesUsage) *schema.Usage {
 	if u == nil {
 		return nil
 	}
-	nonCached := anthropicMessagesIntVal(u.InputTokens)
-	cacheRead := anthropicMessagesIntVal(u.CacheReadInputTokens)
-	cacheWrite := anthropicMessagesIntVal(u.CacheCreationInput)
+	nonCached := intVal(u.InputTokens)
+	cacheRead := intVal(u.CacheReadInputTokens)
+	cacheWrite := intVal(u.CacheCreationInput)
 	inputTokens := nonCached + cacheRead + cacheWrite
 	return &schema.Usage{
 		InputTokens:           inputTokens,
-		OutputTokens:          anthropicMessagesIntVal(u.OutputTokens),
+		OutputTokens:          intVal(u.OutputTokens),
 		NonCachedInputTokens:  nonCached,
 		CacheReadInputTokens:  cacheRead,
 		CacheWriteInputTokens: cacheWrite,
-		TotalTokens:           anthropicMessagesIntVal(TotalTokens(&inputTokens, u.OutputTokens, nil)),
+		TotalTokens:           intVal(TotalTokens(&inputTokens, u.OutputTokens, nil)),
 		ProviderMetadata:      u.ProviderMetadata,
 	}
 }
@@ -696,14 +725,14 @@ func anthropicMessagesMergeUsage(left, right *schema.Usage) *schema.Usage {
 		NonCachedInputTokens:  nonCached,
 		CacheReadInputTokens:  cacheRead,
 		CacheWriteInputTokens: cacheWrite,
-		TotalTokens:           anthropicMessagesIntVal(TotalTokens(&inputTokens, &outputTokens, nil)),
-		ProviderMetadata:      mergeProviderMetadata(left.ProviderMetadata, right.ProviderMetadata),
+		TotalTokens:           intVal(TotalTokens(&inputTokens, &outputTokens, nil)),
+		ProviderMetadata:      anthropicMessagesMergeProviderMetadata(left.ProviderMetadata, right.ProviderMetadata),
 	}
 }
 
-// mergeProviderMetadata right-biased merges provider usage payloads, shallow
+// anthropicMessagesMergeProviderMetadata right-biased merges provider usage payloads, shallow
 // merging the inner map per provider.
-func mergeProviderMetadata(left, right map[string]map[string]any) map[string]map[string]any {
+func anthropicMessagesMergeProviderMetadata(left, right map[string]map[string]any) map[string]map[string]any {
 	if len(left) == 0 {
 		return right
 	}
@@ -733,7 +762,7 @@ func mergeProviderMetadata(left, right map[string]map[string]any) map[string]map
 
 func anthropicMessagesStep(state any, event any) (any, []schema.LLMEvent, error) {
 	s := state.(anthropicMessagesParserState)
-	evt, ok := event.(anthropicMessagesAnthropicEvent)
+	evt, ok := event.(anthropicMessagesEvent)
 	if !ok {
 		return state, nil, nil
 	}
@@ -757,7 +786,7 @@ func anthropicMessagesStep(state any, event any) (any, []schema.LLMEvent, error)
 	return s, nil, nil
 }
 
-func anthropicMessagesOnMessageStart(s anthropicMessagesParserState, evt anthropicMessagesAnthropicEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
+func anthropicMessagesOnMessageStart(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
 	usage := anthropicMessagesMapUsage(nil)
 	if evt.Message != nil {
 		usage = anthropicMessagesMapUsage(evt.Message.Usage)
@@ -768,7 +797,7 @@ func anthropicMessagesOnMessageStart(s anthropicMessagesParserState, evt anthrop
 	return s, nil
 }
 
-func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt anthropicMessagesAnthropicEvent) (anthropicMessagesParserState, []schema.LLMEvent, error) {
+func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent, error) {
 	block := evt.ContentBlock
 	if block == nil {
 		return s, nil, nil
@@ -777,12 +806,12 @@ func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt an
 		var events []schema.LLMEvent
 		utils.StepStart(&s.lifecycle, &events)
 		provExecuted := block.Type == "server_tool_use"
-		s.tools = utils.Start(s.tools, fmt.Sprint(*evt.Index), utils.PendingTool{
-			ID:               anthropicMessagesStrVal(block.ID, fmt.Sprint(*evt.Index)),
-			Name:             anthropicMessagesStrVal(block.Name, ""),
+		s.tools = utils.ToolStreamStart(s.tools, fmt.Sprint(*evt.Index), utils.PendingTool{
+			ID:               strVal(block.ID, fmt.Sprint(*evt.Index)),
+			Name:             strVal(block.Name, ""),
 			ProviderExecuted: &provExecuted,
 		})
-		events = append(events, schema.NewToolInputStart(anthropicMessagesStrVal(block.ID, fmt.Sprint(*evt.Index)), anthropicMessagesStrVal(block.Name, "")))
+		events = append(events, schema.NewToolInputStart(strVal(block.ID, fmt.Sprint(*evt.Index)), strVal(block.Name, "")))
 		return s, events, nil
 	}
 	if block.Type == "text" && block.Text != nil && *block.Text != "" {
@@ -809,7 +838,7 @@ func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt an
 		var isErr bool
 		if block.Content != nil {
 			if m, ok := block.Content.(map[string]any); ok {
-				if t, _ := m["type"].(string); t == "_tool_result_error" || len(t) > 0 && t[len(t)-8:] == "_error" {
+				if t, _ := m["type"].(string); strings.HasSuffix(t, "_tool_result_error") {
 					isErr = true
 				}
 			}
@@ -819,8 +848,8 @@ func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt an
 		if isErr {
 			resultType = "error"
 		}
-		pm := anthropicMessagesAnthropicMetadata(map[string]any{"blockType": block.Type})
-		events = append(events, schema.NewToolResult(anthropicMessagesStrVal(block.ToolUseID, ""), t,
+		pm := providerMetadata("anthropic", map[string]any{"blockType": block.Type})
+		events = append(events, schema.NewToolResult(strVal(block.ToolUseID, ""), t,
 			schema.ToolResultValue{Type: resultType, Value: resultValue},
 			schema.WithEventProviderExecuted(true), schema.WithEventProviderMetadata(pm)))
 		return s, events, nil
@@ -828,7 +857,7 @@ func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt an
 	return s, nil, nil
 }
 
-func anthropicMessagesOnContentBlockDelta(s anthropicMessagesParserState, evt anthropicMessagesAnthropicEvent) (anthropicMessagesParserState, []schema.LLMEvent, error) {
+func anthropicMessagesOnContentBlockDelta(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent, error) {
 	delta := evt.Delta
 	if delta == nil {
 		return s, nil, nil
@@ -837,23 +866,23 @@ func anthropicMessagesOnContentBlockDelta(s anthropicMessagesParserState, evt an
 	if evt.Index != nil {
 		idx = *evt.Index
 	}
-	if anthropicMessagesStrVal(delta.Type, "") == "text_delta" && delta.Text != nil && *delta.Text != "" {
+	if strVal(delta.Type, "") == "text_delta" && delta.Text != nil && *delta.Text != "" {
 		var events []schema.LLMEvent
 		utils.TextDelta(&s.lifecycle, &events, fmt.Sprintf("text-%d", idx), *delta.Text)
 		return s, events, nil
 	}
-	if anthropicMessagesStrVal(delta.Type, "") == "thinking_delta" && delta.Thinking != nil && *delta.Thinking != "" {
+	if strVal(delta.Type, "") == "thinking_delta" && delta.Thinking != nil && *delta.Thinking != "" {
 		var events []schema.LLMEvent
 		utils.ReasoningDelta(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), *delta.Thinking)
 		return s, events, nil
 	}
-	if anthropicMessagesStrVal(delta.Type, "") == "signature_delta" && delta.Signature != nil && *delta.Signature != "" {
+	if strVal(delta.Type, "") == "signature_delta" && delta.Signature != nil && *delta.Signature != "" {
 		var events []schema.LLMEvent
 		utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx),
-			anthropicMessagesAnthropicMetadata(map[string]any{"signature": *delta.Signature}))
+			providerMetadata("anthropic", map[string]any{"signature": *delta.Signature}))
 		return s, events, nil
 	}
-	if anthropicMessagesStrVal(delta.Type, "") == "input_json_delta" && evt.Index != nil {
+	if strVal(delta.Type, "") == "input_json_delta" && evt.Index != nil {
 		if delta.PartialJSON == nil || *delta.PartialJSON == "" {
 			return s, nil, nil
 		}
@@ -873,7 +902,7 @@ func anthropicMessagesOnContentBlockDelta(s anthropicMessagesParserState, evt an
 	return s, nil, nil
 }
 
-func anthropicMessagesOnContentBlockStop(s anthropicMessagesParserState, evt anthropicMessagesAnthropicEvent) (anthropicMessagesParserState, []schema.LLMEvent, error) {
+func anthropicMessagesOnContentBlockStop(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent, error) {
 	if evt.Index == nil {
 		return s, nil, nil
 	}
@@ -894,18 +923,14 @@ func anthropicMessagesOnContentBlockStop(s anthropicMessagesParserState, evt ant
 	return s, events, nil
 }
 
-func anthropicMessagesOnMessageDelta(s anthropicMessagesParserState, evt anthropicMessagesAnthropicEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
+func anthropicMessagesOnMessageDelta(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
 	usage := anthropicMessagesMergeUsage(s.usage, anthropicMessagesMapUsage(evt.Usage))
 	var events []schema.LLMEvent
 	var pm schema.ProviderMetadata
 	if evt.Delta != nil && evt.Delta.StopSequence != nil && *evt.Delta.StopSequence != "" {
-		pm = anthropicMessagesAnthropicMetadata(map[string]any{"stopSequence": *evt.Delta.StopSequence})
+		pm = providerMetadata("anthropic", map[string]any{"stopSequence": *evt.Delta.StopSequence})
 	}
-	utils.Finish(&s.lifecycle, &events, struct {
-		Reason           schema.FinishReason
-		Usage            *schema.Usage
-		ProviderMetadata schema.ProviderMetadata
-	}{
+	utils.LifecycleFinish(&s.lifecycle, &events, utils.FinishInput{
 		Reason:           anthropicMessagesMapFinishReason(anthropicMessagesDeltaStopReason(evt.Delta)),
 		Usage:            usage,
 		ProviderMetadata: pm,
@@ -921,12 +946,12 @@ func anthropicMessagesDeltaStopReason(delta *anthropicMessagesStreamDelta) *stri
 	return delta.StopReason
 }
 
-func anthropicMessagesOnError(s anthropicMessagesParserState, evt anthropicMessagesAnthropicEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
+func anthropicMessagesOnError(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
 	msg := "Anthropic Messages stream error"
 	raw := ""
 	if evt.Error != nil {
-		t := anthropicMessagesStrVal(evt.Error.Type, "")
-		raw = anthropicMessagesStrVal(evt.Error.Message, "")
+		t := strVal(evt.Error.Type, "")
+		raw = strVal(evt.Error.Message, "")
 		if t != "" && raw != "" {
 			msg = fmt.Sprintf("%s: %s", t, raw)
 		} else if raw != "" {
@@ -943,13 +968,6 @@ func anthropicMessagesOnError(s anthropicMessagesParserState, evt anthropicMessa
 	return s, events
 }
 
-func anthropicMessagesStrVal(s *string, def string) string {
-	if s == nil {
-		return def
-	}
-	return *s
-}
-
 // AnthropicMessagesProtocol is the Anthropic Messages wire protocol.
 var AnthropicMessagesProtocol = route.Protocol{
 	ID: anthropicMessagesAdapter,
@@ -961,8 +979,8 @@ var AnthropicMessagesProtocol = route.Protocol{
 		DecodeEvent: anthropicMessagesDecodeEvent,
 		Initial: func(request *schema.LLMRequest) any {
 			return anthropicMessagesParserState{
-				tools:     utils.Empty(),
-				lifecycle: utils.Initial(),
+				tools:     utils.ToolStreamEmpty(),
+				lifecycle: utils.LifecycleInitial(),
 			}
 		},
 		Step: anthropicMessagesStep,

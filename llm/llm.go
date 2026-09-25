@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/santhosh-tekuri/jsonschema/v6"
+	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/user/go-agent-sdk/jsonschema"
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/llm/schema"
 )
@@ -233,10 +234,18 @@ func UpdateRequest(r *schema.LLMRequest, patch RequestInput) *schema.LLMRequest 
 	if patch.ID != "" {
 		base.ID = patch.ID
 	}
-	base.Model = patch.Model
-	base.Generation = patch.Generation
-	base.Http = patch.Http
-	base.ResponseFormat = patch.ResponseFormat
+	if patch.Model != nil {
+		base.Model = patch.Model
+	}
+	if patch.Generation != nil {
+		base.Generation = patch.Generation
+	}
+	if patch.Http != nil {
+		base.Http = patch.Http
+	}
+	if patch.ResponseFormat != nil {
+		base.ResponseFormat = patch.ResponseFormat
+	}
 	return NewRequest(base)
 }
 
@@ -261,69 +270,65 @@ func (r *GenerateObjectResponse) Usage() *schema.Usage {
 }
 
 // GenerateObjectOptions describes a structured generation: the request, and the
-// schema the returned object must match.
+// typed schema the returned object must match. An externally-authored JSON Schema
+// can be wrapped with jsonschema.Raw.
 type GenerateObjectOptions struct {
-	Request    RequestInput
-	Schema     schema.JsonSchema
-	JsonSchema schema.JsonSchema
+	Request RequestInput
+	Schema  *jsonschema.Schema
 }
 
-func compileSchema(raw schema.JsonSchema) *jsonschema.Schema {
+func compileSchema(raw schema.JsonSchema) (*jsonschema6.Schema, error) {
 	if raw == nil {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var document any
 	if err := json.Unmarshal(data, &document); err != nil {
-		return nil
+		return nil, err
 	}
-	c := jsonschema.NewCompiler()
+	c := jsonschema6.NewCompiler()
 	if err := c.AddResource("schema.json", document); err != nil {
-		return nil
+		return nil, err
 	}
 	sch, err := c.Compile("schema.json")
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return sch
+	return sch, nil
+}
+
+func generateObjectError(reason schema.LLMErrorReason) *schema.LLMError {
+	return &schema.LLMError{Module: "LLM", Method: "generateObject", Reason: reason}
 }
 
 // GenerateObject forces a single tool call and returns its validated input as
-// the object.
+// the object. The schema's model projection is sent to the model; its validation
+// projection checks the returned input.
 func GenerateObject(ctx context.Context, client route.LLMClient, opts GenerateObjectOptions) (*GenerateObjectResponse, error) {
-	toolInputSchema := opts.JsonSchema
+	var toolInputSchema schema.JsonSchema
+	var schemaInstance *jsonschema6.Schema
 	if opts.Schema != nil {
-		toolInputSchema = opts.Schema
+		toolInputSchema = schema.JsonSchema(opts.Schema.Model())
+		compiled, err := compileSchema(schema.JsonSchema(opts.Schema.Validation()))
+		if err != nil {
+			return nil, generateObjectError(schema.NewInvalidRequestReason("generateObject: invalid schema: " + err.Error()))
+		}
+		schemaInstance = compiled
 	}
-	schemaInstance := compileSchema(toolInputSchema)
 	toolDef := schema.ToolDefinition{
 		Name:        generateObjectToolName,
 		Description: generateObjectToolDescription,
 		InputSchema: toolInputSchema,
 	}
 	base := NewRequest(opts.Request)
-	tools := make([]schema.ToolDefinition, 0, len(base.Tools)+1)
-	tools = append(tools, base.Tools...)
-	tools = append(tools, toolDef)
 	tc := schema.ToolChoiceNamed(generateObjectToolName)
-	req := schema.LLMRequest{
-		ID:              base.ID,
-		Model:           base.Model,
-		System:          base.System,
-		Messages:        base.Messages,
-		Tools:           tools,
-		ToolChoice:      &tc,
-		Generation:      base.Generation,
-		ProviderOptions: base.ProviderOptions,
-		Http:            base.Http,
-		ResponseFormat:  base.ResponseFormat,
-		Cache:           base.Cache,
-		Metadata:        base.Metadata,
-	}
-	resp, err := client.Generate(ctx, &req)
+	req := base.Clone()
+	req.Tools = []schema.ToolDefinition{toolDef}
+	req.ToolChoice = &tc
+	resp, err := client.Generate(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("generateObject: %w", err)
 	}
@@ -331,7 +336,7 @@ func GenerateObject(ctx context.Context, client route.LLMClient, opts GenerateOb
 		if call.Type == schema.EventToolCall && call.Name == generateObjectToolName {
 			if schemaInstance != nil {
 				if err := schemaInstance.Validate(call.Input); err != nil {
-					return nil, fmt.Errorf("generateObject: schema validation failed: %w", err)
+					return nil, generateObjectError(schema.NewInvalidProviderOutputReason("generateObject: tool input failed schema decode: " + err.Error()))
 				}
 			}
 			return &GenerateObjectResponse{
@@ -340,5 +345,6 @@ func GenerateObject(ctx context.Context, client route.LLMClient, opts GenerateOb
 			}, nil
 		}
 	}
-	return nil, fmt.Errorf("generateObject: model did not call the forced `%s` tool", generateObjectToolName)
+	return nil, generateObjectError(schema.NewInvalidProviderOutputReason(
+		"generateObject: model did not call the forced `" + generateObjectToolName + "` tool"))
 }

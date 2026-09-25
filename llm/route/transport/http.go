@@ -6,17 +6,15 @@ import (
 	"fmt"
 	"iter"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
-// JsonRequestParts is the pieces a JSON request is assembled from.
-type JsonRequestParts struct {
+// jsonParts is the pieces a JSON request is assembled from.
+type jsonParts struct {
 	URL      string
-	JSONBody any
 	BodyText string
 	Headers  map[string]string
 }
@@ -51,34 +49,17 @@ func forbiddenBodyOverlayKeys(body map[string]any) []string {
 	return forbidden
 }
 
-func applyQuery(baseURL string, query map[string]string) string {
-	if len(query) == 0 {
-		return baseURL
-	}
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return baseURL
-	}
-	q := u.Query()
-	for k, v := range query {
-		q.Set(k, v)
-	}
-	u.RawQuery = q.Encode()
-	return u.String()
-}
-
-func bodyWithOverlay(body any, request *schema.LLMRequest, encodeBody func(any) string) (jsonBody any, bodyText string, err error) {
+func bodyWithOverlay(body any, request *schema.LLMRequest, encodeBody func(any) (string, error)) (bodyText string, err error) {
 	if request.Http == nil || request.Http.Body == nil {
-		text := encodeBody(body)
-		return body, text, nil
+		return encodeBody(body)
 	}
 	overlay := request.Http.Body
 	if forbidden := forbiddenBodyOverlayKeys(overlay); len(forbidden) > 0 {
-		return nil, "", fmt.Errorf("http.body cannot overlay protocol-owned field(s): %s", strings.Join(forbidden, ", "))
+		return "", fmt.Errorf("http.body cannot overlay protocol-owned field(s): %s", strings.Join(forbidden, ", "))
 	}
 	base, ok := jsonRecord(body)
 	if !ok {
-		return nil, "", fmt.Errorf("http.body can only overlay JSON object request bodies")
+		return "", fmt.Errorf("http.body can only overlay JSON object request bodies")
 	}
 	merged := schema.MergeJsonRecords(base, overlay)
 	if merged == nil {
@@ -86,9 +67,9 @@ func bodyWithOverlay(body any, request *schema.LLMRequest, encodeBody func(any) 
 	}
 	b, err := json.Marshal(merged)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
-	return merged, string(b), nil
+	return string(b), nil
 }
 
 // jsonRecord returns a JSON object body as a map, whether it is already one or a
@@ -108,47 +89,49 @@ func jsonRecord(body any) (map[string]any, bool) {
 	return m, true
 }
 
-func jsonRequestParts(input route.TransportPrepareInput) (JsonRequestParts, error) {
+func jsonRequestParts(input route.TransportPrepareInput) (jsonParts, error) {
 	rendered, err := route.RenderEndpoint(input.Endpoint, route.EndpointInput{Request: input.Request, Body: input.Body})
 	if err != nil {
-		return JsonRequestParts{}, err
+		return jsonParts{}, err
 	}
 	u := rendered.String()
 	if input.Request.Http != nil {
-		u = applyQuery(u, input.Request.Http.Query)
+		u = route.ApplyQuery(u, input.Request.Http.Query)
 	}
-	jsonBody, bodyText, err := bodyWithOverlay(input.Body, input.Request, input.EncodeBody)
+	bodyText, err := bodyWithOverlay(input.Body, input.Request, input.EncodeBody)
 	if err != nil {
-		return JsonRequestParts{}, err
+		return jsonParts{}, err
 	}
-	headers := make(map[string]string)
+	var routeHeaders map[string]string
 	if input.Headers != nil {
-		for k, v := range input.Headers(input.Request) {
-			headers[k] = v
-		}
+		routeHeaders = input.Headers(input.Request)
 	}
-	if input.Request.Http != nil && input.Request.Http.Headers != nil {
-		for k, v := range input.Request.Http.Headers {
-			headers[k] = v
-		}
+	var requestHeaders map[string]string
+	if input.Request.Http != nil {
+		requestHeaders = input.Request.Http.Headers
+	}
+	headers := schema.MergeStringRecords(routeHeaders, requestHeaders)
+	if headers == nil {
+		headers = make(map[string]string)
 	}
 	if input.Auth != nil {
 		authHeaders, err := input.Auth.Apply(route.AuthInput{
 			Request: input.Request,
-			Method:  "POST",
 			URL:     u,
 			Body:    bodyText,
 			Headers: headers,
 		})
 		if err != nil {
-			return JsonRequestParts{}, err
+			return jsonParts{}, err
 		}
 		headers = authHeaders
 	}
+	if headers == nil {
+		headers = make(map[string]string)
+	}
 	headers["content-type"] = "application/json"
-	return JsonRequestParts{
+	return jsonParts{
 		URL:      u,
-		JSONBody: jsonBody,
 		BodyText: bodyText,
 		Headers:  headers,
 	}, nil
@@ -162,7 +145,6 @@ type HttpJsonInput struct {
 // HttpJsonTransport sends a JSON body over HTTP and frames the response.
 type HttpJsonTransport struct {
 	id      string
-	withFn  func(patch HttpJsonInput) *HttpJsonTransport
 	prepare func(input route.TransportPrepareInput) (HttpPrepared, error)
 	frames  func(ctx context.Context, prepared HttpPrepared, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error]
 }
@@ -185,13 +167,6 @@ func (t *HttpJsonTransport) Frames(ctx context.Context, prepared any, request *s
 func NewHttpJsonTransport(input HttpJsonInput) *HttpJsonTransport {
 	base := &HttpJsonTransport{
 		id: "http-json",
-		withFn: func(patch HttpJsonInput) *HttpJsonTransport {
-			merged := input
-			if patch.Framing.ID != "" {
-				merged.Framing = patch.Framing
-			}
-			return NewHttpJsonTransport(merged)
-		},
 		prepare: func(pi route.TransportPrepareInput) (HttpPrepared, error) {
 			parts, err := jsonRequestParts(pi)
 			if err != nil {
@@ -207,7 +182,7 @@ func NewHttpJsonTransport(input HttpJsonInput) *HttpJsonTransport {
 		},
 		frames: func(ctx context.Context, prepared HttpPrepared, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
 			return func(yield func(any, error) bool) {
-				req, err := http.NewRequestWithContext(ctx, "POST", prepared.URL, strings.NewReader(prepared.Body))
+				req, err := http.NewRequestWithContext(ctx, prepared.Method, prepared.URL, strings.NewReader(prepared.Body))
 				if err != nil {
 					yield(nil, err)
 					return

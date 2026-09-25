@@ -18,10 +18,6 @@ const OpenAIResponsesDefaultBaseURL = "https://api.openai.com/v1"
 // OpenAIResponsesPath is the Responses endpoint path.
 const OpenAIResponsesPath = "/responses"
 
-var openaiResponsesImageMIMEs = map[string]struct{}{
-	"image/png": {}, "image/jpeg": {}, "image/gif": {}, "image/webp": {},
-}
-
 type openaiResponsesInputText struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -74,7 +70,7 @@ type openaiResponsesSystemItem struct {
 
 type openaiResponsesInputItem any
 
-type openaiResponsesResponsesTool struct {
+type openaiResponsesTool struct {
 	Type        string `json:"type"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -82,7 +78,7 @@ type openaiResponsesResponsesTool struct {
 	Strict      bool   `json:"strict"`
 }
 
-type openaiResponsesResponsesUsage struct {
+type openaiResponsesUsage struct {
 	InputTokens         *int                                `json:"input_tokens,omitempty"`
 	InputTokensDetails  *openaiResponsesInputTokensDetails  `json:"input_tokens_details,omitempty"`
 	OutputTokens        *int                                `json:"output_tokens,omitempty"`
@@ -92,17 +88,14 @@ type openaiResponsesResponsesUsage struct {
 }
 
 // UnmarshalJSON reads the usage payload the Responses API sends.
-func (u *openaiResponsesResponsesUsage) UnmarshalJSON(data []byte) error {
-	type plain openaiResponsesResponsesUsage
+func (u *openaiResponsesUsage) UnmarshalJSON(data []byte) error {
+	type plain openaiResponsesUsage
 	var decoded plain
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	*u = openaiResponsesResponsesUsage(decoded)
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err == nil {
-		u.ProviderMetadata = schema.ProviderMetadata{"openai": raw}
-	}
+	*u = openaiResponsesUsage(decoded)
+	u.ProviderMetadata = providerMetadata("openai", rawRecord(data))
 	return nil
 }
 
@@ -142,14 +135,14 @@ type openaiResponsesResponseEntry struct {
 	ID                *string                           `json:"id,omitempty"`
 	ServiceTier       *string                           `json:"service_tier,omitempty"`
 	IncompleteDetails *openaiResponsesIncompleteDetails `json:"incomplete_details,omitempty"`
-	Usage             *openaiResponsesResponsesUsage    `json:"usage,omitempty"`
+	Usage             *openaiResponsesUsage             `json:"usage,omitempty"`
 	Error             *openaiResponsesErrorPayload      `json:"error,omitempty"`
 }
 type openaiResponsesIncompleteDetails struct {
 	Reason string `json:"reason"`
 }
 
-type openaiResponsesResponsesEvent struct {
+type openaiResponsesEvent struct {
 	Type         string                        `json:"type"`
 	Delta        *string                       `json:"delta,omitempty"`
 	ItemID       *string                       `json:"item_id,omitempty"`
@@ -169,7 +162,7 @@ type openaiResponsesReasoningStreamItem struct {
 type openaiResponsesParserState struct {
 	tools           map[string]*utils.PendingTool
 	hasFunctionCall bool
-	lifecycle       utils.State
+	lifecycle       utils.LifecycleState
 	reasoningItems  map[string]*openaiResponsesReasoningStreamItem
 	store           *bool
 }
@@ -194,25 +187,12 @@ var openaiResponsesHostedTools = map[string]openaiResponsesHostedToolDef{
 	"local_shell_call": {Name: "local_shell", Input: func(item openaiResponsesStreamItem) any { return item.Action }},
 }
 
-func openaiResponsesIntVal(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-func openaiResponsesStrVal(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
-func openaiResponsesLowerTool(td schema.ToolDefinition, inputSchema any) openaiResponsesResponsesTool {
-	return openaiResponsesResponsesTool{
+func openaiResponsesLowerTool(td schema.ToolDefinition, inputSchema any) openaiResponsesTool {
+	return openaiResponsesTool{
 		Type:        "function",
 		Name:        td.Name,
 		Description: td.Description,
-		Parameters:  schemaMap(inputSchema),
+		Parameters:  toolParameters(inputSchema),
 		Strict:      false,
 	}
 }
@@ -283,7 +263,7 @@ func openaiResponsesLowerUserContent(part schema.ContentPart) (any, error) {
 	case schema.TextPart:
 		return openaiResponsesInputText{Type: "input_text", Text: p.Text}, nil
 	case schema.MediaPart:
-		media, err := utils.ValidateMedia("OpenAI Responses", p, openaiResponsesImageMIMEs)
+		media, err := utils.ValidateMedia("OpenAI Responses", p, imageMIMESet)
 		if err != nil {
 			return nil, err
 		}
@@ -297,7 +277,7 @@ func openaiResponsesLowerToolResultContentItem(item schema.ToolContent) (any, er
 	case schema.ToolTextContent:
 		return openaiResponsesInputText{Type: "input_text", Text: v.Text}, nil
 	case schema.ToolFileContent:
-		media, err := utils.ValidateToolFile("OpenAI Responses", v, openaiResponsesImageMIMEs)
+		media, err := utils.ValidateToolFile("OpenAI Responses", v, imageMIMESet)
 		if err != nil {
 			return nil, err
 		}
@@ -325,16 +305,12 @@ func openaiResponsesLowerToolResultOutput(part schema.ToolResultPart) (any, erro
 	return items, nil
 }
 
-func openaiResponsesOpenAIMetadata(m map[string]any) schema.ProviderMetadata {
-	return schema.ProviderMetadata{"openai": m}
-}
-
 func openaiResponsesReasoningMetadata(itemID string, encrypted *string) schema.ProviderMetadata {
 	var value any
 	if encrypted != nil {
 		value = *encrypted
 	}
-	return openaiResponsesOpenAIMetadata(map[string]any{
+	return providerMetadata("openai", map[string]any{
 		"itemId":                    itemID,
 		"reasoningEncryptedContent": value,
 	})
@@ -354,106 +330,25 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
-			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
-			if len(input) > 0 {
-				if last, ok := input[len(input)-1].(openaiResponsesUserItem); ok {
-					last.Content = append(last.Content, openaiResponsesInputText{Type: "input_text", Text: update})
-					input[len(input)-1] = last
-				} else {
-					input = append(input, openaiResponsesUserItem{Role: "user", Content: []any{openaiResponsesInputText{Type: "input_text", Text: update}}})
-				}
-			} else {
-				input = append(input, openaiResponsesUserItem{Role: "user", Content: []any{openaiResponsesInputText{Type: "input_text", Text: update}}})
-			}
-
+			input = openaiResponsesLowerSystemMessage(input, msg)
 		case schema.RoleUser:
-			userContent := []any{}
-			for _, p := range msg.Content {
-				c, err := openaiResponsesLowerUserContent(p)
-				if err != nil {
-					return nil, err
-				}
-				userContent = append(userContent, c)
+			item, err := openaiResponsesLowerUserMessage(msg)
+			if err != nil {
+				return nil, err
 			}
-			input = append(input, openaiResponsesUserItem{Role: "user", Content: userContent})
-
+			input = append(input, item)
 		case schema.RoleAssistant:
-			var textParts []string
-			reasoningItems := map[string]*openaiResponsesReasoningItem{}
-			var reasoningRefs map[string]bool
-			var hostedRefs map[string]bool
-			for _, p := range msg.Content {
-				switch part := p.(type) {
-				case schema.TextPart:
-					textParts = append(textParts, part.Text)
-				case schema.ReasoningPart:
-					r := openaiResponsesLowerReasoning(part)
-					if r == nil {
-						continue
-					}
-					openaiResponsesFlushText(&input, &textParts)
-					if store == nil || *store {
-						if reasoningRefs == nil {
-							reasoningRefs = make(map[string]bool)
-						}
-						if !reasoningRefs[r.ID] {
-							input = append(input, openaiResponsesItemReference{Type: "item_reference", ID: r.ID})
-							reasoningRefs[r.ID] = true
-						}
-					} else if existing := reasoningItems[r.ID]; existing != nil {
-						existing.Summary = append(existing.Summary, r.Summary...)
-						if r.EncryptedContent != nil {
-							existing.EncryptedContent = r.EncryptedContent
-						}
-					} else {
-						reasoningItems[r.ID] = r
-						input = append(input, r)
-					}
-				case schema.ToolCallPart:
-					if part.ProviderExecuted != nil && *part.ProviderExecuted {
-						continue
-					}
-					openaiResponsesFlushText(&input, &textParts)
-					input = append(input, openaiResponsesLowerToolCall(part))
-				case schema.ToolResultPart:
-					if part.ProviderExecuted == nil || !*part.ProviderExecuted {
-						continue
-					}
-					openaiResponsesFlushText(&input, &textParts)
-					itemID := openaiResponsesHostedToolItemID(part)
-					if store == nil || *store {
-						if itemID != nil {
-							if hostedRefs == nil {
-								hostedRefs = make(map[string]bool)
-							}
-							if !hostedRefs[*itemID] {
-								input = append(input, openaiResponsesItemReference{Type: "item_reference", ID: *itemID})
-								hostedRefs[*itemID] = true
-							}
-						}
-					}
-				default:
-					return nil, fmt.Errorf("OpenAI Responses assistant messages only support text, reasoning, tool-call and tool-result content")
-				}
+			next, err := openaiResponsesLowerAssistantMessage(input, msg, store)
+			if err != nil {
+				return nil, err
 			}
-			openaiResponsesFlushText(&input, &textParts)
-
+			input = next
 		case schema.RoleTool:
-			for _, p := range msg.Content {
-				part, ok := p.(schema.ToolResultPart)
-				if !ok {
-					return nil, fmt.Errorf("OpenAI Responses tool messages only support tool-result content")
-				}
-				output, err := openaiResponsesLowerToolResultOutput(part)
-				if err != nil {
-					return nil, err
-				}
-				input = append(input, openaiResponsesFunctionCallOutputItem{
-					Type:   "function_call_output",
-					CallID: part.ID,
-					Output: output,
-				})
+			items, err := openaiResponsesLowerToolMessage(msg)
+			if err != nil {
+				return nil, err
 			}
+			input = append(input, items...)
 		}
 	}
 
@@ -468,6 +363,116 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 		return filtered, nil
 	}
 	return input, nil
+}
+
+// openaiResponsesLowerSystemMessage appends a wrapped system update to a trailing
+// user item, or starts a new user item.
+func openaiResponsesLowerSystemMessage(input []openaiResponsesInputItem, msg schema.Message) []openaiResponsesInputItem {
+	update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
+	text := openaiResponsesInputText{Type: "input_text", Text: update}
+	if len(input) > 0 {
+		if last, ok := input[len(input)-1].(openaiResponsesUserItem); ok {
+			last.Content = append(last.Content, text)
+			input[len(input)-1] = last
+			return input
+		}
+	}
+	return append(input, openaiResponsesUserItem{Role: "user", Content: []any{text}})
+}
+
+func openaiResponsesLowerUserMessage(msg schema.Message) (openaiResponsesUserItem, error) {
+	userContent := []any{}
+	for _, p := range msg.Content {
+		c, err := openaiResponsesLowerUserContent(p)
+		if err != nil {
+			return openaiResponsesUserItem{}, err
+		}
+		userContent = append(userContent, c)
+	}
+	return openaiResponsesUserItem{Role: "user", Content: userContent}, nil
+}
+
+func openaiResponsesLowerAssistantMessage(input []openaiResponsesInputItem, msg schema.Message, store *bool) ([]openaiResponsesInputItem, error) {
+	var textParts []string
+	reasoningItems := map[string]*openaiResponsesReasoningItem{}
+	var reasoningRefs map[string]bool
+	var hostedRefs map[string]bool
+	for _, p := range msg.Content {
+		switch part := p.(type) {
+		case schema.TextPart:
+			textParts = append(textParts, part.Text)
+		case schema.ReasoningPart:
+			openaiResponsesFlushText(&input, &textParts)
+			r := openaiResponsesLowerReasoning(part)
+			if r == nil {
+				continue
+			}
+			if store == nil || *store {
+				if reasoningRefs == nil {
+					reasoningRefs = make(map[string]bool)
+				}
+				if !reasoningRefs[r.ID] {
+					input = append(input, openaiResponsesItemReference{Type: "item_reference", ID: r.ID})
+					reasoningRefs[r.ID] = true
+				}
+			} else if existing := reasoningItems[r.ID]; existing != nil {
+				existing.Summary = append(existing.Summary, r.Summary...)
+				if r.EncryptedContent != nil {
+					existing.EncryptedContent = r.EncryptedContent
+				}
+			} else {
+				reasoningItems[r.ID] = r
+				input = append(input, r)
+			}
+		case schema.ToolCallPart:
+			openaiResponsesFlushText(&input, &textParts)
+			if part.ProviderExecuted != nil && *part.ProviderExecuted {
+				continue
+			}
+			input = append(input, openaiResponsesLowerToolCall(part))
+		case schema.ToolResultPart:
+			if part.ProviderExecuted == nil || !*part.ProviderExecuted {
+				continue
+			}
+			openaiResponsesFlushText(&input, &textParts)
+			itemID := openaiResponsesHostedToolItemID(part)
+			if store == nil || *store {
+				if itemID != nil {
+					if hostedRefs == nil {
+						hostedRefs = make(map[string]bool)
+					}
+					if !hostedRefs[*itemID] {
+						input = append(input, openaiResponsesItemReference{Type: "item_reference", ID: *itemID})
+						hostedRefs[*itemID] = true
+					}
+				}
+			}
+		default:
+			return nil, fmt.Errorf("OpenAI Responses assistant messages only support text, reasoning, tool-call and tool-result content")
+		}
+	}
+	openaiResponsesFlushText(&input, &textParts)
+	return input, nil
+}
+
+func openaiResponsesLowerToolMessage(msg schema.Message) ([]openaiResponsesInputItem, error) {
+	var items []openaiResponsesInputItem
+	for _, p := range msg.Content {
+		part, ok := p.(schema.ToolResultPart)
+		if !ok {
+			return nil, fmt.Errorf("OpenAI Responses tool messages only support tool-result content")
+		}
+		output, err := openaiResponsesLowerToolResultOutput(part)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, openaiResponsesFunctionCallOutputItem{
+			Type:   "function_call_output",
+			CallID: part.ID,
+			Output: output,
+		})
+	}
+	return items, nil
 }
 
 func openaiResponsesFlushText(input *[]openaiResponsesInputItem, texts *[]string) {
@@ -539,7 +544,7 @@ func openaiResponsesFromRequest(request *schema.LLMRequest) (any, error) {
 		body[k] = v
 	}
 	if len(request.Tools) > 0 {
-		tools := make([]openaiResponsesResponsesTool, 0, len(request.Tools))
+		tools := make([]openaiResponsesTool, 0, len(request.Tools))
 		for _, t := range request.Tools {
 			tools = append(tools, openaiResponsesLowerTool(t, ProjectToolSchema(request.Model, t.InputSchema)))
 		}
@@ -570,14 +575,14 @@ func openaiResponsesDecodeEvent(frame string) (any, error) {
 	if frame == "" || frame == "[DONE]" {
 		return nil, nil
 	}
-	var evt openaiResponsesResponsesEvent
+	var evt openaiResponsesEvent
 	if err := json.Unmarshal([]byte(frame), &evt); err != nil {
 		return nil, fmt.Errorf("OpenAI Responses: invalid stream event: %s: %w", frame, err)
 	}
 	return evt, nil
 }
 
-func openaiResponsesMapUsage(u *openaiResponsesResponsesUsage) *schema.Usage {
+func openaiResponsesMapUsage(u *openaiResponsesUsage) *schema.Usage {
 	if u == nil {
 		return nil
 	}
@@ -588,22 +593,22 @@ func openaiResponsesMapUsage(u *openaiResponsesResponsesUsage) *schema.Usage {
 	if u.OutputTokensDetails != nil && u.OutputTokensDetails.ReasoningTokens != nil {
 		reasoning = *u.OutputTokensDetails.ReasoningTokens
 	}
-	nonCached := openaiResponsesIntVal(u.InputTokens)
-	if cached > 0 {
-		nonCached = openaiResponsesIntVal(u.InputTokens) - cached
+	nonCached := intVal(u.InputTokens) - cached
+	if nonCached < 0 {
+		nonCached = 0
 	}
 	return &schema.Usage{
-		InputTokens:          openaiResponsesIntVal(u.InputTokens),
-		OutputTokens:         openaiResponsesIntVal(u.OutputTokens),
+		InputTokens:          intVal(u.InputTokens),
+		OutputTokens:         intVal(u.OutputTokens),
 		NonCachedInputTokens: nonCached,
 		CacheReadInputTokens: cached,
 		ReasoningTokens:      reasoning,
-		TotalTokens:          openaiResponsesIntVal(TotalTokens(u.InputTokens, u.OutputTokens, u.TotalTokens)),
+		TotalTokens:          intVal(TotalTokens(u.InputTokens, u.OutputTokens, u.TotalTokens)),
 		ProviderMetadata:     u.ProviderMetadata,
 	}
 }
 
-func openaiResponsesMapFinishReason(evt openaiResponsesResponsesEvent, hasFunctionCall bool) schema.FinishReason {
+func openaiResponsesMapFinishReason(evt openaiResponsesEvent, hasFunctionCall bool) schema.FinishReason {
 	if evt.Response == nil || evt.Response.IncompleteDetails == nil {
 		if hasFunctionCall {
 			return schema.ReasonToolCalls
@@ -630,7 +635,10 @@ var openaiResponsesTerminalTypes = map[string]bool{
 
 func openaiResponsesIsHostedTool(item openaiResponsesStreamItem) (openaiResponsesHostedToolDef, bool) {
 	t, ok := openaiResponsesHostedTools[item.Type]
-	return t, ok
+	if !ok || item.ID == nil || *item.ID == "" {
+		return openaiResponsesHostedToolDef{}, false
+	}
+	return t, true
 }
 
 func openaiResponsesIsReasoningItem(item openaiResponsesStreamItem) bool {
@@ -645,21 +653,21 @@ func openaiResponsesHostedResult(item openaiResponsesStreamItem) schema.ToolResu
 }
 
 func openaiResponsesHostedEvents(item openaiResponsesStreamItem, tool openaiResponsesHostedToolDef) []schema.LLMEvent {
-	pm := openaiResponsesOpenAIMetadata(map[string]any{"itemId": openaiResponsesStrVal(item.ID)})
+	pm := providerMetadata("openai", map[string]any{"itemId": strVal(item.ID)})
 	return []schema.LLMEvent{
-		schema.NewToolCall(openaiResponsesStrVal(item.ID), tool.Name, tool.Input(item),
+		schema.NewToolCall(strVal(item.ID), tool.Name, tool.Input(item),
 			schema.WithEventProviderExecuted(true), schema.WithEventProviderMetadata(pm)),
-		schema.NewToolResult(openaiResponsesStrVal(item.ID), tool.Name, openaiResponsesHostedResult(item),
+		schema.NewToolResult(strVal(item.ID), tool.Name, openaiResponsesHostedResult(item),
 			schema.WithEventProviderExecuted(true), schema.WithEventProviderMetadata(pm)),
 	}
 }
 
-func openaiResponsesOnOutputTextDelta(state openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnOutputTextDelta(state openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
 	if evt.Delta == nil {
 		return state, nil
 	}
 	var events []schema.LLMEvent
-	itemID := openaiResponsesStrVal(evt.ItemID)
+	itemID := strVal(evt.ItemID)
 	if itemID == "" {
 		itemID = "text-0"
 	}
@@ -667,18 +675,18 @@ func openaiResponsesOnOutputTextDelta(state openaiResponsesParserState, evt open
 	return state, events
 }
 
-func openaiResponsesOnReasoningDelta(state openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnReasoningDelta(state openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
 	if evt.Delta == nil {
 		return state, nil
 	}
 	var events []schema.LLMEvent
-	itemID := openaiResponsesStrVal(evt.ItemID)
+	itemID := strVal(evt.ItemID)
 	if itemID == "" {
 		itemID = "reasoning-0"
 	}
 	id := itemID
 	if _, tracked := state.reasoningItems[itemID]; evt.SummaryIndex != nil || tracked {
-		id = fmt.Sprintf("%s:%d", itemID, openaiResponsesIntVal(evt.SummaryIndex))
+		id = fmt.Sprintf("%s:%d", itemID, intVal(evt.SummaryIndex))
 	}
 	utils.ReasoningDelta(&state.lifecycle, &events, id, *evt.Delta)
 	return state, events
@@ -686,7 +694,7 @@ func openaiResponsesOnReasoningDelta(state openaiResponsesParserState, evt opena
 
 func openaiResponsesStep(state any, event any) (any, []schema.LLMEvent, error) {
 	s := state.(openaiResponsesParserState)
-	evt, ok := event.(openaiResponsesResponsesEvent)
+	evt, ok := event.(openaiResponsesEvent)
 	if !ok {
 		return state, nil, nil
 	}
@@ -721,14 +729,14 @@ func openaiResponsesStep(state any, event any) (any, []schema.LLMEvent, error) {
 }
 
 func openaiResponsesTerminal(event any) bool {
-	evt, ok := event.(openaiResponsesResponsesEvent)
+	evt, ok := event.(openaiResponsesEvent)
 	if !ok {
 		return false
 	}
 	return openaiResponsesTerminalTypes[evt.Type]
 }
 
-func openaiResponsesOnReasoningSummaryPartAdded(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnReasoningSummaryPartAdded(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	if evt.ItemID == nil || evt.SummaryIndex == nil {
 		return s, nil, nil
 	}
@@ -750,7 +758,7 @@ func openaiResponsesOnReasoningSummaryPartAdded(s openaiResponsesParserState, ev
 		for k, v := range existing.SummaryParts {
 			if v == "can-conclude" {
 				utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("%s:%d", itemID, k),
-					openaiResponsesOpenAIMetadata(map[string]any{"itemId": itemID}))
+					providerMetadata("openai", map[string]any{"itemId": itemID}))
 				existing.SummaryParts[k] = "concluded"
 			}
 		}
@@ -761,7 +769,7 @@ func openaiResponsesOnReasoningSummaryPartAdded(s openaiResponsesParserState, ev
 	return s, events, nil
 }
 
-func openaiResponsesOnReasoningSummaryPartDone(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnReasoningSummaryPartDone(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	if evt.ItemID == nil || evt.SummaryIndex == nil {
 		return s, nil, nil
 	}
@@ -774,7 +782,7 @@ func openaiResponsesOnReasoningSummaryPartDone(s openaiResponsesParserState, evt
 	store := s.store == nil || *s.store
 	if store {
 		utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("%s:%d", itemID, *evt.SummaryIndex),
-			openaiResponsesOpenAIMetadata(map[string]any{"itemId": itemID}))
+			providerMetadata("openai", map[string]any{"itemId": itemID}))
 		existing.SummaryParts[*evt.SummaryIndex] = "concluded"
 	} else {
 		existing.SummaryParts[*evt.SummaryIndex] = "can-conclude"
@@ -782,7 +790,7 @@ func openaiResponsesOnReasoningSummaryPartDone(s openaiResponsesParserState, evt
 	return s, events, nil
 }
 
-func openaiResponsesOnOutputItemAdded(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnOutputItemAdded(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	item := evt.Item
 	if item == nil {
 		return s, nil, nil
@@ -803,24 +811,24 @@ func openaiResponsesOnOutputItemAdded(s openaiResponsesParserState, evt openaiRe
 	if item.Type != "function_call" || item.ID == nil {
 		return s, nil, nil
 	}
-	pm := openaiResponsesOpenAIMetadata(map[string]any{"itemId": *item.ID})
+	pm := providerMetadata("openai", map[string]any{"itemId": *item.ID})
 	var events []schema.LLMEvent
 	utils.StepStart(&s.lifecycle, &events)
-	callID := openaiResponsesStrVal(item.CallID)
+	callID := strVal(item.CallID)
 	if callID == "" {
 		callID = *item.ID
 	}
-	s.tools = utils.Start(s.tools, *item.ID, utils.PendingTool{
+	s.tools = utils.ToolStreamStart(s.tools, *item.ID, utils.PendingTool{
 		ID:               callID,
-		Name:             openaiResponsesStrVal(item.Name),
-		Input:            openaiResponsesStrVal(item.Arguments),
+		Name:             strVal(item.Name),
+		Input:            strVal(item.Arguments),
 		ProviderMetadata: pm,
 	})
-	events = append(events, schema.NewToolInputStart(callID, openaiResponsesStrVal(item.Name), schema.WithEventProviderMetadata(pm)))
+	events = append(events, schema.NewToolInputStart(callID, strVal(item.Name), schema.WithEventProviderMetadata(pm)))
 	return s, events, nil
 }
 
-func openaiResponsesOnFunctionCallArgumentsDelta(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnFunctionCallArgumentsDelta(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	if evt.ItemID == nil || evt.Delta == nil {
 		return s, nil, nil
 	}
@@ -838,79 +846,89 @@ func openaiResponsesOnFunctionCallArgumentsDelta(s openaiResponsesParserState, e
 	return s, events, nil
 }
 
-func openaiResponsesOnOutputItemDone(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnOutputItemDone(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	item := evt.Item
 	if item == nil {
 		return s, nil, nil
 	}
-	switch item.Type {
-	case "function_call":
-		if item.ID == nil || item.CallID == nil || item.Name == nil {
-			return s, nil, nil
-		}
-		if s.tools[*item.ID] == nil {
-			s.tools = utils.Start(s.tools, *item.ID, utils.PendingTool{
-				ID:   *item.CallID,
-				Name: *item.Name,
-			})
-		}
-		var outcome utils.FinishOutcome
-		var finishErr error
-		if item.Arguments != nil {
-			outcome, finishErr = utils.FinishToolWithInput(openaiResponsesAdapter, s.tools, *item.ID, *item.Arguments)
-		} else {
-			outcome, finishErr = utils.FinishTool(openaiResponsesAdapter, s.tools, *item.ID)
-		}
-		if finishErr != nil {
-			return s, nil, finishErr
-		}
-		var events []schema.LLMEvent
-		if len(outcome.Events) > 0 {
-			utils.StepStart(&s.lifecycle, &events)
-		}
-		events = append(events, outcome.Events...)
-		for _, e := range outcome.Events {
-			if e.IsToolCall() {
-				s.hasFunctionCall = true
-				break
-			}
-		}
-		s.tools = outcome.Tools
-		return s, events, nil
-	default:
-		if t, ok := openaiResponsesIsHostedTool(*item); ok {
-			var events []schema.LLMEvent
-			utils.StepStart(&s.lifecycle, &events)
-			events = append(events, openaiResponsesHostedEvents(*item, t)...)
-			return s, events, nil
-		}
-		if openaiResponsesIsReasoningItem(*item) {
-			var events []schema.LLMEvent
-			ri := s.reasoningItems[*item.ID]
-			if ri != nil {
-				for k, v := range ri.SummaryParts {
-					if v == "active" || v == "can-conclude" {
-						utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("%s:%d", *item.ID, k),
-							openaiResponsesReasoningMetadata(*item.ID, item.EncryptedContent))
-					}
-				}
-				delete(s.reasoningItems, *item.ID)
-			} else if _, ok := s.lifecycle.Reasoning[*item.ID]; !ok {
-				utils.StepStart(&s.lifecycle, &events)
-				pm := openaiResponsesOpenAIMetadata(map[string]any{"itemId": *item.ID})
-				events = append(events, schema.NewReasoningStart(*item.ID, schema.WithEventProviderMetadata(pm)))
-				events = append(events, schema.NewReasoningEnd(*item.ID, schema.WithEventProviderMetadata(pm)))
-			} else {
-				utils.ReasoningEnd(&s.lifecycle, &events, *item.ID,
-					openaiResponsesOpenAIMetadata(map[string]any{"itemId": *item.ID}))
-			}
-			return s, events, nil
-		}
-		return s, nil, nil
+	if item.Type == "function_call" {
+		return openaiResponsesOnFunctionCallDone(s, *item)
 	}
+	if t, ok := openaiResponsesIsHostedTool(*item); ok {
+		return openaiResponsesOnHostedToolDone(s, *item, t)
+	}
+	if openaiResponsesIsReasoningItem(*item) {
+		return openaiResponsesOnReasoningItemDone(s, *item)
+	}
+	return s, nil, nil
 }
 
-func openaiResponsesOnResponseFinish(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnFunctionCallDone(s openaiResponsesParserState, item openaiResponsesStreamItem) (openaiResponsesParserState, []schema.LLMEvent, error) {
+	if item.ID == nil || item.CallID == nil || item.Name == nil {
+		return s, nil, nil
+	}
+	if s.tools[*item.ID] == nil {
+		s.tools = utils.ToolStreamStart(s.tools, *item.ID, utils.PendingTool{
+			ID:   *item.CallID,
+			Name: *item.Name,
+		})
+	}
+	var outcome utils.FinishOutcome
+	var err error
+	if item.Arguments != nil {
+		outcome, err = utils.FinishToolWithInput(openaiResponsesAdapter, s.tools, *item.ID, *item.Arguments)
+	} else {
+		outcome, err = utils.FinishTool(openaiResponsesAdapter, s.tools, *item.ID)
+	}
+	if err != nil {
+		return s, nil, err
+	}
+	var events []schema.LLMEvent
+	if len(outcome.Events) > 0 {
+		utils.StepStart(&s.lifecycle, &events)
+	}
+	events = append(events, outcome.Events...)
+	for _, e := range outcome.Events {
+		if e.IsToolCall() {
+			s.hasFunctionCall = true
+			break
+		}
+	}
+	s.tools = outcome.Tools
+	return s, events, nil
+}
+
+func openaiResponsesOnHostedToolDone(s openaiResponsesParserState, item openaiResponsesStreamItem, t openaiResponsesHostedToolDef) (openaiResponsesParserState, []schema.LLMEvent, error) {
+	var events []schema.LLMEvent
+	utils.StepStart(&s.lifecycle, &events)
+	events = append(events, openaiResponsesHostedEvents(item, t)...)
+	return s, events, nil
+}
+
+func openaiResponsesOnReasoningItemDone(s openaiResponsesParserState, item openaiResponsesStreamItem) (openaiResponsesParserState, []schema.LLMEvent, error) {
+	var events []schema.LLMEvent
+	if ri := s.reasoningItems[*item.ID]; ri != nil {
+		for k, v := range ri.SummaryParts {
+			if v == "active" || v == "can-conclude" {
+				utils.ReasoningEnd(&s.lifecycle, &events, fmt.Sprintf("%s:%d", *item.ID, k),
+					openaiResponsesReasoningMetadata(*item.ID, item.EncryptedContent))
+			}
+		}
+		delete(s.reasoningItems, *item.ID)
+		return s, events, nil
+	}
+	pm := providerMetadata("openai", map[string]any{"itemId": *item.ID})
+	if _, ok := s.lifecycle.Reasoning[*item.ID]; !ok {
+		utils.StepStart(&s.lifecycle, &events)
+		events = append(events, schema.NewReasoningStart(*item.ID, schema.WithEventProviderMetadata(pm)))
+		events = append(events, schema.NewReasoningEnd(*item.ID, schema.WithEventProviderMetadata(pm)))
+		return s, events, nil
+	}
+	utils.ReasoningEnd(&s.lifecycle, &events, *item.ID, pm)
+	return s, events, nil
+}
+
+func openaiResponsesOnResponseFinish(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
 	var events []schema.LLMEvent
 	usage := openaiResponsesMapUsage(nil)
 	if evt.Response != nil {
@@ -925,28 +943,28 @@ func openaiResponsesOnResponseFinish(s openaiResponsesParserState, evt openaiRes
 		if evt.Response.ServiceTier != nil {
 			m["serviceTier"] = *evt.Response.ServiceTier
 		}
-		pm = openaiResponsesOpenAIMetadata(m)
+		pm = providerMetadata("openai", m)
 	}
-	utils.Finish(&s.lifecycle, &events, struct {
-		Reason           schema.FinishReason
-		Usage            *schema.Usage
-		ProviderMetadata schema.ProviderMetadata
-	}{Reason: openaiResponsesMapFinishReason(evt, s.hasFunctionCall), Usage: usage, ProviderMetadata: pm})
+	utils.LifecycleFinish(&s.lifecycle, &events, utils.FinishInput{
+		Reason:           openaiResponsesMapFinishReason(evt, s.hasFunctionCall),
+		Usage:            usage,
+		ProviderMetadata: pm,
+	})
 	return s, events
 }
 
-func openaiResponsesOnResponseFailed(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnResponseFailed(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
 	return s, []schema.LLMEvent{openaiResponsesProviderError(evt, "OpenAI Responses response failed")}
 }
 
-func openaiResponsesOnError(s openaiResponsesParserState, evt openaiResponsesResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnError(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
 	return s, []schema.LLMEvent{openaiResponsesProviderError(evt, "OpenAI Responses stream error")}
 }
 
-func openaiResponsesProviderError(evt openaiResponsesResponsesEvent, fallback string) schema.LLMEvent {
-	code := openaiResponsesStrVal(evt.Code)
+func openaiResponsesProviderError(evt openaiResponsesEvent, fallback string) schema.LLMEvent {
+	code := strVal(evt.Code)
 	if code == "" && evt.Response != nil && evt.Response.Error != nil {
-		code = openaiResponsesStrVal(evt.Response.Error.Code)
+		code = strVal(evt.Response.Error.Code)
 	}
 	message := openaiResponsesProviderErrorMessage(evt, fallback)
 	opts := []schema.EventOption{}
@@ -956,18 +974,18 @@ func openaiResponsesProviderError(evt openaiResponsesResponsesEvent, fallback st
 	return schema.NewProviderErrorEvent(message, opts...)
 }
 
-func openaiResponsesProviderErrorMessage(evt openaiResponsesResponsesEvent, fallback string) string {
+func openaiResponsesProviderErrorMessage(evt openaiResponsesEvent, fallback string) string {
 	var nested *openaiResponsesErrorPayload
 	if evt.Response != nil {
 		nested = evt.Response.Error
 	}
-	message := openaiResponsesStrVal(evt.Message)
+	message := strVal(evt.Message)
 	if message == "" && nested != nil {
-		message = openaiResponsesStrVal(nested.Message)
+		message = strVal(nested.Message)
 	}
-	code := openaiResponsesStrVal(evt.Code)
+	code := strVal(evt.Code)
 	if code == "" && nested != nil {
-		code = openaiResponsesStrVal(nested.Code)
+		code = strVal(nested.Code)
 	}
 	if message != "" && code != "" {
 		return fmt.Sprintf("%s: %s", code, message)
@@ -992,8 +1010,8 @@ var OpenAIResponsesProtocol = route.Protocol{
 		DecodeEvent: openaiResponsesDecodeEvent,
 		Initial: func(request *schema.LLMRequest) any {
 			return openaiResponsesParserState{
-				tools:          utils.Empty(),
-				lifecycle:      utils.Initial(),
+				tools:          utils.ToolStreamEmpty(),
+				lifecycle:      utils.LifecycleInitial(),
 				reasoningItems: make(map[string]*openaiResponsesReasoningStreamItem),
 				store:          utils.Store(request),
 			}

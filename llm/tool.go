@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/user/go-agent-sdk/jsonschema"
@@ -121,6 +122,13 @@ func (t *Tool) Project(parameters any, callID string, output any) schema.ToolOut
 	return schema.NewToolOutput(structured, content...)
 }
 
+// legacyResult reports whether the tool has no output mappers, so a handler
+// result that already is a ToolResultValue is used as-is instead of being
+// projected and re-wrapped.
+func (t *Tool) legacyResult() bool {
+	return t.toModelOutput == nil && t.toStructuredOutput == nil
+}
+
 // ToolConfig describes a tool. The parameters and output schemas drive both the
 // model-facing definition and the input/output validation.
 type ToolConfig struct {
@@ -155,8 +163,8 @@ func Make(config ToolConfig) *Tool {
 // mustCompileToolSchema fails fast when a schema cannot be compiled; silently
 // skipping validation would let malformed calls through.
 func mustCompileToolSchema(raw schema.JsonSchema) *jsonschema6.Schema {
-	compiled := compileSchema(raw)
-	if compiled == nil {
+	compiled, err := compileSchema(raw)
+	if err != nil || compiled == nil {
 		panic("llm: tool schema failed to compile")
 	}
 	return compiled
@@ -165,10 +173,17 @@ func mustCompileToolSchema(raw schema.JsonSchema) *jsonschema6.Schema {
 // Tools is a set of tools keyed by name.
 type Tools map[string]*Tool
 
-// ToDefinitions renders the tools as model-facing definitions.
+// ToDefinitions renders the tools as model-facing definitions. Tools are
+// emitted in name order so the request prefix is stable across runs.
 func ToDefinitions(tools Tools) []schema.ToolDefinition {
+	names := make([]string, 0, len(tools))
+	for name := range tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	result := make([]schema.ToolDefinition, 0, len(tools))
-	for name, tool := range tools {
+	for _, name := range names {
+		tool := tools[name]
 		def := schema.ToolDefinition{
 			Name:        name,
 			Description: tool.description,

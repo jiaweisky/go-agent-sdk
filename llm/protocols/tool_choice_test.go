@@ -60,10 +60,10 @@ func TestAnthropicToolChoiceModes(t *testing.T) {
 		choice schema.ToolChoice
 		want   any
 	}{
-		{schema.ToolChoice{Type: "auto"}, anthropicMessagesAnthropicToolChoice{Type: "auto"}},
+		{schema.ToolChoice{Type: "auto"}, anthropicMessagesToolChoice{Type: "auto"}},
 		{schema.ToolChoice{Type: "none"}, nil},
-		{schema.ToolChoice{Type: "required"}, anthropicMessagesAnthropicToolChoice{Type: "any"}},
-		{schema.ToolChoice{Type: "tool", Name: &name}, anthropicMessagesAnthropicToolChoice{Type: "tool", Name: "lookup"}},
+		{schema.ToolChoice{Type: "required"}, anthropicMessagesToolChoice{Type: "any"}},
+		{schema.ToolChoice{Type: "tool", Name: &name}, anthropicMessagesToolChoice{Type: "tool", Name: "lookup"}},
 	}
 	for _, tc := range cases {
 		got, err := anthropicMessagesLowerToolChoice(tc.choice)

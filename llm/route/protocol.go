@@ -17,8 +17,8 @@ type Protocol struct {
 // ProtocolBody lowers a request into the protocol's body and describes its
 // schema.
 type ProtocolBody struct {
-	// Schema is the provider-native body contract. Route construction compiles
-	// it and compile() validates every built body against it.
+	// Schema is the provider-native body contract. CompileBodySchema compiles it
+	// and the client validates every built body against it.
 	Schema *jsonschema.Schema
 	From   func(request *schema.LLMRequest) (any, error)
 }
@@ -45,9 +45,4 @@ type ProtocolStream struct {
 	Step        func(state any, event any) (any, []schema.LLMEvent, error)
 	Terminal    func(event any) bool
 	OnHalt      func(state any) []schema.LLMEvent
-}
-
-// MakeProtocol fills in a protocol's defaults.
-func MakeProtocol(input Protocol) Protocol {
-	return input
 }

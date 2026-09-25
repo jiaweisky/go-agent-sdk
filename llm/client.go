@@ -94,7 +94,17 @@ func (c *Client) compile(request *schema.LLMRequest) (*schema.LLMRequest, route.
 	resolved := resolveRequestOptions(request)
 	model, ok := resolved.Model.(route.Model)
 	if !ok {
-		return nil, route.Route{}, nil, nil, streamError(request, "Model has no route")
+		var provider schema.ProviderID
+		var modelID schema.ModelID
+		if resolved.Model != nil {
+			provider = resolved.Model.ProviderID()
+			modelID = resolved.Model.ModelID()
+		}
+		return nil, route.Route{}, nil, nil, &schema.LLMError{
+			Module: "LLM",
+			Method: "request",
+			Reason: schema.NewNoRouteReason("", provider, modelID),
+		}
 	}
 	resolved = ApplyCachePolicy(resolved, string(model.Route.Protocol))
 	r := model.Route
@@ -116,13 +126,9 @@ func (c *Client) compile(request *schema.LLMRequest) (*schema.LLMRequest, route.
 // precedence order: route defaults, then model overrides, then request values.
 func resolveRequestOptions(request *schema.LLMRequest) *schema.LLMRequest {
 	var routeDefaults schema.ModelDefaults
-	if model, ok := request.Model.(route.Model); ok {
-		d := model.Route.Defaults
-		routeDefaults = schema.ModelDefaults{
-			Limits:          d.Limits,
-			Generation:      d.Generation,
-			ProviderOptions: d.ProviderOptions,
-			Http:            d.Http,
+	if request.Model != nil {
+		if d := request.Model.GetRouteDefaults(); d != nil {
+			routeDefaults = *d
 		}
 	}
 	var modelDefaults schema.ModelDefaults

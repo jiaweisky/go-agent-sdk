@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/user/go-agent-sdk/jsonschema"
 	"github.com/user/go-agent-sdk/llm"
 	"github.com/user/go-agent-sdk/llm/protocols"
 	"github.com/user/go-agent-sdk/llm/provider"
@@ -111,7 +112,7 @@ func TestClient_GenerateObject(t *testing.T) {
 		t.Skip("set DEEPSEEK_API_KEY to run this test")
 	}
 	client, _ := chatClient()
-	jsonSchema := schema.JsonSchema{
+	jsonSchema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"city":    map[string]any{"type": "string"},
@@ -127,7 +128,7 @@ func TestClient_GenerateObject(t *testing.T) {
 				"openai": {"reasoningEffort": "none"},
 			},
 		},
-		JsonSchema: jsonSchema,
+		Schema: jsonschema.Raw(jsonSchema),
 	})
 	if err != nil {
 		t.Fatalf("GenerateObject: %v", err)
@@ -146,8 +147,7 @@ func TestProvider_OpenAI_Chat(t *testing.T) {
 	}
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	prov := provider.NewOpenAI(protocols.OpenAIChatHTTPRoute, protocols.OpenAIChatHTTPRoute, provider.OpenAIConfig{
-		APIKey:  &apiKey,
-		BaseURL: "https://api.deepseek.com/v1",
+		CommonConfig: provider.CommonConfig{APIKey: &apiKey, BaseURL: "https://api.deepseek.com/v1"},
 	})
 	model := prov.Model("deepseek-flash")
 	req := llm.NewRequest(llm.RequestInput{

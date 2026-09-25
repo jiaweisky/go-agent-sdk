@@ -7,14 +7,12 @@ import (
 	"iter"
 
 	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/user/go-agent-sdk/jsonschema"
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
 // RouteBody is how a route turns a request into a wire body, and how it validates
 // the result.
 type RouteBody struct {
-	Schema    *jsonschema.Schema
 	Validator *jsonschema6.Schema
 	From      func(request *schema.LLMRequest) (any, error)
 }
@@ -29,13 +27,7 @@ type RouteDefaults struct {
 }
 
 // RouteDefaultsInput is the input form of RouteDefaults.
-type RouteDefaultsInput struct {
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
-}
+type RouteDefaultsInput = RouteDefaults
 
 // RouteModelInput describes the model to bind to a route.
 type RouteModelInput struct {
@@ -98,7 +90,6 @@ func MakeFromTransport(input MakeTransportInput) Route {
 			Transport: ri.Transport,
 			Defaults:  ri.Defaults,
 			Body: RouteBody{
-				Schema:    ri.Protocol.Body.Schema,
 				Validator: CompileBodySchema(ri.Protocol.Body.Schema),
 				From:      ri.Protocol.Body.From,
 			},
@@ -190,12 +181,12 @@ func routePrepareTransport(ri makeTransportInput, body any, request *schema.LLMR
 		Request:  request,
 		Endpoint: ri.Endpoint,
 		Auth:     ri.Auth,
-		EncodeBody: func(b any) string {
+		EncodeBody: func(b any) (string, error) {
 			bytes, err := json.Marshal(b)
 			if err != nil {
-				return ""
+				return "", err
 			}
-			return string(bytes)
+			return string(bytes), nil
 		},
 		Headers: ri.Headers,
 	})
@@ -221,26 +212,16 @@ func routeStreamPrepared(
 				yield(nil, err)
 				return
 			}
-			frameStr, ok := frame.(string)
-			if !ok {
-				yield(nil, fmt.Errorf("route %s: expected string frame, got %T", ri.ID, frame))
-				return
-			}
-			event, decodeErr := stream.DecodeEvent(frameStr)
-			if decodeErr != nil {
-				yield(nil, decodeErr)
-				return
-			}
-			next, events, stepErr := stream.Step(state, event)
-			if stepErr != nil {
-				yield(nil, stepErr)
+			next, events, terminal, err := stepFrame(ri, stream, state, frame)
+			if err != nil {
+				yield(nil, err)
 				return
 			}
 			state = next
 			if !emitEvents(events, yield) {
 				return
 			}
-			if stream.Terminal != nil && stream.Terminal(event) {
+			if terminal {
 				if stream.OnHalt != nil {
 					emitEvents(stream.OnHalt(state), yield)
 				}
@@ -251,6 +232,24 @@ func routeStreamPrepared(
 			emitEvents(stream.OnHalt(state), yield)
 		}
 	}
+}
+
+// stepFrame decodes one frame, steps the state machine, and reports whether the
+// frame was terminal.
+func stepFrame(ri makeTransportInput, stream ProtocolStream, state any, frame any) (any, []schema.LLMEvent, bool, error) {
+	frameStr, ok := frame.(string)
+	if !ok {
+		return state, nil, false, fmt.Errorf("route %s: expected string frame, got %T", ri.ID, frame)
+	}
+	event, err := stream.DecodeEvent(frameStr)
+	if err != nil {
+		return state, nil, false, err
+	}
+	next, events, err := stream.Step(state, event)
+	if err != nil {
+		return state, nil, false, err
+	}
+	return next, events, stream.Terminal != nil && stream.Terminal(event), nil
 }
 
 // emitEvents yields every event, reporting whether the consumer kept iterating.
@@ -281,40 +280,28 @@ func mergeRouteDefaults(base RouteDefaults, input RouteDefaultsInput) RouteDefau
 	}
 	if input.Generation != nil {
 		r.Generation = schema.MergeGenerationOptions(base.Generation, input.Generation)
-	} else if base.Generation != nil {
-		r.Generation = base.Generation
 	}
 	if input.ProviderOptions != nil {
 		r.ProviderOptions = schema.MergeProviderOptions(base.ProviderOptions, input.ProviderOptions)
 	}
-	headers := mergeHeaders(base.Headers, input.Headers)
-	r.Headers = headers
-	httpInput := input.Http
-	if headers != nil {
-		httpWithHeaders := &schema.HttpOptions{Headers: headers}
-		if httpInput != nil {
-			r.Http = schema.MergeHttpOptions(base.Http, httpInput, httpWithHeaders)
-		} else {
-			r.Http = schema.MergeHttpOptions(base.Http, httpWithHeaders)
-		}
-	} else if httpInput != nil {
-		r.Http = schema.MergeHttpOptions(base.Http, httpInput)
-	}
+	r.Headers = schema.MergeStringRecords(base.Headers, input.Headers)
+	r.Http = mergeHttpDefaults(base.Http, r.Headers, input.Http)
 	return r
 }
 
-func mergeHeaders(base, patch map[string]string) map[string]string {
-	if len(base) == 0 && len(patch) == 0 {
-		return nil
+// mergeHttpDefaults folds merged headers and a patch into the base HTTP options.
+func mergeHttpDefaults(base *schema.HttpOptions, headers map[string]string, input *schema.HttpOptions) *schema.HttpOptions {
+	if headers == nil {
+		if input == nil {
+			return base
+		}
+		return schema.MergeHttpOptions(base, input)
 	}
-	r := make(map[string]string, len(base)+len(patch))
-	for k, v := range base {
-		r[k] = v
+	withHeaders := &schema.HttpOptions{Headers: headers}
+	if input == nil {
+		return schema.MergeHttpOptions(base, withHeaders)
 	}
-	for k, v := range patch {
-		r[k] = v
-	}
-	return r
+	return schema.MergeHttpOptions(base, input, withHeaders)
 }
 
 // LLMClient runs requests. Client implements it over a route.

@@ -12,14 +12,7 @@ const OpenRouterProviderID = schema.ProviderID("openrouter")
 
 // OpenRouterConfig configures the OpenRouter facade.
 type OpenRouterConfig struct {
-	Auth            *route.Auth
-	APIKey          *string
-	BaseURL         string
-	Headers         map[string]string
-	Limits          *schema.ModelLimits
-	Generation      *schema.GenerationOptions
-	ProviderOptions schema.ProviderOptions
-	Http            *schema.HttpOptions
+	CommonConfig
 }
 
 // OpenRouterProvider is a configured OpenRouter facade: its id, its routes, and
@@ -30,7 +23,7 @@ type OpenRouterProvider struct {
 }
 
 func openRouterDefaultBaseURL() string {
-	return Profiles["openrouter"].BaseURL
+	return OpenAICompatibleProfiles["openrouter"].BaseURL
 }
 
 func openRouterBodyOptions(providerOptions schema.ProviderOptions) map[string]any {
@@ -89,10 +82,7 @@ func openRouterProtocol(openAIChatProtocol route.Protocol) route.Protocol {
 }
 
 func openRouterAuth(input OpenRouterConfig) *route.Auth {
-	return route.BearerAuth(struct {
-		Auth   *route.Auth
-		APIKey *string
-	}{Auth: input.Auth, APIKey: input.APIKey}, []string{"OPENROUTER_API_KEY"})
+	return route.BearerAuth(route.BearerAuthOptions{Auth: input.Auth, APIKey: input.APIKey}, []string{"OPENROUTER_API_KEY"})
 }
 
 // NewOpenRouter builds the OpenRouter facade over the OpenAI Chat protocol.
@@ -110,24 +100,12 @@ func NewOpenRouter(openAIChatProtocol route.Protocol, input OpenRouterConfig) Op
 		Auth:      openRouterAuth(input),
 		Transport: transport.SSEJson(),
 	})
-	defaults := route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
+	defaults := input.defaults()
 	r = r.With(route.RoutePatch{Defaults: &defaults})
 	return OpenRouterProvider{
 		ID: OpenRouterProviderID,
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
-			modelInput := route.RouteModelInput{ID: id}
-			if len(opts) > 0 {
-				opt := opts[0]
-				modelInput.Defaults = opt.Defaults
-				modelInput.Compatibility = opt.Compatibility
-			}
-			return r.Model(modelInput)
+			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
 	}
 }

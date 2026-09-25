@@ -39,13 +39,13 @@ func TestPrepareValidatesProtocolBody(t *testing.T) {
 }
 
 func TestPrepareRejectsBodyFailingItsSchema(t *testing.T) {
-	protocol := route.MakeProtocol(route.Protocol{
+	protocol := route.Protocol{
 		ID: "test-schema",
 		Body: route.ProtocolBody{
 			Schema: jsonschema.Object(jsonschema.Required("model", jsonschema.String())),
 			From:   func(*schema.LLMRequest) (any, error) { return map[string]any{}, nil },
 		},
-	})
+	}
 	r := route.MakeFromTransport(route.MakeTransportInput{
 		ID:        "test-schema",
 		Provider:  "test",

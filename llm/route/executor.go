@@ -47,7 +47,7 @@ func isSensitiveQueryName(name string) bool {
 func redactHeaders(headers map[string]string) map[string]string {
 	result := make(map[string]string, len(headers))
 	for k, v := range headers {
-		if sensitiveNameRE.MatchString(k) {
+		if isSensitiveHeaderName(k) {
 			result[k] = redacted
 		} else {
 			result[k] = v
@@ -106,50 +106,60 @@ func retryAfterMs(headers map[string]string) *int {
 	return nil
 }
 
-func rateLimitDetails(headers map[string]string, retryAfter *int) *schema.HttpRateLimitDetails {
-	limit := make(map[string]string)
-	remaining := make(map[string]string)
-	reset := make(map[string]string)
+type rateLimitBuckets struct {
+	limit     map[string]string
+	remaining map[string]string
+	reset     map[string]string
+}
 
-	for name, value := range headers {
-		name = strings.ToLower(name)
-		if m := openaiLimitRE.FindStringSubmatch(name); m != nil {
-			limit[m[1]] = value
-			continue
-		}
-		if m := openaiRemainingRE.FindStringSubmatch(name); m != nil {
-			remaining[m[1]] = value
-			continue
-		}
-		if m := openaiResetRE.FindStringSubmatch(name); m != nil {
-			reset[m[1]] = value
-			continue
-		}
-		if m := anthropicRE.FindStringSubmatch(name); m != nil {
-			switch m[2] {
-			case "limit":
-				limit[m[1]] = value
-			case "remaining":
-				remaining[m[1]] = value
-			case "reset":
-				reset[m[1]] = value
-			}
-		}
+func rateLimitDetails(headers map[string]string, retryAfter *int) *schema.HttpRateLimitDetails {
+	b := rateLimitBuckets{
+		limit:     make(map[string]string),
+		remaining: make(map[string]string),
+		reset:     make(map[string]string),
 	}
-	if retryAfter == nil && len(limit) == 0 && len(remaining) == 0 && len(reset) == 0 {
+	for name, value := range headers {
+		collectRateLimitHeader(strings.ToLower(name), value, &b)
+	}
+	if retryAfter == nil && len(b.limit) == 0 && len(b.remaining) == 0 && len(b.reset) == 0 {
 		return nil
 	}
 	rl := &schema.HttpRateLimitDetails{RetryAfterMs: retryAfter}
-	if len(limit) > 0 {
-		rl.Limit = limit
+	if len(b.limit) > 0 {
+		rl.Limit = b.limit
 	}
-	if len(remaining) > 0 {
-		rl.Remaining = remaining
+	if len(b.remaining) > 0 {
+		rl.Remaining = b.remaining
 	}
-	if len(reset) > 0 {
-		rl.Reset = reset
+	if len(b.reset) > 0 {
+		rl.Reset = b.reset
 	}
 	return rl
+}
+
+func collectRateLimitHeader(name, value string, b *rateLimitBuckets) {
+	if m := openaiLimitRE.FindStringSubmatch(name); m != nil {
+		b.limit[m[1]] = value
+		return
+	}
+	if m := openaiRemainingRE.FindStringSubmatch(name); m != nil {
+		b.remaining[m[1]] = value
+		return
+	}
+	if m := openaiResetRE.FindStringSubmatch(name); m != nil {
+		b.reset[m[1]] = value
+		return
+	}
+	if m := anthropicRE.FindStringSubmatch(name); m != nil {
+		switch m[2] {
+		case "limit":
+			b.limit[m[1]] = value
+		case "remaining":
+			b.remaining[m[1]] = value
+		case "reset":
+			b.reset[m[1]] = value
+		}
+	}
 }
 
 func secretValues(req *http.Request) map[string]struct{} {
@@ -191,11 +201,11 @@ func redactBody(body string, req *http.Request) string {
 }
 
 func responseBody(body string, req *http.Request) (string, bool) {
-	redacted := redactBody(body, req)
-	if len(redacted) <= bodyLimit {
-		return redacted, false
+	text := redactBody(body, req)
+	if len(text) <= bodyLimit {
+		return text, false
 	}
-	return redacted[:bodyLimit], true
+	return text[:bodyLimit], true
 }
 
 func providerMessage(status int, body string) string {
@@ -223,57 +233,62 @@ func classifyResponse(req *http.Request, status int, body string, headers map[st
 	return &schema.LLMError{
 		Module: "RequestExecutor",
 		Method: "execute",
-		Reason: classifyStatusReason(status, redactedBody, msg, ra, rl, httpCtx),
+		Reason: classifyStatusReason(status, redactedBody, msg, ra, httpCtx),
 	}
 }
 
-func classifyStatusReason(status int, body, msg string, retryAfterMs *int, rateLimit *schema.HttpRateLimitDetails, httpCtx *schema.HttpContext) schema.LLMErrorReason {
+func classifyStatusReason(status int, body, msg string, retryAfterMs *int, httpCtx *schema.HttpContext) schema.LLMErrorReason {
 	if contentPolicyRE.MatchString(body) {
 		return schema.NewContentPolicyReason(msg, schema.WithHttpContext(*httpCtx))
 	}
-	if status == 401 {
+	switch status {
+	case 401:
 		return schema.NewAuthenticationReason(msg, schema.AuthKindInvalid, schema.WithHttpContext(*httpCtx))
-	}
-	if status == 403 {
+	case 403:
 		return schema.NewAuthenticationReason(msg, schema.AuthKindInsufficientPermissions, schema.WithHttpContext(*httpCtx))
-	}
-	if status == 429 {
-		if quotaExceededRE.MatchString(body) {
-			return schema.NewQuotaExceededReason(msg, schema.WithHttpContext(*httpCtx))
-		}
-		opts := []schema.ReasonOption{schema.WithHttpContext(*httpCtx)}
-		if retryAfterMs != nil {
-			opts = append(opts, schema.WithRetryAfterMs(*retryAfterMs))
-		}
-		return schema.NewRateLimitReason(msg, opts...)
-	}
-	if status == 400 || status == 404 || status == 409 || status == 413 || status == 422 {
-		opts := []schema.ReasonOption{schema.WithHttpContext(*httpCtx)}
-		if schema.IsContextOverflow(body) {
-			opts = append(opts, schema.WithClassification(schema.ClassificationContextOverflow))
-		}
-		return schema.NewInvalidRequestReason(msg, opts...)
+	case 429:
+		return classifyRateLimitReason(body, msg, retryAfterMs, httpCtx)
+	case 400, 404, 409, 413, 422:
+		return classifyInvalidRequestReason(body, msg, httpCtx)
 	}
 	if status >= 500 || retryableStatus(status) {
-		opts := []schema.ReasonOption{schema.WithHttpContext(*httpCtx)}
-		if retryAfterMs != nil {
-			opts = append(opts, schema.WithRetryAfterMs(*retryAfterMs))
-		}
-		return schema.NewProviderInternalReason(msg, status, opts...)
+		return classifyServerReason(msg, status, retryAfterMs, httpCtx)
 	}
 	return schema.NewUnknownProviderReason(msg, schema.WithStatus(status), schema.WithHttpContext(*httpCtx))
+}
+
+func classifyRateLimitReason(body, msg string, retryAfterMs *int, httpCtx *schema.HttpContext) schema.LLMErrorReason {
+	if quotaExceededRE.MatchString(body) {
+		return schema.NewQuotaExceededReason(msg, schema.WithHttpContext(*httpCtx))
+	}
+	opts := []schema.ReasonOption{schema.WithHttpContext(*httpCtx)}
+	if retryAfterMs != nil {
+		opts = append(opts, schema.WithRetryAfterMs(*retryAfterMs))
+	}
+	return schema.NewRateLimitReason(msg, opts...)
+}
+
+func classifyInvalidRequestReason(body, msg string, httpCtx *schema.HttpContext) schema.LLMErrorReason {
+	opts := []schema.ReasonOption{schema.WithHttpContext(*httpCtx)}
+	if schema.IsContextOverflow(body) {
+		opts = append(opts, schema.WithClassification(schema.ClassificationContextOverflow))
+	}
+	return schema.NewInvalidRequestReason(msg, opts...)
+}
+
+func classifyServerReason(msg string, status int, retryAfterMs *int, httpCtx *schema.HttpContext) schema.LLMErrorReason {
+	opts := []schema.ReasonOption{schema.WithHttpContext(*httpCtx)}
+	if retryAfterMs != nil {
+		opts = append(opts, schema.WithRetryAfterMs(*retryAfterMs))
+	}
+	return schema.NewProviderInternalReason(msg, status, opts...)
 }
 
 func requestDetails(req *http.Request) schema.HttpRequestDetails {
 	if req == nil {
 		return schema.HttpRequestDetails{}
 	}
-	headers := make(map[string]string, len(req.Header))
-	for k, v := range req.Header {
-		if len(v) > 0 {
-			headers[k] = v[0]
-		}
-	}
+	headers := firstHeaderValues(req.Header)
 	return schema.HttpRequestDetails{
 		Method:  req.Method,
 		URL:     redactURL(req.URL.String()),
@@ -345,8 +360,7 @@ func retryDelay(attempt int, retryAfterMs *int) time.Duration {
 	return time.Duration(actual) * time.Millisecond
 }
 
-// canceledTransportError reports a request aborted by its context so callers can
-// detect an interrupt via errors.Is(err, context.Canceled).
+// canceledTransportError builds the error for a request aborted by its context.
 func canceledTransportError(err error) *schema.LLMError {
 	kind := "TransportError"
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -390,22 +404,12 @@ func NewExecutor(client *http.Client) *Executor {
 	return &Executor{client: client}
 }
 
-// Do sends one request without retrying.
-func (e *Executor) Do(req *http.Request) (*http.Response, error) {
-	return e.client.Do(req)
-}
-
 // DoWithRetries sends a request, retrying while the failure is retryable and the
 // attempt budget allows.
 func (e *Executor) DoWithRetries(req *http.Request) (*http.Response, *schema.LLMError) {
-	var reqBody []byte
-	if req.Body != nil {
-		var err error
-		reqBody, err = io.ReadAll(req.Body)
-		req.Body.Close()
-		if err != nil {
-			return nil, transportError(req, fmt.Errorf("failed to read request body: %w", err))
-		}
+	reqBody, llmErr := readRequestBody(req)
+	if llmErr != nil {
+		return nil, llmErr
 	}
 
 	var lastErr *schema.LLMError
@@ -422,40 +426,66 @@ func (e *Executor) DoWithRetries(req *http.Request) (*http.Response, *schema.LLM
 				return nil, canceledTransportError(req.Context().Err())
 			}
 		}
-		if reqBody != nil {
-			req.Body = io.NopCloser(bytes.NewReader(reqBody))
-		}
-		resp, err := e.client.Do(req)
-		if err != nil {
-			if ctxErr := req.Context().Err(); ctxErr != nil {
-				return nil, canceledTransportError(ctxErr)
-			}
-			lastErr = transportError(req, err)
-			// A failed transport is retried: a transient network error is worth a
-			// second attempt. Status errors follow the reason's Retryable().
-			continue
-		}
-		if resp.StatusCode < 400 {
-			// Success: hand the response back with its body unread so the
-			// caller can stream it (SSE and friends).
+		resp, llmErr, retry := e.attempt(req, reqBody)
+		if llmErr == nil {
 			return resp, nil
 		}
-		body, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		bodyStr := ""
-		if readErr == nil {
-			bodyStr = string(body)
-		}
-		headers := make(map[string]string)
-		for k, v := range resp.Header {
-			if len(v) > 0 {
-				headers[k] = v[0]
-			}
-		}
-		lastErr = classifyResponse(req, resp.StatusCode, bodyStr, headers)
-		if !lastErr.Retryable() {
+		lastErr = llmErr
+		if !retry {
 			return nil, lastErr
 		}
 	}
 	return nil, lastErr
+}
+
+// readRequestBody buffers the request body so every attempt can resend it.
+func readRequestBody(req *http.Request) ([]byte, *schema.LLMError) {
+	if req.Body == nil {
+		return nil, nil
+	}
+	body, err := io.ReadAll(req.Body)
+	req.Body.Close()
+	if err != nil {
+		return nil, transportError(req, fmt.Errorf("failed to read request body: %w", err))
+	}
+	return body, nil
+}
+
+// attempt sends one request. A transport failure is always retryable; a status
+// failure follows its reason's Retryable().
+func (e *Executor) attempt(req *http.Request, reqBody []byte) (*http.Response, *schema.LLMError, bool) {
+	if reqBody != nil {
+		req.Body = io.NopCloser(bytes.NewReader(reqBody))
+	}
+	resp, err := e.client.Do(req)
+	if err != nil {
+		if ctxErr := req.Context().Err(); ctxErr != nil {
+			return nil, canceledTransportError(ctxErr), false
+		}
+		return nil, transportError(req, err), true
+	}
+	if resp.StatusCode < 400 {
+		// Success: hand the response back with its body unread so the caller can
+		// stream it (SSE and friends).
+		return resp, nil, false
+	}
+	body, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	bodyStr := ""
+	if readErr == nil {
+		bodyStr = string(body)
+	}
+	llmErr := classifyResponse(req, resp.StatusCode, bodyStr, firstHeaderValues(resp.Header))
+	return nil, llmErr, llmErr.Retryable()
+}
+
+// firstHeaderValues flattens headers to their first value.
+func firstHeaderValues(headers http.Header) map[string]string {
+	result := make(map[string]string, len(headers))
+	for k, v := range headers {
+		if len(v) > 0 {
+			result[k] = v[0]
+		}
+	}
+	return result
 }

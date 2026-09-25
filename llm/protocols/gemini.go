@@ -16,7 +16,7 @@ const geminiAdapter = "gemini"
 // GeminiDefaultBaseURL is the Google Generative Language API base URL.
 const GeminiDefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
-var geminiMediaMIMEs = mediaMIMESet(MediaMIMEs)
+var geminiMediaMIMEs = mediaMIMESet(mediaMIMEs)
 
 type geminiTextPart struct {
 	Text             string  `json:"text"`
@@ -101,10 +101,7 @@ func (u *geminiUsage) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*u = geminiUsage(decoded)
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err == nil {
-		u.ProviderMetadata = schema.ProviderMetadata{"google": raw}
-	}
+	u.ProviderMetadata = providerMetadata("google", rawRecord(data))
 	return nil
 }
 
@@ -122,19 +119,8 @@ type geminiParserState struct {
 	hasToolCalls       bool
 	nextToolCallID     int
 	usage              *schema.Usage
-	lifecycle          utils.State
+	lifecycle          utils.LifecycleState
 	reasoningSignature *string
-}
-
-func geminiIntVal(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-
-func geminiGoogleMetadata(m map[string]any) schema.ProviderMetadata {
-	return schema.ProviderMetadata{"google": m}
 }
 
 func geminiThoughtSignature(md schema.ProviderMetadata) *string {
@@ -149,7 +135,7 @@ func geminiThoughtSignature(md schema.ProviderMetadata) *string {
 func geminiLowerTool(td schema.ToolDefinition, inputSchema any) geminiFunctionDeclaration {
 	decl := geminiFunctionDeclaration{Name: td.Name, Description: td.Description}
 	// An empty object schema projects to nil, so the key stays absent.
-	if params := utils.Convert(schemaMap(inputSchema)); params != nil {
+	if params := utils.GeminiConvert(schemaMap(inputSchema)); params != nil {
 		decl.Parameters = params
 	}
 	return decl
@@ -183,10 +169,7 @@ func geminiLowerUserPart(part schema.ContentPart) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		var ip geminiInlineDataPart
-		ip.InlineData.MimeType = media.MIME
-		ip.InlineData.Data = media.Base64
-		return ip, nil
+		return geminiInlineData(media.MIME, media.Base64), nil
 	}
 	return nil, fmt.Errorf("Gemini user parts only support text and media")
 }
@@ -204,100 +187,139 @@ func geminiLowerMessages(request *schema.LLMRequest) ([]geminiContent, error) {
 	for _, msg := range request.Messages {
 		switch msg.Role {
 		case schema.RoleSystem:
-			update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
-			if len(contents) > 0 && contents[len(contents)-1].Role == "user" {
-				last := &contents[len(contents)-1]
-				last.Parts = append(last.Parts, geminiTextPart{Text: update})
-			} else {
-				contents = append(contents, geminiContent{Role: "user", Parts: []any{geminiTextPart{Text: update}}})
-			}
-
+			contents = geminiLowerSystemMessage(contents, msg)
 		case schema.RoleUser:
-			var parts []any
-			for _, p := range msg.Content {
-				part, err := geminiLowerUserPart(p)
-				if err != nil {
-					return nil, err
-				}
-				parts = append(parts, part)
+			content, err := geminiLowerUserMessage(msg)
+			if err != nil {
+				return nil, err
 			}
-			contents = append(contents, geminiContent{Role: "user", Parts: parts})
-
+			contents = append(contents, content)
 		case schema.RoleAssistant:
-			var parts []any
-			for _, p := range msg.Content {
-				switch part := p.(type) {
-				case schema.TextPart:
-					parts = append(parts, geminiTextPart{Text: part.Text})
-				case schema.ReasoningPart:
-					sig := geminiThoughtSignature(part.ProviderMetadata)
-					if sig == nil {
-						sig = part.Encrypted
-					}
-					t := true
-					tp := geminiTextPart{Text: part.Text, Thought: &t, ThoughtSignature: sig}
-					parts = append(parts, tp)
-				case schema.ToolCallPart:
-					parts = append(parts, geminiLowerToolCall(part))
-				default:
-					return nil, fmt.Errorf("Gemini assistant only supports text, reasoning, tool-call")
-				}
+			content, err := geminiLowerAssistantMessage(msg)
+			if err != nil {
+				return nil, err
 			}
-			contents = append(contents, geminiContent{Role: "model", Parts: parts})
-
+			contents = append(contents, content)
 		case schema.RoleTool:
-			var parts []any
-			for _, p := range msg.Content {
-				if part, ok := p.(schema.ToolResultPart); ok {
-					if part.Result.Type != "content" {
-						parts = append(parts, geminiFunctionResponsePart{
-							FunctionResponse: struct {
-								Name     string `json:"name"`
-								Response any    `json:"response"`
-							}{Name: part.Name, Response: map[string]any{"name": part.Name, "content": ToolResultText(part)}},
-						})
-					} else {
-						content, ok := part.Result.Value.([]schema.ToolContent)
-						var texts []string
-						if ok {
-							for _, c := range content {
-								if tc, ok := c.(schema.ToolTextContent); ok {
-									texts = append(texts, tc.Text)
-								}
-							}
-						}
-						parts = append(parts, geminiFunctionResponsePart{
-							FunctionResponse: struct {
-								Name     string `json:"name"`
-								Response any    `json:"response"`
-							}{Name: part.Name, Response: map[string]any{"name": part.Name, "content": strings.Join(texts, "\n")}},
-						})
-						if ok {
-							for _, c := range content {
-								if _, ok := c.(schema.ToolTextContent); ok {
-									continue
-								}
-								if fc, ok := c.(schema.ToolFileContent); ok {
-									media, err := utils.ValidateToolFile("Gemini", fc, geminiMediaMIMEs)
-									if err != nil {
-										return nil, err
-									}
-									parts = append(parts, geminiInlineDataPart{
-										InlineData: struct {
-											MimeType string `json:"mimeType"`
-											Data     string `json:"data"`
-										}{MimeType: media.MIME, Data: media.Base64},
-									})
-								}
-							}
-						}
-					}
-				}
+			content, err := geminiLowerToolMessage(msg)
+			if err != nil {
+				return nil, err
 			}
-			contents = append(contents, geminiContent{Role: "user", Parts: parts})
+			contents = append(contents, content)
 		}
 	}
 	return contents, nil
+}
+
+func geminiLowerSystemMessage(contents []geminiContent, msg schema.Message) []geminiContent {
+	update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
+	if len(contents) > 0 && contents[len(contents)-1].Role == "user" {
+		contents[len(contents)-1].Parts = append(contents[len(contents)-1].Parts, geminiTextPart{Text: update})
+		return contents
+	}
+	return append(contents, geminiContent{Role: "user", Parts: []any{geminiTextPart{Text: update}}})
+}
+
+func geminiLowerUserMessage(msg schema.Message) (geminiContent, error) {
+	var parts []any
+	for _, p := range msg.Content {
+		part, err := geminiLowerUserPart(p)
+		if err != nil {
+			return geminiContent{}, err
+		}
+		parts = append(parts, part)
+	}
+	return geminiContent{Role: "user", Parts: parts}, nil
+}
+
+func geminiLowerAssistantMessage(msg schema.Message) (geminiContent, error) {
+	var parts []any
+	for _, p := range msg.Content {
+		switch part := p.(type) {
+		case schema.TextPart:
+			parts = append(parts, geminiTextPart{Text: part.Text})
+		case schema.ReasoningPart:
+			sig := geminiThoughtSignature(part.ProviderMetadata)
+			if sig == nil {
+				sig = part.Encrypted
+			}
+			t := true
+			parts = append(parts, geminiTextPart{Text: part.Text, Thought: &t, ThoughtSignature: sig})
+		case schema.ToolCallPart:
+			parts = append(parts, geminiLowerToolCall(part))
+		default:
+			return geminiContent{}, fmt.Errorf("Gemini assistant only supports text, reasoning, tool-call")
+		}
+	}
+	return geminiContent{Role: "model", Parts: parts}, nil
+}
+
+func geminiLowerToolMessage(msg schema.Message) (geminiContent, error) {
+	var parts []any
+	for _, p := range msg.Content {
+		part, ok := p.(schema.ToolResultPart)
+		if !ok {
+			continue
+		}
+		blocks, err := geminiLowerToolResultPart(part)
+		if err != nil {
+			return geminiContent{}, err
+		}
+		parts = append(parts, blocks...)
+	}
+	return geminiContent{Role: "user", Parts: parts}, nil
+}
+
+func geminiLowerToolResultPart(part schema.ToolResultPart) ([]any, error) {
+	if part.Result.Type != "content" {
+		return []any{geminiFunctionResponse(part.Name, map[string]any{
+			"name": part.Name, "content": ToolResultText(part),
+		})}, nil
+	}
+	content, ok := part.Result.Value.([]schema.ToolContent)
+	var texts []string
+	if ok {
+		for _, c := range content {
+			if tc, ok := c.(schema.ToolTextContent); ok {
+				texts = append(texts, tc.Text)
+			}
+		}
+	}
+	parts := []any{geminiFunctionResponse(part.Name, map[string]any{
+		"name": part.Name, "content": strings.Join(texts, "\n"),
+	})}
+	if !ok {
+		return parts, nil
+	}
+	for _, c := range content {
+		if _, ok := c.(schema.ToolTextContent); ok {
+			continue
+		}
+		fc, ok := c.(schema.ToolFileContent)
+		if !ok {
+			continue
+		}
+		media, err := utils.ValidateToolFile("Gemini", fc, geminiMediaMIMEs)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, geminiInlineData(media.MIME, media.Base64))
+	}
+	return parts, nil
+}
+
+func geminiFunctionResponse(name string, response any) geminiFunctionResponsePart {
+	var part geminiFunctionResponsePart
+	part.FunctionResponse.Name = name
+	part.FunctionResponse.Response = response
+	return part
+}
+
+func geminiInlineData(mimeType, data string) geminiInlineDataPart {
+	var part geminiInlineDataPart
+	part.InlineData.MimeType = mimeType
+	part.InlineData.Data = data
+	return part
 }
 
 func geminiLowerOptions(request *schema.LLMRequest) *geminiThinkingConfig {
@@ -440,32 +462,32 @@ func geminiMapUsage(u *geminiUsage) *schema.Usage {
 	if u == nil {
 		return nil
 	}
-	cached := geminiIntVal(u.CachedContentTokenCount)
-	nonCached := geminiIntVal(u.PromptTokenCount) - cached
+	cached := intVal(u.CachedContentTokenCount)
+	nonCached := intVal(u.PromptTokenCount) - cached
 	if nonCached < 0 {
 		nonCached = 0
 	}
 	var outputTokens int
 	var hasOutput bool
 	if u.CandidatesTokenCount != nil {
-		outputTokens = geminiIntVal(u.CandidatesTokenCount) + geminiIntVal(u.ThoughtsTokenCount)
+		outputTokens = intVal(u.CandidatesTokenCount) + intVal(u.ThoughtsTokenCount)
 		hasOutput = true
 	}
 	var total int
 	if hasOutput {
-		total = geminiIntVal(TotalTokens(u.PromptTokenCount, &outputTokens, u.TotalTokenCount))
+		total = intVal(TotalTokens(u.PromptTokenCount, &outputTokens, u.TotalTokenCount))
 	} else {
-		total = geminiIntVal(u.PromptTokenCount)
+		total = intVal(u.PromptTokenCount)
 		if u.TotalTokenCount != nil {
 			total = *u.TotalTokenCount
 		}
 	}
 	return &schema.Usage{
-		InputTokens:          geminiIntVal(u.PromptTokenCount),
+		InputTokens:          intVal(u.PromptTokenCount),
 		OutputTokens:         outputTokens,
 		NonCachedInputTokens: nonCached,
 		CacheReadInputTokens: cached,
-		ReasoningTokens:      geminiIntVal(u.ThoughtsTokenCount),
+		ReasoningTokens:      intVal(u.ThoughtsTokenCount),
 		TotalTokens:          total,
 		ProviderMetadata:     u.ProviderMetadata,
 	}
@@ -495,12 +517,11 @@ func geminiStep(state any, event any) (any, []schema.LLMEvent, error) {
 	s := state.(geminiParserState)
 	evt, ok := event.(geminiEvent)
 	if !ok {
-		return state, nil, nil
+		return s, nil, nil
 	}
 
 	if evt.UsageMetadata != nil {
-		u := geminiMapUsage(evt.UsageMetadata)
-		if u != nil {
+		if u := geminiMapUsage(evt.UsageMetadata); u != nil {
 			s.usage = u
 		}
 	}
@@ -514,62 +535,56 @@ func geminiStep(state any, event any) (any, []schema.LLMEvent, error) {
 
 	candidate := evt.Candidates[0]
 	var events []schema.LLMEvent
-	hasToolCalls := s.hasToolCalls
-	lifecycle := s.lifecycle
-	nextID := s.nextToolCallID
-	reasoningSig := s.reasoningSignature
-
 	for _, part := range candidate.Content.Parts {
-		switch p := part.(type) {
-		case geminiTextPart:
-			if p.ThoughtSignature != nil && p.Thought != nil && *p.Thought {
-				reasoningSig = p.ThoughtSignature
-			}
-			if p.Text == "" {
-				continue
-			}
-			if p.Thought != nil && *p.Thought {
-				var pm schema.ProviderMetadata
-				if p.ThoughtSignature != nil {
-					pm = geminiGoogleMetadata(map[string]any{"thoughtSignature": *p.ThoughtSignature})
-				}
-				utils.ReasoningDelta(&lifecycle, &events, "reasoning-0", p.Text, pm)
-				continue
-			}
-			var pm schema.ProviderMetadata
-			if reasoningSig != nil {
-				pm = geminiGoogleMetadata(map[string]any{"thoughtSignature": *reasoningSig})
-			}
-			utils.ReasoningEnd(&lifecycle, &events, "reasoning-0", pm)
-			utils.TextDelta(&lifecycle, &events, "text-0", p.Text)
-
-		case geminiFunctionCallPart:
-			id := fmt.Sprintf("tool_%d", nextID)
-			nextID++
-			var pm schema.ProviderMetadata
-			if reasoningSig != nil {
-				pm = geminiGoogleMetadata(map[string]any{"thoughtSignature": *reasoningSig})
-			}
-			utils.ReasoningEnd(&lifecycle, &events, "reasoning-0", pm)
-			utils.StepStart(&lifecycle, &events)
-			var fpm schema.ProviderMetadata
-			if p.ThoughtSignature != nil {
-				fpm = geminiGoogleMetadata(map[string]any{"thoughtSignature": *p.ThoughtSignature})
-			}
-			events = append(events, schema.NewToolCall(id, p.FunctionCall.Name, p.FunctionCall.Args,
-				schema.WithEventProviderMetadata(fpm)))
-			hasToolCalls = true
-		}
+		geminiApplyPart(&s, &events, part)
 	}
-
-	s.hasToolCalls = hasToolCalls
-	s.lifecycle = lifecycle
-	s.nextToolCallID = nextID
-	s.reasoningSignature = reasoningSig
 	if candidate.FinishReason != nil {
 		s.finishReason = candidate.FinishReason
 	}
 	return s, events, nil
+}
+
+func geminiApplyPart(s *geminiParserState, events *[]schema.LLMEvent, part any) {
+	switch p := part.(type) {
+	case geminiTextPart:
+		if p.ThoughtSignature != nil && p.Thought != nil && *p.Thought {
+			s.reasoningSignature = p.ThoughtSignature
+		}
+		if p.Text == "" {
+			return
+		}
+		if p.Thought != nil && *p.Thought {
+			var pm schema.ProviderMetadata
+			if p.ThoughtSignature != nil {
+				pm = providerMetadata("google", map[string]any{"thoughtSignature": *p.ThoughtSignature})
+			}
+			utils.ReasoningDelta(&s.lifecycle, events, "reasoning-0", p.Text, pm)
+			return
+		}
+		var pm schema.ProviderMetadata
+		if s.reasoningSignature != nil {
+			pm = providerMetadata("google", map[string]any{"thoughtSignature": *s.reasoningSignature})
+		}
+		utils.ReasoningEnd(&s.lifecycle, events, "reasoning-0", pm)
+		utils.TextDelta(&s.lifecycle, events, "text-0", p.Text)
+
+	case geminiFunctionCallPart:
+		id := fmt.Sprintf("tool_%d", s.nextToolCallID)
+		s.nextToolCallID++
+		var pm schema.ProviderMetadata
+		if s.reasoningSignature != nil {
+			pm = providerMetadata("google", map[string]any{"thoughtSignature": *s.reasoningSignature})
+		}
+		utils.ReasoningEnd(&s.lifecycle, events, "reasoning-0", pm)
+		utils.StepStart(&s.lifecycle, events)
+		var fpm schema.ProviderMetadata
+		if p.ThoughtSignature != nil {
+			fpm = providerMetadata("google", map[string]any{"thoughtSignature": *p.ThoughtSignature})
+		}
+		*events = append(*events, schema.NewToolCall(id, p.FunctionCall.Name, p.FunctionCall.Args,
+			schema.WithEventProviderMetadata(fpm)))
+		s.hasToolCalls = true
+	}
 }
 
 func geminiFinish(state any) []schema.LLMEvent {
@@ -581,13 +596,12 @@ func geminiFinish(state any) []schema.LLMEvent {
 	lifecycle := s.lifecycle
 	if s.reasoningSignature != nil {
 		utils.ReasoningEnd(&lifecycle, &events, "reasoning-0",
-			geminiGoogleMetadata(map[string]any{"thoughtSignature": *s.reasoningSignature}))
+			providerMetadata("google", map[string]any{"thoughtSignature": *s.reasoningSignature}))
 	}
-	utils.Finish(&lifecycle, &events, struct {
-		Reason           schema.FinishReason
-		Usage            *schema.Usage
-		ProviderMetadata schema.ProviderMetadata
-	}{Reason: geminiMapFinishReason(s.finishReason, s.hasToolCalls), Usage: s.usage})
+	utils.LifecycleFinish(&lifecycle, &events, utils.FinishInput{
+		Reason: geminiMapFinishReason(s.finishReason, s.hasToolCalls),
+		Usage:  s.usage,
+	})
 	return events
 }
 
@@ -599,7 +613,7 @@ var GeminiProtocol = route.Protocol{
 		DecodeEvent: geminiDecodeEvent,
 		Initial: func(request *schema.LLMRequest) any {
 			return geminiParserState{
-				lifecycle: utils.Initial(),
+				lifecycle: utils.LifecycleInitial(),
 			}
 		},
 		Step:   geminiStep,

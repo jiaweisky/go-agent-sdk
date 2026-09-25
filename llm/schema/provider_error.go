@@ -1,10 +1,13 @@
 package schema
 
-import "regexp"
+import (
+	"errors"
+	"regexp"
+)
 
 // Context-overflow detection lives in this leaf package because both the llm
 // root package (provider_error.go) and llm/route (executor.go) need it, and
-// route cannot import llm (llm imports route). Mirrors provider-error.ts.
+// route cannot import llm (llm imports route).
 
 var contextOverflowPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)prompt is too long`),
@@ -63,8 +66,8 @@ func IsContextOverflow(message string) bool {
 // IsContextOverflowFailure reports whether err is an LLMError classified as a
 // context overflow.
 func IsContextOverflowFailure(err error) bool {
-	e, ok := err.(*LLMError)
-	if !ok {
+	var e *LLMError
+	if !errors.As(err, &e) {
 		return false
 	}
 	return e.Reason.Kind == ReasonInvalidRequest &&

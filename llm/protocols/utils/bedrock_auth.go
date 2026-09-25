@@ -28,8 +28,7 @@ type AuthInput struct {
 // AuthFunc signs a request and returns its headers.
 type AuthFunc func(input AuthInput) (map[string]string, error)
 
-// SigV4 signs a request with AWS SigV4. Nil credentials fall back to the
-// environment.
+// SigV4 signs a request with AWS SigV4. It fails when credentials are nil.
 func SigV4(credentials *Credentials) AuthFunc {
 	return sigV4(credentials)
 }
@@ -54,9 +53,6 @@ func sigV4(credentials *Credentials) AuthFunc {
 	}
 }
 
-// BedrockAuth is SigV4 over the ambient AWS credentials.
-var BedrockAuth = SigV4(nil)
-
 func signRequest(input AuthInput, creds *Credentials) (map[string]string, error) {
 	bodyHash := sha256Hex(input.Body)
 	now := time.Now().UTC()
@@ -64,6 +60,34 @@ func signRequest(input AuthInput, creds *Credentials) (map[string]string, error)
 	dateStamp := now.Format("20060102")
 	service := "bedrock"
 
+	headers := signableHeaders(input, creds, amzDate, bodyHash)
+	canonical, signedNames := canonicalRequest(headers, pathFromURL(input.URL), bodyHash)
+
+	algorithm := "AWS4-HMAC-SHA256"
+	credentialScope := dateStamp + "/" + creds.Region + "/" + service + "/aws4_request"
+	stringToSign := algorithm + "\n" +
+		amzDate + "\n" +
+		credentialScope + "\n" +
+		sha256Hex(canonical)
+
+	signingKey := computeSigningKey(creds.SecretAccessKey, dateStamp, creds.Region, service)
+	signature := hex.EncodeToString(hmacSHA256(signingKey, stringToSign))
+
+	authorization := algorithm + " " +
+		"Credential=" + creds.AccessKeyID + "/" + credentialScope + ", " +
+		"SignedHeaders=" + strings.Join(signedNames, ";") + ", " +
+		"Signature=" + signature
+
+	result := make(map[string]string, len(headers)+1)
+	for k, v := range headers {
+		result[k] = v
+	}
+	result["authorization"] = authorization
+	return result, nil
+}
+
+// signableHeaders copies the request headers and adds the SigV4 headers.
+func signableHeaders(input AuthInput, creds *Credentials, amzDate, bodyHash string) map[string]string {
 	headers := make(map[string]string)
 	for k, v := range input.Headers {
 		headers[strings.ToLower(k)] = v
@@ -74,46 +98,28 @@ func signRequest(input AuthInput, creds *Credentials) (map[string]string, error)
 	if creds.SessionToken != "" {
 		headers["x-amz-security-token"] = creds.SessionToken
 	}
+	return headers
+}
 
-	signedHeaders := make([]string, 0, len(headers))
+// canonicalRequest builds the SigV4 canonical request and the sorted signed
+// header names.
+func canonicalRequest(headers map[string]string, path, bodyHash string) (string, []string) {
+	signedNames := make([]string, 0, len(headers))
 	for k := range headers {
-		signedHeaders = append(signedHeaders, k)
+		signedNames = append(signedNames, k)
 	}
-	sort.Strings(signedHeaders)
-
+	sort.Strings(signedNames)
 	canonicalHeaders := ""
-	for _, k := range signedHeaders {
+	for _, k := range signedNames {
 		canonicalHeaders += k + ":" + strings.TrimSpace(headers[k]) + "\n"
 	}
-
-	canonicalRequest := "POST" + "\n" +
-		pathFromURL(input.URL) + "\n" +
+	request := "POST" + "\n" +
+		path + "\n" +
 		"" + "\n" +
 		canonicalHeaders + "\n" +
-		strings.Join(signedHeaders, ";") + "\n" +
+		strings.Join(signedNames, ";") + "\n" +
 		bodyHash
-
-	algorithm := "AWS4-HMAC-SHA256"
-	credentialScope := dateStamp + "/" + creds.Region + "/" + service + "/aws4_request"
-	stringToSign := algorithm + "\n" +
-		amzDate + "\n" +
-		credentialScope + "\n" +
-		sha256Hex(canonicalRequest)
-
-	signingKey := computeSigningKey(creds.SecretAccessKey, dateStamp, creds.Region, service)
-	signature := hex.EncodeToString(hmacSHA256(signingKey, stringToSign))
-
-	authorization := algorithm + " " +
-		"Credential=" + creds.AccessKeyID + "/" + credentialScope + ", " +
-		"SignedHeaders=" + strings.Join(signedHeaders, ";") + ", " +
-		"Signature=" + signature
-
-	result := make(map[string]string)
-	for k, v := range headers {
-		result[k] = v
-	}
-	result["authorization"] = authorization
-	return result, nil
+	return request, signedNames
 }
 
 func hostFromURL(rawURL string) string {

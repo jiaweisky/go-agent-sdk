@@ -170,8 +170,8 @@ type ToolResultValue struct {
 	Value any    `json:"value"`
 }
 
-// IsToolResultValue reports whether v looks like a tool result value.
-func IsToolResultValue(v any) bool {
+// isToolResultValue reports whether v looks like a tool result value.
+func isToolResultValue(v any) bool {
 	m, ok := v.(map[string]any)
 	if !ok {
 		_, ok = v.(ToolResultValue)
@@ -186,16 +186,25 @@ func IsToolResultValue(v any) bool {
 	return false
 }
 
+// AsToolResultValue returns v as a ToolResultValue when it already is one or is a
+// result-shaped map.
+func AsToolResultValue(v any) (ToolResultValue, bool) {
+	if rv, ok := v.(ToolResultValue); ok {
+		return rv, true
+	}
+	if isToolResultValue(v) {
+		m := v.(map[string]any)
+		t, _ := m["type"].(string)
+		return ToolResultValue{Type: t, Value: m["value"]}, true
+	}
+	return ToolResultValue{}, false
+}
+
 // NewToolResultValue builds a tool result value, inferring its kind from the Go
 // type unless typ overrides it.
 func NewToolResultValue(value any, typ ...string) ToolResultValue {
-	if rv, ok := value.(ToolResultValue); ok {
+	if rv, ok := AsToolResultValue(value); ok {
 		return rv
-	}
-	if IsToolResultValue(value) {
-		m := value.(map[string]any)
-		t, _ := m["type"].(string)
-		return ToolResultValue{Type: t, Value: m["value"]}
 	}
 	t := "json"
 	if len(typ) > 0 {
@@ -553,51 +562,12 @@ type LLMRequest struct {
 	Metadata        map[string]any     `json:"metadata,omitempty"`
 }
 
-// LLMRequestInput renders the request as the input record its schema accepts.
-func LLMRequestInput(r *LLMRequest) map[string]any {
-	return map[string]any{
-		"id":              r.ID,
-		"model":           r.Model,
-		"system":          r.System,
-		"messages":        r.Messages,
-		"tools":           r.Tools,
-		"toolChoice":      r.ToolChoice,
-		"generation":      r.Generation,
-		"providerOptions": r.ProviderOptions,
-		"http":            r.Http,
-		"responseFormat":  r.ResponseFormat,
-		"cache":           r.Cache,
-		"metadata":        r.Metadata,
+// Clone returns a shallow copy of the request: slices, maps and pointers are
+// shared, so callers replace a field rather than mutate it in place.
+func (r *LLMRequest) Clone() *LLMRequest {
+	if r == nil {
+		return nil
 	}
-}
-
-// LLMRequestUpdate applies the set keys of patch and returns a new request.
-func LLMRequestUpdate(r *LLMRequest, patch map[string]any) *LLMRequest {
-	if len(patch) == 0 {
-		return r
-	}
-	updated := *r
-	setField(&updated.Model, patch, "model")
-	setField(&updated.ID, patch, "id")
-	setField(&updated.System, patch, "system")
-	setField(&updated.Messages, patch, "messages")
-	setField(&updated.Tools, patch, "tools")
-	setField(&updated.ToolChoice, patch, "toolChoice")
-	setField(&updated.Generation, patch, "generation")
-	setField(&updated.ProviderOptions, patch, "providerOptions")
-	setField(&updated.Http, patch, "http")
-	setField(&updated.ResponseFormat, patch, "responseFormat")
-	setField(&updated.Cache, patch, "cache")
-	setField(&updated.Metadata, patch, "metadata")
-	return &updated
-}
-
-// setField copies patch[key] into dst when the key is present and its value has
-// the field's type; a value of another type is ignored.
-func setField[T any](dst *T, patch map[string]any, key string) {
-	if v, ok := patch[key]; ok {
-		if typed, ok := v.(T); ok {
-			*dst = typed
-		}
-	}
+	cp := *r
+	return &cp
 }

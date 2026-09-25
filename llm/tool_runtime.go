@@ -43,6 +43,11 @@ func Dispatch(ctx context.Context, tools Tools, call schema.ToolCallPart) *Dispa
 	if err != nil {
 		return buildResult(call, schema.ToolResultValue{Type: "error", Value: err.Error()}, err)
 	}
+	if tool.legacyResult() {
+		if rv, ok := schema.AsToolResultValue(encoded); ok {
+			return buildResult(call, rv, nil, schema.ToolOutputFromResultValue(rv))
+		}
+	}
 	output := tool.Project(decoded, call.ID, encoded)
 	result := schema.ToolOutputToResultValue(output)
 	return buildResult(call, result, nil, &output)

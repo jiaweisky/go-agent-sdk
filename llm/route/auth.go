@@ -6,11 +6,10 @@ import (
 	"github.com/user/go-agent-sdk/llm/schema"
 )
 
-// AuthInput is what an auth scheme sees: the request, its method, URL and body,
-// and the headers accumulated so far.
+// AuthInput is what an auth scheme sees: the request, its URL and body, and the
+// headers accumulated so far.
 type AuthInput struct {
 	Request *schema.LLMRequest
-	Method  string
 	URL     string
 	Body    string
 	Headers map[string]string
@@ -60,11 +59,7 @@ func (c *Credential) Bearer() *Auth {
 		if err != nil {
 			return nil, err
 		}
-		if input.Headers == nil {
-			input.Headers = make(map[string]string)
-		}
-		input.Headers["authorization"] = "Bearer " + secret
-		return input.Headers, nil
+		return setHeader(input.Headers, "authorization", "Bearer "+secret), nil
 	})
 }
 
@@ -75,12 +70,27 @@ func (c *Credential) Header(name string) *Auth {
 		if err != nil {
 			return nil, err
 		}
-		if input.Headers == nil {
-			input.Headers = make(map[string]string)
-		}
-		input.Headers[name] = secret
-		return input.Headers, nil
+		return setHeader(input.Headers, name, secret), nil
 	})
+}
+
+// BearerHeader applies the credential as "Bearer <secret>" in a named header.
+func (c *Credential) BearerHeader(name string) *Auth {
+	return Custom(func(input AuthInput) (map[string]string, error) {
+		secret, err := c.load()
+		if err != nil {
+			return nil, err
+		}
+		return setHeader(input.Headers, name, "Bearer "+secret), nil
+	})
+}
+
+func setHeader(headers map[string]string, name, value string) map[string]string {
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	headers[name] = value
+	return headers
 }
 
 // Auth applies a credential convention to a request's headers.
@@ -133,19 +143,6 @@ func None() *Auth {
 	})
 }
 
-// SetHeaders adds fixed headers to the request.
-func SetHeaders(headers map[string]string) *Auth {
-	return Custom(func(input AuthInput) (map[string]string, error) {
-		if input.Headers == nil {
-			input.Headers = make(map[string]string)
-		}
-		for k, v := range headers {
-			input.Headers[k] = v
-		}
-		return input.Headers, nil
-	})
-}
-
 // RemoveHeader deletes a header from the request.
 func RemoveHeader(name string) *Auth {
 	return Custom(func(input AuthInput) (map[string]string, error) {
@@ -154,81 +151,47 @@ func RemoveHeader(name string) *Auth {
 	})
 }
 
-// Bearer applies a secret, a credential, or an env-var name as a bearer token.
+// Bearer applies a secret or a credential as a bearer token.
 func Bearer(source any) *Auth {
-	switch s := source.(type) {
-	case string:
-		return NewValue(s).Bearer()
-	case *Credential:
-		return s.Bearer()
-	default:
-		return Custom(func(input AuthInput) (map[string]string, error) {
-			return nil, fmt.Errorf("Missing auth credential: value")
-		})
+	cred, ok := credentialFrom(source)
+	if !ok {
+		return missingCredential()
 	}
+	return cred.Bearer()
 }
 
-// APIKey applies a secret, a credential, or an env-var name as a header whose
-// name the protocol uses for API keys.
-func APIKey(source any) *Auth {
-	return Bearer(source)
-}
-
-// Header applies a secret, a credential, or an env-var name as a named header.
+// Header applies a secret or a credential as a named header.
 func Header(name string, source any) *Auth {
+	cred, ok := credentialFrom(source)
+	if !ok {
+		return missingCredential()
+	}
+	return cred.Header(name)
+}
+
+// BearerHeader applies a secret or a credential as "Bearer" in a named header.
+func BearerHeader(name string, source any) *Auth {
+	cred, ok := credentialFrom(source)
+	if !ok {
+		return missingCredential()
+	}
+	return cred.BearerHeader(name)
+}
+
+// credentialFrom normalizes a secret or a credential into a Credential.
+func credentialFrom(source any) (*Credential, bool) {
 	switch s := source.(type) {
 	case string:
-		return NewValue(s).Header(name)
+		return NewValue(s), true
 	case *Credential:
-		return s.Header(name)
+		return s, true
 	default:
-		return Custom(func(input AuthInput) (map[string]string, error) {
-			return nil, fmt.Errorf("Missing auth credential: value")
-		})
+		return nil, false
 	}
 }
 
-// BearerHeader applies a secret as "Bearer" in a named header.
-func BearerHeader(name string, source any) *Auth {
-	inner := func(s any) *Auth {
-		switch v := s.(type) {
-		case string:
-			return Custom(func(input AuthInput) (map[string]string, error) {
-				if input.Headers == nil {
-					input.Headers = make(map[string]string)
-				}
-				input.Headers[name] = "Bearer " + v
-				return input.Headers, nil
-			})
-		case *Credential:
-			return Custom(func(input AuthInput) (map[string]string, error) {
-				secret, err := v.load()
-				if err != nil {
-					return nil, err
-				}
-				if input.Headers == nil {
-					input.Headers = make(map[string]string)
-				}
-				input.Headers[name] = "Bearer " + secret
-				return input.Headers, nil
-			})
-		default:
-			return Custom(func(input AuthInput) (map[string]string, error) {
-				return nil, fmt.Errorf("Missing auth credential: value")
-			})
-		}
-	}
-	return inner(source)
-}
-
-// ToLLMError wraps err as an LLMError, leaving an existing one unchanged.
-func ToLLMError(err error) *schema.LLMError {
-	if e, ok := err.(*schema.LLMError); ok {
-		return e
-	}
-	return &schema.LLMError{
-		Module: "Auth",
-		Method: "apply",
-		Reason: schema.NewAuthenticationReason(err.Error(), schema.AuthKindMissing),
-	}
+func missingCredential() *Auth {
+	return Custom(func(AuthInput) (map[string]string, error) {
+		return nil, fmt.Errorf("Missing auth credential: value")
+	})
 }

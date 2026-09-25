@@ -102,8 +102,8 @@ func moonshotNode(schema any) any {
 	return result
 }
 
-// Moonshot rewrites a tool schema into the shape Moonshot requires.
-func Moonshot(schema map[string]any) map[string]any {
+// ToolSchemaMoonshot rewrites a tool schema into the shape Moonshot requires.
+func ToolSchemaMoonshot(schema map[string]any) map[string]any {
 	projected := moonshotNode(schema)
 	if r, ok := projected.(map[string]any); ok {
 		return r
@@ -111,17 +111,17 @@ func Moonshot(schema map[string]any) map[string]any {
 	return map[string]any{}
 }
 
-// Gemini rewrites a tool schema into the shape Gemini requires.
-func Gemini(schema map[string]any) map[string]any {
-	r := Convert(schema)
+// ToolSchemaGemini rewrites a tool schema into the shape Gemini requires.
+func ToolSchemaGemini(schema map[string]any) map[string]any {
+	r := GeminiConvert(schema)
 	if r != nil {
 		return r
 	}
 	return map[string]any{}
 }
 
-// OpenAI leaves a tool schema as the OpenAI API expects it.
-func OpenAI(schema map[string]any) map[string]any {
+// ToolSchemaOpenAI leaves a tool schema as the OpenAI API expects it.
+func ToolSchemaOpenAI(schema map[string]any) map[string]any {
 	anyOf, hasAnyOf := schema["anyOf"].([]any)
 	var flattened map[string]any
 	if !hasAnyOf || len(anyOf) == 0 {
@@ -149,7 +149,9 @@ func OpenAI(schema map[string]any) map[string]any {
 		for _, variant := range variants {
 			if p, ok := variant["properties"].(map[string]any); ok {
 				for k, v := range p {
-					props[k] = v
+					if _, exists := props[k]; !exists {
+						props[k] = v
+					}
 				}
 			}
 		}
@@ -168,9 +170,9 @@ func OpenAI(schema map[string]any) map[string]any {
 func ModelCompatibility(schema map[string]any, compatibility string) map[string]any {
 	switch compatibility {
 	case "gemini":
-		return Gemini(schema)
+		return ToolSchemaGemini(schema)
 	case "moonshot":
-		return Moonshot(schema)
+		return ToolSchemaMoonshot(schema)
 	default:
 		return schema
 	}

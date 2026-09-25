@@ -15,18 +15,11 @@ const AzureProviderID = schema.ProviderID("azure")
 
 // AzureConfig configures the Azure OpenAI facade.
 type AzureConfig struct {
-	Auth              *route.Auth
-	APIKey            *string
+	CommonConfig
 	ResourceName      string
-	BaseURL           string
 	APIVersion        string
 	QueryParams       map[string]string
 	UseCompletionURLs bool
-	ProviderOptions   schema.ProviderOptions
-	Headers           map[string]string
-	Limits            *schema.ModelLimits
-	Generation        *schema.GenerationOptions
-	Http              *schema.HttpOptions
 }
 
 // AzureProvider is a configured Azure OpenAI facade: its id, its routes, and its
@@ -56,16 +49,6 @@ func azureAuth(input AzureConfig) *route.Auth {
 		cred = cred.OrElse(route.NewValue(envVal))
 	}
 	return route.RemoveHeader("authorization").AndThen(cred.Header("api-key"))
-}
-
-func azureDefaults(input AzureConfig) route.RouteDefaultsInput {
-	return route.RouteDefaultsInput{
-		Headers:         input.Headers,
-		Limits:          input.Limits,
-		Generation:      input.Generation,
-		ProviderOptions: input.ProviderOptions,
-		Http:            input.Http,
-	}
 }
 
 func azureEndpoint(input AzureConfig) *route.EndpointPatch {
@@ -102,22 +85,22 @@ func NewAzure(responsesRoute, chatRoute route.Route, input AzureConfig) AzurePro
 	ep := azureEndpoint(input)
 	respCfg := responsesPre.With(route.RoutePatch{Auth: a, Endpoint: ep})
 	chatCfg := chatPre.With(route.RoutePatch{Auth: a, Endpoint: ep})
-	base := azureDefaults(input)
+	base := input.defaults()
 
 	return AzureProvider{
 		ID:     AzureProviderID,
 		Routes: []route.Route{respCfg, chatCfg},
 		Model: func(id string, opts ...llm.ModelOptions) route.Model {
 			if input.UseCompletionURLs {
-				return modelFactory(chatCfg, id, base, nil, opts...)
+				return openAIModelFactory(chatCfg, id, base, nil, opts...)
 			}
-			return modelFactory(respCfg, id, base, nil, opts...)
+			return openAIModelFactory(respCfg, id, base, nil, opts...)
 		},
 		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
-			return modelFactory(respCfg, id, base, nil, opts...)
+			return openAIModelFactory(respCfg, id, base, nil, opts...)
 		},
 		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
-			return modelFactory(chatCfg, id, base, nil, opts...)
+			return openAIModelFactory(chatCfg, id, base, nil, opts...)
 		},
 	}
 }
