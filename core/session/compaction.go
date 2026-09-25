@@ -156,13 +156,7 @@ func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	var previousSummary *schema.SessionMessageCompaction
-	for i := range input.Entries {
-		if message, isCompaction := input.Entries[i].Message.(schema.SessionMessageCompaction); isCompaction {
-			previousSummary = &message
-			break
-		}
-	}
+	previousSummary := compactionPreviousSummary(input.Entries)
 	if selected.Head == "" && previousSummary == nil {
 		return false, nil
 	}
@@ -199,6 +193,39 @@ func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
 		return false, err
 	}
 
+	summary, ok, err := c.summarizeCompaction(input, summaryPrompt, summaryOutput)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+
+	if _, err := c.events.Publish(schema.SessionEventCompactionEnded, map[string]any{
+		"sessionID": input.SessionID,
+		"messageID": messageID,
+		"timestamp": time.Now().UnixMilli(),
+		"reason":    "auto",
+		"text":      summary,
+		"recent":    selected.Recent,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func compactionPreviousSummary(entries []CompactionEntry) *schema.SessionMessageCompaction {
+	for i := range entries {
+		if message, isCompaction := entries[i].Message.(schema.SessionMessageCompaction); isCompaction {
+			return &message
+		}
+	}
+	return nil
+}
+
+// summarizeCompaction streams the summary prompt and reports whether it
+// produced usable text.
+func (c *Compaction) summarizeCompaction(input CompactionInput, summaryPrompt string, summaryOutput int) (string, bool, error) {
 	maxTokens := summaryOutput
 	request := llm.NewRequest(llm.RequestInput{
 		Model:      input.Model,
@@ -222,7 +249,7 @@ func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
 				summarized = false
 				break
 			}
-			return false, err
+			return "", false, err
 		}
 		if event.IsProviderError() {
 			failed = true
@@ -233,20 +260,9 @@ func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
 	}
 	summary := strings.Join(chunks, "")
 	if !summarized || failed || strings.TrimSpace(summary) == "" {
-		return false, nil
+		return "", false, nil
 	}
-
-	if _, err := c.events.Publish(schema.SessionEventCompactionEnded, map[string]any{
-		"sessionID": input.SessionID,
-		"messageID": messageID,
-		"timestamp": time.Now().UnixMilli(),
-		"reason":    "auto",
-		"text":      summary,
-		"recent":    selected.Recent,
-	}); err != nil {
-		return false, err
-	}
-	return true, nil
+	return summary, true, nil
 }
 
 type compactionSelection struct {

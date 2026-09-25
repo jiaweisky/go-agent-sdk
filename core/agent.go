@@ -31,8 +31,8 @@ type AgentDraft struct {
 	Remove  func(schema.AgentID)
 }
 
-// Agent is the agent registry. Agents are held in an ordered map so listing and
-// fallback selection follow registration order.
+// Agent is the agent registry. Agents are held in a map plus a registration
+// order slice, so listing and fallback selection follow registration order.
 type Agent struct {
 	state *State[*agentData, AgentDraft]
 }

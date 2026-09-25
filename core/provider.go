@@ -2,7 +2,7 @@ package core
 
 import "github.com/user/go-agent-sdk/schema"
 
-// ProviderV2 re-exports the shared provider schema (core/provider.ts).
+// ProviderV2 re-exports the shared provider schema.
 type (
 	ProviderID      = schema.ProviderID
 	ProviderAISDK   = schema.ProviderAISDK

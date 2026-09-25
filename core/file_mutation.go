@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -173,7 +174,7 @@ func (fm *fileMutation) WriteIfUnchanged(input FileMutationConditionalWriteInput
 			err = readErr
 			return
 		}
-		if !sameBytes(current, input.Expected) {
+		if !bytes.Equal(current, input.Expected) {
 			err = &FileMutationStaleContentError{Path: input.Target.Canonical}
 			return
 		}
@@ -223,16 +224,4 @@ func joinBom(text string, bom bool) string {
 
 func hasUtf8Bom(content []byte) bool {
 	return len(content) >= 3 && content[0] == 0xef && content[1] == 0xbb && content[2] == 0xbf
-}
-
-func sameBytes(left, right []byte) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }

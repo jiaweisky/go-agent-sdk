@@ -6,7 +6,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// Default agent system prompts, ported from core/src/plugin/agent.ts.
+// Default agent system prompts.
 const agentBuildSystem = "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions."
 
 const agentPromptExplore = `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.

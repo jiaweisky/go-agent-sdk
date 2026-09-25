@@ -8,7 +8,7 @@ import (
 	"unicode"
 )
 
-// PatchHunk is the Patch.Hunk union from patch.ts.
+// PatchHunk is one operation parsed from a patch document.
 type PatchHunk interface {
 	patchHunkTag()
 }
@@ -60,20 +60,8 @@ var (
 // PatchParse parses a patch document into its hunks.
 func PatchParse(patchText string) ([]PatchHunk, error) {
 	lines := strings.Split(patchStripHeredoc(patchTrimSpace(patchText)), "\n")
-	begin := -1
-	for i, line := range lines {
-		if patchTrimSpace(line) == patchBeginMarker {
-			begin = i
-			break
-		}
-	}
-	end := -1
-	for i, line := range lines {
-		if patchTrimSpace(line) == patchEndMarker {
-			end = i
-			break
-		}
-	}
+	begin := patchMarkerIndex(lines, patchBeginMarker)
+	end := patchMarkerIndex(lines, patchEndMarker)
 	if begin == -1 || end == -1 || begin >= end {
 		return nil, fmt.Errorf("Invalid patch format: missing Begin/End markers")
 	}
@@ -81,55 +69,84 @@ func PatchParse(patchText string) ([]PatchHunk, error) {
 	var hunks []PatchHunk
 	index := begin + 1
 	for index < end {
-		line := lines[index]
-		switch {
-		case strings.HasPrefix(line, patchAddPrefix):
-			path := patchTrimSpace(line[len(patchAddPrefix):])
-			if path == "" {
-				return nil, fmt.Errorf("Invalid add file path")
-			}
-			contents, next, err := patchParseAdd(lines, index+1)
-			if err != nil {
-				return nil, err
-			}
-			hunks = append(hunks, PatchAddHunk{Path: path, Contents: contents})
-			index = next
-		case strings.HasPrefix(line, patchDeletePrefix):
-			path := patchTrimSpace(line[len(patchDeletePrefix):])
-			if path == "" {
-				return nil, fmt.Errorf("Invalid delete file path")
-			}
-			hunks = append(hunks, PatchDeleteHunk{Path: path})
-			index++
-		case strings.HasPrefix(line, patchUpdatePrefix):
-			path := patchTrimSpace(line[len(patchUpdatePrefix):])
-			if path == "" {
-				return nil, fmt.Errorf("Invalid update file path")
-			}
-			next := index + 1
-			var movePath *string
-			if next < len(lines) && strings.HasPrefix(lines[next], patchMovePrefix) {
-				move := patchTrimSpace(lines[next][len(patchMovePrefix):])
-				if move == "" {
-					return nil, fmt.Errorf("Invalid move file path")
-				}
-				movePath = &move
-				next++
-			}
-			chunks, after, err := patchParseUpdate(lines, next)
-			if err != nil {
-				return nil, err
-			}
-			if len(chunks) == 0 {
-				return nil, fmt.Errorf("Invalid update hunk for %s: expected at least one @@ chunk", path)
-			}
-			hunks = append(hunks, PatchUpdateHunk{Path: path, MovePath: movePath, Chunks: chunks})
-			index = after
-		default:
-			return nil, fmt.Errorf("Invalid patch line: %s", line)
+		hunk, next, err := patchParseHunk(lines, index)
+		if err != nil {
+			return nil, err
 		}
+		hunks = append(hunks, hunk)
+		index = next
 	}
 	return hunks, nil
+}
+
+// patchMarkerIndex returns the index of the first line equal to marker, or -1.
+func patchMarkerIndex(lines []string, marker string) int {
+	for i, line := range lines {
+		if patchTrimSpace(line) == marker {
+			return i
+		}
+	}
+	return -1
+}
+
+// patchParseHunk parses the hunk starting at index and returns the index after
+// it.
+func patchParseHunk(lines []string, index int) (PatchHunk, int, error) {
+	switch line := lines[index]; {
+	case strings.HasPrefix(line, patchAddPrefix):
+		return patchParseAddHunk(lines, index)
+	case strings.HasPrefix(line, patchDeletePrefix):
+		return patchParseDeleteHunk(lines, index)
+	case strings.HasPrefix(line, patchUpdatePrefix):
+		return patchParseUpdateHunk(lines, index)
+	default:
+		return nil, 0, fmt.Errorf("Invalid patch line: %s", line)
+	}
+}
+
+func patchParseAddHunk(lines []string, index int) (PatchHunk, int, error) {
+	path := patchTrimSpace(lines[index][len(patchAddPrefix):])
+	if path == "" {
+		return nil, 0, fmt.Errorf("Invalid add file path")
+	}
+	contents, next, err := patchParseAdd(lines, index+1)
+	if err != nil {
+		return nil, 0, err
+	}
+	return PatchAddHunk{Path: path, Contents: contents}, next, nil
+}
+
+func patchParseDeleteHunk(lines []string, index int) (PatchHunk, int, error) {
+	path := patchTrimSpace(lines[index][len(patchDeletePrefix):])
+	if path == "" {
+		return nil, 0, fmt.Errorf("Invalid delete file path")
+	}
+	return PatchDeleteHunk{Path: path}, index + 1, nil
+}
+
+func patchParseUpdateHunk(lines []string, index int) (PatchHunk, int, error) {
+	path := patchTrimSpace(lines[index][len(patchUpdatePrefix):])
+	if path == "" {
+		return nil, 0, fmt.Errorf("Invalid update file path")
+	}
+	next := index + 1
+	var movePath *string
+	if next < len(lines) && strings.HasPrefix(lines[next], patchMovePrefix) {
+		move := patchTrimSpace(lines[next][len(patchMovePrefix):])
+		if move == "" {
+			return nil, 0, fmt.Errorf("Invalid move file path")
+		}
+		movePath = &move
+		next++
+	}
+	chunks, after, err := patchParseUpdate(lines, next)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(chunks) == 0 {
+		return nil, 0, fmt.Errorf("Invalid update hunk for %s: expected at least one @@ chunk", path)
+	}
+	return PatchUpdateHunk{Path: path, MovePath: movePath, Chunks: chunks}, after, nil
 }
 
 func patchParseAdd(lines []string, start int) (string, int, error) {

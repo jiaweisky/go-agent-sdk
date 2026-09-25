@@ -126,13 +126,25 @@ func ripgrepRun[A any](process AppProcess, binary RipgrepBinary, input ripgrepRu
 	if limit < 0 {
 		limit = 0
 	}
+	collected, err := ripgrepCollect(input, string(result.Stdout), limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(collected) > limit {
+		return &ripgrepRunResult[A]{Items: collected[:limit], Truncated: true}, nil
+	}
+	return ripgrepInterpret(result.ExitCode, string(result.Stderr), input.Pattern, collected)
+}
+
+// ripgrepCollect parses at most limit+1 rows so the caller can detect
+// truncation.
+func ripgrepCollect[A any](input ripgrepRunInput[A], stdout string, limit int) ([]A, error) {
 	take := limit + 1
 	if take < limit {
 		take = limit
 	}
-
 	var collected []A
-	for _, line := range ripgrepSplitLines(string(result.Stdout)) {
+	for _, line := range ripgrepSplitLines(stdout) {
 		if line == "" {
 			continue
 		}
@@ -153,15 +165,13 @@ func ripgrepRun[A any](process AppProcess, binary RipgrepBinary, input ripgrepRu
 		}
 		collected = append(collected, *row)
 	}
+	return collected, nil
+}
 
-	if len(collected) > limit {
-		return &ripgrepRunResult[A]{Items: collected[:limit], Truncated: true}, nil
-	}
-
-	code := result.ExitCode
-	stderr := string(result.Stderr)
-	if input.Pattern != "" && code == 2 && ripgrepIsInvalidPattern(stderr) {
-		return nil, &RipgrepInvalidPatternError{Pattern: input.Pattern, Message: strings.TrimSpace(stderr)}
+// ripgrepInterpret maps ripgrep's exit code to a result or error.
+func ripgrepInterpret[A any](code int, stderr, pattern string, collected []A) (*ripgrepRunResult[A], error) {
+	if pattern != "" && code == 2 && ripgrepIsInvalidPattern(stderr) {
+		return nil, &RipgrepInvalidPatternError{Pattern: pattern, Message: strings.TrimSpace(stderr)}
 	}
 	if code != 0 && code != 1 && code != 2 {
 		message := strings.TrimSpace(stderr)
@@ -201,7 +211,7 @@ func (s *ripgrepService) Glob(input RipgrepGlobInput) ([]FileSystemEntry, error)
 	}
 	entries := make([]FileSystemEntry, len(result.Items))
 	for i, relative := range result.Items {
-		entries[i] = FileSystemEntry{Path: relative, Type: "file"}
+		entries[i] = FileSystemEntry{Path: relative, Type: FileKindFile}
 	}
 	return entries, nil
 }
@@ -225,7 +235,7 @@ func (s *ripgrepService) Find(input RipgrepFindInput) ([]FileSystemEntry, error)
 		Limit:   input.Limit,
 		Context: input.Context,
 		Parse: func(line string) (*FileSystemEntry, error) {
-			entry := FileSystemEntry{Path: ripgrepNormalizeRelative(line), Type: "file"}
+			entry := FileSystemEntry{Path: ripgrepNormalizeRelative(line), Type: FileKindFile}
 			return &entry, nil
 		},
 		OnItem: input.OnEntry,
@@ -306,7 +316,7 @@ func parseRipgrepMatch(line string) (*FileSystemMatch, error) {
 	}
 	relative := ripgrepNormalizeRelative(ripgrepSingleDotSlash.ReplaceAllString(raw.Data.Path.Text, ""))
 	match := FileSystemMatch{
-		Entry:      FileSystemEntry{Path: relative, Type: "file"},
+		Entry:      FileSystemEntry{Path: relative, Type: FileKindFile},
 		Line:       raw.Data.LineNumber,
 		Offset:     raw.Data.AbsoluteOffset,
 		Text:       ripgrepTruncateText(raw.Data.Lines.Text),

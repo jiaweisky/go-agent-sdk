@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -146,7 +147,7 @@ func (d *Discovery) plan(sourceRoot string, source *url.URL, data Index) []skill
 		if !isSafeSegment(entry.Name) {
 			continue
 		}
-		if !containsString(entry.Files, "SKILL.md") && !containsString(entry.Files, entry.Name+".md") {
+		if !slices.Contains(entry.Files, "SKILL.md") && !slices.Contains(entry.Files, entry.Name+".md") {
 			continue
 		}
 		root := filepath.Join(sourceRoot, entry.Name)
@@ -315,15 +316,6 @@ func (d *Discovery) fileExists(path string) bool {
 
 func transientStatus(status int) bool {
 	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 func discoveryHash(value string) string {

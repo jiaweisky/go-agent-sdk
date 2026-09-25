@@ -1,6 +1,6 @@
-// Package ripgrep ports core/ripgrep/binary.ts: it locates a usable ripgrep
-// executable, preferring one already on PATH or previously downloaded, and
-// otherwise fetches the pinned release for the current platform.
+// Package ripgrep locates a usable ripgrep executable, preferring one already
+// on PATH or previously downloaded, and otherwise fetches the pinned release
+// for the current platform.
 package ripgrep
 
 import (
@@ -45,8 +45,8 @@ type binaryService struct {
 	err    error
 }
 
-// NewBinary returns a RipgrepBinary that resolves (and caches) the executable
-// path the way RipgrepBinary.node does in TypeScript.
+// NewBinary returns a RipgrepBinary that resolves and caches the executable
+// path.
 func NewBinary(global core.Global) core.RipgrepBinary {
 	return &binaryService{
 		global: global,

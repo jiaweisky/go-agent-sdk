@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/user/go-agent-sdk/core/util"
 	"github.com/user/go-agent-sdk/schema"
@@ -87,6 +86,14 @@ type PermissionNotFoundError struct {
 
 func (e *PermissionNotFoundError) Error() string {
 	return fmt.Sprintf("permission request not found: %s", e.RequestID)
+}
+
+type PermissionDuplicateError struct {
+	RequestID PermissionID
+}
+
+func (e *PermissionDuplicateError) Error() string {
+	return fmt.Sprintf("duplicate pending permission request: %s", e.RequestID)
 }
 
 type PermissionSessionNotFoundError struct {
@@ -196,24 +203,19 @@ type Permission interface {
 	Close() error
 }
 
-type permissionPending struct {
-	request PermissionRequest
-	agent   *string
-	done    chan error
-	settled bool
-}
+// permissionPending is an in-flight permission request; its meta is the agent
+// the request was evaluated against.
+type permissionPending = pendingEntry[PermissionID, PermissionRequest, error, *string]
 
 type permissionService struct {
 	cfg     PermissionConfig
-	mu      sync.Mutex
-	pending map[PermissionID]*permissionPending
-	closed  bool
+	pending *pendingRegistry[PermissionID, PermissionRequest, error, *string]
 }
 
 func NewPermission(cfg PermissionConfig) Permission {
 	return &permissionService{
 		cfg:     cfg,
-		pending: make(map[PermissionID]*permissionPending),
+		pending: newPendingRegistry[PermissionID, PermissionRequest, error, *string](),
 	}
 }
 
@@ -312,23 +314,16 @@ func permissionRequestFrom(input PermissionAssertInput) PermissionRequest {
 }
 
 func (s *permissionService) create(req PermissionRequest, agent *string) (*permissionPending, error) {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
+	item, closed, duplicate := s.pending.add(req.ID, req, agent)
+	if closed {
 		return nil, &PermissionDeclinedError{}
 	}
-	if _, exists := s.pending[req.ID]; exists {
-		s.mu.Unlock()
-		panic(fmt.Sprintf("Duplicate pending permission ID: %s", req.ID))
+	if duplicate {
+		return nil, &PermissionDuplicateError{RequestID: req.ID}
 	}
-	item := &permissionPending{request: req, agent: agent, done: make(chan error, 1)}
-	s.pending[req.ID] = item
-	s.mu.Unlock()
 
 	if err := s.cfg.Events.PublishAsked(req); err != nil {
-		s.mu.Lock()
-		delete(s.pending, req.ID)
-		s.mu.Unlock()
+		s.pending.finish(req.ID)
 		return nil, err
 	}
 	return item, nil
@@ -364,7 +359,7 @@ func (s *permissionService) Assert(input PermissionAssertInput) error {
 		return err
 	}
 	err = <-item.done
-	s.finish(item.request.ID)
+	s.pending.finish(item.request.ID)
 	return err
 }
 
@@ -380,30 +375,7 @@ func (s *permissionService) Reply(input PermissionReplyInput) error {
 	}
 
 	if input.Reply == PermissionReplyReject {
-		var replyErr error = &PermissionDeclinedError{}
-		if input.Message != nil {
-			replyErr = &PermissionCorrectedError{Feedback: *input.Message}
-		}
-		existing.done <- replyErr
-		s.finish(input.RequestID)
-
-		s.mu.Lock()
-		victims := make([]*permissionPending, 0)
-		for id, item := range s.pending {
-			if item.request.SessionID != existing.request.SessionID || item.settled {
-				continue
-			}
-			item.settled = true
-			victims = append(victims, item)
-			delete(s.pending, id)
-		}
-		s.mu.Unlock()
-
-		for _, item := range victims {
-			s.cfg.Events.PublishReplied(item.request.SessionID, item.request.ID, PermissionReplyReject)
-			item.done <- &PermissionDeclinedError{}
-		}
-		return nil
+		return s.rejectReply(existing, input)
 	}
 
 	if input.Reply == PermissionReplyAlways && len(existing.request.Save) > 0 {
@@ -413,47 +385,45 @@ func (s *permissionService) Reply(input PermissionReplyInput) error {
 		}
 	}
 	existing.done <- nil
-	s.finish(input.RequestID)
+	s.pending.finish(input.RequestID)
 
 	if input.Reply != PermissionReplyAlways || len(existing.request.Save) == 0 {
 		return nil
 	}
+	return s.approveRemembered()
+}
 
+// rejectReply settles the replied request and declines every other pending
+// request of the same session.
+func (s *permissionService) rejectReply(existing *permissionPending, input PermissionReplyInput) error {
+	var replyErr error = &PermissionDeclinedError{}
+	if input.Message != nil {
+		replyErr = &PermissionCorrectedError{Feedback: *input.Message}
+	}
+	existing.done <- replyErr
+	s.pending.finish(existing.id)
+
+	victims := s.pending.takeUnsettled(func(item *permissionPending) bool {
+		return item.request.SessionID == existing.request.SessionID
+	})
+	for _, item := range victims {
+		s.cfg.Events.PublishReplied(item.request.SessionID, item.request.ID, PermissionReplyReject)
+		item.done <- &PermissionDeclinedError{}
+	}
+	return nil
+}
+
+// approveRemembered settles every pending request that the newly saved rules
+// now allow.
+func (s *permissionService) approveRemembered() error {
 	rememberedRules, err := s.savedRules()
 	if err != nil {
 		return err
 	}
 
-	s.mu.Lock()
-	approved := make([]*permissionPending, 0)
-	for id, item := range s.pending {
-		if item.settled {
-			continue
-		}
-		rules, err := s.configured(item.request.SessionID, item.agent)
-		if err != nil {
-			continue
-		}
-		if permissionDenied(item.request.Action, item.request.Resources, rules) {
-			continue
-		}
-		effective := PermissionMerge(rules, rememberedRules)
-		allAllow := true
-		for _, resource := range item.request.Resources {
-			if PermissionEvaluate(item.request.Action, resource, effective).Effect != PermissionEffectAllow {
-				allAllow = false
-				break
-			}
-		}
-		if !allAllow {
-			continue
-		}
-		item.settled = true
-		approved = append(approved, item)
-		delete(s.pending, id)
-	}
-	s.mu.Unlock()
-
+	approved := s.pending.takeUnsettled(func(item *permissionPending) bool {
+		return s.rememberedAllows(item, rememberedRules)
+	})
 	for _, item := range approved {
 		s.cfg.Events.PublishReplied(item.request.SessionID, item.request.ID, PermissionReplyAlways)
 		item.done <- nil
@@ -461,86 +431,62 @@ func (s *permissionService) Reply(input PermissionReplyInput) error {
 	return nil
 }
 
+// rememberedAllows reports whether the remembered rules allow every resource of
+// a pending request that configuration does not already deny.
+func (s *permissionService) rememberedAllows(item *permissionPending, remembered PermissionRuleset) bool {
+	rules, err := s.configured(item.request.SessionID, item.meta)
+	if err != nil {
+		return false
+	}
+	if permissionDenied(item.request.Action, item.request.Resources, rules) {
+		return false
+	}
+	effective := PermissionMerge(rules, remembered)
+	for _, resource := range item.request.Resources {
+		if PermissionEvaluate(item.request.Action, resource, effective).Effect != PermissionEffectAllow {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *permissionService) reserve(id PermissionID) (*permissionPending, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	existing, ok := s.pending[id]
-	if !ok || existing.settled {
+	existing, ok := s.pending.reserve(id)
+	if !ok {
 		return nil, &PermissionNotFoundError{RequestID: id}
 	}
-	existing.settled = true
 	return existing, nil
 }
 
 func (s *permissionService) release(existing *permissionPending) {
-	s.mu.Lock()
-	if s.closed {
-		delete(s.pending, existing.request.ID)
-		s.mu.Unlock()
+	if s.pending.release(existing) {
 		existing.done <- &PermissionDeclinedError{}
-		return
 	}
-	existing.settled = false
-	s.mu.Unlock()
-}
-
-func (s *permissionService) finish(id PermissionID) {
-	s.mu.Lock()
-	delete(s.pending, id)
-	s.mu.Unlock()
 }
 
 // Close declines every pending request with PermissionDeclinedError without
 // publishing an event. It is idempotent.
 func (s *permissionService) Close() error {
-	s.mu.Lock()
-	s.closed = true
-	victims := make([]*permissionPending, 0, len(s.pending))
-	for id, item := range s.pending {
-		if item.settled {
-			continue
-		}
-		item.settled = true
-		victims = append(victims, item)
-		delete(s.pending, id)
-	}
-	s.mu.Unlock()
-
-	for _, item := range victims {
+	for _, item := range s.pending.close() {
 		item.done <- &PermissionDeclinedError{}
 	}
 	return nil
 }
 
 func (s *permissionService) List() []PermissionRequest {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	result := make([]PermissionRequest, 0, len(s.pending))
-	for _, item := range s.pending {
-		result = append(result, item.request)
-	}
-	return result
+	return s.pending.listWhere(func(*permissionPending) bool { return true })
 }
 
 func (s *permissionService) Get(id PermissionID) *PermissionRequest {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	item, ok := s.pending[id]
+	req, ok := s.pending.get(id)
 	if !ok {
 		return nil
 	}
-	req := item.request
 	return &req
 }
 
 func (s *permissionService) ForSession(sessionID string) []PermissionRequest {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var result []PermissionRequest
-	for _, item := range s.pending {
-		if item.request.SessionID == sessionID {
-			result = append(result, item.request)
-		}
-	}
-	return result
+	return s.pending.listWhere(func(item *permissionPending) bool {
+		return item.request.SessionID == sessionID
+	})
 }

@@ -26,8 +26,8 @@ type RepositoryCacheEnsureInput struct {
 	Branch    *string
 }
 
-// RepositoryCache keeps one local checkout per remote and branch.
-// tracking checkouts. Locking is in-process (cross-process flock is not ported).
+// RepositoryCache keeps one local checkout per remote and branch. Locking is
+// in-process only; it does not coordinate across processes.
 type RepositoryCache struct {
 	git     Git
 	repos   string
@@ -83,28 +83,8 @@ func (c *RepositoryCache) ensureLocked(reference, cloneTarget *RepositoryReferen
 		return RepositoryCacheResult{}, err
 	}
 
-	var existing *GitRepository
-	if repository, err := c.git.Repo.Discover(schema.AbsolutePath(localPath)); err == nil {
-		existing = repository
-	}
-
-	origin := ""
-	if existing != nil {
-		origin, _ = c.git.Remote.Get(*existing)
-	}
-	var originReference *RepositoryReference
-	if origin != "" {
-		originReference = RepositoryParse(origin, c.repositoryOptions()...)
-	}
-
-	worktree := ""
-	if existing != nil {
-		if resolved, err := RealPath(localPath); err == nil {
-			worktree = resolved
-		}
-	}
-	reuse := existing != nil && string(existing.Worktree) == worktree &&
-		originReference != nil && RepositorySame(originReference, cloneTarget)
+	existing, originReference := c.discoverExisting(localPath)
+	reuse := c.canReuse(existing, originReference, cloneTarget, localPath)
 
 	if !reuse {
 		if exists, _ := Exists(localPath); exists {
@@ -122,52 +102,86 @@ func (c *RepositoryCache) ensureLocked(reference, cloneTarget *RepositoryReferen
 		status = "refreshed"
 	}
 
-	if status == "cloned" {
+	switch status {
+	case "cloned":
 		if _, err := c.git.Repo.Clone(GitCloneInput{
 			Remote: reference.Remote, Directory: schema.AbsolutePath(localPath), Branch: input.Branch,
 		}); err != nil {
 			return RepositoryCacheResult{}, err
 		}
-	}
-
-	if status == "refreshed" {
-		if existing == nil {
-			return RepositoryCacheResult{}, fmt.Errorf("repository is unavailable")
-		}
-		if err := c.git.Sync.FetchRemotes(*existing); err != nil {
-			return RepositoryCacheResult{}, err
-		}
-		if input.Branch != nil {
-			if err := c.git.Sync.FetchBranch(*existing, GitFetchBranchInput{Branch: *input.Branch}); err != nil {
-				return RepositoryCacheResult{}, err
-			}
-		}
-		branch := ""
-		if input.Branch != nil {
-			branch = *input.Branch
-		} else if value, err := c.git.History.DefaultRemoteBranch(*existing); err == nil {
-			branch = value
-		}
-		if branch != "" {
-			if err := c.git.Sync.CheckoutRemoteBranch(*existing, GitCheckoutRemoteBranchInput{Branch: branch}); err != nil {
-				return RepositoryCacheResult{}, err
-			}
-		}
-		target := branch
-		if target == "" {
-			if value, err := c.git.History.Branch(*existing); err == nil {
-				target = value
-			}
-		}
-		revision := "HEAD"
-		if target != "" {
-			revision = "origin/" + target
-		}
-		if err := c.git.Sync.ResetHard(*existing, revision); err != nil {
+	case "refreshed":
+		if err := c.refreshCheckout(existing, input); err != nil {
 			return RepositoryCacheResult{}, err
 		}
 	}
 
+	return c.result(reference, localPath, status), nil
+}
+
+// discoverExisting opens the cached checkout and parses its origin remote.
+func (c *RepositoryCache) discoverExisting(localPath string) (*GitRepository, *RepositoryReference) {
+	repository, err := c.git.Repo.Discover(schema.AbsolutePath(localPath))
+	if err != nil || repository == nil {
+		return nil, nil
+	}
+	origin, _ := c.git.Remote.Get(*repository)
+	if origin == "" {
+		return repository, nil
+	}
+	return repository, RepositoryParse(origin, c.repositoryOptions()...)
+}
+
+// canReuse reports whether the cached checkout already points at cloneTarget.
+func (c *RepositoryCache) canReuse(existing *GitRepository, origin, cloneTarget *RepositoryReference, localPath string) bool {
+	if existing == nil || origin == nil || !RepositorySame(origin, cloneTarget) {
+		return false
+	}
+	resolved, err := RealPath(localPath)
+	if err != nil {
+		return false
+	}
+	return string(existing.Worktree) == resolved
+}
+
+// refreshCheckout fetches and hard-resets an existing checkout to its branch.
+func (c *RepositoryCache) refreshCheckout(existing *GitRepository, input RepositoryCacheEnsureInput) error {
+	if existing == nil {
+		return fmt.Errorf("repository is unavailable")
+	}
+	if err := c.git.Sync.FetchRemotes(*existing); err != nil {
+		return err
+	}
+	if input.Branch != nil {
+		if err := c.git.Sync.FetchBranch(*existing, GitFetchBranchInput{Branch: *input.Branch}); err != nil {
+			return err
+		}
+	}
+	branch := ""
+	if input.Branch != nil {
+		branch = *input.Branch
+	} else if value, err := c.git.History.DefaultRemoteBranch(*existing); err == nil {
+		branch = value
+	}
+	if branch != "" {
+		if err := c.git.Sync.CheckoutRemoteBranch(*existing, GitCheckoutRemoteBranchInput{Branch: branch}); err != nil {
+			return err
+		}
+	}
+	target := branch
+	if target == "" {
+		if value, err := c.git.History.Branch(*existing); err == nil {
+			target = value
+		}
+	}
+	revision := "HEAD"
+	if target != "" {
+		revision = "origin/" + target
+	}
+	return c.git.Sync.ResetHard(*existing, revision)
+}
+
+// result describes the checkout, resolving its current head and branch.
+func (c *RepositoryCache) result(reference *RepositoryReference, localPath, status string) RepositoryCacheResult {
 	result := RepositoryCacheResult{
 		Repository: reference.Label, Host: reference.Host, Remote: reference.Remote,
 		LocalPath: localPath, Status: status,
@@ -180,5 +194,5 @@ func (c *RepositoryCache) ensureLocked(reference, cloneTarget *RepositoryReferen
 			result.Branch = &branch
 		}
 	}
-	return result, nil
+	return result
 }

@@ -73,6 +73,9 @@ func (s *State[S, D]) Transform(update func(D) error) (func() error, error) {
 	transform := &stateTransform[D]{run: update}
 	s.transforms = append(s.transforms, transform)
 	err := s.reloadLocked()
+	if err != nil {
+		s.removeTransformLocked(transform)
+	}
 	s.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -81,19 +84,23 @@ func (s *State[S, D]) Transform(update func(D) error) (func() error, error) {
 	return func() error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		index := -1
-		for i, item := range s.transforms {
-			if item == transform {
-				index = i
-				break
-			}
-		}
-		if index == -1 {
+		if !s.removeTransformLocked(transform) {
 			return nil
 		}
-		s.transforms = append(s.transforms[:index], s.transforms[index+1:]...)
 		return s.reloadLocked()
 	}, nil
+}
+
+// removeTransformLocked unregisters a transform, reporting whether it was
+// present.
+func (s *State[S, D]) removeTransformLocked(transform *stateTransform[D]) bool {
+	for i, item := range s.transforms {
+		if item == transform {
+			s.transforms = append(s.transforms[:i], s.transforms[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 // StateBatch defers the reloads of the states it covers: a batch is an explicit

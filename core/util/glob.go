@@ -66,103 +66,147 @@ func globPattern(pattern, cwd string, options GlobOptions) ([]string, error) {
 	}
 
 	if !strings.ContainsAny(slashPattern, "*?[{") {
-		full := pattern
-		if !absolute {
-			full = filepath.Join(cwd, full)
-		}
-		info, err := os.Stat(full)
-		if err != nil {
-			return nil, nil
-		}
-		if info.IsDir() && options.Include != "all" {
-			return nil, nil
-		}
-		return []string{format(full)}, nil
+		return globLiteral(pattern, cwd, absolute, options, format)
 	}
 
 	base := cwd
 	if absolute {
 		base = globLiteralBase(pattern)
 	}
-	literals := literalSegments(slashPattern)
-
-	var results []string
-	visited := map[string]struct{}{}
-	var walk func(dir, rel string) error
-	walk = func(dir, rel string) error {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return nil
-		}
-		for _, entry := range entries {
-			name := entry.Name()
-			full := filepath.Join(dir, name)
-			childRel := name
-			if rel != "" {
-				childRel = rel + "/" + name
-			}
-
-			isDir := entry.IsDir()
-			isSymlink := entry.Type()&os.ModeSymlink != 0
-			if isSymlink {
-				target, statErr := os.Stat(full)
-				if statErr != nil {
-					continue
-				}
-				// npm glob only treats a symlink as a directory when it follows
-				// it: with follow:false a symlink is a leaf, so a link to a
-				// directory still matches a nodir (include:"file") pattern.
-				isDir = target.IsDir() && options.Symlink
-			}
-
-			candidate := childRel
-			if absolute {
-				candidate = filepath.ToSlash(full)
-			}
-			allowed := options.Dot || dotAllowed(childRel, literals)
-
-			if allowed {
-				matched, matchErr := doublestar.Match(slashPattern, candidate)
-				if matchErr != nil {
-					return matchErr
-				}
-				if matched && (!isDir || options.Include == "all") {
-					results = append(results, format(full))
-				}
-			}
-
-			if !isDir || !allowed {
-				continue
-			}
-			if isSymlink && !options.Symlink {
-				continue
-			}
-			real := full
-			if isSymlink {
-				if resolved, evalErr := filepath.EvalSymlinks(full); evalErr == nil {
-					real = resolved
-				}
-			}
-			if _, ok := visited[real]; ok {
-				continue
-			}
-			visited[real] = struct{}{}
-			if err := walk(full, childRel); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
 	info, err := os.Stat(base)
 	if err != nil || !info.IsDir() {
 		return nil, nil
 	}
-	visited[base] = struct{}{}
-	if err := walk(base, ""); err != nil {
+	walker := &globWalker{
+		slashPattern: slashPattern,
+		absolute:     absolute,
+		options:      options,
+		literals:     literalSegments(slashPattern),
+		format:       format,
+		visited:      map[string]struct{}{base: {}},
+	}
+	if err := walker.walk(base, ""); err != nil {
 		return nil, err
 	}
-	return results, nil
+	return walker.results, nil
+}
+
+// globLiteral resolves a pattern that contains no wildcard characters.
+func globLiteral(pattern, cwd string, absolute bool, options GlobOptions, format func(string) string) ([]string, error) {
+	full := pattern
+	if !absolute {
+		full = filepath.Join(cwd, full)
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return nil, nil
+	}
+	if info.IsDir() && options.Include != "all" {
+		return nil, nil
+	}
+	return []string{format(full)}, nil
+}
+
+// globWalker walks a directory tree collecting pattern matches.
+type globWalker struct {
+	slashPattern string
+	absolute     bool
+	options      GlobOptions
+	literals     map[string]struct{}
+	format       func(string) string
+	results      []string
+	visited      map[string]struct{}
+}
+
+func (w *globWalker) walk(dir, rel string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if err := w.visit(dir, rel, entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *globWalker) visit(dir, rel string, entry os.DirEntry) error {
+	name := entry.Name()
+	full := filepath.Join(dir, name)
+	childRel := name
+	if rel != "" {
+		childRel = rel + "/" + name
+	}
+
+	isDir, isSymlink, ok := w.entryKind(entry, full)
+	if !ok {
+		return nil
+	}
+	allowed := w.options.Dot || dotAllowed(childRel, w.literals)
+	if allowed {
+		matched, err := w.matches(childRel, full, isDir)
+		if err != nil {
+			return err
+		}
+		if matched {
+			w.results = append(w.results, w.format(full))
+		}
+	}
+
+	if !isDir || !allowed {
+		return nil
+	}
+	if isSymlink && !w.options.Symlink {
+		return nil
+	}
+	return w.descend(full, childRel, isSymlink)
+}
+
+// entryKind reports whether an entry is a traversable directory and whether it
+// is a symlink. ok is false when a symlink's target cannot be read.
+func (w *globWalker) entryKind(entry os.DirEntry, full string) (isDir, isSymlink, ok bool) {
+	isDir = entry.IsDir()
+	isSymlink = entry.Type()&os.ModeSymlink != 0
+	if !isSymlink {
+		return isDir, false, true
+	}
+	target, err := os.Stat(full)
+	if err != nil {
+		return false, true, false
+	}
+	// npm glob only treats a symlink as a directory when it follows it: with
+	// follow:false a symlink is a leaf, so a link to a directory still matches a
+	// nodir (include:"file") pattern.
+	return target.IsDir() && w.options.Symlink, true, true
+}
+
+// matches reports whether the entry matches the pattern and is includable.
+func (w *globWalker) matches(childRel, full string, isDir bool) (bool, error) {
+	candidate := childRel
+	if w.absolute {
+		candidate = filepath.ToSlash(full)
+	}
+	matched, err := doublestar.Match(w.slashPattern, candidate)
+	if err != nil {
+		return false, err
+	}
+	return matched && (!isDir || w.options.Include == "all"), nil
+}
+
+// descend recurses into a directory unless its real path was already visited.
+func (w *globWalker) descend(full, childRel string, isSymlink bool) error {
+	real := full
+	if isSymlink {
+		if resolved, err := filepath.EvalSymlinks(full); err == nil {
+			real = resolved
+		}
+	}
+	if _, ok := w.visited[real]; ok {
+		return nil
+	}
+	w.visited[real] = struct{}{}
+	return w.walk(full, childRel)
 }
 
 // globLiteralBase returns the longest directory prefix of an absolute pattern

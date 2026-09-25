@@ -44,11 +44,11 @@ func TestRipgrepGlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
-	got := map[string]string{}
+	got := map[string]FileKind{}
 	for _, entry := range entries {
 		got[entry.Path] = entry.Type
 	}
-	if len(got) != 2 || got["a.go"] != "file" || got["sub/b.go"] != "file" {
+	if len(got) != 2 || got["a.go"] != FileKindFile || got["sub/b.go"] != FileKindFile {
 		t.Fatalf("unexpected entries: %v", got)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -285,7 +286,7 @@ func TestDiscoveryVersionRefresh(t *testing.T) {
 	if content, _ := os.ReadFile(filepath.Join(string(first[0]), "SKILL.md")); string(content) != "# New" {
 		t.Fatalf("SKILL.md = %q", content)
 	}
-	if got := server.recorded(); !containsString(got, "/catalog/deploy/SKILL.md") {
+	if got := server.recorded(); !slices.Contains(got, "/catalog/deploy/SKILL.md") {
 		t.Fatalf("expected refresh request, got %v", got)
 	}
 

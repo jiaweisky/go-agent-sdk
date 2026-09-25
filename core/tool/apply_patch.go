@@ -136,168 +136,184 @@ func (r *applyPatchRun) fail(path string) error {
 	return &Failure{Message: prefix}
 }
 
+// applyPatchTarget pairs a parsed hunk with its resolved mutation target.
+type applyPatchTarget struct {
+	hunk   core.PatchHunk
+	target *core.LocationMutationTarget
+}
+
 func (r *applyPatchRun) run(input ApplyPatchInput) (ApplyPatchOutput, error) {
-	ctx := r.ctx
 	source := &core.PermissionSource{
 		Type:      core.PermissionSourceTypeTool,
-		MessageID: ctx.AssistantMessageID,
-		CallID:    ctx.ToolCallID,
+		MessageID: r.ctx.AssistantMessageID,
+		CallID:    r.ctx.ToolCallID,
 	}
 
-	if strings.TrimSpace(input.PatchText) == "" {
-		return ApplyPatchOutput{}, &Failure{Message: "patchText is required"}
-	}
-	hunks, err := core.PatchParse(input.PatchText)
+	hunks, err := r.parsePatch(input)
 	if err != nil {
-		return ApplyPatchOutput{}, &Failure{Message: fmt.Sprintf("apply_patch verification failed: %s", err)}
+		return ApplyPatchOutput{}, err
 	}
-	if len(hunks) == 0 {
-		return ApplyPatchOutput{}, &Failure{Message: "patch rejected: empty patch"}
+	targets, err := r.resolveTargets(hunks)
+	if err != nil {
+		return ApplyPatchOutput{}, err
 	}
-	for _, hunk := range hunks {
-		if update, ok := hunk.(core.PatchUpdateHunk); ok && update.MovePath != nil {
-			return ApplyPatchOutput{}, &Failure{Message: "apply_patch moves are not supported yet"}
-		}
+	if err := r.assertExternalPermissions(targets, source); err != nil {
+		return ApplyPatchOutput{}, err
 	}
-
-	type targetEntry struct {
-		hunk   core.PatchHunk
-		target *core.LocationMutationTarget
+	if err := r.assertEditPermission(targets, source); err != nil {
+		return ApplyPatchOutput{}, err
 	}
-	kind := core.LocationMutationKindFile
-	targets := make([]targetEntry, 0, len(hunks))
-	for _, hunk := range hunks {
-		target, err := r.deps.Mutation.Resolve(core.LocationMutationResolveInput{
-			Path: patchHunkPath(hunk),
-			Kind: &kind,
-		})
-		if err != nil {
-			return ApplyPatchOutput{}, r.fail("patch")
-		}
-		targets = append(targets, targetEntry{hunk: hunk, target: target})
-	}
-
-	var externalOrder []string
-	externalDirectories := make(map[string]core.LocationMutationExternalDirectoryAuthorization)
-	for _, entry := range targets {
-		if external := entry.target.ExternalDirectory; external != nil {
-			if _, ok := externalDirectories[external.Resource]; !ok {
-				externalOrder = append(externalOrder, external.Resource)
-			}
-			externalDirectories[external.Resource] = *external
-		}
-	}
-	for _, key := range externalOrder {
-		externalPermission := core.LocationMutationExternalDirectoryPermission(externalDirectories[key])
-		if err := r.deps.Permission.Assert(core.PermissionAssertInput{
-			SessionID: ctx.SessionID,
-			Action:    externalPermission.Action,
-			Resources: externalPermission.Resources,
-			Save:      externalPermission.Save,
-			Source:    source,
-			Agent:     &ctx.Agent,
-		}); err != nil {
-			if decline := userDecline(err); decline != nil {
-				return ApplyPatchOutput{}, decline
-			}
-			return ApplyPatchOutput{}, r.fail("patch")
-		}
-	}
-
-	var editResources []string
-	seen := make(map[string]bool)
-	for _, entry := range targets {
-		if !seen[entry.target.Resource] {
-			seen[entry.target.Resource] = true
-			editResources = append(editResources, entry.target.Resource)
-		}
-	}
-	if err := r.deps.Permission.Assert(core.PermissionAssertInput{
-		SessionID: ctx.SessionID,
-		Action:    "edit",
-		Resources: editResources,
-		Save:      []string{"*"},
-		Source:    source,
-		Agent:     &ctx.Agent,
-	}); err != nil {
-		if decline := userDecline(err); decline != nil {
-			return ApplyPatchOutput{}, decline
-		}
-		return ApplyPatchOutput{}, r.fail("patch")
-	}
-
-	prepared := make([]applyPatchPrepared, 0, len(targets))
-	for _, entry := range targets {
-		change, err := prepareApplyPatch(entry.hunk, entry.target)
-		if err != nil {
-			return ApplyPatchOutput{}, r.fail(patchHunkPath(entry.hunk))
-		}
-		prepared = append(prepared, change)
+	prepared, err := r.prepareChanges(targets)
+	if err != nil {
+		return ApplyPatchOutput{}, err
 	}
 
 	patchFiles := make([]coreschema.FileDiffInfo, len(prepared))
 	for i, change := range prepared {
 		patchFiles[i] = applyPatchFile(change)
 	}
-
 	for _, change := range prepared {
-		switch change.hunk.(type) {
-		case core.PatchAddHunk:
-			content := change.contents
-			if !strings.HasSuffix(content, "\n") && content != "" {
-				content += "\n"
-			}
-			result, err := r.deps.Files.Create(core.FileMutationWriteInput{
-				Target: core.FileMutationTarget{
-					Canonical: change.target.Canonical,
-					Resource:  change.target.Resource,
-				},
-				Content: []byte(content),
-			})
-			if err != nil {
-				return ApplyPatchOutput{}, r.fail(change.path)
-			}
-			r.applied = append(r.applied, ApplyPatchApplied{
-				Type:     "add",
-				Resource: result.Resource,
-				Target:   result.Target,
-			})
-		case core.PatchDeleteHunk:
-			result, err := r.deps.Files.Remove(core.FileMutationRemoveInput{
-				Target: core.FileMutationTarget{
-					Canonical: change.target.Canonical,
-					Resource:  change.target.Resource,
-				},
-			})
-			if err != nil {
-				return ApplyPatchOutput{}, r.fail(change.path)
-			}
-			r.applied = append(r.applied, ApplyPatchApplied{
-				Type:     "delete",
-				Resource: result.Resource,
-				Target:   result.Target,
-			})
-		default:
-			result, err := r.deps.Files.WriteIfUnchanged(core.FileMutationConditionalWriteInput{
-				Target: core.FileMutationTarget{
-					Canonical: change.target.Canonical,
-					Resource:  change.target.Resource,
-				},
-				Expected: change.source,
-				Content:  []byte(change.content),
-			})
-			if err != nil {
-				return ApplyPatchOutput{}, r.fail(change.path)
-			}
-			r.applied = append(r.applied, ApplyPatchApplied{
-				Type:     "update",
-				Resource: result.Resource,
-				Target:   result.Target,
-			})
+		if err := r.applyChange(change); err != nil {
+			return ApplyPatchOutput{}, err
 		}
 	}
-
 	return ApplyPatchOutput{Applied: r.applied, Files: patchFiles}, nil
+}
+
+// parsePatch validates the patch text and rejects unsupported moves.
+func (r *applyPatchRun) parsePatch(input ApplyPatchInput) ([]core.PatchHunk, error) {
+	if strings.TrimSpace(input.PatchText) == "" {
+		return nil, &Failure{Message: "patchText is required"}
+	}
+	hunks, err := core.PatchParse(input.PatchText)
+	if err != nil {
+		return nil, &Failure{Message: fmt.Sprintf("apply_patch verification failed: %s", err)}
+	}
+	if len(hunks) == 0 {
+		return nil, &Failure{Message: "patch rejected: empty patch"}
+	}
+	for _, hunk := range hunks {
+		if update, ok := hunk.(core.PatchUpdateHunk); ok && update.MovePath != nil {
+			return nil, &Failure{Message: "apply_patch moves are not supported yet"}
+		}
+	}
+	return hunks, nil
+}
+
+func (r *applyPatchRun) resolveTargets(hunks []core.PatchHunk) ([]applyPatchTarget, error) {
+	kind := core.LocationMutationKindFile
+	targets := make([]applyPatchTarget, 0, len(hunks))
+	for _, hunk := range hunks {
+		target, err := r.deps.Mutation.Resolve(core.LocationMutationResolveInput{
+			Path: patchHunkPath(hunk),
+			Kind: &kind,
+		})
+		if err != nil {
+			return nil, r.fail("patch")
+		}
+		targets = append(targets, applyPatchTarget{hunk: hunk, target: target})
+	}
+	return targets, nil
+}
+
+func (r *applyPatchRun) assertExternalPermissions(targets []applyPatchTarget, source *core.PermissionSource) error {
+	var order []string
+	directories := make(map[string]core.LocationMutationExternalDirectoryAuthorization)
+	for _, entry := range targets {
+		if external := entry.target.ExternalDirectory; external != nil {
+			if _, ok := directories[external.Resource]; !ok {
+				order = append(order, external.Resource)
+			}
+			directories[external.Resource] = *external
+		}
+	}
+	for _, key := range order {
+		permission := core.LocationMutationExternalDirectoryPermission(directories[key])
+		if err := r.deps.Permission.Assert(core.PermissionAssertInput{
+			SessionID: r.ctx.SessionID,
+			Action:    permission.Action,
+			Resources: permission.Resources,
+			Save:      permission.Save,
+			Source:    source,
+			Agent:     &r.ctx.Agent,
+		}); err != nil {
+			return r.permissionError(err)
+		}
+	}
+	return nil
+}
+
+func (r *applyPatchRun) assertEditPermission(targets []applyPatchTarget, source *core.PermissionSource) error {
+	var resources []string
+	seen := make(map[string]bool)
+	for _, entry := range targets {
+		if !seen[entry.target.Resource] {
+			seen[entry.target.Resource] = true
+			resources = append(resources, entry.target.Resource)
+		}
+	}
+	if err := r.deps.Permission.Assert(core.PermissionAssertInput{
+		SessionID: r.ctx.SessionID,
+		Action:    "edit",
+		Resources: resources,
+		Save:      []string{"*"},
+		Source:    source,
+		Agent:     &r.ctx.Agent,
+	}); err != nil {
+		return r.permissionError(err)
+	}
+	return nil
+}
+
+// permissionError surfaces a user decline unchanged, otherwise a patch failure.
+func (r *applyPatchRun) permissionError(err error) error {
+	if decline := userDecline(err); decline != nil {
+		return decline
+	}
+	return r.fail("patch")
+}
+
+func (r *applyPatchRun) prepareChanges(targets []applyPatchTarget) ([]applyPatchPrepared, error) {
+	prepared := make([]applyPatchPrepared, 0, len(targets))
+	for _, entry := range targets {
+		change, err := prepareApplyPatch(entry.hunk, entry.target)
+		if err != nil {
+			return nil, r.fail(patchHunkPath(entry.hunk))
+		}
+		prepared = append(prepared, change)
+	}
+	return prepared, nil
+}
+
+func (r *applyPatchRun) applyChange(change applyPatchPrepared) error {
+	target := core.FileMutationTarget{Canonical: change.target.Canonical, Resource: change.target.Resource}
+	switch change.hunk.(type) {
+	case core.PatchAddHunk:
+		content := change.contents
+		if !strings.HasSuffix(content, "\n") && content != "" {
+			content += "\n"
+		}
+		result, err := r.deps.Files.Create(core.FileMutationWriteInput{Target: target, Content: []byte(content)})
+		if err != nil {
+			return r.fail(change.path)
+		}
+		r.applied = append(r.applied, ApplyPatchApplied{Type: "add", Resource: result.Resource, Target: result.Target})
+	case core.PatchDeleteHunk:
+		result, err := r.deps.Files.Remove(core.FileMutationRemoveInput{Target: target})
+		if err != nil {
+			return r.fail(change.path)
+		}
+		r.applied = append(r.applied, ApplyPatchApplied{Type: "delete", Resource: result.Resource, Target: result.Target})
+	default:
+		result, err := r.deps.Files.WriteIfUnchanged(core.FileMutationConditionalWriteInput{
+			Target: target, Expected: change.source, Content: []byte(change.content),
+		})
+		if err != nil {
+			return r.fail(change.path)
+		}
+		r.applied = append(r.applied, ApplyPatchApplied{Type: "update", Resource: result.Resource, Target: result.Target})
+	}
+	return nil
 }
 
 type applyPatchPrepared struct {
@@ -375,7 +391,7 @@ func applyPatchAssertFile(path string) error {
 	if err != nil {
 		return err
 	}
-	if info.Type != "File" {
+	if info.Type != core.FileKindFile {
 		return fmt.Errorf("not a file: %s", path)
 	}
 	return nil

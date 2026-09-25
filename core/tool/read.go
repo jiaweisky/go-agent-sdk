@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"errors"
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/jsonschema"
@@ -174,10 +173,6 @@ func executeRead(deps ReadDeps, input ReadInput, ctx Context) (any, error) {
 	if fileContent.Encoding == "base64" && readSupportedImageMIMEs[fileContent.MIME] {
 		normalized, nerr := deps.Image.Normalize(resource, fileContent)
 		if nerr != nil {
-			var unavailable *core.ImageResizerUnavailableError
-			if errors.As(nerr, &unavailable) {
-				return fileContent, nil
-			}
 			return nil, nerr
 		}
 		return normalized, nil

@@ -278,227 +278,270 @@ func (p *LLMEventPublisher) endToolInput(id, name string) error {
 	return p.toolInput.End(id, nil)
 }
 
-// Publish folds one LLM event into the session's stored state and events.
+// Publish folds one LLM event into the session's stored state and events. Step
+// start and finish events carry no state and are ignored.
 func (p *LLMEventPublisher) Publish(event llmschema.LLMEvent, outputPaths []string) error {
-	switch event.Type {
-	case llmschema.EventStepStart:
-		return nil
-	case llmschema.EventTextStart:
-		if err := p.text.Start(event.ID); err != nil {
-			return err
-		}
-		assistantID, err := p.StartAssistant()
-		if err != nil {
-			return err
-		}
-		_, err = p.events.Publish(schema.SessionEventTextStarted, map[string]any{
-			"sessionID":          p.input.SessionID,
-			"assistantMessageID": assistantID,
-			"timestamp":          time.Now().UnixMilli(),
-			"textID":             event.ID,
-		})
-		return err
-	case llmschema.EventTextDelta:
-		if err := p.text.Append(event.ID, event.Text); err != nil {
-			return err
-		}
-		assistantID, err := p.currentAssistantMessageID()
-		if err != nil {
-			return err
-		}
-		_, err = p.events.Publish(schema.SessionEventTextDelta, map[string]any{
-			"sessionID":          p.input.SessionID,
-			"assistantMessageID": assistantID,
-			"timestamp":          time.Now().UnixMilli(),
-			"textID":             event.ID,
-			"delta":              event.Text,
-		})
-		return err
-	case llmschema.EventTextEnd:
-		return p.text.End(event.ID, nil)
-	case llmschema.EventReasoningStart:
-		if err := p.reasoning.Start(event.ID); err != nil {
-			return err
-		}
-		assistantID, err := p.StartAssistant()
-		if err != nil {
-			return err
-		}
-		data := map[string]any{
-			"sessionID":          p.input.SessionID,
-			"assistantMessageID": assistantID,
-			"timestamp":          time.Now().UnixMilli(),
-			"reasoningID":        event.ID,
-		}
-		if event.ProviderMetadata != nil {
-			data["providerMetadata"] = event.ProviderMetadata
-		}
-		_, err = p.events.Publish(schema.SessionEventReasoningStarted, data)
-		return err
-	case llmschema.EventReasoningDelta:
-		if err := p.reasoning.Append(event.ID, event.Text); err != nil {
-			return err
-		}
-		assistantID, err := p.currentAssistantMessageID()
-		if err != nil {
-			return err
-		}
-		_, err = p.events.Publish(schema.SessionEventReasoningDelta, map[string]any{
-			"sessionID":          p.input.SessionID,
-			"assistantMessageID": assistantID,
-			"timestamp":          time.Now().UnixMilli(),
-			"reasoningID":        event.ID,
-			"delta":              event.Text,
-		})
-		return err
-	case llmschema.EventReasoningEnd:
-		return p.reasoning.End(event.ID, event.ProviderMetadata)
-	case llmschema.EventToolInputStart:
-		return p.startToolInput(event.ID, event.Name)
-	case llmschema.EventToolInputDelta:
-		tool := p.tools[event.ID]
-		if tool == nil {
-			return errors.New("Tool input delta before start: " + event.ID)
-		}
-		if tool.Name != event.Name {
-			return fmt.Errorf("Tool input name changed for %s: %s -> %s", event.ID, tool.Name, event.Name)
-		}
-		if tool.InputEnded {
-			return errors.New("Tool input delta after end: " + event.ID)
-		}
-		if err := p.toolInput.Append(event.ID, event.Text); err != nil {
-			return err
-		}
-		_, err := p.events.Publish(schema.SessionEventToolInputDelta, map[string]any{
-			"sessionID":          p.input.SessionID,
-			"timestamp":          time.Now().UnixMilli(),
-			"assistantMessageID": tool.AssistantMessageID,
-			"callID":             event.ID,
-			"delta":              event.Text,
-		})
-		return err
-	case llmschema.EventToolInputEnd:
-		return p.endToolInput(event.ID, event.Name)
-	case llmschema.EventToolCall:
-		if _, ok := p.tools[event.ID]; !ok {
-			if err := p.startToolInput(event.ID, event.Name); err != nil {
-				return err
-			}
-		}
-		tool := p.tools[event.ID]
-		if !tool.InputEnded {
-			if err := p.endToolInput(event.ID, event.Name); err != nil {
-				return err
-			}
-		}
-		if tool.Name != event.Name {
-			return fmt.Errorf("Tool call name changed for %s: %s -> %s", event.ID, tool.Name, event.Name)
-		}
-		if tool.Called {
-			return errors.New("Duplicate tool call: " + event.ID)
-		}
-		tool.Called = true
-		tool.ProviderExecuted = event.ProviderExecuted != nil && *event.ProviderExecuted
-		tool.ProviderMetadata = event.ProviderMetadata
-		_, err := p.events.Publish(schema.SessionEventToolCalled, map[string]any{
-			"sessionID":          p.input.SessionID,
-			"timestamp":          time.Now().UnixMilli(),
-			"assistantMessageID": tool.AssistantMessageID,
-			"callID":             event.ID,
-			"tool":               event.Name,
-			"input":              runnerRecord(event.Input),
-			"provider":           llmToolProvider(tool.ProviderExecuted, event.ProviderMetadata),
-		})
-		return err
-	case llmschema.EventToolResult:
-		tool := p.tools[event.ID]
-		if tool == nil || !tool.Called {
-			return errors.New("Tool result before call: " + event.ID)
-		}
-		if tool.Name != event.Name {
-			return fmt.Errorf("Tool result name changed for %s: %s -> %s", event.ID, tool.Name, event.Name)
-		}
-		if tool.Settled {
-			if event.Result.Type == "error" {
-				return nil
-			}
-			return errors.New("Duplicate tool result: " + event.ID)
-		}
-		tool.Settled = true
-		result, err := runnerSettledOutput(event.Output, event.Result)
-		if err != nil {
-			return err
-		}
-		providerExecuted := (event.ProviderExecuted != nil && *event.ProviderExecuted) || tool.ProviderExecuted
-		provider := llmToolProvider(providerExecuted, event.ProviderMetadata)
-		if result.Error != nil {
-			_, err = p.events.Publish(schema.SessionEventToolFailed, map[string]any{
-				"sessionID":          p.input.SessionID,
-				"timestamp":          time.Now().UnixMilli(),
-				"assistantMessageID": tool.AssistantMessageID,
-				"callID":             event.ID,
-				"error":              *result.Error,
-				"result":             event.Result,
-				"provider":           provider,
-			})
-			return err
-		}
-		data := map[string]any{
-			"sessionID":          p.input.SessionID,
-			"timestamp":          time.Now().UnixMilli(),
-			"assistantMessageID": tool.AssistantMessageID,
-			"callID":             event.ID,
-			"structured":         result.Structured,
-			"content":            result.Content,
-			"outputPaths":        outputPaths,
-			"provider":           provider,
-		}
-		if providerExecuted {
-			data["result"] = event.Result
-		}
-		_, err = p.events.Publish(schema.SessionEventToolSuccess, data)
-		return err
-	case llmschema.EventToolError:
-		tool := p.tools[event.ID]
-		if tool == nil || !tool.Called {
-			return errors.New("Tool error before call: " + event.ID)
-		}
-		if tool.Name != event.Name {
-			return fmt.Errorf("Tool error name changed for %s: %s -> %s", event.ID, tool.Name, event.Name)
-		}
-		if tool.Settled {
-			return errors.New("Duplicate tool error: " + event.ID)
-		}
-		tool.Settled = true
-		_, err := p.events.Publish(schema.SessionEventToolFailed, map[string]any{
-			"sessionID":          p.input.SessionID,
-			"timestamp":          time.Now().UnixMilli(),
-			"assistantMessageID": tool.AssistantMessageID,
-			"callID":             event.ID,
-			"error":              schema.SessionMessageUnknownError{Type: "unknown", Message: event.Message},
-			"provider":           llmToolProvider(tool.ProviderExecuted, event.ProviderMetadata),
-		})
-		return err
-	case llmschema.EventStepFinish:
-		if err := p.Flush(); err != nil {
-			return err
-		}
-		p.assistantActive = false
-		if p.stepSettlement != nil {
-			return errors.New("Duplicate step finish")
-		}
-		p.stepSettlement = &LLMEventStepSettlement{
-			Finish: string(event.Reason),
-			Tokens: llmTokensFromUsage(event.Usage),
-		}
-		return nil
-	case llmschema.EventFinish:
-		return nil
-	case llmschema.EventProviderError:
-		p.providerFailed = true
-		return p.FailAssistant(event.Message)
+	if handler, ok := llmEventHandlers[event.Type]; ok {
+		return handler(p, event, outputPaths)
 	}
 	return nil
+}
+
+var llmEventHandlers = map[llmschema.LLMEventType]func(*LLMEventPublisher, llmschema.LLMEvent, []string) error{
+	llmschema.EventTextStart:      (*LLMEventPublisher).publishTextStart,
+	llmschema.EventTextDelta:      (*LLMEventPublisher).publishTextDelta,
+	llmschema.EventTextEnd:        (*LLMEventPublisher).publishTextEnd,
+	llmschema.EventReasoningStart: (*LLMEventPublisher).publishReasoningStart,
+	llmschema.EventReasoningDelta: (*LLMEventPublisher).publishReasoningDelta,
+	llmschema.EventReasoningEnd:   (*LLMEventPublisher).publishReasoningEnd,
+	llmschema.EventToolInputStart: (*LLMEventPublisher).publishToolInputStart,
+	llmschema.EventToolInputDelta: (*LLMEventPublisher).publishToolInputDelta,
+	llmschema.EventToolInputEnd:   (*LLMEventPublisher).publishToolInputEnd,
+	llmschema.EventToolCall:       (*LLMEventPublisher).publishToolCall,
+	llmschema.EventToolResult:     (*LLMEventPublisher).publishToolResult,
+	llmschema.EventToolError:      (*LLMEventPublisher).publishToolError,
+	llmschema.EventStepFinish:     (*LLMEventPublisher).publishStepFinish,
+	llmschema.EventProviderError:  (*LLMEventPublisher).publishProviderError,
+}
+
+func (p *LLMEventPublisher) publishTextStart(event llmschema.LLMEvent, _ []string) error {
+	if err := p.text.Start(event.ID); err != nil {
+		return err
+	}
+	assistantID, err := p.StartAssistant()
+	if err != nil {
+		return err
+	}
+	_, err = p.events.Publish(schema.SessionEventTextStarted, map[string]any{
+		"sessionID":          p.input.SessionID,
+		"assistantMessageID": assistantID,
+		"timestamp":          time.Now().UnixMilli(),
+		"textID":             event.ID,
+	})
+	return err
+}
+
+func (p *LLMEventPublisher) publishTextDelta(event llmschema.LLMEvent, _ []string) error {
+	if err := p.text.Append(event.ID, event.Text); err != nil {
+		return err
+	}
+	assistantID, err := p.currentAssistantMessageID()
+	if err != nil {
+		return err
+	}
+	_, err = p.events.Publish(schema.SessionEventTextDelta, map[string]any{
+		"sessionID":          p.input.SessionID,
+		"assistantMessageID": assistantID,
+		"timestamp":          time.Now().UnixMilli(),
+		"textID":             event.ID,
+		"delta":              event.Text,
+	})
+	return err
+}
+
+func (p *LLMEventPublisher) publishTextEnd(event llmschema.LLMEvent, _ []string) error {
+	return p.text.End(event.ID, nil)
+}
+
+func (p *LLMEventPublisher) publishReasoningStart(event llmschema.LLMEvent, _ []string) error {
+	if err := p.reasoning.Start(event.ID); err != nil {
+		return err
+	}
+	assistantID, err := p.StartAssistant()
+	if err != nil {
+		return err
+	}
+	data := map[string]any{
+		"sessionID":          p.input.SessionID,
+		"assistantMessageID": assistantID,
+		"timestamp":          time.Now().UnixMilli(),
+		"reasoningID":        event.ID,
+	}
+	if event.ProviderMetadata != nil {
+		data["providerMetadata"] = event.ProviderMetadata
+	}
+	_, err = p.events.Publish(schema.SessionEventReasoningStarted, data)
+	return err
+}
+
+func (p *LLMEventPublisher) publishReasoningDelta(event llmschema.LLMEvent, _ []string) error {
+	if err := p.reasoning.Append(event.ID, event.Text); err != nil {
+		return err
+	}
+	assistantID, err := p.currentAssistantMessageID()
+	if err != nil {
+		return err
+	}
+	_, err = p.events.Publish(schema.SessionEventReasoningDelta, map[string]any{
+		"sessionID":          p.input.SessionID,
+		"assistantMessageID": assistantID,
+		"timestamp":          time.Now().UnixMilli(),
+		"reasoningID":        event.ID,
+		"delta":              event.Text,
+	})
+	return err
+}
+
+func (p *LLMEventPublisher) publishReasoningEnd(event llmschema.LLMEvent, _ []string) error {
+	return p.reasoning.End(event.ID, event.ProviderMetadata)
+}
+
+func (p *LLMEventPublisher) publishToolInputStart(event llmschema.LLMEvent, _ []string) error {
+	return p.startToolInput(event.ID, event.Name)
+}
+
+func (p *LLMEventPublisher) publishToolInputDelta(event llmschema.LLMEvent, _ []string) error {
+	tool := p.tools[event.ID]
+	if tool == nil {
+		return errors.New("Tool input delta before start: " + event.ID)
+	}
+	if tool.Name != event.Name {
+		return fmt.Errorf("Tool input name changed for %s: %s -> %s", event.ID, tool.Name, event.Name)
+	}
+	if tool.InputEnded {
+		return errors.New("Tool input delta after end: " + event.ID)
+	}
+	if err := p.toolInput.Append(event.ID, event.Text); err != nil {
+		return err
+	}
+	_, err := p.events.Publish(schema.SessionEventToolInputDelta, map[string]any{
+		"sessionID":          p.input.SessionID,
+		"timestamp":          time.Now().UnixMilli(),
+		"assistantMessageID": tool.AssistantMessageID,
+		"callID":             event.ID,
+		"delta":              event.Text,
+	})
+	return err
+}
+
+func (p *LLMEventPublisher) publishToolInputEnd(event llmschema.LLMEvent, _ []string) error {
+	return p.endToolInput(event.ID, event.Name)
+}
+
+func (p *LLMEventPublisher) publishToolCall(event llmschema.LLMEvent, _ []string) error {
+	if _, ok := p.tools[event.ID]; !ok {
+		if err := p.startToolInput(event.ID, event.Name); err != nil {
+			return err
+		}
+	}
+	tool := p.tools[event.ID]
+	if !tool.InputEnded {
+		if err := p.endToolInput(event.ID, event.Name); err != nil {
+			return err
+		}
+	}
+	if tool.Name != event.Name {
+		return fmt.Errorf("Tool call name changed for %s: %s -> %s", event.ID, tool.Name, event.Name)
+	}
+	if tool.Called {
+		return errors.New("Duplicate tool call: " + event.ID)
+	}
+	tool.Called = true
+	tool.ProviderExecuted = event.ProviderExecuted != nil && *event.ProviderExecuted
+	tool.ProviderMetadata = event.ProviderMetadata
+	_, err := p.events.Publish(schema.SessionEventToolCalled, map[string]any{
+		"sessionID":          p.input.SessionID,
+		"timestamp":          time.Now().UnixMilli(),
+		"assistantMessageID": tool.AssistantMessageID,
+		"callID":             event.ID,
+		"tool":               event.Name,
+		"input":              runnerRecord(event.Input),
+		"provider":           llmToolProvider(tool.ProviderExecuted, event.ProviderMetadata),
+	})
+	return err
+}
+
+func (p *LLMEventPublisher) publishToolResult(event llmschema.LLMEvent, outputPaths []string) error {
+	tool := p.tools[event.ID]
+	if tool == nil || !tool.Called {
+		return errors.New("Tool result before call: " + event.ID)
+	}
+	if tool.Name != event.Name {
+		return fmt.Errorf("Tool result name changed for %s: %s -> %s", event.ID, tool.Name, event.Name)
+	}
+	if tool.Settled {
+		if event.Result.Type == "error" {
+			return nil
+		}
+		return errors.New("Duplicate tool result: " + event.ID)
+	}
+	tool.Settled = true
+	result, err := runnerSettledOutput(event.Output, event.Result)
+	if err != nil {
+		return err
+	}
+	providerExecuted := (event.ProviderExecuted != nil && *event.ProviderExecuted) || tool.ProviderExecuted
+	provider := llmToolProvider(providerExecuted, event.ProviderMetadata)
+	if result.Error != nil {
+		_, err = p.events.Publish(schema.SessionEventToolFailed, map[string]any{
+			"sessionID":          p.input.SessionID,
+			"timestamp":          time.Now().UnixMilli(),
+			"assistantMessageID": tool.AssistantMessageID,
+			"callID":             event.ID,
+			"error":              *result.Error,
+			"result":             event.Result,
+			"provider":           provider,
+		})
+		return err
+	}
+	data := map[string]any{
+		"sessionID":          p.input.SessionID,
+		"timestamp":          time.Now().UnixMilli(),
+		"assistantMessageID": tool.AssistantMessageID,
+		"callID":             event.ID,
+		"structured":         result.Structured,
+		"content":            result.Content,
+		"outputPaths":        outputPaths,
+		"provider":           provider,
+	}
+	if providerExecuted {
+		data["result"] = event.Result
+	}
+	_, err = p.events.Publish(schema.SessionEventToolSuccess, data)
+	return err
+}
+
+func (p *LLMEventPublisher) publishToolError(event llmschema.LLMEvent, _ []string) error {
+	tool := p.tools[event.ID]
+	if tool == nil || !tool.Called {
+		return errors.New("Tool error before call: " + event.ID)
+	}
+	if tool.Name != event.Name {
+		return fmt.Errorf("Tool error name changed for %s: %s -> %s", event.ID, tool.Name, event.Name)
+	}
+	if tool.Settled {
+		return errors.New("Duplicate tool error: " + event.ID)
+	}
+	tool.Settled = true
+	_, err := p.events.Publish(schema.SessionEventToolFailed, map[string]any{
+		"sessionID":          p.input.SessionID,
+		"timestamp":          time.Now().UnixMilli(),
+		"assistantMessageID": tool.AssistantMessageID,
+		"callID":             event.ID,
+		"error":              schema.SessionMessageUnknownError{Type: "unknown", Message: event.Message},
+		"provider":           llmToolProvider(tool.ProviderExecuted, event.ProviderMetadata),
+	})
+	return err
+}
+
+func (p *LLMEventPublisher) publishStepFinish(event llmschema.LLMEvent, _ []string) error {
+	if err := p.Flush(); err != nil {
+		return err
+	}
+	p.assistantActive = false
+	if p.stepSettlement != nil {
+		return errors.New("Duplicate step finish")
+	}
+	p.stepSettlement = &LLMEventStepSettlement{
+		Finish: string(event.Reason),
+		Tokens: llmTokensFromUsage(event.Usage),
+	}
+	return nil
+}
+
+func (p *LLMEventPublisher) publishProviderError(event llmschema.LLMEvent, _ []string) error {
+	p.providerFailed = true
+	return p.FailAssistant(event.Message)
 }
 
 type llmSettledOutput struct {

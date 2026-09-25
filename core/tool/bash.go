@@ -311,7 +311,7 @@ func executeBash(deps BashDeps, execCtx context.Context, input BashInput, ctx Co
 	if err != nil {
 		return BashOutput{}, err
 	}
-	if info.Type != "Directory" {
+	if info.Type != core.FileKindDirectory {
 		return BashOutput{}, fmt.Errorf("Working directory is not a directory: %s", target.Canonical)
 	}
 

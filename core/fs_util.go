@@ -29,16 +29,28 @@ func (e *FileSystemError) Unwrap() error {
 	return e.Cause
 }
 
+// FileKind classifies a filesystem entry.
+type FileKind string
+
+const (
+	FileKindFile      FileKind = "file"
+	FileKindDirectory FileKind = "directory"
+	FileKindSymlink   FileKind = "symlink"
+	FileKindOther     FileKind = "other"
+)
+
 type DirEntry struct {
 	Name string
-	Type string
+	Type FileKind
 }
 
 type FileInfo struct {
-	Type string
+	Type FileKind
 	Size int64
 }
 
+// Exists reports whether path exists; a stat error other than "not found" is
+// returned.
 func Exists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
@@ -50,6 +62,7 @@ func Exists(path string) (bool, error) {
 	return false, err
 }
 
+// IsDir reports whether path is an existing directory.
 func IsDir(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -58,6 +71,7 @@ func IsDir(path string) bool {
 	return info.IsDir()
 }
 
+// IsFile reports whether path exists and is not a directory.
 func IsFile(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -66,10 +80,12 @@ func IsFile(path string) bool {
 	return !info.IsDir()
 }
 
+// ReadFileBytes reads path into memory.
 func ReadFileBytes(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
+// ReadFileString reads path as a UTF-8 string.
 func ReadFileString(path string) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -78,6 +94,7 @@ func ReadFileString(path string) (string, error) {
 	return string(b), nil
 }
 
+// ReadJson decodes a JSON file into a generic value.
 func ReadJson(path string) (any, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -90,6 +107,7 @@ func ReadJson(path string) (any, error) {
 	return v, nil
 }
 
+// WriteJson writes data as indented JSON, optionally overriding the mode.
 func WriteJson(path string, data any, mode ...os.FileMode) error {
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -104,10 +122,13 @@ func WriteJson(path string, data any, mode ...os.FileMode) error {
 	return nil
 }
 
+// EnsureDir creates path and any missing parents.
 func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0755)
 }
 
+// WriteWithDirs writes content, creating parent directories when missing, and
+// optionally overriding the mode.
 func WriteWithDirs(path string, content []byte, mode ...os.FileMode) error {
 	err := os.WriteFile(path, content, 0644)
 	if err != nil && errors.Is(err, os.ErrNotExist) {
@@ -125,10 +146,12 @@ func WriteWithDirs(path string, content []byte, mode ...os.FileMode) error {
 	return nil
 }
 
+// WriteFileString writes content as a UTF-8 string, creating parents.
 func WriteFileString(path string, content string, mode ...os.FileMode) error {
 	return WriteWithDirs(path, []byte(content), mode...)
 }
 
+// WriteFileBytes writes content. The "wx" flag fails when path already exists.
 func WriteFileBytes(path string, content []byte, flags ...string) error {
 	if len(flags) > 0 && flags[0] == "wx" {
 		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
@@ -147,6 +170,7 @@ func WriteFileBytes(path string, content []byte, flags ...string) error {
 	return WriteWithDirs(path, content)
 }
 
+// Remove deletes path, treating a missing file as success.
 func Remove(path string) error {
 	err := os.Remove(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -155,25 +179,27 @@ func Remove(path string) error {
 	return nil
 }
 
+// RealPath resolves symlinks in path.
 func RealPath(path string) (string, error) {
 	return filepath.EvalSymlinks(path)
 }
 
+// Stat follows symlinks, so its kind is FileKindFile or FileKindDirectory.
 func Stat(path string) (*FileInfo, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
-	fileType := "File"
+	kind := FileKindFile
 	if info.IsDir() {
-		fileType = "Directory"
-	} else if info.Mode()&os.ModeSymlink != 0 {
-		fileType = "SymbolicLink"
+		kind = FileKindDirectory
 	}
-	return &FileInfo{Type: fileType, Size: info.Size()}, nil
+	return &FileInfo{Type: kind, Size: info.Size()}, nil
 }
 
-func Up(targets []string, start string, stop ...string) []string {
+// FindUp returns the paths of targets found in start or any ancestor directory,
+// closest first, walking up to the filesystem root.
+func FindUp(targets []string, start string) []string {
 	var result []string
 	current := start
 	for {
@@ -182,9 +208,6 @@ func Up(targets []string, start string, stop ...string) []string {
 			if ok, _ := Exists(search); ok {
 				result = append(result, search)
 			}
-		}
-		if len(stop) > 0 && stop[0] == current {
-			break
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
@@ -195,6 +218,7 @@ func Up(targets []string, start string, stop ...string) []string {
 	return result
 }
 
+// CopyFile copies src to dst with mode 0644.
 func CopyFile(src, dst string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
@@ -203,6 +227,7 @@ func CopyFile(src, dst string) error {
 	return os.WriteFile(dst, data, 0644)
 }
 
+// ReadDir lists a directory's immediate entries.
 func ReadDir(dirPath string) ([]DirEntry, error) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
@@ -210,19 +235,21 @@ func ReadDir(dirPath string) ([]DirEntry, error) {
 	}
 	result := make([]DirEntry, 0, len(entries))
 	for _, e := range entries {
-		typ := "other"
-		if e.IsDir() {
-			typ = "directory"
-		} else if e.Type().IsRegular() {
-			typ = "file"
-		} else if e.Type()&os.ModeSymlink != 0 {
-			typ = "symlink"
+		kind := FileKindOther
+		switch {
+		case e.IsDir():
+			kind = FileKindDirectory
+		case e.Type().IsRegular():
+			kind = FileKindFile
+		case e.Type()&os.ModeSymlink != 0:
+			kind = FileKindSymlink
 		}
-		result = append(result, DirEntry{Name: e.Name(), Type: typ})
+		result = append(result, DirEntry{Name: e.Name(), Type: kind})
 	}
 	return result, nil
 }
 
+// Contains reports whether child is parent or lies under it.
 func Contains(parent, child string) bool {
 	rel, err := filepath.Rel(parent, child)
 	if err != nil {
@@ -231,6 +258,7 @@ func Contains(parent, child string) bool {
 	return rel == "." || (!filepath.IsAbs(rel) && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
+// Overlaps reports whether either path contains the other.
 func Overlaps(a, b string) bool {
 	return Contains(a, b) || Contains(b, a)
 }

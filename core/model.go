@@ -6,7 +6,7 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// ModelV2 re-exports the shared model schema (core/model.ts).
+// ModelV2 re-exports the shared model schema.
 type (
 	ModelID           = schema.ModelID
 	ModelVariantID    = schema.ModelVariantID
@@ -18,7 +18,7 @@ type (
 	ModelInfo         = schema.ModelInfo
 )
 
-// ModelRefParts is the result of ParseModel (model.ts `parse`).
+// ModelRefParts is the result of ParseModel.
 type ModelRefParts struct {
 	ProviderID ProviderID
 	ModelID    ModelID

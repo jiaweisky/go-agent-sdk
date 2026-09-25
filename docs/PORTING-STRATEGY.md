@@ -783,7 +783,7 @@ opencode 的 agent 与 skill 定义来自 `{agent,agents}/**/*.md`、`{mode,mode
 | `core/agent_defaults.go` | packages/core/src/plugin/agent.ts | — |
 | `core/filesystem.go` | packages/core/src/filesystem.ts, packages/schema/src/filesystem.ts | `FileSystemEntry` ↔ `FileSystem.Entry`, `FileSystemSubmatch` ↔ `FileSystem.Submatch`, `FileSystemMatch` ↔ `FileSystem.Match` |
 | `core/fs_util.go` | packages/core/src/fs-util.ts | `RemoveAll` ↔ `fs.remove` |
-| `core/image.go` | packages/core/src/image.ts | `ImageResizerUnavailableError` ↔ `Image.ResizerUnavailableError` |
+| `core/image.go` | packages/core/src/image.ts | `Image.Normalize` ↔ `Image.normalize`；Go 侧 resizer 是编译期依赖，`Image.ResizerUnavailableError` 不移植 |
 | `core/location_mutation.go` | packages/core/src/location-mutation.ts | `locationMutationSlash` ↔ `FSUtil.slash` |
 | `core/model.go` | packages/core/src/model.ts | `ParseModel` ↔ `ModelV2.parse` |
 | `core/patch.go` | packages/core/src/patch.ts | `PatchParse` ↔ `Patch.parse`, `PatchDerive` ↔ `Patch.derive`, `PatchJoinBom` ↔ `Patch.joinBom`, `patchSplitBom` ↔ `patch.ts` |

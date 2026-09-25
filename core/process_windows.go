@@ -4,9 +4,8 @@ package core
 
 import "os/exec"
 
-// applyProcessAttrs is a no-op: Windows has no process-group equivalent, and the
-// only requests detachment on non-Windows platforms, so there is nothing to
-// apply here yet.
+// applyProcessAttrs is a no-op: Windows has no process-group equivalent, and
+// detachment is only requested on non-Windows platforms.
 func applyProcessAttrs(cmd *exec.Cmd, detached bool) {}
 
 // processTerminate kills the child: Windows has no SIGTERM,

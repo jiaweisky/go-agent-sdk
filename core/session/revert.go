@@ -83,15 +83,9 @@ func RevertStage(
 	messageID schema.MessageID,
 	files *bool,
 ) (*schema.RevertState, error) {
-	var original *string
-	if session.Revert != nil && session.Revert.Snapshot != nil {
-		original = session.Revert.Snapshot
-	} else {
-		captured, err := snapshot.Capture()
-		if err != nil {
-			return nil, err
-		}
-		original = captured
+	original, err := revertOriginalSnapshot(snapshot, session)
+	if err != nil {
+		return nil, err
 	}
 
 	next, err := RevertPlan(db, session.ID, messageID)
@@ -99,47 +93,18 @@ func RevertStage(
 		return nil, err
 	}
 
-	restore := map[schema.RelativePath]string{}
-	if original != nil && session.Revert != nil {
-		for _, file := range session.Revert.Files {
-			restore[file.Path] = *original
-		}
-	}
-	if files == nil || *files {
-		for file, tree := range next {
-			restore[file] = tree
-		}
-	}
+	restore := revertRestoreFiles(original, session, next, files)
 	if len(restore) > 0 {
 		if err := snapshot.Restore(restore); err != nil {
 			return nil, err
 		}
 	}
 
-	paths := []schema.RelativePath{}
-	if files == nil || *files {
-		for file := range next {
-			paths = append(paths, file)
-		}
+	paths := revertPaths(next, files)
+	diffFiles, trimmed, err := revertDiff(snapshot, original, paths)
+	if err != nil {
+		return nil, err
 	}
-
-	diffFiles := []schema.RevertFileDiff{}
-	if original != nil {
-		to := *original
-		if captured, err := snapshot.Capture(); err == nil && captured != nil {
-			to = *captured
-		}
-		diffFiles, err = snapshot.Diff(*original, to, paths)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	patch := ""
-	for _, file := range diffFiles {
-		patch += file.Patch
-	}
-	trimmed := strings.TrimSpace(patch)
 
 	revert := &schema.RevertState{
 		MessageID: messageID,
@@ -155,6 +120,61 @@ func RevertStage(
 		return nil, err
 	}
 	return revert, nil
+}
+
+// revertOriginalSnapshot returns the snapshot to revert to, capturing one when
+// none is staged.
+func revertOriginalSnapshot(snapshot RevertSnapshot, session schema.SessionInfo) (*string, error) {
+	if session.Revert != nil && session.Revert.Snapshot != nil {
+		return session.Revert.Snapshot, nil
+	}
+	return snapshot.Capture()
+}
+
+// revertRestoreFiles maps each file to the tree it should be restored from.
+func revertRestoreFiles(original *string, session schema.SessionInfo, next map[schema.RelativePath]string, files *bool) map[schema.RelativePath]string {
+	restore := map[schema.RelativePath]string{}
+	if original != nil && session.Revert != nil {
+		for _, file := range session.Revert.Files {
+			restore[file.Path] = *original
+		}
+	}
+	if files == nil || *files {
+		for file, tree := range next {
+			restore[file] = tree
+		}
+	}
+	return restore
+}
+
+func revertPaths(next map[schema.RelativePath]string, files *bool) []schema.RelativePath {
+	paths := []schema.RelativePath{}
+	if files == nil || *files {
+		for file := range next {
+			paths = append(paths, file)
+		}
+	}
+	return paths
+}
+
+// revertDiff computes the staged diff and its concatenated, trimmed patch text.
+func revertDiff(snapshot RevertSnapshot, original *string, paths []schema.RelativePath) ([]schema.RevertFileDiff, string, error) {
+	if original == nil {
+		return []schema.RevertFileDiff{}, "", nil
+	}
+	to := *original
+	if captured, err := snapshot.Capture(); err == nil && captured != nil {
+		to = *captured
+	}
+	diffFiles, err := snapshot.Diff(*original, to, paths)
+	if err != nil {
+		return nil, "", err
+	}
+	patch := ""
+	for _, file := range diffFiles {
+		patch += file.Patch
+	}
+	return diffFiles, strings.TrimSpace(patch), nil
 }
 
 // RevertClear drops a staged revert.

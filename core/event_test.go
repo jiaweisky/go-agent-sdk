@@ -647,7 +647,7 @@ func TestEventAllBoundedDelivers(t *testing.T) {
 
 	got := make(chan []schema.EventPayload, 1)
 	go func() {
-		got <- collectEventN(ctx, EventAllBounded(ctx, events, 8), 2)
+		got <- collectEventN(ctx, events.AllBounded(ctx, 8), 2)
 	}()
 	waitForEventRegistration(t, events, func(svc *eventService) bool {
 		return len(svc.listeners) >= 1

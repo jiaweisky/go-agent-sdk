@@ -323,9 +323,8 @@ var webFetchVoidTags = map[string]bool{
 
 // ExtractTextFromHTML returns the concatenated text of an HTML document while
 // dropping the contents of script/style/noscript/iframe/object/embed elements.
-// It ports webfetch.ts extractTextFromHTML (htmlparser2 streaming parser). The
-// only known divergence is nested markup inside <iframe>: the HTML spec treats
-// iframe content as raw text, so it is not tokenized like htmlparser2 would.
+// Nested markup inside <iframe> is not tokenized, since the HTML spec treats
+// iframe content as raw text.
 func ExtractTextFromHTML(input string) string {
 	var b strings.Builder
 	tokenizer := html.NewTokenizer(strings.NewReader(input))
@@ -358,8 +357,8 @@ func ExtractTextFromHTML(input string) string {
 	return turndownTrimSpace(b.String())
 }
 
-// ConvertHTMLToMarkdown converts HTML to Markdown using the same turndown
-// options configured in webfetch.ts convertHTMLToMarkdown.
+// ConvertHTMLToMarkdown converts HTML to Markdown with the default turndown
+// options.
 func ConvertHTMLToMarkdown(input string) (string, error) {
 	options := defaultTurndownOptions()
 	options.headingStyle = "atx"

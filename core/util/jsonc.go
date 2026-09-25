@@ -16,42 +16,19 @@ func CleanJSONC(text string) ([]byte, error) {
 		c := text[i]
 		switch {
 		case c == '"':
-			out.WriteByte(c)
-			i++
-			closed := false
-			for i < n {
-				ch := text[i]
-				out.WriteByte(ch)
-				i++
-				if ch == '\\' {
-					if i < n {
-						out.WriteByte(text[i])
-						i++
-					}
-					continue
-				}
-				if ch == '"' {
-					closed = true
-					break
-				}
+			next, err := copyJSONCString(&out, text, i)
+			if err != nil {
+				return nil, err
 			}
-			if !closed {
-				return nil, errors.New("unterminated string")
-			}
+			i = next
 		case c == '/' && i+1 < n && text[i+1] == '/':
-			i += 2
-			for i < n && text[i] != '\n' {
-				i++
-			}
+			i = skipJSONCLineComment(text, i+2)
 		case c == '/' && i+1 < n && text[i+1] == '*':
-			i += 2
-			for i+1 < n && !(text[i] == '*' && text[i+1] == '/') {
-				i++
+			next, err := skipJSONCBlockComment(text, i+2)
+			if err != nil {
+				return nil, err
 			}
-			if i+1 >= n {
-				return nil, errors.New("unterminated comment")
-			}
-			i += 2
+			i = next
 		case c == ',':
 			j := skipJSONCSpace(text, i+1)
 			if j < n && (text[j] == '}' || text[j] == ']') {
@@ -68,6 +45,58 @@ func CleanJSONC(text string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// copyJSONCString copies the string literal starting at the opening quote and
+// returns the index after the closing quote.
+func copyJSONCString(out *bytes.Buffer, text string, i int) (int, error) {
+	n := len(text)
+	out.WriteByte(text[i])
+	i++
+	closed := false
+	for i < n {
+		ch := text[i]
+		out.WriteByte(ch)
+		i++
+		if ch == '\\' {
+			if i < n {
+				out.WriteByte(text[i])
+				i++
+			}
+			continue
+		}
+		if ch == '"' {
+			closed = true
+			break
+		}
+	}
+	if !closed {
+		return 0, errors.New("unterminated string")
+	}
+	return i, nil
+}
+
+// skipJSONCLineComment returns the index after a line comment, starting after
+// the leading "//".
+func skipJSONCLineComment(text string, i int) int {
+	n := len(text)
+	for i < n && text[i] != '\n' {
+		i++
+	}
+	return i
+}
+
+// skipJSONCBlockComment returns the index after a block comment, starting after
+// the leading "/*".
+func skipJSONCBlockComment(text string, i int) (int, error) {
+	n := len(text)
+	for i+1 < n && !(text[i] == '*' && text[i+1] == '/') {
+		i++
+	}
+	if i+1 >= n {
+		return 0, errors.New("unterminated comment")
+	}
+	return i + 2, nil
+}
+
 func skipJSONCSpace(text string, i int) int {
 	n := len(text)
 	for i < n {
@@ -77,18 +106,15 @@ func skipJSONCSpace(text string, i int) int {
 			continue
 		}
 		if c == '/' && i+1 < n && text[i+1] == '/' {
-			i += 2
-			for i < n && text[i] != '\n' {
-				i++
-			}
+			i = skipJSONCLineComment(text, i+2)
 			continue
 		}
 		if c == '/' && i+1 < n && text[i+1] == '*' {
-			i += 2
-			for i+1 < n && !(text[i] == '*' && text[i+1] == '/') {
-				i++
+			next, err := skipJSONCBlockComment(text, i+2)
+			if err != nil {
+				break
 			}
-			i += 2
+			i = next
 			continue
 		}
 		break

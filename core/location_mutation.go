@@ -50,7 +50,7 @@ func (e *LocationMutationPathError) Error() string {
 
 type locationMutationResolvedPath struct {
 	Canonical string
-	Type      *string
+	Type      *FileKind
 	Directory string
 }
 
@@ -109,7 +109,7 @@ func (lm *locationMutation) Resolve(input LocationMutationResolveInput) (*Locati
 	if external {
 		dir := resolved.Directory
 		if input.Kind != nil && *input.Kind == LocationMutationKindDirectory &&
-			resolved.Type != nil && *resolved.Type == "Directory" {
+			resolved.Type != nil && *resolved.Type == FileKindDirectory {
 			dir = resolved.Canonical
 		}
 		extResource := locationMutationSlash(filepath.Join(dir, "*"))
@@ -134,7 +134,7 @@ func (lm *locationMutation) resolvePath(absolute string) (*locationMutationResol
 		info, err2 := Stat(existing)
 		if err2 == nil {
 			dir := filepath.Dir(existing)
-			if info.Type == "Directory" {
+			if info.Type == FileKindDirectory {
 				dir = existing
 			}
 			return &locationMutationResolvedPath{Canonical: existing, Type: &info.Type, Directory: dir}, nil
@@ -147,7 +147,7 @@ func (lm *locationMutation) resolvePath(absolute string) (*locationMutationResol
 		if err == nil {
 			info, err2 := Stat(canonical)
 			if err2 == nil {
-				if info.Type != "Directory" {
+				if info.Type != FileKindDirectory {
 					return nil, &LocationMutationPathError{Path: absolute, Reason: LocationMutationReasonNonDirAncestor}
 				}
 				rel, _ := filepath.Rel(anchor, absolute)

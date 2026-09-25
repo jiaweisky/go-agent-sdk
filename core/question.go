@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -82,23 +81,17 @@ type questionResult struct {
 	err     error
 }
 
-type questionPending struct {
-	request QuestionRequest
-	done    chan questionResult
-	settled bool
-}
+type questionPending = pendingEntry[QuestionID, QuestionRequest, questionResult, struct{}]
 
 type questionService struct {
 	cfg     QuestionConfig
-	mu      sync.Mutex
-	pending map[QuestionID]*questionPending
-	closed  bool
+	pending *pendingRegistry[QuestionID, QuestionRequest, questionResult, struct{}]
 }
 
 func NewQuestion(cfg QuestionConfig) Question {
 	return &questionService{
 		cfg:     cfg,
-		pending: make(map[QuestionID]*questionPending),
+		pending: newPendingRegistry[QuestionID, QuestionRequest, questionResult, struct{}](),
 	}
 }
 
@@ -131,21 +124,14 @@ func (s *questionService) Ask(ctx context.Context, input QuestionAskInput) ([]Qu
 		Questions: input.Questions,
 		Tool:      input.Tool,
 	}
-	item := &questionPending{request: request, done: make(chan questionResult, 1)}
-
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
+	item, closed, _ := s.pending.add(id, request, struct{}{})
+	if closed {
 		return nil, &QuestionRejectedError{}
 	}
-	s.pending[id] = item
-	s.mu.Unlock()
 
 	if s.cfg.Events != nil {
 		if err := s.publish(schema.QuestionEventAsked, request); err != nil {
-			s.mu.Lock()
-			delete(s.pending, id)
-			s.mu.Unlock()
+			s.pending.finish(id)
 			return nil, err
 		}
 	}
@@ -154,16 +140,11 @@ func (s *questionService) Ask(ctx context.Context, input QuestionAskInput) ([]Qu
 	select {
 	case result = <-item.done:
 	case <-ctx.Done():
-		s.mu.Lock()
-		delete(s.pending, id)
-		s.mu.Unlock()
+		s.pending.finish(id)
 		return nil, ctx.Err()
 	}
 
-	s.mu.Lock()
-	delete(s.pending, id)
-	s.mu.Unlock()
-
+	s.pending.finish(id)
 	return result.answers, result.err
 }
 
@@ -189,7 +170,7 @@ func (s *questionService) Reply(input QuestionReplyInput) error {
 	}
 
 	existing.done <- questionResult{answers: input.Answers}
-	s.finish(input.RequestID)
+	s.pending.finish(input.RequestID)
 	return nil
 }
 
@@ -210,68 +191,34 @@ func (s *questionService) Reject(requestID QuestionID) error {
 	}
 
 	existing.done <- questionResult{err: &QuestionRejectedError{}}
-	s.finish(requestID)
+	s.pending.finish(requestID)
 	return nil
 }
 
 // reserve atomically claims a pending request so a concurrent reply or reject
 // cannot act on it twice.
 func (s *questionService) reserve(requestID QuestionID) (*questionPending, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	existing, ok := s.pending[requestID]
-	if !ok || existing.settled {
+	existing, ok := s.pending.reserve(requestID)
+	if !ok {
 		return nil, &QuestionNotFoundError{RequestID: requestID}
 	}
-	existing.settled = true
 	return existing, nil
 }
 
 func (s *questionService) release(existing *questionPending) {
-	s.mu.Lock()
-	if s.closed {
-		delete(s.pending, existing.request.ID)
-		s.mu.Unlock()
+	if s.pending.release(existing) {
 		existing.done <- questionResult{err: &QuestionRejectedError{}}
-		return
 	}
-	existing.settled = false
-	s.mu.Unlock()
-}
-
-func (s *questionService) finish(requestID QuestionID) {
-	s.mu.Lock()
-	delete(s.pending, requestID)
-	s.mu.Unlock()
 }
 
 func (s *questionService) List() []QuestionRequest {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	result := make([]QuestionRequest, 0, len(s.pending))
-	for _, item := range s.pending {
-		result = append(result, item.request)
-	}
-	return result
+	return s.pending.listWhere(func(*questionPending) bool { return true })
 }
 
 // Close rejects every pending ask with QuestionRejectedError without publishing
 // an event. It is idempotent.
 func (s *questionService) Close() error {
-	s.mu.Lock()
-	s.closed = true
-	pending := make([]*questionPending, 0, len(s.pending))
-	for id, item := range s.pending {
-		if item.settled {
-			continue
-		}
-		item.settled = true
-		pending = append(pending, item)
-		delete(s.pending, id)
-	}
-	s.mu.Unlock()
-
-	for _, item := range pending {
+	for _, item := range s.pending.close() {
 		item.done <- questionResult{err: &QuestionRejectedError{}}
 	}
 	return nil

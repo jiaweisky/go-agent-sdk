@@ -1,13 +1,16 @@
 package core
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
@@ -15,6 +18,10 @@ import (
 // ErrTimedOut is the cause carried by an AppProcessError when a run exceeds its
 // configured timeout.
 var ErrTimedOut = errors.New("Timed out")
+
+// streamTerminateGrace bounds how long a streamed process may keep running
+// after its stream is abandoned or cancelled before it is killed.
+const streamTerminateGrace = 2 * time.Second
 
 type AppProcessError struct {
 	Command  string
@@ -82,6 +89,8 @@ type RunResult struct {
 
 type AppProcess interface {
 	Run(ctx context.Context, command string, args []string, options ...RunOptions) (*RunResult, error)
+	// RunStream runs a command and yields its stdout lines as they are
+	// produced. When IncludeStderr is set, stderr is merged into the stream.
 	RunStream(ctx context.Context, command string, args []string, options ...RunStreamOptions) iter.Seq2[string, error]
 }
 
@@ -114,8 +123,8 @@ func (p *appProcess) command(ctx context.Context, command string, args []string,
 		cmd.Stdin = bytes.NewReader(options.Stdin)
 	}
 	applyProcessAttrs(cmd, options.Detached)
-	// Mirror the TypeScript spawner: terminate with SIGTERM first, then let
-	// WaitDelay force a SIGKILL if the process does not exit in time.
+	// Terminate with SIGTERM first, then let WaitDelay force a SIGKILL if the
+	// process does not exit in time.
 	cmd.Cancel = func() error { return processTerminate(cmd, options.Detached) }
 	if options.ForceKillAfter > 0 {
 		cmd.WaitDelay = options.ForceKillAfter
@@ -211,6 +220,8 @@ func (p *appProcess) RunStream(ctx context.Context, command string, args []strin
 			ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 			defer cancel()
 		}
+		runCtx, stop := context.WithCancel(ctx)
+		defer stop()
 
 		runOpts := RunOptions{
 			Dir:            opts.Dir,
@@ -219,49 +230,124 @@ func (p *appProcess) RunStream(ctx context.Context, command string, args []strin
 			Detached:       opts.Detached,
 			ForceKillAfter: opts.ForceKillAfter,
 		}
-		cmd := p.command(ctx, command, args, runOpts)
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		if opts.IncludeStderr {
-			cmd.Stderr = &stdout
-		} else {
-			cmd.Stderr = &stderr
+		cmd := p.command(runCtx, command, args, runOpts)
+		if cmd.WaitDelay == 0 {
+			cmd.WaitDelay = streamTerminateGrace
 		}
 
-		err := cmd.Run()
-		exitCode := 0
-		if cmd.ProcessState != nil {
-			exitCode = cmd.ProcessState.ExitCode()
-		}
-
-		for _, line := range strings.Split(stdout.String(), "\n") {
-			if line == "" {
-				continue
-			}
-			if !yield(line, nil) {
-				return
-			}
-		}
-
+		// Read stdout through a pipe we own so each line is yielded as it is
+		// produced rather than after the process exits.
+		read, write, err := os.Pipe()
 		if err != nil {
-			if _, ok := err.(*exec.ExitError); !ok {
-				yield("", &AppProcessError{Command: description, Cause: err})
-				return
-			}
-		}
-		if len(opts.OkExitCodes) > 0 && !containsInt(opts.OkExitCodes, exitCode) {
-			s := stderr.String()
-			yield("", &AppProcessError{Command: description, ExitCode: &exitCode, Stderr: &s})
+			yield("", &AppProcessError{Command: description, Cause: err})
 			return
 		}
+		stderr := newBoundedBuffer(opts.MaxErrorBytes)
+		cmd.Stdout = write
+		if opts.IncludeStderr {
+			cmd.Stderr = write
+		} else {
+			cmd.Stderr = stderr
+		}
+
+		if err := cmd.Start(); err != nil {
+			read.Close()
+			write.Close()
+			yield("", &AppProcessError{Command: description, Cause: err})
+			return
+		}
+		// The parent must release the write end, or the read never reaches EOF.
+		write.Close()
+
+		stopped, readFailure := streamReadLines(read, yield)
+		read.Close()
+
+		if stopped {
+			// stop triggers SIGTERM through cmd.Cancel; WaitDelay then kills a
+			// process that ignores it, so an abandoned stream cannot hang.
+			stop()
+			_ = cmd.Wait()
+			return
+		}
+
+		waitErr := cmd.Wait()
+		if ctx.Err() == context.DeadlineExceeded {
+			yield("", &AppProcessError{Command: description, Cause: ErrTimedOut})
+			return
+		}
+		if readFailure != nil {
+			yield("", &AppProcessError{Command: description, Cause: readFailure})
+			return
+		}
+		if err := streamExitError(cmd, waitErr, stderr.String(), opts.OkExitCodes, description); err != nil {
+			yield("", err)
+		}
 	}
 }
 
-func containsInt(items []int, target int) bool {
-	for _, item := range items {
-		if item == target {
-			return true
+// streamReadLines yields each stdout line until EOF, reporting whether the
+// consumer stopped early and any non-EOF read failure.
+func streamReadLines(read *os.File, yield func(string, error) bool) (bool, error) {
+	var readFailure error
+	reader := bufio.NewReader(read)
+	for {
+		line, readErr := reader.ReadString('\n')
+		if line = strings.TrimSuffix(line, "\n"); line != "" {
+			if !yield(line, nil) {
+				return true, nil
+			}
+		}
+		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				readFailure = readErr
+			}
+			return false, readFailure
 		}
 	}
-	return false
 }
+
+// streamExitError interprets the wait result against the allowed exit codes.
+func streamExitError(cmd *exec.Cmd, waitErr error, stderr string, okExitCodes []int, description string) error {
+	exitCode := 0
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	}
+	if waitErr != nil {
+		if _, ok := waitErr.(*exec.ExitError); !ok {
+			return &AppProcessError{Command: description, Cause: waitErr}
+		}
+	}
+	if len(okExitCodes) > 0 && !slices.Contains(okExitCodes, exitCode) {
+		return &AppProcessError{Command: description, ExitCode: &exitCode, Stderr: &stderr}
+	}
+	return nil
+}
+
+// boundedBuffer accumulates at most limit bytes. A negative limit is unbounded.
+type boundedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+func newBoundedBuffer(max *int) *boundedBuffer {
+	limit := -1
+	if max != nil {
+		limit = *max
+	}
+	return &boundedBuffer{limit: limit}
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if b.limit < 0 {
+		return b.buf.Write(p)
+	}
+	if remaining := b.limit - b.buf.Len(); remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		b.buf.Write(p)
+	}
+	return len(p), nil
+}
+
+func (b *boundedBuffer) String() string { return b.buf.String() }

@@ -61,8 +61,8 @@ func Hash(content string, algorithm ...string) (string, error) {
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// Checksum ports encode.ts checksum: an FNV-1a 32-bit hash over UTF-16 code
-// units, rendered as a base-36 string. It returns "" for empty input.
+// Checksum is an FNV-1a 32-bit hash over UTF-16 code units, rendered as a
+// base-36 string. It returns "" for empty input.
 func Checksum(content string) string {
 	if content == "" {
 		return ""
@@ -70,8 +70,8 @@ func Checksum(content string) string {
 	return checksumUnits(utf16.Encode([]rune(content)))
 }
 
-// SampledChecksum ports encode.ts sampledChecksum. The default limit is 500_000
-// UTF-16 code units; larger inputs are hashed from five sampled windows.
+// SampledChecksum hashes large inputs from five sampled windows. The default
+// limit is 500_000 UTF-16 code units.
 func SampledChecksum(content string, limit ...int) string {
 	if content == "" {
 		return ""

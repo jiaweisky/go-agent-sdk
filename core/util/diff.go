@@ -75,138 +75,153 @@ func DiffLines(oldStr, newStr string) []DiffChange {
 }
 
 func diffTokens(oldTokens, newTokens []string) []DiffChange {
-	newLen := len(newTokens)
-	oldLen := len(oldTokens)
-	bestPath := map[int]*diffPath{0: {oldPos: -1}}
+	solver := &diffSolver{
+		oldTokens:   oldTokens,
+		newTokens:   newTokens,
+		oldLen:      len(oldTokens),
+		newLen:      len(newTokens),
+		bestPath:    map[int]*diffPath{0: {oldPos: -1}},
+		minDiagonal: math.MinInt,
+		maxDiagonal: math.MaxInt,
+	}
+	return solver.solve()
+}
 
-	extractCommon := func(basePath *diffPath, diagonalPath int) int {
-		oldPos := basePath.oldPos
-		newPos := oldPos - diagonalPath
-		commonCount := 0
-		for newPos+1 < newLen && oldPos+1 < oldLen && oldTokens[oldPos+1] == newTokens[newPos+1] {
-			newPos++
-			oldPos++
-			commonCount++
-		}
-		if commonCount > 0 {
-			basePath.lastComponent = &diffComponent{count: commonCount, previous: basePath.lastComponent}
-		}
-		basePath.oldPos = oldPos
-		return newPos
+// diffSolver runs the Myers diff over two token sequences.
+type diffSolver struct {
+	oldTokens   []string
+	newTokens   []string
+	oldLen      int
+	newLen      int
+	bestPath    map[int]*diffPath
+	minDiagonal int
+	maxDiagonal int
+}
+
+func (s *diffSolver) solve() []DiffChange {
+	newPos := s.extractCommon(s.bestPath[0], 0)
+	if s.bestPath[0].oldPos+1 >= s.oldLen && newPos+1 >= s.newLen {
+		return s.buildValues(s.bestPath[0].lastComponent)
 	}
 
-	addToPath := func(path *diffPath, added, removed bool, oldPosInc int) *diffPath {
-		last := path.lastComponent
-		if last != nil && last.added == added && last.removed == removed {
-			return &diffPath{
-				oldPos: path.oldPos + oldPosInc,
-				lastComponent: &diffComponent{
-					count:    last.count + 1,
-					added:    added,
-					removed:  removed,
-					previous: last.previous,
-				},
-			}
-		}
-		return &diffPath{
-			oldPos:        path.oldPos + oldPosInc,
-			lastComponent: &diffComponent{count: 1, added: added, removed: removed, previous: last},
-		}
-	}
-
-	buildValues := func(lastComponent *diffComponent) []DiffChange {
-		var components []*diffComponent
-		for component := lastComponent; component != nil; component = component.previous {
-			components = append(components, component)
-		}
-		for i, j := 0, len(components)-1; i < j; i, j = i+1, j-1 {
-			components[i], components[j] = components[j], components[i]
-		}
-
-		newPos, oldPos := 0, 0
-		for _, component := range components {
-			if !component.removed {
-				component.value = strings.Join(newTokens[newPos:newPos+component.count], "")
-				newPos += component.count
-				if !component.added {
-					oldPos += component.count
-				}
-				continue
-			}
-			component.value = strings.Join(oldTokens[oldPos:oldPos+component.count], "")
-			oldPos += component.count
-		}
-
-		result := make([]DiffChange, len(components))
-		for i, component := range components {
-			result[i] = DiffChange{
-				Count:   component.count,
-				Added:   component.added,
-				Removed: component.removed,
-				Value:   component.value,
-			}
-		}
-		return result
-	}
-
-	newPos := extractCommon(bestPath[0], 0)
-	if bestPath[0].oldPos+1 >= oldLen && newPos+1 >= newLen {
-		return buildValues(bestPath[0].lastComponent)
-	}
-
-	editLength := 1
-	maxEditLength := newLen + oldLen
-	minDiagonalToConsider := math.MinInt
-	maxDiagonalToConsider := math.MaxInt
-
-	execEditLength := func() []DiffChange {
-		for diagonalPath := max(minDiagonalToConsider, -editLength); diagonalPath <= min(maxDiagonalToConsider, editLength); diagonalPath += 2 {
-			removePath := bestPath[diagonalPath-1]
-			addPath := bestPath[diagonalPath+1]
-			if removePath != nil {
-				delete(bestPath, diagonalPath-1)
-			}
-
-			canAdd := false
-			if addPath != nil {
-				addPathNewPos := addPath.oldPos - diagonalPath
-				canAdd = 0 <= addPathNewPos && addPathNewPos < newLen
-			}
-			canRemove := removePath != nil && removePath.oldPos+1 < oldLen
-			if !canAdd && !canRemove {
-				delete(bestPath, diagonalPath)
-				continue
-			}
-
-			var basePath *diffPath
-			if !canRemove || (canAdd && removePath.oldPos < addPath.oldPos) {
-				basePath = addToPath(addPath, true, false, 0)
-			} else {
-				basePath = addToPath(removePath, false, true, 1)
-			}
-
-			newPos = extractCommon(basePath, diagonalPath)
-			if basePath.oldPos+1 >= oldLen && newPos+1 >= newLen {
-				return buildValues(basePath.lastComponent)
-			}
-			bestPath[diagonalPath] = basePath
-			if basePath.oldPos+1 >= oldLen {
-				maxDiagonalToConsider = min(maxDiagonalToConsider, diagonalPath-1)
-			}
-			if newPos+1 >= newLen {
-				minDiagonalToConsider = max(minDiagonalToConsider, diagonalPath+1)
-			}
-		}
-		return nil
-	}
-
-	for editLength <= maxEditLength {
-		if values := execEditLength(); values != nil {
+	maxEditLength := s.newLen + s.oldLen
+	for editLength := 1; editLength <= maxEditLength; editLength++ {
+		if values := s.execEditLength(editLength); values != nil {
 			return values
 		}
-		editLength++
 	}
 	return nil
+}
+
+func (s *diffSolver) execEditLength(editLength int) []DiffChange {
+	for diagonalPath := max(s.minDiagonal, -editLength); diagonalPath <= min(s.maxDiagonal, editLength); diagonalPath += 2 {
+		removePath := s.bestPath[diagonalPath-1]
+		addPath := s.bestPath[diagonalPath+1]
+		if removePath != nil {
+			delete(s.bestPath, diagonalPath-1)
+		}
+
+		canAdd := false
+		if addPath != nil {
+			addPathNewPos := addPath.oldPos - diagonalPath
+			canAdd = 0 <= addPathNewPos && addPathNewPos < s.newLen
+		}
+		canRemove := removePath != nil && removePath.oldPos+1 < s.oldLen
+		if !canAdd && !canRemove {
+			delete(s.bestPath, diagonalPath)
+			continue
+		}
+
+		var basePath *diffPath
+		if !canRemove || (canAdd && removePath.oldPos < addPath.oldPos) {
+			basePath = s.addToPath(addPath, true, false, 0)
+		} else {
+			basePath = s.addToPath(removePath, false, true, 1)
+		}
+
+		newPos := s.extractCommon(basePath, diagonalPath)
+		if basePath.oldPos+1 >= s.oldLen && newPos+1 >= s.newLen {
+			return s.buildValues(basePath.lastComponent)
+		}
+		s.bestPath[diagonalPath] = basePath
+		if basePath.oldPos+1 >= s.oldLen {
+			s.maxDiagonal = min(s.maxDiagonal, diagonalPath-1)
+		}
+		if newPos+1 >= s.newLen {
+			s.minDiagonal = max(s.minDiagonal, diagonalPath+1)
+		}
+	}
+	return nil
+}
+
+func (s *diffSolver) extractCommon(basePath *diffPath, diagonalPath int) int {
+	oldPos := basePath.oldPos
+	newPos := oldPos - diagonalPath
+	commonCount := 0
+	for newPos+1 < s.newLen && oldPos+1 < s.oldLen && s.oldTokens[oldPos+1] == s.newTokens[newPos+1] {
+		newPos++
+		oldPos++
+		commonCount++
+	}
+	if commonCount > 0 {
+		basePath.lastComponent = &diffComponent{count: commonCount, previous: basePath.lastComponent}
+	}
+	basePath.oldPos = oldPos
+	return newPos
+}
+
+func (s *diffSolver) addToPath(path *diffPath, added, removed bool, oldPosInc int) *diffPath {
+	last := path.lastComponent
+	if last != nil && last.added == added && last.removed == removed {
+		return &diffPath{
+			oldPos: path.oldPos + oldPosInc,
+			lastComponent: &diffComponent{
+				count:    last.count + 1,
+				added:    added,
+				removed:  removed,
+				previous: last.previous,
+			},
+		}
+	}
+	return &diffPath{
+		oldPos:        path.oldPos + oldPosInc,
+		lastComponent: &diffComponent{count: 1, added: added, removed: removed, previous: last},
+	}
+}
+
+func (s *diffSolver) buildValues(lastComponent *diffComponent) []DiffChange {
+	var components []*diffComponent
+	for component := lastComponent; component != nil; component = component.previous {
+		components = append(components, component)
+	}
+	for i, j := 0, len(components)-1; i < j; i, j = i+1, j-1 {
+		components[i], components[j] = components[j], components[i]
+	}
+
+	newPos, oldPos := 0, 0
+	for _, component := range components {
+		if !component.removed {
+			component.value = strings.Join(s.newTokens[newPos:newPos+component.count], "")
+			newPos += component.count
+			if !component.added {
+				oldPos += component.count
+			}
+			continue
+		}
+		component.value = strings.Join(s.oldTokens[oldPos:oldPos+component.count], "")
+		oldPos += component.count
+	}
+
+	result := make([]DiffChange, len(components))
+	for i, component := range components {
+		result[i] = DiffChange{
+			Count:   component.count,
+			Added:   component.added,
+			Removed: component.removed,
+			Value:   component.value,
+		}
+	}
+	return result
 }
 
 type diffHunk struct {
@@ -242,23 +257,30 @@ func diffContextLines(lines []string) []string {
 	return out
 }
 
+// diffChangeLines pairs a change with its split lines.
+type diffChangeLines struct {
+	change DiffChange
+	lines  []string
+}
+
 func structuredPatch(oldFileName, newFileName, oldStr, newStr string) []diffHunk {
 	const context = 4
 
 	changes := DiffLines(oldStr, newStr)
-
-	type changeLines struct {
-		change DiffChange
-		lines  []string
-	}
-	entries := make([]changeLines, 0, len(changes)+1)
+	entries := make([]diffChangeLines, 0, len(changes)+1)
 	for _, change := range changes {
-		entries = append(entries, changeLines{change: change, lines: diffSplitLines(change.Value)})
+		entries = append(entries, diffChangeLines{change: change, lines: diffSplitLines(change.Value)})
 	}
 	// Append an empty sentinel change to make cleanup easier. jsdiff seeds it
 	// with an explicit empty `lines` array, so it contributes no lines.
-	entries = append(entries, changeLines{change: DiffChange{Value: ""}, lines: []string{}})
+	entries = append(entries, diffChangeLines{change: DiffChange{Value: ""}, lines: []string{}})
 
+	hunks := buildDiffHunks(entries, context)
+	normalizeDiffHunkLines(hunks)
+	return hunks
+}
+
+func buildDiffHunks(entries []diffChangeLines, context int) []diffHunk {
 	var hunks []diffHunk
 	oldRangeStart, newRangeStart := 0, 0
 	var curRange []string
@@ -269,7 +291,7 @@ func structuredPatch(oldFileName, newFileName, oldStr, newStr string) []diffHunk
 		lines := current.lines
 		if current.change.Added || current.change.Removed {
 			if oldRangeStart == 0 {
-				var prev *changeLines
+				var prev *diffChangeLines
 				if i > 0 {
 					prev = &entries[i-1]
 				}
@@ -328,7 +350,11 @@ func structuredPatch(oldFileName, newFileName, oldStr, newStr string) []diffHunk
 		oldLine += len(lines)
 		newLine += len(lines)
 	}
+	return hunks
+}
 
+// normalizeDiffHunkLines marks lines without a trailing newline.
+func normalizeDiffHunkLines(hunks []diffHunk) {
 	for h := range hunks {
 		for i := 0; i < len(hunks[h].lines); i++ {
 			line := hunks[h].lines[i]
@@ -341,7 +367,6 @@ func structuredPatch(oldFileName, newFileName, oldStr, newStr string) []diffHunk
 			i++
 		}
 	}
-	return hunks
 }
 
 func formatPatch(oldFileName, newFileName string, hunks []diffHunk) string {

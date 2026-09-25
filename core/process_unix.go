@@ -8,8 +8,7 @@ import (
 )
 
 // applyProcessAttrs puts the child in its own process group when detached, so
-// child becomes the leader of a new process group so the whole group can be
-// signalled together.
+// the whole group can be signalled together.
 func applyProcessAttrs(cmd *exec.Cmd, detached bool) {
 	if !detached {
 		return

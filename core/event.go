@@ -111,6 +111,7 @@ type Event interface {
 	Publish(def schema.EventDefinition, data any, options *EventPublishOptions) (schema.EventPayload, error)
 	Subscribe(ctx context.Context, def schema.EventDefinition) iter.Seq2[schema.EventPayload, error]
 	All(ctx context.Context) iter.Seq2[schema.EventPayload, error]
+	AllBounded(ctx context.Context, capacity int) iter.Seq2[schema.EventPayload, error]
 	Durable(ctx context.Context, aggregateID string, after ...int) iter.Seq2[schema.EventPayload, error]
 	Listen(listener EventListener) (func(), error)
 	Project(def schema.EventDefinition, projector EventProjector) error
@@ -355,6 +356,25 @@ func (s *eventService) All(ctx context.Context) iter.Seq2[schema.EventPayload, e
 	}
 }
 
+// AllBounded streams every published event through a bounded listener queue,
+// reporting an overflow error when the consumer falls too far behind.
+func (s *eventService) AllBounded(ctx context.Context, capacity int) iter.Seq2[schema.EventPayload, error] {
+	return func(yield func(schema.EventPayload, error) bool) {
+		q := newEventQueue(capacity)
+		unsubscribe, err := s.Listen(func(event schema.EventPayload) error {
+			q.offer(event)
+			return nil
+		})
+		if err != nil {
+			yield(schema.EventPayload{}, err)
+			return
+		}
+		defer unsubscribe()
+		defer q.close()
+		drainQueue(ctx, q, yield)
+	}
+}
+
 func (s *eventService) Durable(ctx context.Context, aggregateID string, after ...int) iter.Seq2[schema.EventPayload, error] {
 	start := -1
 	if len(after) > 0 {
@@ -402,23 +422,6 @@ func drainQueue(ctx context.Context, q *eventQueue, yield func(schema.EventPaylo
 		if !yield(event, nil) {
 			return
 		}
-	}
-}
-
-func EventAllBounded(ctx context.Context, events Event, capacity int) iter.Seq2[schema.EventPayload, error] {
-	return func(yield func(schema.EventPayload, error) bool) {
-		q := newEventQueue(capacity)
-		unsubscribe, err := events.Listen(func(event schema.EventPayload) error {
-			q.offer(event)
-			return nil
-		})
-		if err != nil {
-			yield(schema.EventPayload{}, err)
-			return
-		}
-		defer unsubscribe()
-		defer q.close()
-		drainQueue(ctx, q, yield)
 	}
 }
 
@@ -557,16 +560,9 @@ func (s *eventService) commitDurableEvent(
 		return nil, nil
 	}
 
-	encoded, err := eventEncodeData(event.Data)
+	encoded, aggregateID, err := durableAggregate(def, event)
 	if err != nil {
 		return nil, err
-	}
-	aggregateID, ok := encoded[def.Durable.Aggregate].(string)
-	if !ok {
-		return nil, &EventInvalidDurableEventError{
-			Type:    event.Type,
-			Message: fmt.Sprintf("Expected string aggregate field %s", def.Durable.Aggregate),
-		}
 	}
 	if input != nil && input.aggregateID != aggregateID {
 		return nil, &EventInvalidDurableEventError{
@@ -577,138 +573,23 @@ func (s *eventService) commitDurableEvent(
 
 	var committed *schema.EventPayloadDurable
 	err = s.withTx(func(tx *sql.Tx) error {
-		latest := -1
-		var ownerID sql.NullString
-		row := tx.QueryRow("SELECT `seq`, `owner_id` FROM `event_sequence` WHERE `aggregate_id` = ?", aggregateID)
-		switch err := row.Scan(&latest, &ownerID); err {
-		case nil:
-		case sql.ErrNoRows:
-			latest = -1
-		default:
-			return err
-		}
-
-		if input != nil && input.strictOwner && ownerID.Valid && ownerID.String != input.ownerID {
-			return &EventInvalidDurableEventError{
-				Type: event.Type,
-				Message: fmt.Sprintf(
-					"Replay owner mismatch for aggregate %s: expected %s, got %s",
-					aggregateID,
-					ownerID.String,
-					input.ownerID,
-				),
-			}
-		}
-
-		if input != nil && input.seq <= latest {
-			var storedID, storedType, storedData string
-			err := tx.QueryRow(
-				"SELECT `id`, `type`, `data` FROM `event` WHERE `aggregate_id` = ? AND `seq` = ?",
-				aggregateID,
-				input.seq,
-			).Scan(&storedID, &storedType, &storedData)
-			if err == nil {
-				var stored map[string]any
-				if err := json.Unmarshal([]byte(storedData), &stored); err != nil {
-					return err
-				}
-				versioned := schema.VersionedType(def.Type, def.Durable.Version)
-				if storedID == string(event.ID) && storedType == versioned && reflect.DeepEqual(stored, encoded) {
-					if input.ownerID != "" && !ownerID.Valid {
-						if _, err := tx.Exec(
-							"UPDATE `event_sequence` SET `owner_id` = ? WHERE `aggregate_id` = ?",
-							input.ownerID,
-							aggregateID,
-						); err != nil {
-							return err
-						}
-					}
-					return nil
-				}
-			} else if !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
-			return &EventInvalidDurableEventError{
-				Type:    event.Type,
-				Message: fmt.Sprintf("Replay diverged at aggregate %s sequence %d", aggregateID, input.seq),
-			}
-		}
-
-		if input != nil && ownerID.Valid && ownerID.String != input.ownerID {
-			return nil
-		}
-
-		seq := latest + 1
-		if input != nil {
-			seq = input.seq
-			if seq != latest+1 {
-				return &EventInvalidDurableEventError{
-					Type:    event.Type,
-					Message: fmt.Sprintf("Sequence mismatch for aggregate %s: expected %d, got %d", aggregateID, latest+1, seq),
-				}
-			}
-		}
-
-		var storedAggregate string
-		var storedSeq int
-		err = tx.QueryRow("SELECT `aggregate_id`, `seq` FROM `event` WHERE `id` = ?", string(event.ID)).
-			Scan(&storedAggregate, &storedSeq)
-		if err == nil {
-			return &EventInvalidDurableEventError{
-				Type:    event.Type,
-				Message: fmt.Sprintf("Event %s already exists at aggregate %s sequence %d", event.ID, storedAggregate, storedSeq),
-			}
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-
-		payload := schema.EventPayloadDurable{AggregateID: aggregateID, Seq: seq, Version: def.Durable.Version}
-		committedEvent := event
-		committedEvent.Durable = &payload
-
-		for _, projector := range s.projectorsFor(def.Type) {
-			if err := projector(committedEvent, tx); err != nil {
-				return err
-			}
-		}
-		if options != nil && options.Commit != nil {
-			if err := options.Commit(tx, seq); err != nil {
-				return err
-			}
-		}
-
-		var valueOwner any
-		if input != nil && input.ownerID != "" {
-			valueOwner = input.ownerID
-		}
-		claim := input != nil && input.ownerID != "" && !ownerID.Valid
-		upsert := "INSERT INTO `event_sequence` (`aggregate_id`, `seq`, `owner_id`) VALUES (?, ?, ?) " +
-			"ON CONFLICT(`aggregate_id`) DO UPDATE SET `seq` = excluded.`seq`"
-		if claim {
-			upsert += ", `owner_id` = excluded.`owner_id`"
-		}
-		if _, err := tx.Exec(upsert, aggregateID, seq, valueOwner); err != nil {
-			return err
-		}
-
-		dataJSON, err := json.Marshal(encoded)
+		latest, ownerID, err := readEventSequence(tx, aggregateID)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(
-			"INSERT INTO `event` (`id`, `aggregate_id`, `seq`, `type`, `data`) VALUES (?, ?, ?, ?, ?)",
-			string(event.ID),
-			aggregateID,
-			seq,
-			schema.VersionedType(def.Type, def.Durable.Version),
-			string(dataJSON),
-		); err != nil {
+		handled, err := s.replayOrDivergence(tx, def, event, input, aggregateID, encoded, ownerID, latest)
+		if err != nil || handled {
 			return err
 		}
-
-		committed = &payload
-		return nil
+		if input != nil && ownerID.Valid && ownerID.String != input.ownerID {
+			return nil
+		}
+		seq, err := nextSequence(latest, input, event, aggregateID)
+		if err != nil {
+			return err
+		}
+		committed, err = s.insertDurableEvent(tx, def, event, options, aggregateID, seq, encoded, ownerID, input)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -718,6 +599,214 @@ func (s *eventService) commitDurableEvent(
 		s.signalDurableWakes(committed.AggregateID)
 	}
 	return committed, nil
+}
+
+// replayOrDivergence handles the replay path. It reports handled=true when the
+// event is already committed identically, and returns an error when the strict
+// owner check fails or the replay diverges.
+func (s *eventService) replayOrDivergence(
+	tx *sql.Tx,
+	def schema.EventDefinition,
+	event schema.EventPayload,
+	input *eventCommitInput,
+	aggregateID string,
+	encoded map[string]any,
+	ownerID sql.NullString,
+	latest int,
+) (bool, error) {
+	if input == nil {
+		return false, nil
+	}
+	if input.strictOwner && ownerID.Valid && ownerID.String != input.ownerID {
+		return false, &EventInvalidDurableEventError{
+			Type: event.Type,
+			Message: fmt.Sprintf(
+				"Replay owner mismatch for aggregate %s: expected %s, got %s",
+				aggregateID,
+				ownerID.String,
+				input.ownerID,
+			),
+		}
+	}
+	if input.seq > latest {
+		return false, nil
+	}
+	matched, err := replayMatches(tx, def, event, input, aggregateID, encoded, ownerID)
+	if err != nil {
+		return false, err
+	}
+	if matched {
+		return true, nil
+	}
+	return false, &EventInvalidDurableEventError{
+		Type:    event.Type,
+		Message: fmt.Sprintf("Replay diverged at aggregate %s sequence %d", aggregateID, input.seq),
+	}
+}
+
+// nextSequence returns the sequence to commit at, validating an explicit replay
+// sequence against the latest committed one.
+func nextSequence(latest int, input *eventCommitInput, event schema.EventPayload, aggregateID string) (int, error) {
+	if input == nil {
+		return latest + 1, nil
+	}
+	if input.seq != latest+1 {
+		return 0, &EventInvalidDurableEventError{
+			Type:    event.Type,
+			Message: fmt.Sprintf("Sequence mismatch for aggregate %s: expected %d, got %d", aggregateID, latest+1, input.seq),
+		}
+	}
+	return input.seq, nil
+}
+
+// durableAggregate encodes the event data and resolves its aggregate id.
+func durableAggregate(def schema.EventDefinition, event schema.EventPayload) (map[string]any, string, error) {
+	encoded, err := eventEncodeData(event.Data)
+	if err != nil {
+		return nil, "", err
+	}
+	aggregateID, ok := encoded[def.Durable.Aggregate].(string)
+	if !ok {
+		return nil, "", &EventInvalidDurableEventError{
+			Type:    event.Type,
+			Message: fmt.Sprintf("Expected string aggregate field %s", def.Durable.Aggregate),
+		}
+	}
+	return encoded, aggregateID, nil
+}
+
+// readEventSequence reads the latest committed sequence and owner for an
+// aggregate, treating a missing row as sequence -1 with no owner.
+func readEventSequence(tx *sql.Tx, aggregateID string) (int, sql.NullString, error) {
+	latest := -1
+	var ownerID sql.NullString
+	row := tx.QueryRow("SELECT `seq`, `owner_id` FROM `event_sequence` WHERE `aggregate_id` = ?", aggregateID)
+	switch err := row.Scan(&latest, &ownerID); err {
+	case nil:
+	case sql.ErrNoRows:
+		latest = -1
+	default:
+		return 0, sql.NullString{}, err
+	}
+	return latest, ownerID, nil
+}
+
+// replayMatches reports whether the stored event at input.seq is identical to
+// the replayed one. When it matches, it also claims the aggregate for the
+// replayer if the stored row has no owner yet.
+func replayMatches(
+	tx *sql.Tx,
+	def schema.EventDefinition,
+	event schema.EventPayload,
+	input *eventCommitInput,
+	aggregateID string,
+	encoded map[string]any,
+	ownerID sql.NullString,
+) (bool, error) {
+	var storedID, storedType, storedData string
+	err := tx.QueryRow(
+		"SELECT `id`, `type`, `data` FROM `event` WHERE `aggregate_id` = ? AND `seq` = ?",
+		aggregateID,
+		input.seq,
+	).Scan(&storedID, &storedType, &storedData)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var stored map[string]any
+	if err := json.Unmarshal([]byte(storedData), &stored); err != nil {
+		return false, err
+	}
+	versioned := schema.VersionedType(def.Type, def.Durable.Version)
+	if storedID != string(event.ID) || storedType != versioned || !reflect.DeepEqual(stored, encoded) {
+		return false, nil
+	}
+	if input.ownerID != "" && !ownerID.Valid {
+		if _, err := tx.Exec(
+			"UPDATE `event_sequence` SET `owner_id` = ? WHERE `aggregate_id` = ?",
+			input.ownerID,
+			aggregateID,
+		); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// insertDurableEvent appends the event, updates the aggregate sequence, and
+// runs the projectors and commit hook inside the transaction.
+func (s *eventService) insertDurableEvent(
+	tx *sql.Tx,
+	def schema.EventDefinition,
+	event schema.EventPayload,
+	options *EventPublishOptions,
+	aggregateID string,
+	seq int,
+	encoded map[string]any,
+	ownerID sql.NullString,
+	input *eventCommitInput,
+) (*schema.EventPayloadDurable, error) {
+	var storedAggregate string
+	var storedSeq int
+	err := tx.QueryRow("SELECT `aggregate_id`, `seq` FROM `event` WHERE `id` = ?", string(event.ID)).
+		Scan(&storedAggregate, &storedSeq)
+	if err == nil {
+		return nil, &EventInvalidDurableEventError{
+			Type:    event.Type,
+			Message: fmt.Sprintf("Event %s already exists at aggregate %s sequence %d", event.ID, storedAggregate, storedSeq),
+		}
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+
+	payload := schema.EventPayloadDurable{AggregateID: aggregateID, Seq: seq, Version: def.Durable.Version}
+	committedEvent := event
+	committedEvent.Durable = &payload
+
+	for _, projector := range s.projectorsFor(def.Type) {
+		if err := projector(committedEvent, tx); err != nil {
+			return nil, err
+		}
+	}
+	if options != nil && options.Commit != nil {
+		if err := options.Commit(tx, seq); err != nil {
+			return nil, err
+		}
+	}
+
+	var valueOwner any
+	if input != nil && input.ownerID != "" {
+		valueOwner = input.ownerID
+	}
+	claim := input != nil && input.ownerID != "" && !ownerID.Valid
+	upsert := "INSERT INTO `event_sequence` (`aggregate_id`, `seq`, `owner_id`) VALUES (?, ?, ?) " +
+		"ON CONFLICT(`aggregate_id`) DO UPDATE SET `seq` = excluded.`seq`"
+	if claim {
+		upsert += ", `owner_id` = excluded.`owner_id`"
+	}
+	if _, err := tx.Exec(upsert, aggregateID, seq, valueOwner); err != nil {
+		return nil, err
+	}
+
+	dataJSON, err := json.Marshal(encoded)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(
+		"INSERT INTO `event` (`id`, `aggregate_id`, `seq`, `type`, `data`) VALUES (?, ?, ?, ?, ?)",
+		string(event.ID),
+		aggregateID,
+		seq,
+		schema.VersionedType(def.Type, def.Durable.Version),
+		string(dataJSON),
+	); err != nil {
+		return nil, err
+	}
+
+	return &payload, nil
 }
 
 func (s *eventService) readAfter(aggregateID string, after int) ([]schema.EventPayload, error) {

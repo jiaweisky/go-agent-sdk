@@ -258,7 +258,7 @@ func findDotEnv() (string, bool) {
 // projectRoot is core's project boundary: the directory
 // holding the nearest .git, else the filesystem root.
 func projectRoot(start string) string {
-	if matches := core.Up([]string{".git"}, start); len(matches) > 0 {
+	if matches := core.FindUp([]string{".git"}, start); len(matches) > 0 {
 		return filepath.Dir(matches[0])
 	}
 	return filepath.VolumeName(start) + string(filepath.Separator)

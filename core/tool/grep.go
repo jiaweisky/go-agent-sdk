@@ -165,9 +165,9 @@ func executeGrep(deps GrepDeps, input GrepInput, ctx Context) (GrepOutput, error
 	var file *string
 	if statErr == nil && info != nil {
 		switch info.Type {
-		case "Directory":
+		case core.FileKindDirectory:
 			cwd = target
-		case "File":
+		case core.FileKindFile:
 			name := filepath.Base(target)
 			file = &name
 		}

@@ -214,233 +214,293 @@ func (s *turndownService) turndown(input string) (string, error) {
 
 func turndownDefaultRules() []turndownRule {
 	return []turndownRule{
-		{
-			tags: []string{"p"},
-			replacement: func(content string, _ *html.Node, _ *turndownOptions, _ *turndownState) string {
-				return "\n\n" + content + "\n\n"
-			},
-		},
-		{
-			tags: []string{"br"},
-			replacement: func(_ string, _ *html.Node, options *turndownOptions, _ *turndownState) string {
-				return options.br + "\n"
-			},
-		},
-		{
-			tags: []string{"h1", "h2", "h3", "h4", "h5", "h6"},
-			replacement: func(content string, node *html.Node, options *turndownOptions, _ *turndownState) string {
-				level := int(node.Data[1] - '0')
-				if options.headingStyle == "setext" && level < 3 {
-					char := "-"
-					if level == 1 {
-						char = "="
-					}
-					return "\n\n" + content + "\n" + strings.Repeat(char, turndownJSLength(content)) + "\n\n"
-				}
-				return "\n\n" + strings.Repeat("#", level) + " " + content + "\n\n"
-			},
-		},
-		{
-			tags: []string{"blockquote"},
-			replacement: func(content string, _ *html.Node, _ *turndownOptions, _ *turndownState) string {
-				content = turndownBlockquoteTrim.ReplaceAllString(content, "")
-				content = turndownLineStart.ReplaceAllString(content, "> ")
-				return "\n\n" + content + "\n\n"
-			},
-		},
-		{
-			tags: []string{"ul", "ol"},
-			replacement: func(content string, node *html.Node, _ *turndownOptions, _ *turndownState) string {
-				parent := node.Parent
-				if parent != nil && parent.Type == html.ElementNode &&
-					strings.ToLower(parent.Data) == "li" && turndownLastElementChild(parent) == node {
-					return "\n" + content
-				}
-				return "\n\n" + content + "\n\n"
-			},
-		},
-		{
-			tags: []string{"li"},
-			replacement: func(content string, node *html.Node, options *turndownOptions, _ *turndownState) string {
-				content = turndownLeadingNewlines.ReplaceAllString(content, "")
-				content = turndownTrailingNewlinesRe.ReplaceAllString(content, "\n")
-				content = turndownNewlines.ReplaceAllString(content, "\n    ")
-				prefix := options.bulletListMarker + "   "
-				parent := node.Parent
-				if parent != nil && parent.Type == html.ElementNode && strings.ToLower(parent.Data) == "ol" {
-					start := turndownAttr(parent, "start")
-					index := turndownElementIndex(parent, node)
-					if start != "" {
-						base, err := strconv.ParseFloat(start, 64)
-						if err != nil {
-							base = math.NaN()
-						}
-						prefix = strconv.FormatFloat(base+float64(index), 'f', -1, 64) + ".  "
-					} else {
-						prefix = strconv.Itoa(index+1) + ".  "
-					}
-				}
-				result := prefix + content
-				if node.NextSibling != nil && !strings.HasSuffix(content, "\n") {
-					result += "\n"
-				}
-				return result
-			},
-		},
-		{
-			filter: func(node *html.Node, options *turndownOptions) bool {
-				return options.codeBlockStyle == "indented" &&
-					strings.ToLower(node.Data) == "pre" &&
-					node.FirstChild != nil && node.FirstChild.Type == html.ElementNode &&
-					strings.ToLower(node.FirstChild.Data) == "code"
-			},
-			replacement: func(_ string, node *html.Node, _ *turndownOptions, _ *turndownState) string {
-				return "\n\n    " + turndownNewlines.ReplaceAllString(turndownTextContent(node.FirstChild), "\n    ") + "\n\n"
-			},
-		},
-		{
-			filter: func(node *html.Node, options *turndownOptions) bool {
-				return options.codeBlockStyle == "fenced" &&
-					strings.ToLower(node.Data) == "pre" &&
-					node.FirstChild != nil && node.FirstChild.Type == html.ElementNode &&
-					strings.ToLower(node.FirstChild.Data) == "code"
-			},
-			replacement: func(_ string, node *html.Node, options *turndownOptions, _ *turndownState) string {
-				className := turndownAttr(node.FirstChild, "class")
-				language := ""
-				if m := turndownLanguageRe.FindStringSubmatch(className); m != nil {
-					language = m[1]
-				}
-				code := turndownTextContent(node.FirstChild)
+		turndownRuleParagraph(),
+		turndownRuleBreak(),
+		turndownRuleHeadings(),
+		turndownRuleBlockquote(),
+		turndownRuleList(),
+		turndownRuleListItem(),
+		turndownRuleIndentedCode(),
+		turndownRuleFencedCode(),
+		turndownRuleHorizontalRule(),
+		turndownRuleInlinedLink(),
+		turndownRuleReferencedLink(),
+		turndownRuleEmphasis(),
+		turndownRuleStrong(),
+		turndownRuleInlineCode(),
+		turndownRuleImage(),
+	}
+}
 
-				fenceChar := ""
-				if options.fence != "" {
-					fenceChar = options.fence[:1]
+func turndownRuleParagraph() turndownRule {
+	return turndownRule{
+		tags: []string{"p"},
+		replacement: func(content string, _ *html.Node, _ *turndownOptions, _ *turndownState) string {
+			return "\n\n" + content + "\n\n"
+		},
+	}
+}
+
+func turndownRuleBreak() turndownRule {
+	return turndownRule{
+		tags: []string{"br"},
+		replacement: func(_ string, _ *html.Node, options *turndownOptions, _ *turndownState) string {
+			return options.br + "\n"
+		},
+	}
+}
+
+func turndownRuleHeadings() turndownRule {
+	return turndownRule{
+		tags: []string{"h1", "h2", "h3", "h4", "h5", "h6"},
+		replacement: func(content string, node *html.Node, options *turndownOptions, _ *turndownState) string {
+			level := int(node.Data[1] - '0')
+			if options.headingStyle == "setext" && level < 3 {
+				char := "-"
+				if level == 1 {
+					char = "="
 				}
-				fenceSize := 3
-				fenceRe := regexp.MustCompile("(?m)^" + regexp.QuoteMeta(fenceChar) + "{3,}")
-				for _, match := range fenceRe.FindAllString(code, -1) {
-					if len(match) >= fenceSize {
-						fenceSize = len(match) + 1
+				return "\n\n" + content + "\n" + strings.Repeat(char, turndownJSLength(content)) + "\n\n"
+			}
+			return "\n\n" + strings.Repeat("#", level) + " " + content + "\n\n"
+		},
+	}
+}
+
+func turndownRuleBlockquote() turndownRule {
+	return turndownRule{
+		tags: []string{"blockquote"},
+		replacement: func(content string, _ *html.Node, _ *turndownOptions, _ *turndownState) string {
+			content = turndownBlockquoteTrim.ReplaceAllString(content, "")
+			content = turndownLineStart.ReplaceAllString(content, "> ")
+			return "\n\n" + content + "\n\n"
+		},
+	}
+}
+
+func turndownRuleList() turndownRule {
+	return turndownRule{
+		tags: []string{"ul", "ol"},
+		replacement: func(content string, node *html.Node, _ *turndownOptions, _ *turndownState) string {
+			parent := node.Parent
+			if parent != nil && parent.Type == html.ElementNode &&
+				strings.ToLower(parent.Data) == "li" && turndownLastElementChild(parent) == node {
+				return "\n" + content
+			}
+			return "\n\n" + content + "\n\n"
+		},
+	}
+}
+
+func turndownRuleListItem() turndownRule {
+	return turndownRule{
+		tags: []string{"li"},
+		replacement: func(content string, node *html.Node, options *turndownOptions, _ *turndownState) string {
+			content = turndownLeadingNewlines.ReplaceAllString(content, "")
+			content = turndownTrailingNewlinesRe.ReplaceAllString(content, "\n")
+			content = turndownNewlines.ReplaceAllString(content, "\n    ")
+			prefix := options.bulletListMarker + "   "
+			parent := node.Parent
+			if parent != nil && parent.Type == html.ElementNode && strings.ToLower(parent.Data) == "ol" {
+				start := turndownAttr(parent, "start")
+				index := turndownElementIndex(parent, node)
+				if start != "" {
+					base, err := strconv.ParseFloat(start, 64)
+					if err != nil {
+						base = math.NaN()
 					}
+					prefix = strconv.FormatFloat(base+float64(index), 'f', -1, 64) + ".  "
+				} else {
+					prefix = strconv.Itoa(index+1) + ".  "
 				}
-				fence := strings.Repeat(fenceChar, fenceSize)
-				code = turndownTrailingNewline.ReplaceAllString(code, "")
-				return "\n\n" + fence + language + "\n" + code + "\n" + fence + "\n\n"
-			},
+			}
+			result := prefix + content
+			if node.NextSibling != nil && !strings.HasSuffix(content, "\n") {
+				result += "\n"
+			}
+			return result
 		},
-		{
-			tags: []string{"hr"},
-			replacement: func(_ string, _ *html.Node, options *turndownOptions, _ *turndownState) string {
-				return "\n\n" + options.hr + "\n\n"
-			},
+	}
+}
+
+func turndownRuleIndentedCode() turndownRule {
+	return turndownRule{
+		filter: func(node *html.Node, options *turndownOptions) bool {
+			return options.codeBlockStyle == "indented" &&
+				strings.ToLower(node.Data) == "pre" &&
+				node.FirstChild != nil && node.FirstChild.Type == html.ElementNode &&
+				strings.ToLower(node.FirstChild.Data) == "code"
 		},
-		{
-			filter: func(node *html.Node, options *turndownOptions) bool {
-				return options.linkStyle == "inlined" && strings.ToLower(node.Data) == "a" && turndownAttr(node, "href") != ""
-			},
-			replacement: func(content string, node *html.Node, _ *turndownOptions, _ *turndownState) string {
-				href := turndownAttr(node, "href")
-				href = turndownLinkParens.ReplaceAllString(href, "\\$1")
-				title := turndownCleanAttribute(turndownAttr(node, "title"))
-				if title != "" {
-					title = ` "` + turndownQuote.ReplaceAllString(title, `\"`) + `"`
-				}
-				return "[" + content + "](" + href + title + ")"
-			},
+		replacement: func(_ string, node *html.Node, _ *turndownOptions, _ *turndownState) string {
+			return "\n\n    " + turndownNewlines.ReplaceAllString(turndownTextContent(node.FirstChild), "\n    ") + "\n\n"
 		},
-		{
-			filter: func(node *html.Node, options *turndownOptions) bool {
-				return options.linkStyle == "referenced" && strings.ToLower(node.Data) == "a" && turndownAttr(node, "href") != ""
-			},
-			replacement: func(content string, node *html.Node, options *turndownOptions, state *turndownState) string {
-				href := turndownAttr(node, "href")
-				title := turndownCleanAttribute(turndownAttr(node, "title"))
-				if title != "" {
-					title = ` "` + title + `"`
-				}
-				var replacement, reference string
-				switch options.linkReferenceStyle {
-				case "collapsed":
-					replacement = "[" + content + "][]"
-					reference = "[" + content + "]: " + href + title
-				case "shortcut":
-					replacement = "[" + content + "]"
-					reference = "[" + content + "]: " + href + title
-				default:
-					id := len(state.references) + 1
-					replacement = "[" + content + "][" + strconv.Itoa(id) + "]"
-					reference = "[" + strconv.Itoa(id) + "]: " + href + title
-				}
-				state.references = append(state.references, reference)
-				return replacement
-			},
-			appendFn: func(_ *turndownOptions, state *turndownState) string {
-				if len(state.references) == 0 {
-					return ""
-				}
-				references := "\n\n" + strings.Join(state.references, "\n") + "\n\n"
-				state.references = nil
-				return references
-			},
+	}
+}
+
+func turndownRuleFencedCode() turndownRule {
+	return turndownRule{
+		filter: func(node *html.Node, options *turndownOptions) bool {
+			return options.codeBlockStyle == "fenced" &&
+				strings.ToLower(node.Data) == "pre" &&
+				node.FirstChild != nil && node.FirstChild.Type == html.ElementNode &&
+				strings.ToLower(node.FirstChild.Data) == "code"
 		},
-		{
-			tags: []string{"em", "i"},
-			replacement: func(content string, _ *html.Node, options *turndownOptions, _ *turndownState) string {
-				if turndownTrimSpace(content) == "" {
-					return ""
+		replacement: func(_ string, node *html.Node, options *turndownOptions, _ *turndownState) string {
+			className := turndownAttr(node.FirstChild, "class")
+			language := ""
+			if m := turndownLanguageRe.FindStringSubmatch(className); m != nil {
+				language = m[1]
+			}
+			code := turndownTextContent(node.FirstChild)
+
+			fenceChar := ""
+			if options.fence != "" {
+				fenceChar = options.fence[:1]
+			}
+			fenceSize := 3
+			fenceRe := regexp.MustCompile("(?m)^" + regexp.QuoteMeta(fenceChar) + "{3,}")
+			for _, match := range fenceRe.FindAllString(code, -1) {
+				if len(match) >= fenceSize {
+					fenceSize = len(match) + 1
 				}
-				return options.emDelimiter + content + options.emDelimiter
-			},
+			}
+			fence := strings.Repeat(fenceChar, fenceSize)
+			code = turndownTrailingNewline.ReplaceAllString(code, "")
+			return "\n\n" + fence + language + "\n" + code + "\n" + fence + "\n\n"
 		},
-		{
-			tags: []string{"strong", "b"},
-			replacement: func(content string, _ *html.Node, options *turndownOptions, _ *turndownState) string {
-				if turndownTrimSpace(content) == "" {
-					return ""
-				}
-				return options.strongDelimiter + content + options.strongDelimiter
-			},
+	}
+}
+
+func turndownRuleHorizontalRule() turndownRule {
+	return turndownRule{
+		tags: []string{"hr"},
+		replacement: func(_ string, _ *html.Node, options *turndownOptions, _ *turndownState) string {
+			return "\n\n" + options.hr + "\n\n"
 		},
-		{
-			filter: func(node *html.Node, _ *turndownOptions) bool {
-				hasSiblings := node.PrevSibling != nil || node.NextSibling != nil
-				isCodeBlock := node.Parent != nil && node.Parent.Type == html.ElementNode &&
-					strings.ToLower(node.Parent.Data) == "pre" && !hasSiblings
-				return strings.ToLower(node.Data) == "code" && !isCodeBlock
-			},
-			replacement: func(content string, _ *html.Node, _ *turndownOptions, _ *turndownState) string {
-				if content == "" {
-					return ""
-				}
-				content = turndownLineBreaks.ReplaceAllString(content, " ")
-				extraSpace := ""
-				if turndownCodeSpaceRe.MatchString(content) {
-					extraSpace = " "
-				}
-				delimiter := "`"
-				matches := turndownBackticks.FindAllString(content, -1)
-				for turndownContains(matches, delimiter) {
-					delimiter += "`"
-				}
-				return delimiter + extraSpace + content + extraSpace + delimiter
-			},
+	}
+}
+
+func turndownRuleInlinedLink() turndownRule {
+	return turndownRule{
+		filter: func(node *html.Node, options *turndownOptions) bool {
+			return options.linkStyle == "inlined" && strings.ToLower(node.Data) == "a" && turndownAttr(node, "href") != ""
 		},
-		{
-			tags: []string{"img"},
-			replacement: func(_ string, node *html.Node, _ *turndownOptions, _ *turndownState) string {
-				alt := turndownCleanAttribute(turndownAttr(node, "alt"))
-				src := turndownAttr(node, "src")
-				title := turndownCleanAttribute(turndownAttr(node, "title"))
-				titlePart := ""
-				if title != "" {
-					titlePart = ` "` + title + `"`
-				}
-				if src == "" {
-					return ""
-				}
-				return "![" + alt + "](" + src + titlePart + ")"
-			},
+		replacement: func(content string, node *html.Node, _ *turndownOptions, _ *turndownState) string {
+			href := turndownAttr(node, "href")
+			href = turndownLinkParens.ReplaceAllString(href, "\\$1")
+			title := turndownCleanAttribute(turndownAttr(node, "title"))
+			if title != "" {
+				title = ` "` + turndownQuote.ReplaceAllString(title, `\"`) + `"`
+			}
+			return "[" + content + "](" + href + title + ")"
+		},
+	}
+}
+
+func turndownRuleReferencedLink() turndownRule {
+	return turndownRule{
+		filter: func(node *html.Node, options *turndownOptions) bool {
+			return options.linkStyle == "referenced" && strings.ToLower(node.Data) == "a" && turndownAttr(node, "href") != ""
+		},
+		replacement: func(content string, node *html.Node, options *turndownOptions, state *turndownState) string {
+			href := turndownAttr(node, "href")
+			title := turndownCleanAttribute(turndownAttr(node, "title"))
+			if title != "" {
+				title = ` "` + title + `"`
+			}
+			var replacement, reference string
+			switch options.linkReferenceStyle {
+			case "collapsed":
+				replacement = "[" + content + "][]"
+				reference = "[" + content + "]: " + href + title
+			case "shortcut":
+				replacement = "[" + content + "]"
+				reference = "[" + content + "]: " + href + title
+			default:
+				id := len(state.references) + 1
+				replacement = "[" + content + "][" + strconv.Itoa(id) + "]"
+				reference = "[" + strconv.Itoa(id) + "]: " + href + title
+			}
+			state.references = append(state.references, reference)
+			return replacement
+		},
+		appendFn: func(_ *turndownOptions, state *turndownState) string {
+			if len(state.references) == 0 {
+				return ""
+			}
+			references := "\n\n" + strings.Join(state.references, "\n") + "\n\n"
+			state.references = nil
+			return references
+		},
+	}
+}
+
+func turndownRuleEmphasis() turndownRule {
+	return turndownRule{
+		tags: []string{"em", "i"},
+		replacement: func(content string, _ *html.Node, options *turndownOptions, _ *turndownState) string {
+			if turndownTrimSpace(content) == "" {
+				return ""
+			}
+			return options.emDelimiter + content + options.emDelimiter
+		},
+	}
+}
+
+func turndownRuleStrong() turndownRule {
+	return turndownRule{
+		tags: []string{"strong", "b"},
+		replacement: func(content string, _ *html.Node, options *turndownOptions, _ *turndownState) string {
+			if turndownTrimSpace(content) == "" {
+				return ""
+			}
+			return options.strongDelimiter + content + options.strongDelimiter
+		},
+	}
+}
+
+func turndownRuleInlineCode() turndownRule {
+	return turndownRule{
+		filter: func(node *html.Node, _ *turndownOptions) bool {
+			hasSiblings := node.PrevSibling != nil || node.NextSibling != nil
+			isCodeBlock := node.Parent != nil && node.Parent.Type == html.ElementNode &&
+				strings.ToLower(node.Parent.Data) == "pre" && !hasSiblings
+			return strings.ToLower(node.Data) == "code" && !isCodeBlock
+		},
+		replacement: func(content string, _ *html.Node, _ *turndownOptions, _ *turndownState) string {
+			if content == "" {
+				return ""
+			}
+			content = turndownLineBreaks.ReplaceAllString(content, " ")
+			extraSpace := ""
+			if turndownCodeSpaceRe.MatchString(content) {
+				extraSpace = " "
+			}
+			delimiter := "`"
+			matches := turndownBackticks.FindAllString(content, -1)
+			for turndownContains(matches, delimiter) {
+				delimiter += "`"
+			}
+			return delimiter + extraSpace + content + extraSpace + delimiter
+		},
+	}
+}
+
+func turndownRuleImage() turndownRule {
+	return turndownRule{
+		tags: []string{"img"},
+		replacement: func(_ string, node *html.Node, _ *turndownOptions, _ *turndownState) string {
+			alt := turndownCleanAttribute(turndownAttr(node, "alt"))
+			src := turndownAttr(node, "src")
+			title := turndownCleanAttribute(turndownAttr(node, "title"))
+			titlePart := ""
+			if title != "" {
+				titlePart = ` "` + title + `"`
+			}
+			if src == "" {
+				return ""
+			}
+			return "![" + alt + "](" + src + titlePart + ")"
 		},
 	}
 }
@@ -477,53 +537,73 @@ func turndownIsPre(node *html.Node) bool {
 	return node.Type == html.ElementNode && strings.ToLower(node.Data) == "pre"
 }
 
+// turndownWhitespaceState carries the running state of whitespace collapsing.
+type turndownWhitespaceState struct {
+	isPre         func(*html.Node) bool
+	prevText      *html.Node
+	keepLeadingWs bool
+	prev          *html.Node
+}
+
 // turndownCollapseWhitespace is adapted from collapse-whitespace by Luc Thevenard.
 func turndownCollapseWhitespace(root *html.Node, isPre func(*html.Node) bool) {
 	if root.FirstChild == nil || isPre(root) {
 		return
 	}
-	var prevText *html.Node
-	keepLeadingWs := false
-	var prev *html.Node
-	node := turndownNext(prev, root, isPre)
+	state := &turndownWhitespaceState{isPre: isPre}
+	node := turndownNext(state.prev, root, isPre)
 	for node != root {
-		if node.Type == html.TextNode || node.Type == html.RawNode {
-			text := turndownWhitespaceRun.ReplaceAllString(node.Data, " ")
-			if (prevText == nil || strings.HasSuffix(prevText.Data, " ")) && !keepLeadingWs && strings.HasPrefix(text, " ") {
-				text = text[1:]
-			}
-			if text == "" {
-				node = turndownRemove(node)
-				continue
-			}
-			node.Data = text
-			prevText = node
-		} else if node.Type == html.ElementNode {
-			if turndownIsBlock(node) || strings.ToLower(node.Data) == "br" {
-				if prevText != nil {
-					prevText.Data = strings.TrimSuffix(prevText.Data, " ")
-				}
-				prevText = nil
-				keepLeadingWs = false
-			} else if turndownIsVoid(node) || isPre(node) {
-				prevText = nil
-				keepLeadingWs = true
-			} else if prevText != nil {
-				keepLeadingWs = false
-			}
-		} else {
-			node = turndownRemove(node)
+		if next, removed := state.visit(node); removed {
+			node = next
 			continue
 		}
-		nextNode := turndownNext(prev, node, isPre)
-		prev = node
+		nextNode := turndownNext(state.prev, node, isPre)
+		state.prev = node
 		node = nextNode
 	}
-	if prevText != nil {
-		prevText.Data = strings.TrimSuffix(prevText.Data, " ")
-		if prevText.Data == "" {
-			turndownRemove(prevText)
+	if state.prevText != nil {
+		state.prevText.Data = strings.TrimSuffix(state.prevText.Data, " ")
+		if state.prevText.Data == "" {
+			turndownRemove(state.prevText)
 		}
+	}
+}
+
+// visit collapses one node, reporting removed=true with the next node when the
+// node was dropped.
+func (s *turndownWhitespaceState) visit(node *html.Node) (*html.Node, bool) {
+	switch node.Type {
+	case html.TextNode, html.RawNode:
+		text := turndownWhitespaceRun.ReplaceAllString(node.Data, " ")
+		if (s.prevText == nil || strings.HasSuffix(s.prevText.Data, " ")) && !s.keepLeadingWs && strings.HasPrefix(text, " ") {
+			text = text[1:]
+		}
+		if text == "" {
+			return turndownRemove(node), true
+		}
+		node.Data = text
+		s.prevText = node
+		return nil, false
+	case html.ElementNode:
+		s.collapseElement(node)
+		return nil, false
+	default:
+		return turndownRemove(node), true
+	}
+}
+
+func (s *turndownWhitespaceState) collapseElement(node *html.Node) {
+	if turndownIsBlock(node) || strings.ToLower(node.Data) == "br" {
+		if s.prevText != nil {
+			s.prevText.Data = strings.TrimSuffix(s.prevText.Data, " ")
+		}
+		s.prevText = nil
+		s.keepLeadingWs = false
+	} else if turndownIsVoid(node) || s.isPre(node) {
+		s.prevText = nil
+		s.keepLeadingWs = true
+	} else if s.prevText != nil {
+		s.keepLeadingWs = false
 	}
 }
 

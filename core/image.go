@@ -14,13 +14,6 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// ImageResizerUnavailableError reports that no image resizer is available.
-// packages/core/src/image.ts. The read tool treats it as "keep the original
-// content" rather than a failure.
-type ImageResizerUnavailableError struct{}
-
-func (e *ImageResizerUnavailableError) Error() string { return "image resizer unavailable" }
-
 type ImageDecodeError struct {
 	Resource string
 }

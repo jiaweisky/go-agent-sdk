@@ -141,6 +141,33 @@ func TestRead_Paging(t *testing.T) {
 	}
 }
 
+func TestRead_LargeFilePages(t *testing.T) {
+	root := t.TempDir()
+	var b strings.Builder
+	for i := 0; i < 10000; i++ {
+		b.WriteString("0123456789\n")
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(b.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := settleRead(t, newReadDeps(root), map[string]any{"path": "big.txt"})
+	value, ok := result.Result.Value.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map value, got %T", result.Result.Value)
+	}
+	if value["type"] != "text-page" {
+		t.Fatalf("unexpected type: %v", value["type"])
+	}
+	if value["truncated"] != true || value["next"] == nil {
+		t.Fatalf("expected truncation with a next page, got %v / %v", value["truncated"], value["next"])
+	}
+	content, _ := value["content"].(string)
+	if !strings.HasPrefix(content, "0123456789\n") {
+		t.Fatalf("unexpected content start: %q", content)
+	}
+}
+
 func TestRead_OffsetOutOfRange(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "data.txt"), []byte("a\nb\n"), 0644); err != nil {

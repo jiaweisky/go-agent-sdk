@@ -133,6 +133,24 @@ func llmAssistant(message schema.SessionMessageAssistant, model llmschema.ModelS
 		string(message.Model.ID) == string(model.ModelID())
 	reuseProviderMetadata := sameModel && message.Error == nil
 
+	meaningful := llmMeaningfulContent(llmAssistantContent(message, sameModel, reuseProviderMetadata))
+	results := llmAssistantToolResults(message, reuseProviderMetadata)
+
+	if len(meaningful) == 0 {
+		return results
+	}
+	messages := []llmschema.Message{llmschema.NewMessage(llmschema.MessageInput{
+		ID:       string(message.ID),
+		Role:     llmschema.RoleAssistant,
+		Content:  meaningful,
+		Metadata: message.Metadata,
+	})}
+	return append(messages, results...)
+}
+
+// llmAssistantContent converts the assistant's parts, reusing provider metadata
+// only when the message came from the same model without error.
+func llmAssistantContent(message schema.SessionMessageAssistant, sameModel, reuseProviderMetadata bool) []llmschema.ContentPart {
 	content := make([]llmschema.ContentPart, 0, len(message.Content))
 	for _, item := range message.Content {
 		switch part := item.(type) {
@@ -169,7 +187,11 @@ func llmAssistant(message schema.SessionMessageAssistant, model llmschema.ModelS
 			}
 		}
 	}
+	return content
+}
 
+// llmMeaningfulContent drops empty text and reasoning parts.
+func llmMeaningfulContent(content []llmschema.ContentPart) []llmschema.ContentPart {
 	meaningful := make([]llmschema.ContentPart, 0, len(content))
 	for _, part := range content {
 		switch p := part.(type) {
@@ -185,7 +207,12 @@ func llmAssistant(message schema.SessionMessageAssistant, model llmschema.ModelS
 			meaningful = append(meaningful, part)
 		}
 	}
+	return meaningful
+}
 
+// llmAssistantToolResults collects the tool results that are not hosted by the
+// provider.
+func llmAssistantToolResults(message schema.SessionMessageAssistant, reuseProviderMetadata bool) []llmschema.Message {
 	var results []llmschema.Message
 	for _, item := range message.Content {
 		tool, ok := item.(schema.SessionMessageAssistantTool)
@@ -203,17 +230,7 @@ func llmAssistant(message schema.SessionMessageAssistant, model llmschema.ModelS
 			results = append(results, llmschema.MessageTool(result))
 		}
 	}
-
-	if len(meaningful) == 0 {
-		return results
-	}
-	messages := []llmschema.Message{llmschema.NewMessage(llmschema.MessageInput{
-		ID:       string(message.ID),
-		Role:     llmschema.RoleAssistant,
-		Content:  meaningful,
-		Metadata: message.Metadata,
-	})}
-	return append(messages, results...)
+	return results
 }
 
 func toLLMMessage(message schema.SessionMessage, model llmschema.ModelSchema) []llmschema.Message {

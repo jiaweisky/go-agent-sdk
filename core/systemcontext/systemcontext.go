@@ -1,5 +1,5 @@
-// Package systemcontext ports core/system-context/index.ts: privileged system
-// context modelled as independently refreshable typed sources.
+// Package systemcontext models privileged system context as independently
+// refreshable typed sources.
 package systemcontext
 
 import (
@@ -285,6 +285,32 @@ func Reconcile(value SystemContext, previous Snapshot) (ReconcileResult, error) 
 }
 
 func reconcileObservation(entries []entry, previous Snapshot) (ReconcileResult, error) {
+	comparisons, keys, replace, err := compareObservations(entries, previous)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	if replace {
+		return replaceObservation(entries, previous)
+	}
+
+	snapshot, updates, err := buildUpdatedSnapshot(entries, previous, comparisons)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	removals, err := removedUpdates(previous, keys)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	updates = append(updates, removals...)
+	if len(updates) == 0 {
+		return ReconcileResult{Tag: "Unchanged"}, nil
+	}
+	return ReconcileResult{Tag: "Updated", Text: render(updates), Snapshot: snapshot}, nil
+}
+
+// compareObservations compares each available entry with the previous snapshot.
+// It reports replace=true when reconciliation must fall back to replacement.
+func compareObservations(entries []entry, previous Snapshot) (map[Key]compared, map[Key]bool, bool, error) {
 	keys := map[Key]bool{}
 	comparisons := map[Key]compared{}
 	for _, entry := range entries {
@@ -298,10 +324,10 @@ func reconcileObservation(entries []entry, previous Snapshot) (ReconcileResult, 
 		}
 		compared, err := entry.compare(stored.Value)
 		if err != nil {
-			return ReconcileResult{}, err
+			return nil, nil, false, err
 		}
 		if compared.tag == "Incompatible" {
-			return replaceObservation(entries, previous)
+			return nil, nil, true, nil
 		}
 		comparisons[entry.key] = compared
 	}
@@ -310,10 +336,14 @@ func reconcileObservation(entries []entry, previous Snapshot) (ReconcileResult, 
 			continue
 		}
 		if previous[key].Removed == nil {
-			return replaceObservation(entries, previous)
+			return nil, nil, true, nil
 		}
 	}
+	return comparisons, keys, false, nil
+}
 
+// buildUpdatedSnapshot renders the changed entries and carries the rest forward.
+func buildUpdatedSnapshot(entries []entry, previous Snapshot, comparisons map[Key]compared) (Snapshot, []string, error) {
 	snapshot := Snapshot{}
 	var updates []string
 	for _, entry := range entries {
@@ -327,7 +357,7 @@ func reconcileObservation(entries []entry, previous Snapshot) (ReconcileResult, 
 		if !ok {
 			result, err := entry.baseline()
 			if err != nil {
-				return ReconcileResult{}, err
+				return nil, nil, err
 			}
 			updates = append(updates, result.text)
 			snapshot[entry.key] = result.snapshot
@@ -335,7 +365,7 @@ func reconcileObservation(entries []entry, previous Snapshot) (ReconcileResult, 
 		}
 		compared, ok := comparisons[entry.key]
 		if !ok || compared.tag == "Incompatible" {
-			return ReconcileResult{}, fmt.Errorf("Missing comparison for system context source %s", entry.key)
+			return nil, nil, fmt.Errorf("Missing comparison for system context source %s", entry.key)
 		}
 		if compared.tag == "Unchanged" {
 			snapshot[entry.key] = stored
@@ -343,25 +373,28 @@ func reconcileObservation(entries []entry, previous Snapshot) (ReconcileResult, 
 		}
 		result, err := compared.render()
 		if err != nil {
-			return ReconcileResult{}, err
+			return nil, nil, err
 		}
 		updates = append(updates, result.text)
 		snapshot[entry.key] = result.snapshot
 	}
+	return snapshot, updates, nil
+}
+
+// removedUpdates renders the sources present before but no longer observed.
+func removedUpdates(previous Snapshot, keys map[Key]bool) ([]string, error) {
+	var updates []string
 	for _, key := range sortedKeys(previous) {
 		if keys[key] {
 			continue
 		}
 		removed := previous[key].Removed
 		if removed == nil {
-			return ReconcileResult{}, fmt.Errorf("Missing removal rendering for system context source %s", key)
+			return nil, fmt.Errorf("Missing removal rendering for system context source %s", key)
 		}
 		updates = append(updates, *removed)
 	}
-	if len(updates) == 0 {
-		return ReconcileResult{Tag: "Unchanged"}, nil
-	}
-	return ReconcileResult{Tag: "Updated", Text: render(updates), Snapshot: snapshot}, nil
+	return updates, nil
 }
 
 // Replace creates a complete replacement generation or blocks while admitted

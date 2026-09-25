@@ -10,6 +10,10 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
+// snapshotMaxUntrackedFileBytes bounds the size of a single untracked file that
+// is captured into a snapshot.
+const snapshotMaxUntrackedFileBytes = 2 * 1024 * 1024
+
 type SnapshotID string
 
 type SnapshotOperation string
@@ -125,9 +129,8 @@ func (s *Snapshot) repository() (*GitRepository, error) {
 	return repository, nil
 }
 
-// Capture records the worktree and returns its snapshot id; it returns nil when
-// snapshots are disabled or the
-// best-effort capture fails.
+// Capture records the worktree and returns its snapshot id. It returns nil when
+// snapshots are disabled or the best-effort capture fails.
 func (s *Snapshot) Capture() (*SnapshotID, error) {
 	if !s.enabled {
 		return nil, nil
@@ -140,7 +143,7 @@ func (s *Snapshot) Capture() (*SnapshotID, error) {
 	if err != nil {
 		return nil, nil
 	}
-	maximum := 2 * 1024 * 1024
+	maximum := snapshotMaxUntrackedFileBytes
 	tree, err := s.git.Tree.Capture(GitTreeCaptureInput{
 		Repository:                *repository,
 		Scopes:                    []schema.RelativePath{scope},
@@ -256,7 +259,7 @@ func (s *Snapshot) Preview(input SnapshotPreviewInput) ([]FileDiff, error) {
 	for file := range files {
 		scopes = append(scopes, file)
 	}
-	maximum := 2 * 1024 * 1024
+	maximum := snapshotMaxUntrackedFileBytes
 	current, err := s.git.Tree.Capture(GitTreeCaptureInput{
 		Repository: *repository, Scopes: scopes, Ignores: s.source, MaximumUntrackedFileBytes: &maximum,
 	})

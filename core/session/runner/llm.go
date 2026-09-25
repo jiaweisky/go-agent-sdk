@@ -134,43 +134,60 @@ func (r *LLMRunner) Run(ctx context.Context, input RunInput) error {
 		return err
 	}
 
-	var promotion *schema.SessionDelivery
-	if hasSteer {
-		value := schema.SessionDeliverySteer
-		promotion = &value
-	} else if hasQueue {
-		value := schema.SessionDeliveryQueue
-		promotion = &value
-	}
+	promotion := deliveryPromotion(hasSteer, hasQueue)
 	shouldRun := input.Force || hasSteer || hasQueue
 	for shouldRun {
-		needsContinuation := true
-		step := 1
-		for needsContinuation {
-			result, err := r.runTurn(ctx, input.SessionID, promotion, step)
-			if err != nil {
-				return err
-			}
-			needsContinuation = result.NeedsContinuation
-			step = result.Step + 1
-			value := schema.SessionDeliverySteer
-			promotion = &value
-			if !needsContinuation {
-				needsContinuation, err = session.HasPending(r.DB.DB, input.SessionID, schema.SessionDeliverySteer)
-				if err != nil {
-					return err
-				}
-			}
+		if err := r.drainTurns(ctx, input.SessionID, promotion); err != nil {
+			return err
 		}
 		shouldRun, err = session.HasPending(r.DB.DB, input.SessionID, schema.SessionDeliveryQueue)
 		if err != nil {
 			return err
 		}
-		if shouldRun {
-			value := schema.SessionDeliveryQueue
-			promotion = &value
-		} else {
-			promotion = nil
+		promotion = queuePromotion(shouldRun)
+	}
+	return nil
+}
+
+// deliveryPromotion is the initial input kind to promote, if any.
+func deliveryPromotion(hasSteer, hasQueue bool) *schema.SessionDelivery {
+	if hasSteer {
+		value := schema.SessionDeliverySteer
+		return &value
+	}
+	if hasQueue {
+		value := schema.SessionDeliveryQueue
+		return &value
+	}
+	return nil
+}
+
+func queuePromotion(hasQueue bool) *schema.SessionDelivery {
+	if hasQueue {
+		value := schema.SessionDeliveryQueue
+		return &value
+	}
+	return nil
+}
+
+// drainTurns runs consecutive turns until none requests continuation.
+func (r *LLMRunner) drainTurns(ctx context.Context, sessionID schema.SessionID, promotion *schema.SessionDelivery) error {
+	needsContinuation := true
+	step := 1
+	for needsContinuation {
+		result, err := r.runTurn(ctx, sessionID, promotion, step)
+		if err != nil {
+			return err
+		}
+		needsContinuation = result.NeedsContinuation
+		step = result.Step + 1
+		value := schema.SessionDeliverySteer
+		promotion = &value
+		if !needsContinuation {
+			needsContinuation, err = session.HasPending(r.DB.DB, sessionID, schema.SessionDeliverySteer)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -264,6 +281,33 @@ func (r *LLMRunner) loadSystemContext(agent core.AgentSelection) (systemcontext.
 	return systemcontext.Combine(registry, skills, references), nil
 }
 
+// turnAttempt holds the state of one provider attempt across its three phases:
+// preparation, stream consumption, and settlement.
+type turnAttempt struct {
+	runner              *LLMRunner
+	ctx                 context.Context
+	sessionID           schema.SessionID
+	step                int
+	agent               core.AgentSelection
+	model               route.Model
+	entries             []session.HistoryEntry
+	request             *llmschema.LLMRequest
+	toolMaterialization *tool.Materialization
+	startSnapshot       *core.SnapshotID
+	recoverOverflow     func(session.CompactionInput) (bool, error)
+
+	publisher  *LLMEventPublisher
+	guard      *publishGuard
+	toolCtx    context.Context
+	toolCancel context.CancelFunc
+
+	streamErr         error
+	needsContinuation bool
+	overflowFailure   *llmschema.LLMEvent
+	toolErrs          []error
+	toolErrMu         sync.Mutex
+}
+
 func (r *LLMRunner) runTurnAttempt(
 	ctx context.Context,
 	sessionID schema.SessionID,
@@ -271,15 +315,36 @@ func (r *LLMRunner) runTurnAttempt(
 	step int,
 	recoverOverflow func(session.CompactionInput) (bool, error),
 ) (turnResult, error) {
-	stored, err := r.Store.Get(sessionID)
+	attempt, err := r.prepareTurnAttempt(ctx, sessionID, promotion, step, recoverOverflow)
 	if err != nil {
 		return turnResult{}, err
 	}
+	attempt.toolCtx, attempt.toolCancel = context.WithCancel(ctx)
+	defer attempt.toolCancel()
+
+	attempt.consumeStream()
+	return attempt.settle()
+}
+
+// prepareTurnAttempt validates the session, promotes pending input, and builds
+// the provider request. It returns a transition error when compaction asks the
+// caller to retry.
+func (r *LLMRunner) prepareTurnAttempt(
+	ctx context.Context,
+	sessionID schema.SessionID,
+	promotion *schema.SessionDelivery,
+	step int,
+	recoverOverflow func(session.CompactionInput) (bool, error),
+) (*turnAttempt, error) {
+	stored, err := r.Store.Get(sessionID)
+	if err != nil {
+		return nil, err
+	}
 	if stored == nil {
-		return turnResult{}, fmt.Errorf("Session not found: %s", sessionID)
+		return nil, fmt.Errorf("Session not found: %s", sessionID)
 	}
 	if string(stored.Location.Directory) != string(r.Location.Directory) || !sameWorkspace(stored.Location.WorkspaceID, r.Location.WorkspaceID) {
-		return turnResult{}, errInterrupted
+		return nil, errInterrupted
 	}
 
 	var agentID *string
@@ -289,85 +354,168 @@ func (r *LLMRunner) runTurnAttempt(
 	}
 	agent := r.Agents.Select(agentID)
 
-	systemContext, err := r.loadSystemContext(agent)
+	initialized, err := r.initializeSystemContext(agent, sessionID)
 	if err != nil {
-		return turnResult{}, err
-	}
-	initialized, err := session.ContextEpochInitialize(r.DB.DB, systemContext, sessionID)
-	if err != nil {
-		return turnResult{}, err
+		return nil, err
 	}
 
-	needsContinuation := false
-	currentStep := step
-	if promotion != nil {
-		cutoff, err := core.EventLatestSequence(r.DB.DB, string(sessionID))
-		if err != nil {
-			return turnResult{}, err
-		}
-		promoted := 0
-		if *promotion == schema.SessionDeliverySteer {
-			promoted, err = session.PromoteSteers(r.DB.DB, r.Events, sessionID, int64(cutoff))
-		} else {
-			var queued bool
-			queued, err = session.PromoteNextQueued(r.DB.DB, r.Events, sessionID)
-			if err == nil && queued {
-				promoted++
-			}
-			if err == nil {
-				var steered int
-				steered, err = session.PromoteSteers(r.DB.DB, r.Events, sessionID, int64(cutoff))
-				promoted += steered
-			}
-		}
-		if err != nil {
-			return turnResult{}, err
-		}
-		if promoted > 0 {
-			currentStep = 1
-		}
+	currentStep, err := r.promotePendingDeliveries(sessionID, promotion, step)
+	if err != nil {
+		return nil, err
 	}
 
 	var system session.ContextEpochPrepared
 	if initialized != nil {
 		system = *initialized
 	} else {
-		systemContext, err = r.loadSystemContext(agent)
+		system, err = r.prepareSystemContext(agent, sessionID)
 		if err != nil {
-			return turnResult{}, err
-		}
-		system, err = session.ContextEpochPrepare(r.DB.DB, r.Events, systemContext, sessionID)
-		if err != nil {
-			return turnResult{}, err
+			return nil, err
 		}
 	}
 
 	model, err := r.Models(*stored)
 	if err != nil {
-		return turnResult{}, err
+		return nil, err
 	}
 	entries, err := session.EntriesForRunner(r.DB, sessionID, system.BaselineSeq)
 	if err != nil {
-		return turnResult{}, err
-	}
-	contextMessages := make([]schema.SessionMessage, len(entries))
-	for i, entry := range entries {
-		contextMessages[i] = entry.Message
+		return nil, err
 	}
 
 	isLastStep := agent.Info != nil && agent.Info.Steps != nil && currentStep >= int(*agent.Info.Steps)
-	var toolMaterialization *tool.Materialization
-	if !isLastStep {
-		var permissions []core.PermissionRule
-		if agent.Info != nil {
-			permissions = agent.Info.Permissions
-		}
-		if stored.Permission != nil {
-			permissions = core.PermissionMerge(permissions, *stored.Permission)
-		}
-		toolMaterialization = r.Tools.MaterializeFor(string(sessionID), permissions)
+	toolMaterialization := r.materializeTools(sessionID, agent, stored, isLastStep)
+	request := buildTurnRequest(sessionID, agent, stored, system, contextMessagesOf(entries), model, isLastStep, toolMaterialization)
+
+	if compacted, err := r.compaction.CompactIfNeeded(session.CompactionInput{
+		SessionID: sessionID, Entries: compactionEntries(entries), Model: model, Request: *request, Context: ctx,
+	}); err != nil {
+		return nil, err
+	} else if compacted {
+		return nil, &turnTransitionError{Transition: turnTransition{Tag: "ContinueAfterCompaction", Step: currentStep}}
 	}
 
+	startSnapshot, err := r.Snapshots.Capture()
+	if err != nil {
+		return nil, err
+	}
+	var snapshot *string
+	if startSnapshot != nil {
+		value := string(*startSnapshot)
+		snapshot = &value
+	}
+	variant := variantOf(*stored)
+	publisher := NewLLMEventPublisher(r.Events, LLMEventPublisherInput{
+		SessionID: sessionID,
+		Agent:     string(agent.ID),
+		Model:     schema.ModelRef{ID: schema.ModelID(model.ID), ProviderID: schema.ProviderID(model.Provider), Variant: variant},
+		Snapshot:  snapshot,
+	})
+
+	return &turnAttempt{
+		runner:              r,
+		ctx:                 ctx,
+		sessionID:           sessionID,
+		step:                currentStep,
+		agent:               agent,
+		model:               model,
+		entries:             entries,
+		request:             request,
+		toolMaterialization: toolMaterialization,
+		startSnapshot:       startSnapshot,
+		recoverOverflow:     recoverOverflow,
+		publisher:           publisher,
+		guard:               &publishGuard{},
+	}, nil
+}
+
+// initializeSystemContext loads the context sources and initializes the epoch,
+// returning the prepared epoch when one already existed.
+func (r *LLMRunner) initializeSystemContext(agent core.AgentSelection, sessionID schema.SessionID) (*session.ContextEpochPrepared, error) {
+	systemContext, err := r.loadSystemContext(agent)
+	if err != nil {
+		return nil, err
+	}
+	return session.ContextEpochInitialize(r.DB.DB, systemContext, sessionID)
+}
+
+// prepareSystemContext builds a fresh epoch baseline for the attempt.
+func (r *LLMRunner) prepareSystemContext(agent core.AgentSelection, sessionID schema.SessionID) (session.ContextEpochPrepared, error) {
+	systemContext, err := r.loadSystemContext(agent)
+	if err != nil {
+		return session.ContextEpochPrepared{}, err
+	}
+	return session.ContextEpochPrepare(r.DB.DB, r.Events, systemContext, sessionID)
+}
+
+// promotePendingDeliveries admits pending steer/queue input, resetting the step
+// when anything was promoted.
+func (r *LLMRunner) promotePendingDeliveries(sessionID schema.SessionID, promotion *schema.SessionDelivery, step int) (int, error) {
+	if promotion == nil {
+		return step, nil
+	}
+	cutoff, err := core.EventLatestSequence(r.DB.DB, string(sessionID))
+	if err != nil {
+		return 0, err
+	}
+	promoted := 0
+	if *promotion == schema.SessionDeliverySteer {
+		promoted, err = session.PromoteSteers(r.DB.DB, r.Events, sessionID, int64(cutoff))
+	} else {
+		var queued bool
+		queued, err = session.PromoteNextQueued(r.DB.DB, r.Events, sessionID)
+		if err == nil && queued {
+			promoted++
+		}
+		if err == nil {
+			var steered int
+			steered, err = session.PromoteSteers(r.DB.DB, r.Events, sessionID, int64(cutoff))
+			promoted += steered
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+	if promoted > 0 {
+		return 1, nil
+	}
+	return step, nil
+}
+
+// materializeTools resolves the tools for the attempt, or nil on the last step.
+func (r *LLMRunner) materializeTools(sessionID schema.SessionID, agent core.AgentSelection, stored *schema.SessionInfo, isLastStep bool) *tool.Materialization {
+	if isLastStep {
+		return nil
+	}
+	var permissions []core.PermissionRule
+	if agent.Info != nil {
+		permissions = agent.Info.Permissions
+	}
+	if stored.Permission != nil {
+		permissions = core.PermissionMerge(permissions, *stored.Permission)
+	}
+	return r.Tools.MaterializeFor(string(sessionID), permissions)
+}
+
+func contextMessagesOf(entries []session.HistoryEntry) []schema.SessionMessage {
+	result := make([]schema.SessionMessage, len(entries))
+	for i, entry := range entries {
+		result[i] = entry.Message
+	}
+	return result
+}
+
+// buildTurnRequest assembles the provider request for one attempt.
+func buildTurnRequest(
+	sessionID schema.SessionID,
+	agent core.AgentSelection,
+	stored *schema.SessionInfo,
+	system session.ContextEpochPrepared,
+	contextMessages []schema.SessionMessage,
+	model route.Model,
+	isLastStep bool,
+	toolMaterialization *tool.Materialization,
+) *llmschema.LLMRequest {
 	promptCacheKey := string(sessionID)
 	if sessionIDShape.MatchString(string(sessionID)) {
 		promptCacheKey = string(sessionID)[4:]
@@ -394,7 +542,7 @@ func (r *LLMRunner) runTurnAttempt(
 	if toolMaterialization != nil {
 		tools = toolMaterialization.Definitions
 	}
-	request := llm.NewRequest(llm.RequestInput{
+	return llm.NewRequest(llm.RequestInput{
 		Model:           model,
 		Http:            &llmschema.HttpOptions{Headers: headers},
 		ProviderOptions: llmschema.ProviderOptions{"openai": {"promptCacheKey": promptCacheKey}},
@@ -403,155 +551,197 @@ func (r *LLMRunner) runTurnAttempt(
 		Tools:           tools,
 		ToolChoice:      toolChoice(isLastStep),
 	})
+}
 
-	if compacted, err := r.compaction.CompactIfNeeded(session.CompactionInput{
-		SessionID: sessionID, Entries: compactionEntries(entries), Model: model, Request: *request, Context: ctx,
-	}); err != nil {
-		return turnResult{}, err
-	} else if compacted {
-		return turnResult{}, &turnTransitionError{Transition: turnTransition{Tag: "ContinueAfterCompaction", Step: currentStep}}
-	}
-
-	startSnapshot, err := r.Snapshots.Capture()
-	if err != nil {
-		return turnResult{}, err
-	}
-	var snapshot *string
-	if startSnapshot != nil {
-		value := string(*startSnapshot)
-		snapshot = &value
-	}
-	publisher := NewLLMEventPublisher(r.Events, LLMEventPublisherInput{
-		SessionID: sessionID,
-		Agent:     string(agent.ID),
-		Model:     schema.ModelRef{ID: schema.ModelID(model.ID), ProviderID: schema.ProviderID(model.Provider), Variant: variantOf(*stored)},
-		Snapshot:  snapshot,
-	})
-
-	guard := &publishGuard{}
-	withPublication := func(fn func() error) error { return guard.run(fn) }
-	toolCtx, toolCancel := context.WithCancel(ctx)
-	defer toolCancel()
-
-	var overflowFailure *llmschema.LLMEvent
-	stream, streamErr := r.LLM.Stream(ctx, request)
+// consumeStream publishes the provider stream and settles each tool call.
+func (a *turnAttempt) consumeStream() {
 	var toolWait sync.WaitGroup
-	var toolErrs []error
-	var toolErrMu sync.Mutex
+	stream, streamErr := a.runner.LLM.Stream(a.ctx, a.request)
 	if streamErr == nil {
 		for event, err := range stream {
 			if err != nil {
 				streamErr = err
 				break
 			}
-			if overflowFailure != nil || publisher.HasProviderError() {
-				continue
-			}
-			if event.IsProviderError() {
-				if llm.IsContextOverflow(event.Message) && !publisher.HasAssistantStarted() {
-					captured := event
-					overflowFailure = &captured
-					continue
-				}
-			}
-			if err := withPublication(func() error { return publisher.Publish(event, nil) }); err != nil {
-				streamErr = err
+			if handleErr, stop := a.handleStreamEvent(event, &toolWait); stop {
+				streamErr = handleErr
 				break
 			}
-			if !event.IsToolCall() || (event.ProviderExecuted != nil && *event.ProviderExecuted) {
-				continue
-			}
-			if toolMaterialization == nil {
-				if err := withPublication(func() error {
-					return publisher.FailUnsettledTools("Tools are disabled after the maximum agent steps", false)
-				}); err != nil {
-					streamErr = err
-					break
-				}
-				continue
-			}
-			needsContinuation = true
-			var assistantMessageID schema.MessageID
-			if err := withPublication(func() error {
-				var lookupErr error
-				assistantMessageID, lookupErr = publisher.AssistantMessageID(event.ID)
-				return lookupErr
-			}); err != nil {
-				streamErr = err
-				break
-			}
-			toolWait.Add(1)
-			go func(call llmschema.LLMEvent, assistantMessageID schema.MessageID) {
-				defer toolWait.Done()
-				settlement, err := toolMaterialization.Settle(toolCtx, tool.ExecuteInput{
-					SessionID:          string(sessionID),
-					Agent:              string(agent.ID),
-					AssistantMessageID: string(assistantMessageID),
-					Call:               toolCallPart(call),
-					Progress: func(structured map[string]any, content []tool.Content) error {
-						return withPublication(func() error {
-							_, pubErr := r.Events.Publish(schema.SessionEventToolProgress, map[string]any{
-								"sessionID":          string(sessionID),
-								"timestamp":          time.Now().UnixMilli(),
-								"assistantMessageID": string(assistantMessageID),
-								"callID":             call.ID,
-								"structured":         structured,
-								"content":            tool.ToToolContent(content),
-							})
-							return pubErr
-						})
-					},
-				})
-				if err != nil {
-					toolErrMu.Lock()
-					toolErrs = append(toolErrs, err)
-					toolErrMu.Unlock()
-					return
-				}
-				outputPaths := settlement.OutputPaths
-				if outputPaths == nil {
-					outputPaths = []string{}
-				}
-				if err := withPublication(func() error {
-					return publisher.Publish(
-						llmschema.NewToolResult(call.ID, call.Name, settlement.Result, llmschema.WithEventOutput(settlement.Output)),
-						outputPaths,
-					)
-				}); err != nil {
-					toolErrMu.Lock()
-					toolErrs = append(toolErrs, err)
-					toolErrMu.Unlock()
-				}
-			}(event, assistantMessageID)
 		}
 	}
-	flushErr := withPublication(func() error { return publisher.Flush() })
+	flushErr := a.withPublication(func() error { return a.publisher.Flush() })
 	if streamErr != nil && isInterrupt(streamErr) {
-		toolCancel()
+		a.toolCancel()
 	}
 	toolWait.Wait()
 	if streamErr == nil && flushErr != nil {
 		streamErr = flushErr
 	}
+	a.streamErr = streamErr
+}
 
-	if recoverOverflow != nil && !publisher.HasAssistantStarted() &&
-		overflowContextFailure(overflowFailure, streamErr) {
-		recovered, recoverErr := recoverOverflow(session.CompactionInput{
-			SessionID: sessionID, Entries: compactionEntries(entries), Model: model, Request: *request, Context: ctx,
-		})
-		if recoverErr != nil {
-			return turnResult{}, recoverErr
-		}
-		if recovered {
-			return turnResult{}, &turnTransitionError{Transition: turnTransition{Tag: "ContinueAfterOverflowCompaction", Step: currentStep}}
-		}
+// handleStreamEvent publishes one streamed event and dispatches tool calls. It
+// reports whether to stop consuming, with the publication error when one
+// occurred.
+func (a *turnAttempt) handleStreamEvent(event llmschema.LLMEvent, toolWait *sync.WaitGroup) (error, bool) {
+	if a.overflowFailure != nil || a.publisher.HasProviderError() {
+		return nil, false
 	}
-	if overflowFailure != nil {
-		if err := withPublication(func() error { return publisher.Publish(*overflowFailure, nil) }); err != nil {
+	if event.IsProviderError() && llm.IsContextOverflow(event.Message) && !a.publisher.HasAssistantStarted() {
+		captured := event
+		a.overflowFailure = &captured
+		return nil, false
+	}
+	if err := a.withPublication(func() error { return a.publisher.Publish(event, nil) }); err != nil {
+		return err, true
+	}
+	if !event.IsToolCall() || (event.ProviderExecuted != nil && *event.ProviderExecuted) {
+		return nil, false
+	}
+	if a.toolMaterialization == nil {
+		if err := a.withPublication(func() error {
+			return a.publisher.FailUnsettledTools("Tools are disabled after the maximum agent steps", false)
+		}); err != nil {
+			return err, true
+		}
+		return nil, false
+	}
+	a.needsContinuation = true
+	var assistantMessageID schema.MessageID
+	if err := a.withPublication(func() error {
+		var lookupErr error
+		assistantMessageID, lookupErr = a.publisher.AssistantMessageID(event.ID)
+		return lookupErr
+	}); err != nil {
+		return err, true
+	}
+	toolWait.Add(1)
+	go a.runTool(toolWait, event, assistantMessageID)
+	return nil, false
+}
+
+// runTool executes one tool call and publishes its result.
+func (a *turnAttempt) runTool(wait *sync.WaitGroup, call llmschema.LLMEvent, assistantMessageID schema.MessageID) {
+	defer wait.Done()
+	settlement, err := a.toolMaterialization.Settle(a.toolCtx, tool.ExecuteInput{
+		SessionID:          string(a.sessionID),
+		Agent:              string(a.agent.ID),
+		AssistantMessageID: string(assistantMessageID),
+		Call:               toolCallPart(call),
+		Progress: func(structured map[string]any, content []tool.Content) error {
+			return a.withPublication(func() error {
+				_, pubErr := a.runner.Events.Publish(schema.SessionEventToolProgress, map[string]any{
+					"sessionID":          string(a.sessionID),
+					"timestamp":          time.Now().UnixMilli(),
+					"assistantMessageID": string(assistantMessageID),
+					"callID":             call.ID,
+					"structured":         structured,
+					"content":            tool.ToToolContent(content),
+				})
+				return pubErr
+			})
+		},
+	})
+	if err != nil {
+		a.recordToolError(err)
+		return
+	}
+	outputPaths := settlement.OutputPaths
+	if outputPaths == nil {
+		outputPaths = []string{}
+	}
+	if err := a.withPublication(func() error {
+		return a.publisher.Publish(
+			llmschema.NewToolResult(call.ID, call.Name, settlement.Result, llmschema.WithEventOutput(settlement.Output)),
+			outputPaths,
+		)
+	}); err != nil {
+		a.recordToolError(err)
+	}
+}
+
+func (a *turnAttempt) recordToolError(err error) {
+	a.toolErrMu.Lock()
+	a.toolErrs = append(a.toolErrs, err)
+	a.toolErrMu.Unlock()
+}
+
+func (a *turnAttempt) withPublication(fn func() error) error {
+	return a.guard.run(fn)
+}
+
+// settle interprets the stream and tool outcomes, publishing failures and the
+// step end, and reports whether the turn continues.
+func (a *turnAttempt) settle() (turnResult, error) {
+	streamErr := a.streamErr
+	recovered, err := a.tryOverflowRecovery()
+	if err != nil {
+		return turnResult{}, err
+	}
+	if recovered {
+		return turnResult{}, &turnTransitionError{Transition: turnTransition{Tag: "ContinueAfterOverflowCompaction", Step: a.step}}
+	}
+	if a.overflowFailure != nil {
+		if err := a.withPublication(func() error { return a.publisher.Publish(*a.overflowFailure, nil) }); err != nil {
 			return turnResult{}, err
 		}
 	}
 
+	if err := a.handleProviderFailure(streamErr); err != nil {
+		return turnResult{}, err
+	}
+
+	collected := a.collectToolErrors()
+	settledErr := firstError(collected)
+
+	// A user decline anywhere in the batch halts the turn, even when another tool
+	// failed first.
+	if declined, err := a.declineError(collected); err != nil {
+		return turnResult{}, err
+	} else if declined != nil {
+		return turnResult{}, declined
+	}
+
+	settledInterrupt, err := a.handleInterrupts(collected, streamErr)
+	if err != nil {
+		return turnResult{}, err
+	}
+	settledInterrupted := settledInterrupt != nil
+
+	if err := a.handleToolFailure(settledErr); err != nil {
+		return turnResult{}, err
+	}
+	if err := a.finalizeStep(); err != nil {
+		return turnResult{}, err
+	}
+	if err := a.finishSettlement(streamErr); err != nil {
+		return turnResult{}, err
+	}
+
+	if streamErr != nil {
+		return turnResult{}, streamErr
+	}
+	if settledInterrupted {
+		return turnResult{}, settledInterrupt
+	}
+	return turnResult{NeedsContinuation: !a.publisher.HasProviderError() && a.needsContinuation, Step: a.step}, nil
+}
+
+// tryOverflowRecovery attempts post-overflow compaction, reporting whether it
+// recovered so the caller can retry the attempt.
+func (a *turnAttempt) tryOverflowRecovery() (bool, error) {
+	if a.recoverOverflow == nil || a.publisher.HasAssistantStarted() ||
+		!overflowContextFailure(a.overflowFailure, a.streamErr) {
+		return false, nil
+	}
+	return a.recoverOverflow(session.CompactionInput{
+		SessionID: a.sessionID, Entries: compactionEntries(a.entries), Model: a.model, Request: *a.request, Context: a.ctx,
+	})
+}
+
+// handleProviderFailure reports an LLM error as a failed assistant turn unless
+// the provider already reported it.
+func (a *turnAttempt) handleProviderFailure(streamErr error) error {
 	var llmFailure *llmschema.LLMError
 	if streamErr != nil {
 		var target *llmschema.LLMError
@@ -559,39 +749,50 @@ func (r *LLMRunner) runTurnAttempt(
 			llmFailure = target
 		}
 	}
-	if llmFailure != nil && !publisher.HasProviderError() {
-		if err := withPublication(func() error {
-			return publisher.FailUnsettledTools("Provider did not return a tool result", true)
-		}); err != nil {
-			return turnResult{}, err
-		}
-		if err := withPublication(func() error { return publisher.FailAssistant(llmFailure.Reason.Message) }); err != nil {
-			return turnResult{}, err
-		}
+	if llmFailure == nil || a.publisher.HasProviderError() {
+		return nil
 	}
-
-	toolErrMu.Lock()
-	collected := append([]error(nil), toolErrs...)
-	toolErrMu.Unlock()
-	var settledErr error
-	if len(collected) > 0 {
-		settledErr = collected[0]
+	if err := a.withPublication(func() error {
+		return a.publisher.FailUnsettledTools("Provider did not return a tool result", true)
+	}); err != nil {
+		return err
 	}
+	return a.withPublication(func() error { return a.publisher.FailAssistant(llmFailure.Reason.Message) })
+}
 
-	// A user decline anywhere in the batch halts the turn, even when another tool
-	// failed first.
-	if declined := firstDeclined(collected); declined != nil {
-		toolCancel()
-		if err := withPublication(func() error {
-			return publisher.FailUnsettledTools("Tool execution declined", false)
-		}); err != nil {
-			return turnResult{}, err
-		}
-		// Surface the actual decline (e.g. "permission declined" / "The user
-		// dismissed this question") instead of a generic interrupt.
-		return turnResult{}, declined
+func (a *turnAttempt) collectToolErrors() []error {
+	a.toolErrMu.Lock()
+	defer a.toolErrMu.Unlock()
+	return append([]error(nil), a.toolErrs...)
+}
+
+func firstError(errs []error) error {
+	if len(errs) > 0 {
+		return errs[0]
 	}
+	return nil
+}
 
+// declineError settles a user decline and returns it, or nil when there is none.
+func (a *turnAttempt) declineError(collected []error) (error, error) {
+	declined := firstDeclined(collected)
+	if declined == nil {
+		return nil, nil
+	}
+	a.toolCancel()
+	if err := a.withPublication(func() error {
+		return a.publisher.FailUnsettledTools("Tool execution declined", false)
+	}); err != nil {
+		return nil, err
+	}
+	// Surface the actual decline (e.g. "permission declined" / "The user
+	// dismissed this question") instead of a generic interrupt.
+	return declined, nil
+}
+
+// handleInterrupts settles an interrupted stream or tool batch and returns the
+// interrupt that ended it.
+func (a *turnAttempt) handleInterrupts(collected []error, streamErr error) (error, error) {
 	streamInterrupted := streamErr != nil && isInterrupt(streamErr)
 	var settledInterrupt error
 	for _, err := range collected {
@@ -600,85 +801,85 @@ func (r *LLMRunner) runTurnAttempt(
 			break
 		}
 	}
-	settledInterrupted := settledInterrupt != nil
-	if streamInterrupted || settledInterrupted {
-		toolCancel()
-		if err := withPublication(func() error {
-			return publisher.FailUnsettledTools("Tool execution interrupted", false)
-		}); err != nil {
-			return turnResult{}, err
-		}
-		if publisher.HasActiveAssistant() {
-			if err := withPublication(func() error { return publisher.FailAssistant("Provider turn interrupted") }); err != nil {
-				return turnResult{}, err
-			}
+	if !streamInterrupted && settledInterrupt == nil {
+		return nil, nil
+	}
+	a.toolCancel()
+	if err := a.withPublication(func() error {
+		return a.publisher.FailUnsettledTools("Tool execution interrupted", false)
+	}); err != nil {
+		return nil, err
+	}
+	if a.publisher.HasActiveAssistant() {
+		if err := a.withPublication(func() error { return a.publisher.FailAssistant("Provider turn interrupted") }); err != nil {
+			return nil, err
 		}
 	}
+	return settledInterrupt, nil
+}
 
-	if settledErr != nil && !isInterrupt(settledErr) {
-		if err := withPublication(func() error {
-			return publisher.FailUnsettledTools("Tool execution failed: "+settledErr.Error(), false)
-		}); err != nil {
-			return turnResult{}, err
-		}
+func (a *turnAttempt) handleToolFailure(settledErr error) error {
+	if settledErr == nil || isInterrupt(settledErr) {
+		return nil
 	}
+	return a.withPublication(func() error {
+		return a.publisher.FailUnsettledTools("Tool execution failed: "+settledErr.Error(), false)
+	})
+}
 
-	settlement := publisher.StepSettlement()
-	if settlement != nil && !publisher.HasProviderError() {
-		endSnapshot, err := r.Snapshots.Capture()
-		if err != nil {
-			return turnResult{}, err
-		}
-		var files []schema.RelativePath
-		if startSnapshot != nil && endSnapshot != nil {
-			files, _ = r.Snapshots.Files(core.SnapshotCompareInput{From: *startSnapshot, To: *endSnapshot})
-		}
-		var endSnapshotValue *string
-		if endSnapshot != nil {
-			value := string(*endSnapshot)
-			endSnapshotValue = &value
-		}
-		assistantMessageID, err := publisher.StartAssistant()
-		if err != nil {
-			return turnResult{}, err
-		}
-		if err := withPublication(func() error {
-			_, err := r.Events.Publish(schema.SessionEventStepEnded, map[string]any{
-				"sessionID":          sessionID,
-				"timestamp":          time.Now().UnixMilli(),
-				"assistantMessageID": assistantMessageID,
-				"finish":             settlement.Finish,
-				"cost":               0,
-				"tokens":             settlement.Tokens,
-				"snapshot":           endSnapshotValue,
-				"files":              files,
-			})
+// finalizeStep publishes the step end with its snapshot and file changes.
+func (a *turnAttempt) finalizeStep() error {
+	settlement := a.publisher.StepSettlement()
+	if settlement == nil || a.publisher.HasProviderError() {
+		return nil
+	}
+	endSnapshot, err := a.runner.Snapshots.Capture()
+	if err != nil {
+		return err
+	}
+	var files []schema.RelativePath
+	if a.startSnapshot != nil && endSnapshot != nil {
+		files, _ = a.runner.Snapshots.Files(core.SnapshotCompareInput{From: *a.startSnapshot, To: *endSnapshot})
+	}
+	var endSnapshotValue *string
+	if endSnapshot != nil {
+		value := string(*endSnapshot)
+		endSnapshotValue = &value
+	}
+	assistantMessageID, err := a.publisher.StartAssistant()
+	if err != nil {
+		return err
+	}
+	return a.withPublication(func() error {
+		_, err := a.runner.Events.Publish(schema.SessionEventStepEnded, map[string]any{
+			"sessionID":          a.sessionID,
+			"timestamp":          time.Now().UnixMilli(),
+			"assistantMessageID": assistantMessageID,
+			"finish":             settlement.Finish,
+			"cost":               0,
+			"tokens":             settlement.Tokens,
+			"snapshot":           endSnapshotValue,
+			"files":              files,
+		})
+		return err
+	})
+}
+
+// finishSettlement fails any tools left unsettled by the provider.
+func (a *turnAttempt) finishSettlement(streamErr error) error {
+	if a.publisher.HasProviderError() {
+		if err := a.withPublication(func() error {
+			return a.publisher.FailUnsettledTools("Tool execution interrupted", false)
+		}); err != nil {
 			return err
-		}); err != nil {
-			return turnResult{}, err
 		}
 	}
-	if publisher.HasProviderError() {
-		if err := withPublication(func() error {
-			return publisher.FailUnsettledTools("Tool execution interrupted", false)
-		}); err != nil {
-			return turnResult{}, err
-		}
+	if streamErr == nil && !a.publisher.HasProviderError() {
+		return a.withPublication(func() error {
+			return a.publisher.FailUnsettledTools("Provider did not return a tool result", true)
+		})
 	}
-	if streamErr == nil && !publisher.HasProviderError() {
-		if err := withPublication(func() error {
-			return publisher.FailUnsettledTools("Provider did not return a tool result", true)
-		}); err != nil {
-			return turnResult{}, err
-		}
-	}
-	if streamErr != nil {
-		return turnResult{}, streamErr
-	}
-	if settledInterrupted {
-		return turnResult{}, settledInterrupt
-	}
-	return turnResult{NeedsContinuation: !publisher.HasProviderError() && needsContinuation, Step: currentStep}, nil
+	return nil
 }
 
 // isUserDeclined reports whether the error is a declined permission prompt or a

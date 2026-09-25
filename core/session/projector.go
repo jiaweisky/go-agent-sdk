@@ -215,12 +215,18 @@ func sessionUpdateSet(info v1.V1SessionInfo) (map[string]any, error) {
 		values["tokens_cache_read"] = info.Tokens.Cache.Read
 		values["tokens_cache_write"] = info.Tokens.Cache.Write
 	}
+	if err := applyOptionalSessionFields(values, info); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+// applyOptionalSessionFields writes the optional columns present on info.
+func applyOptionalSessionFields(values map[string]any, info v1.V1SessionInfo) error {
 	if info.Revert != nil {
-		revert, err := jsonOrNull(info.Revert)
-		if err != nil {
-			return nil, err
+		if err := setJSONOrNull(values, "revert", info.Revert); err != nil {
+			return err
 		}
-		values["revert"] = revert
 	}
 	if info.ParentID != nil {
 		values["parent_id"] = string(*info.ParentID)
@@ -229,11 +235,9 @@ func sessionUpdateSet(info v1.V1SessionInfo) (map[string]any, error) {
 		values["agent"] = *info.Agent
 	}
 	if info.Model != nil {
-		model, err := jsonOrNull(info.Model)
-		if err != nil {
-			return nil, err
+		if err := setJSONOrNull(values, "model", info.Model); err != nil {
+			return err
 		}
-		values["model"] = model
 	}
 	if info.Share != nil {
 		values["share_url"] = info.Share.URL
@@ -243,26 +247,20 @@ func sessionUpdateSet(info v1.V1SessionInfo) (map[string]any, error) {
 		values["summary_deletions"] = info.Summary.Deletions
 		values["summary_files"] = info.Summary.Files
 		if info.Summary.Diffs != nil {
-			diffs, err := jsonOrNull(info.Summary.Diffs)
-			if err != nil {
-				return nil, err
+			if err := setJSONOrNull(values, "summary_diffs", info.Summary.Diffs); err != nil {
+				return err
 			}
-			values["summary_diffs"] = diffs
 		}
 	}
 	if info.Metadata != nil {
-		metadata, err := jsonOrNull(info.Metadata)
-		if err != nil {
-			return nil, err
+		if err := setJSONOrNull(values, "metadata", info.Metadata); err != nil {
+			return err
 		}
-		values["metadata"] = metadata
 	}
 	if info.Permission != nil {
-		permission, err := jsonOrNull(info.Permission)
-		if err != nil {
-			return nil, err
+		if err := setJSONOrNull(values, "permission", info.Permission); err != nil {
+			return err
 		}
-		values["permission"] = permission
 	}
 	if info.Time.Compacting != nil {
 		values["time_compacting"] = *info.Time.Compacting
@@ -270,7 +268,18 @@ func sessionUpdateSet(info v1.V1SessionInfo) (map[string]any, error) {
 	if info.Time.Archived != nil {
 		values["time_archived"] = *info.Time.Archived
 	}
-	return values, nil
+	return nil
+}
+
+// setJSONOrNull sets values[key] to the JSON encoding of value, or SQL NULL when
+// value is nil.
+func setJSONOrNull(values map[string]any, key string, value any) error {
+	encoded, err := jsonOrNull(value)
+	if err != nil {
+		return err
+	}
+	values[key] = encoded
+	return nil
 }
 
 func updateSession(tx DB, info v1.V1SessionInfo) error {
