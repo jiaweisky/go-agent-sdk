@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// ProviderMetadata mirrors LLM.ProviderMetadata.
+// ProviderMetadata carries provider-specific values, keyed by provider.
 type ProviderMetadata = map[string]map[string]any
 
 type ToolTextContent struct {
@@ -24,7 +24,7 @@ type ToolFileContent struct {
 
 func (ToolFileContent) ToolContentType() string { return "file" }
 
-// ToolContent mirrors the tagged LLM.ToolContent union (text | file).
+// ToolContent is one piece of a tool result: text or a file.
 type ToolContent interface {
 	ToolContentType() string
 }

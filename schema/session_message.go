@@ -14,8 +14,8 @@ type SessionMessageTime struct {
 	Created NonNegativeInt `json:"created"`
 }
 
-// SessionMessageTimeRange mirrors the { created, completed? } time shape used by
-// Shell, Reasoning and Assistant messages.
+// SessionMessageTimeRange is the { created, completed? } time shape shell,
+// reasoning and assistant messages use.
 type SessionMessageTimeRange struct {
 	Created   NonNegativeInt  `json:"created"`
 	Completed *NonNegativeInt `json:"completed,omitempty"`
@@ -142,7 +142,7 @@ type SessionMessageToolStateError struct {
 
 func (SessionMessageToolStateError) ToolStateStatus() string { return "error" }
 
-// SessionMessageToolState mirrors the tagged ToolState union.
+// SessionMessageToolState is the state of a tool call.
 type SessionMessageToolState interface {
 	ToolStateStatus() string
 }
@@ -189,7 +189,7 @@ type SessionMessageAssistantReasoning struct {
 
 func (SessionMessageAssistantReasoning) AssistantContentType() string { return "reasoning" }
 
-// SessionMessageAssistantContent mirrors the tagged AssistantContent union.
+// SessionMessageAssistantContent is one part of an assistant message.
 type SessionMessageAssistantContent interface {
 	AssistantContentType() string
 }
@@ -229,7 +229,7 @@ type SessionMessageCompaction struct {
 
 func (SessionMessageCompaction) SessionMessageType() string { return "compaction" }
 
-// SessionMessage mirrors the tagged Session.Message union.
+// SessionMessage is one stored message.
 type SessionMessage interface {
 	SessionMessageType() string
 }

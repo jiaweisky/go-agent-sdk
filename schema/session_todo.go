@@ -1,6 +1,6 @@
 package schema
 
-// SessionTodoInfo mirrors SessionTodo.Info.
+// SessionTodoInfo is one todo item.
 type SessionTodoInfo struct {
 	Content  string `json:"content"`
 	Status   string `json:"status"`

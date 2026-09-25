@@ -1,11 +1,11 @@
 package schema
 
-// PluginID mirrors Plugin.ID.
+// PluginID identifies a plugin.
 type PluginID string
 
 func (id PluginID) String() string { return string(id) }
 
-// PluginEventAdded mirrors Plugin.Event.Added.
+// PluginEventAdded is published when a plugin finishes loading.
 var PluginEventAdded = Define(DefineInput{
 	Type:   "plugin.added",
 	Schema: map[string]any{"id": nil},

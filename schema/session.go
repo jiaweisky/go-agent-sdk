@@ -13,7 +13,7 @@ type SessionTime struct {
 	Archived *NonNegativeInt `json:"archived,omitempty"`
 }
 
-// SessionInfo mirrors SessionV2.Info.
+// SessionInfo is a stored session.
 type SessionInfo struct {
 	ID         SessionID          `json:"id"`
 	ParentID   *SessionID         `json:"parentID,omitempty"`
@@ -30,7 +30,7 @@ type SessionInfo struct {
 	Revert     *RevertState       `json:"revert,omitempty"`
 }
 
-// SessionListAnchor mirrors Session.ListAnchor.
+// SessionListAnchor marks a position in a session list.
 type SessionListAnchor struct {
 	ID        SessionID `json:"id"`
 	Time      float64   `json:"time"`

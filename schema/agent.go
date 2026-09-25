@@ -28,7 +28,7 @@ const (
 
 var agentHexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
-// Valid mirrors the Agent.Color union: a #rrggbb hex string or a named color.
+// Valid reports whether the color is a #rrggbb hex string or a known color name.
 func (c AgentColor) Valid() bool {
 	switch c {
 	case AgentColorPrimary, AgentColorSecondary, AgentColorAccent, AgentColorSuccess,
@@ -51,7 +51,7 @@ type AgentInfo struct {
 	Permissions PermissionRuleset `json:"permissions"`
 }
 
-// AgentInfoEmpty mirrors Agent.Info.empty.
+// AgentInfoEmpty is an empty agent info, with its maps initialized.
 func AgentInfoEmpty(id AgentID) AgentInfo {
 	return AgentInfo{
 		ID:          id,

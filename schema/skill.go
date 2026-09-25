@@ -29,12 +29,13 @@ type SkillEmbeddedSource struct {
 
 func (SkillEmbeddedSource) SkillSourceType() string { return "embedded" }
 
-// SkillSource mirrors the tagged Skill.Source union (directory | url | embedded).
+// SkillSource is where a skill comes from: a directory, a URL or an embedded
+// value.
 type SkillSource interface {
 	SkillSourceType() string
 }
 
-// SkillSourceEquals mirrors Skill.Source.equals.
+// SkillSourceEquals reports whether two sources refer to the same skill.
 func SkillSourceEquals(a, b SkillSource) bool {
 	if a == nil || b == nil || a.SkillSourceType() != b.SkillSourceType() {
 		return false
@@ -53,7 +54,7 @@ func SkillSourceEquals(a, b SkillSource) bool {
 	return false
 }
 
-// SkillSourceKey mirrors Skill.Source.key.
+// SkillSourceKey is the identity of a skill source.
 func SkillSourceKey(source SkillSource) string {
 	switch value := source.(type) {
 	case SkillDirectorySource:

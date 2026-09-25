@@ -122,8 +122,8 @@ func jsonFieldName(field reflect.StructField) (string, bool) {
 	return name, false
 }
 
-// allowsJSONNull reports whether a field mirrors Schema.Unknown, which accepts
-// an explicit null. Only the empty interface qualifies.
+// allowsJSONNull reports whether a field accepts an explicit JSON null; only the
+// empty interface does.
 func allowsJSONNull(t reflect.Type) bool {
 	return t.Kind() == reflect.Interface && t.NumMethod() == 0
 }

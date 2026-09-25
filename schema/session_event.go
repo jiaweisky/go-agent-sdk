@@ -1,13 +1,14 @@
 package schema
 
-// SessionEventSource mirrors SessionEvent.Source (start/end are NonNegativeInt).
+// SessionEventSource is an event's source position; its start and end are
+// non-negative integers.
 type SessionEventSource struct {
 	Start NonNegativeInt `json:"start"`
 	End   NonNegativeInt `json:"end"`
 	Text  string         `json:"text"`
 }
 
-// SessionEventRetryError mirrors SessionEvent.RetryError.
+// SessionEventRetryError is the error a retry reports.
 type SessionEventRetryError struct {
 	Message         string            `json:"message"`
 	StatusCode      *float64          `json:"statusCode,omitempty"`
@@ -282,7 +283,7 @@ var SessionEventRevertCommitted = Define(DefineInput{
 	},
 })
 
-// SessionEventDurableDefinitions mirrors SessionEvent.DurableDefinitions.
+// SessionEventDurableDefinitions are the session events that are persisted.
 var SessionEventDurableDefinitions = Inventory(
 	SessionEventAgentSwitched,
 	SessionEventModelSwitched,
@@ -314,7 +315,8 @@ var SessionEventDurableDefinitions = Inventory(
 	SessionEventRevertCommitted,
 )
 
-// SessionEventDefinitions mirrors SessionEvent.Definitions (includes live-only deltas).
+// SessionEventDefinitions are every session event, including the live-only
+// deltas.
 var SessionEventDefinitions = Inventory(
 	SessionEventAgentSwitched,
 	SessionEventModelSwitched,

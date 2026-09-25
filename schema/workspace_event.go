@@ -1,6 +1,6 @@
 package schema
 
-// WorkspaceConnectionStatus mirrors WorkspaceEvent.ConnectionStatus.
+// WorkspaceConnectionStatus is a workspace connection's state.
 type WorkspaceConnectionStatus struct {
 	WorkspaceID WorkspaceID `json:"workspaceID"`
 	Status      string      `json:"status"`

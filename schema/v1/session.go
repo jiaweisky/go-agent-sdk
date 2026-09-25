@@ -14,7 +14,7 @@ func NewPartID() PartID {
 	return PartID("prt_" + schema.Ascending())
 }
 
-// V1SessionSummary mirrors SessionV1.SessionSummary.
+// V1SessionSummary is the v1 session summary: its diff statistics.
 type V1SessionSummary struct {
 	Additions float64               `json:"additions"`
 	Deletions float64               `json:"deletions"`
@@ -27,7 +27,7 @@ type V1SessionCache struct {
 	Write float64 `json:"write"`
 }
 
-// V1SessionTokens mirrors SessionV1.SessionTokens.
+// V1SessionTokens is the v1 token counters.
 type V1SessionTokens struct {
 	Input     float64        `json:"input"`
 	Output    float64        `json:"output"`
@@ -39,7 +39,7 @@ type V1SessionShare struct {
 	URL string `json:"url"`
 }
 
-// V1SessionRevert mirrors SessionV1.SessionRevert.
+// V1SessionRevert is the v1 revert pointer.
 type V1SessionRevert struct {
 	MessageID MessageID `json:"messageID"`
 	PartID    *PartID   `json:"partID,omitempty"`
@@ -47,14 +47,14 @@ type V1SessionRevert struct {
 	Diff      *string   `json:"diff,omitempty"`
 }
 
-// V1SessionModel mirrors SessionV1.SessionModel.
+// V1SessionModel is the v1 model reference.
 type V1SessionModel struct {
 	ID         schema.ModelID    `json:"id"`
 	ProviderID schema.ProviderID `json:"providerID"`
 	Variant    *string           `json:"variant,omitempty"`
 }
 
-// V1SessionTime mirrors SessionV1.SessionInfo.time.
+// V1SessionTime is the v1 session timestamps.
 type V1SessionTime struct {
 	Created    schema.NonNegativeInt  `json:"created"`
 	Updated    schema.NonNegativeInt  `json:"updated"`
@@ -62,7 +62,7 @@ type V1SessionTime struct {
 	Archived   *float64               `json:"archived,omitempty"`
 }
 
-// V1SessionInfo mirrors SessionV1.SessionInfo.
+// V1SessionInfo is a v1 session record.
 type V1SessionInfo struct {
 	ID          schema.SessionID    `json:"id"`
 	Slug        string              `json:"slug"`
@@ -120,14 +120,15 @@ var V1EventPartRemoved = schema.Define(schema.DefineInput{
 	Schema:  map[string]any{"sessionID": nil, "messageID": nil, "partID": nil},
 })
 
-// V1SessionCreatedData mirrors the session.created/updated/deleted payloads.
+// V1SessionCreatedData is the payload of the v1 session created, updated and
+// deleted events.
 type V1SessionCreatedData struct {
 	SessionID schema.SessionID `json:"sessionID"`
 	Info      V1SessionInfo    `json:"info"`
 }
 
-// V1MessageUpdatedData mirrors the message.updated payload. The message body is
-// kept as an opaque JSON object (the v1 Message union is not ported yet).
+// V1MessageUpdatedData is the payload of the v1 message.updated event. The message
+// body is kept as an opaque JSON object (the v1 Message union is not ported yet).
 type V1MessageUpdatedData struct {
 	SessionID schema.SessionID `json:"sessionID"`
 	Info      map[string]any   `json:"info"`

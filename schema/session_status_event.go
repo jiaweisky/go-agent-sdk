@@ -1,6 +1,6 @@
 package schema
 
-// SessionStatusRetryAction mirrors the retry action struct in SessionStatusEvent.Info.
+// SessionStatusRetryAction describes the retry a session status offers.
 type SessionStatusRetryAction struct {
 	Reason   string  `json:"reason"`
 	Provider string  `json:"provider"`
@@ -32,7 +32,7 @@ type SessionStatusRetry struct {
 
 func (SessionStatusRetry) SessionStatusInfoType() string { return "retry" }
 
-// SessionStatusInfo mirrors the tagged SessionStatusEvent.Info union.
+// SessionStatusInfo is a session's run status.
 type SessionStatusInfo interface {
 	SessionStatusInfoType() string
 }

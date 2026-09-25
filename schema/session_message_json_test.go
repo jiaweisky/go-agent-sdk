@@ -115,7 +115,7 @@ func TestDecodeSessionMessageRejectsOptionalNull(t *testing.T) {
 }
 
 func TestDecodeSessionMessageToolStateNull(t *testing.T) {
-	// result mirrors Schema.Unknown, so an explicit null is allowed.
+	// result accepts any JSON value, so an explicit null is allowed.
 	ok := `{"status":"completed","input":{},"content":[],"structured":{},"result":null}`
 	if _, err := DecodeSessionMessageToolState([]byte(ok)); err != nil {
 		t.Fatalf("result null should be allowed: %v", err)

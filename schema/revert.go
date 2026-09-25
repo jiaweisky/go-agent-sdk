@@ -1,6 +1,6 @@
 package schema
 
-// RevertFileDiff mirrors Revert.FileDiff.
+// RevertFileDiff is one file's diff in a revert.
 type RevertFileDiff struct {
 	Path      RelativePath   `json:"path"`
 	Status    string         `json:"status"`
@@ -9,7 +9,7 @@ type RevertFileDiff struct {
 	Patch     string         `json:"patch"`
 }
 
-// RevertState mirrors Revert.State.
+// RevertState is a staged revert.
 type RevertState struct {
 	MessageID MessageID        `json:"messageID"`
 	PartID    *string          `json:"partID,omitempty"`

@@ -1,6 +1,6 @@
 package schema
 
-// SessionInputAdmitted mirrors SessionInput.Admitted.
+// SessionInputAdmitted is published when a prompt is admitted.
 type SessionInputAdmitted struct {
 	AdmittedSeq NonNegativeInt  `json:"admittedSeq"`
 	ID          MessageID       `json:"id"`

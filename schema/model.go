@@ -1,45 +1,45 @@
 package schema
 
-// ModelID mirrors the branded ModelV2.ID string.
+// ModelID identifies a model.
 type ModelID string
 
 func (id ModelID) String() string {
 	return string(id)
 }
 
-// ModelVariantID mirrors the branded VariantID string.
+// ModelVariantID identifies a model variant.
 type ModelVariantID string
 
-// ModelFamily mirrors the branded Family string.
+// ModelFamily names a model family.
 type ModelFamily string
 
-// ModelRef mirrors Model.Ref.
+// ModelRef references a model, its provider and an optional variant.
 type ModelRef struct {
 	ID         ModelID         `json:"id"`
 	ProviderID ProviderID      `json:"providerID"`
 	Variant    *ModelVariantID `json:"variant,omitempty"`
 }
 
-// ModelCapabilities mirrors Model.Capabilities.
+// ModelCapabilities lists what a model can do (tools, reasoning, ...).
 type ModelCapabilities struct {
 	Tools  bool     `json:"tools"`
 	Input  []string `json:"input"`
 	Output []string `json:"output"`
 }
 
-// ModelCostTier mirrors the Model.Cost tier struct.
+// ModelCostTier is one pricing tier.
 type ModelCostTier struct {
 	Type string `json:"type"`
 	Size int    `json:"size"`
 }
 
-// ModelCostCache mirrors the Model.Cost cache struct.
+// ModelCostCache is the cache-read and cache-write pricing.
 type ModelCostCache struct {
 	Read  float64 `json:"read"`
 	Write float64 `json:"write"`
 }
 
-// ModelCost mirrors Model.Cost.
+// ModelCost is a model's pricing.
 type ModelCost struct {
 	Tier   *ModelCostTier  `json:"tier,omitempty"`
 	Input  float64         `json:"input"`
@@ -48,8 +48,7 @@ type ModelCost struct {
 }
 
 // ProtocolID identifies a wire protocol (for example "openai-responses",
-// "anthropic-messages" or "gemini"). It selects the route the SDK speaks. It
-// mirrors llm/schema.ProtocolID; values convert trivially.
+// "anthropic-messages" or "gemini"), selecting the route the SDK speaks.
 type ProtocolID string
 
 // ModelAPI identifies the wire protocol and an optional endpoint.
@@ -59,34 +58,35 @@ type ModelAPI struct {
 	URL      *string    `json:"url,omitempty"`
 }
 
-// ModelLimit mirrors the Model.Info limit struct.
+// ModelLimit is a model's token limits.
 type ModelLimit struct {
 	Context int  `json:"context"`
 	Input   *int `json:"input,omitempty"`
 	Output  int  `json:"output"`
 }
 
-// ModelTime mirrors the Model.Info time struct.
+// ModelTime is a model's release and knowledge-cutoff times.
 type ModelTime struct {
 	Released float64 `json:"released"`
 }
 
-// ModelVariant mirrors the Model.Info variants entry.
+// ModelVariant is one variant of a model.
 type ModelVariant struct {
 	ID      ModelVariantID    `json:"id"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    map[string]any    `json:"body,omitempty"`
 }
 
-// ModelRequest mirrors Model.Info.request: Provider.Request plus an optional
-// default variant.
+// ModelRequest is what a model sends with every request: the provider request
+// options plus an optional default variant.
 type ModelRequest struct {
 	Headers map[string]string `json:"headers"`
 	Body    map[string]any    `json:"body"`
 	Variant *string           `json:"variant,omitempty"`
 }
 
-// ModelInfo mirrors ModelV2.Info.
+// ModelInfo is a model's catalog metadata: identity, limits, pricing, endpoint,
+// headers and variants.
 type ModelInfo struct {
 	ID           ModelID           `json:"id"`
 	ProviderID   ProviderID        `json:"providerID"`
@@ -103,7 +103,7 @@ type ModelInfo struct {
 	Limit        ModelLimit        `json:"limit"`
 }
 
-// ModelInfoEmpty mirrors Model.Info.empty.
+// ModelInfoEmpty is an empty model info for a provider and model id.
 func ModelInfoEmpty(providerID ProviderID, modelID ModelID) ModelInfo {
 	id := modelID
 	return ModelInfo{
