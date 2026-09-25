@@ -6,11 +6,16 @@ func (id QuestionID) String() string {
 	return string(id)
 }
 
-func NewQuestionID(id ...string) QuestionID {
-	if len(id) > 0 && id[0] != "" {
-		return QuestionID(id[0])
+func NewQuestionID() QuestionID {
+	return QuestionID(generateID("que", false))
+}
+
+// ParseQuestionID validates an existing question id.
+func ParseQuestionID(id string) (QuestionID, error) {
+	if err := validateID("que", id); err != nil {
+		return "", err
 	}
-	return QuestionID("que_" + Ascending())
+	return QuestionID(id), nil
 }
 
 type QuestionOption struct {

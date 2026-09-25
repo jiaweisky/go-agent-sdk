@@ -23,6 +23,9 @@ type EventPayloadDurable struct {
 	Version     int
 }
 
+// EventDefinition describes one event type. Data is the field schema keyed by
+// field name; id gives each definition a distinct identity for duplicate
+// detection.
 type EventDefinition struct {
 	Type    string
 	Durable *EventDurable
@@ -31,12 +34,15 @@ type EventDefinition struct {
 	id *int
 }
 
+// DefineInput is the raw input to Define.
 type DefineInput struct {
 	Type    string
 	Durable *EventDurable
 	Schema  map[string]any
 }
 
+// Define builds an event definition from its type, optional durability and
+// field schema.
 func Define(input DefineInput) EventDefinition {
 	return EventDefinition{
 		Type:    input.Type,
@@ -55,10 +61,13 @@ type EventPayload struct {
 	Metadata map[string]any
 }
 
+// Inventory returns the definitions as a single list.
 func Inventory(definitions ...EventDefinition) []EventDefinition {
 	return definitions
 }
 
+// Latest maps each event type to its highest durable version. Two distinct
+// definitions of the same version panic.
 func Latest(definitions []EventDefinition) map[string]EventDefinition {
 	result := make(map[string]EventDefinition)
 	for _, definition := range definitions {
@@ -80,10 +89,13 @@ func Latest(definitions []EventDefinition) map[string]EventDefinition {
 	return result
 }
 
+// VersionedType is the storage type of a durable event at a version.
 func VersionedType(eventType string, version int) string {
 	return fmt.Sprintf("%s.%d", eventType, version)
 }
 
+// Durable maps each durable event's versioned type to its definition. A
+// duplicate versioned type panics.
 func Durable(definitions []EventDefinition) map[string]EventDefinition {
 	result := make(map[string]EventDefinition)
 	for _, definition := range definitions {

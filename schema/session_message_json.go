@@ -6,20 +6,20 @@ import (
 	"reflect"
 )
 
-// DecodeSessionMessage decodes a Session.Message payload using its embedded
+// DecodeSessionMessage decodes a session message payload using its embedded
 // "type" discriminator.
 func DecodeSessionMessage(data []byte) (SessionMessage, error) {
 	object, err := decodeJSONObject(data)
 	if err != nil {
 		return nil, err
 	}
-	idRaw, ok := object["id"]
-	if !ok || isJSONNull(idRaw) {
-		return nil, fmt.Errorf("missing required field %q", "id")
+	idRaw, err := requiredJSONField(object, "id")
+	if err != nil {
+		return nil, err
 	}
-	typeRaw, ok := object["type"]
-	if !ok || isJSONNull(typeRaw) {
-		return nil, fmt.Errorf("missing required field %q", "type")
+	typeRaw, err := requiredJSONField(object, "type")
+	if err != nil {
+		return nil, err
 	}
 	var id MessageID
 	if err := json.Unmarshal(idRaw, &id); err != nil {
@@ -59,63 +59,32 @@ func DecodeSessionMessageWithMeta(data []byte, id MessageID, messageType string)
 func decodeSessionMessageByType(data []byte, messageType string, id MessageID) (SessionMessage, error) {
 	switch messageType {
 	case "agent-switched":
-		var message SessionMessageAgentSwitched
-		if err := json.Unmarshal(data, &message); err != nil {
-			return nil, err
-		}
-		message.ID, message.Type = id, messageType
-		return message, nil
+		return decodeSessionMessageAs(data, func(m *SessionMessageAgentSwitched) { m.ID, m.Type = id, messageType })
 	case "model-switched":
-		var message SessionMessageModelSwitched
-		if err := json.Unmarshal(data, &message); err != nil {
-			return nil, err
-		}
-		message.ID, message.Type = id, messageType
-		return message, nil
+		return decodeSessionMessageAs(data, func(m *SessionMessageModelSwitched) { m.ID, m.Type = id, messageType })
 	case "user":
-		var message SessionMessageUser
-		if err := json.Unmarshal(data, &message); err != nil {
-			return nil, err
-		}
-		message.ID, message.Type = id, messageType
-		return message, nil
+		return decodeSessionMessageAs(data, func(m *SessionMessageUser) { m.ID, m.Type = id, messageType })
 	case "synthetic":
-		var message SessionMessageSynthetic
-		if err := json.Unmarshal(data, &message); err != nil {
-			return nil, err
-		}
-		message.ID, message.Type = id, messageType
-		return message, nil
+		return decodeSessionMessageAs(data, func(m *SessionMessageSynthetic) { m.ID, m.Type = id, messageType })
 	case "system":
-		var message SessionMessageSystem
-		if err := json.Unmarshal(data, &message); err != nil {
-			return nil, err
-		}
-		message.ID, message.Type = id, messageType
-		return message, nil
+		return decodeSessionMessageAs(data, func(m *SessionMessageSystem) { m.ID, m.Type = id, messageType })
 	case "shell":
-		var message SessionMessageShell
-		if err := json.Unmarshal(data, &message); err != nil {
-			return nil, err
-		}
-		message.ID, message.Type = id, messageType
-		return message, nil
+		return decodeSessionMessageAs(data, func(m *SessionMessageShell) { m.ID, m.Type = id, messageType })
 	case "assistant":
-		var message SessionMessageAssistant
-		if err := json.Unmarshal(data, &message); err != nil {
-			return nil, err
-		}
-		message.ID, message.Type = id, messageType
-		return message, nil
+		return decodeSessionMessageAs(data, func(m *SessionMessageAssistant) { m.ID, m.Type = id, messageType })
 	case "compaction":
-		var message SessionMessageCompaction
-		if err := json.Unmarshal(data, &message); err != nil {
-			return nil, err
-		}
-		message.ID, message.Type = id, messageType
-		return message, nil
+		return decodeSessionMessageAs(data, func(m *SessionMessageCompaction) { m.ID, m.Type = id, messageType })
 	}
 	return nil, fmt.Errorf("unknown session message type: %s", messageType)
+}
+
+func decodeSessionMessageAs[T SessionMessage](data []byte, apply func(*T)) (SessionMessage, error) {
+	var message T
+	if err := json.Unmarshal(data, &message); err != nil {
+		return nil, err
+	}
+	apply(&message)
+	return message, nil
 }
 
 // DecodeSessionMessageAssistantContent decodes an Assistant.Content entry using
@@ -125,9 +94,9 @@ func DecodeSessionMessageAssistantContent(data []byte) (SessionMessageAssistantC
 	if err != nil {
 		return nil, err
 	}
-	typeRaw, ok := object["type"]
-	if !ok || isJSONNull(typeRaw) {
-		return nil, fmt.Errorf("missing required field %q", "type")
+	typeRaw, err := requiredJSONField(object, "type")
+	if err != nil {
+		return nil, err
 	}
 	var contentType string
 	if err := json.Unmarshal(typeRaw, &contentType); err != nil {
@@ -167,9 +136,9 @@ func DecodeSessionMessageToolState(data []byte) (SessionMessageToolState, error)
 	if err != nil {
 		return nil, err
 	}
-	statusRaw, ok := object["status"]
-	if !ok || isJSONNull(statusRaw) {
-		return nil, fmt.Errorf("missing required field %q", "status")
+	statusRaw, err := requiredJSONField(object, "status")
+	if err != nil {
+		return nil, err
 	}
 	var status string
 	if err := json.Unmarshal(statusRaw, &status); err != nil {
@@ -205,21 +174,12 @@ func decodeToolState[T SessionMessageToolState](data []byte) (SessionMessageTool
 	return state, nil
 }
 
-// UnmarshalJSON decodes the Assistant message including its tagged content union.
+// UnmarshalJSON decodes the assistant message including its tagged content union.
 func (m *SessionMessageAssistant) UnmarshalJSON(data []byte) error {
+	type assistantAlias SessionMessageAssistant
 	var aux struct {
-		ID       MessageID                        `json:"id"`
-		Metadata map[string]any                   `json:"metadata,omitempty"`
-		Time     SessionMessageTimeRange          `json:"time"`
-		Type     string                           `json:"type"`
-		Agent    string                           `json:"agent"`
-		Model    ModelRef                         `json:"model"`
-		Content  []json.RawMessage                `json:"content"`
-		Snapshot *SessionMessageAssistantSnapshot `json:"snapshot,omitempty"`
-		Finish   *string                          `json:"finish,omitempty"`
-		Cost     *float64                         `json:"cost,omitempty"`
-		Tokens   *SessionMessageTokens            `json:"tokens,omitempty"`
-		Error    *SessionMessageUnknownError      `json:"error,omitempty"`
+		assistantAlias
+		Content []json.RawMessage `json:"content"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -232,32 +192,17 @@ func (m *SessionMessageAssistant) UnmarshalJSON(data []byte) error {
 		}
 		content = append(content, item)
 	}
-	*m = SessionMessageAssistant{
-		ID:       aux.ID,
-		Metadata: aux.Metadata,
-		Time:     aux.Time,
-		Type:     aux.Type,
-		Agent:    aux.Agent,
-		Model:    aux.Model,
-		Content:  content,
-		Snapshot: aux.Snapshot,
-		Finish:   aux.Finish,
-		Cost:     aux.Cost,
-		Tokens:   aux.Tokens,
-		Error:    aux.Error,
-	}
+	*m = SessionMessageAssistant(aux.assistantAlias)
+	m.Content = content
 	return nil
 }
 
 // UnmarshalJSON decodes the tool assistant content including its tagged state union.
 func (m *SessionMessageAssistantTool) UnmarshalJSON(data []byte) error {
+	type toolAlias SessionMessageAssistantTool
 	var aux struct {
-		Type     string                           `json:"type"`
-		ID       string                           `json:"id"`
-		Name     string                           `json:"name"`
-		Provider *SessionMessageAssistantProvider `json:"provider,omitempty"`
-		State    json.RawMessage                  `json:"state"`
-		Time     SessionMessageAssistantToolTime  `json:"time"`
+		toolAlias
+		State json.RawMessage `json:"state"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -266,13 +211,7 @@ func (m *SessionMessageAssistantTool) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	*m = SessionMessageAssistantTool{
-		Type:     aux.Type,
-		ID:       aux.ID,
-		Name:     aux.Name,
-		Provider: aux.Provider,
-		State:    state,
-		Time:     aux.Time,
-	}
+	*m = SessionMessageAssistantTool(aux.toolAlias)
+	m.State = state
 	return nil
 }

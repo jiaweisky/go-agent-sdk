@@ -1,13 +1,5 @@
 package schema
 
-// SessionEventSource is an event's source position; its start and end are
-// non-negative integers.
-type SessionEventSource struct {
-	Start NonNegativeInt `json:"start"`
-	End   NonNegativeInt `json:"end"`
-	Text  string         `json:"text"`
-}
-
 // SessionEventRetryError is the error a retry reports.
 type SessionEventRetryError struct {
 	Message         string            `json:"message"`
@@ -17,8 +9,6 @@ type SessionEventRetryError struct {
 	ResponseBody    *string           `json:"responseBody,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
 }
-
-type SessionEventUnknownError = SessionMessageUnknownError
 
 var (
 	sessionEventDurable     = &EventDurable{Aggregate: "sessionID", Version: 1}

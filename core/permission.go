@@ -30,8 +30,8 @@ const (
 	PermissionSourceTypeTool = schema.PermissionSourceTypeTool
 )
 
-func NewPermissionID(id ...string) PermissionID {
-	return schema.NewPermissionID(id...)
+func NewPermissionID() PermissionID {
+	return schema.NewPermissionID()
 }
 
 var missingAgentPermissions = PermissionRuleset{{Action: "*", Resource: "*", Effect: PermissionEffectDeny}}

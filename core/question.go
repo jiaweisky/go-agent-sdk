@@ -18,8 +18,8 @@ type (
 	QuestionReply   = schema.QuestionReply
 )
 
-func NewQuestionID(id ...string) QuestionID {
-	return schema.NewQuestionID(id...)
+func NewQuestionID() QuestionID {
+	return schema.NewQuestionID()
 }
 
 type QuestionRejectedError struct{}

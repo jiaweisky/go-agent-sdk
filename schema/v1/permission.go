@@ -4,11 +4,8 @@ import "github.com/user/go-agent-sdk/schema"
 
 type PermissionID string
 
-func NewPermissionID(id ...string) PermissionID {
-	if len(id) > 0 && id[0] != "" {
-		return PermissionID(id[0])
-	}
-	return PermissionID("per_" + schema.Ascending())
+func NewPermissionID() PermissionID {
+	return PermissionID(schema.NewPermissionID())
 }
 
 type PermissionAction string

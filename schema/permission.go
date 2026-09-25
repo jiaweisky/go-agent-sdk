@@ -6,11 +6,16 @@ func (id PermissionID) String() string {
 	return string(id)
 }
 
-func NewPermissionID(id ...string) PermissionID {
-	if len(id) > 0 && id[0] != "" {
-		return PermissionID(id[0])
+func NewPermissionID() PermissionID {
+	return PermissionID(generateID("per", false))
+}
+
+// ParsePermissionID validates an existing permission id.
+func ParsePermissionID(id string) (PermissionID, error) {
+	if err := validateID("per", id); err != nil {
+		return "", err
 	}
-	return PermissionID("per_" + Ascending())
+	return PermissionID(id), nil
 }
 
 type PermissionSource struct {

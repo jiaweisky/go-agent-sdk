@@ -15,12 +15,3 @@ type LocationInfo struct {
 	WorkspaceID *WorkspaceID
 	Project     LocationProject
 }
-
-type LocationResponse struct {
-	Location LocationInfo
-	Data     any
-}
-
-func NewLocationResponse(data any) LocationResponse {
-	return LocationResponse{Data: data}
-}

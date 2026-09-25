@@ -1,11 +1,7 @@
 package schema
 
-type SessionTokens struct {
-	Input     float64             `json:"input"`
-	Output    float64             `json:"output"`
-	Reasoning float64             `json:"reasoning"`
-	Cache     SessionMessageCache `json:"cache"`
-}
+// SessionTokens counts a session's tokens; it shares the message token shape.
+type SessionTokens = SessionMessageTokens
 
 type SessionTime struct {
 	Created  NonNegativeInt  `json:"created"`

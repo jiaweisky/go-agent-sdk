@@ -1,6 +1,6 @@
 package schema
 
-// MCP event definitions mirror packages/schema/src/mcp-event.ts.
+// McpEventToolsChanged is published when an MCP server's tool list changes.
 var McpEventToolsChanged = Define(DefineInput{
 	Type:   "mcp.tools.changed",
 	Schema: map[string]any{"server": nil},

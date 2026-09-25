@@ -855,7 +855,7 @@ opencode 的 agent 与 skill 定义来自 `{agent,agents}/**/*.md`、`{mode,mode
 | `schema/revert.go` | packages/schema/src/revert.ts | `RevertFileDiff` ↔ `Revert.FileDiff`, `RevertState` ↔ `Revert.State` |
 | `schema/session.go` | packages/schema/src/session.ts | `SessionInfo` ↔ `SessionV2.Info`, `SessionListAnchor` ↔ `Session.ListAnchor` |
 | `schema/session_delivery.go` | packages/schema/src/session-delivery.ts | `SessionDelivery` ↔ `SessionDelivery.Delivery` |
-| `schema/session_event.go` | packages/schema/src/session-event.ts | `SessionEventSource` ↔ `SessionEvent.Source`, `SessionEventRetryError` ↔ `SessionEvent.RetryError`, `SessionEventDurableDefinitions` ↔ `SessionEvent.DurableDefinitions`, `SessionEventDefinitions` ↔ `SessionEvent.Definitions` |
+| `schema/session_event.go` | packages/schema/src/session-event.ts | `SessionEventRetryError` ↔ `SessionEvent.RetryError`, `SessionEventDurableDefinitions` ↔ `SessionEvent.DurableDefinitions`, `SessionEventDefinitions` ↔ `SessionEvent.Definitions` |
 | `schema/session_input.go` | packages/schema/src/session-input.ts | `SessionInputAdmitted` ↔ `SessionInput.Admitted` |
 | `schema/session_message.go` | packages/schema/src/session-message.ts | — |
 | `schema/session_status_event.go` | packages/schema/src/session-status-event.ts | — |

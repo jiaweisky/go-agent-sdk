@@ -37,21 +37,11 @@ type SkillSource interface {
 
 // SkillSourceEquals reports whether two sources refer to the same skill.
 func SkillSourceEquals(a, b SkillSource) bool {
-	if a == nil || b == nil || a.SkillSourceType() != b.SkillSourceType() {
+	if a == nil || b == nil {
 		return false
 	}
-	switch av := a.(type) {
-	case SkillDirectorySource:
-		bv, ok := b.(SkillDirectorySource)
-		return ok && av.Path == bv.Path
-	case SkillURLSource:
-		bv, ok := b.(SkillURLSource)
-		return ok && av.URL == bv.URL
-	case SkillEmbeddedSource:
-		bv, ok := b.(SkillEmbeddedSource)
-		return ok && av.Skill.Name == bv.Skill.Name
-	}
-	return false
+	keyA, keyB := SkillSourceKey(a), SkillSourceKey(b)
+	return keyA != "" && keyA == keyB
 }
 
 // SkillSourceKey is the identity of a skill source.

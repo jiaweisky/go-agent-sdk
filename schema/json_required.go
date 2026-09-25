@@ -20,6 +20,16 @@ func isJSONNull(value json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
 }
 
+// requiredJSONField returns a required field's non-null value, or an error when
+// it is absent or null.
+func requiredJSONField(object map[string]json.RawMessage, name string) (json.RawMessage, error) {
+	raw, ok := object[name]
+	if !ok || isJSONNull(raw) {
+		return nil, fmt.Errorf("missing required field %q", name)
+	}
+	return raw, nil
+}
+
 // validateRequiredJSON checks that every field of the struct type whose json tag
 // lacks "omitempty" is present and non-null in object. Required nested structs
 // (and present optional ones) are validated recursively. Interface fields are
@@ -36,30 +46,34 @@ func validateRequiredJSON(t reflect.Type, object map[string]json.RawMessage, ski
 		if field.PkgPath != "" {
 			continue
 		}
-		name, optional := jsonFieldName(field)
-		if name == "" || skip[name] {
-			continue
-		}
-		raw, ok := object[name]
-		if !ok {
-			if optional {
-				continue
-			}
-			return fmt.Errorf("missing required field %q", name)
-		}
-		if isJSONNull(raw) {
-			// Effect's optional/required wrappers reject null; only
-			// Schema.Unknown (Go's empty interface) accepts it.
-			if allowsJSONNull(field.Type) {
-				continue
-			}
-			return fmt.Errorf("field %q must not be null", name)
-		}
-		if err := validateNestedJSON(field.Type, raw); err != nil {
+		if err := validateJSONField(field, object, skip); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func validateJSONField(field reflect.StructField, object map[string]json.RawMessage, skip map[string]bool) error {
+	name, optional := jsonFieldName(field)
+	if name == "" || skip[name] {
+		return nil
+	}
+	raw, ok := object[name]
+	if !ok {
+		if optional {
+			return nil
+		}
+		return fmt.Errorf("missing required field %q", name)
+	}
+	if !isJSONNull(raw) {
+		return validateNestedJSON(field.Type, raw)
+	}
+	// An explicit null is rejected for every field except an untyped value
+	// (Go's empty interface).
+	if allowsJSONNull(field.Type) {
+		return nil
+	}
+	return fmt.Errorf("field %q must not be null", name)
 }
 
 func validateNestedJSON(t reflect.Type, raw json.RawMessage) error {
@@ -68,37 +82,40 @@ func validateNestedJSON(t reflect.Type, raw json.RawMessage) error {
 	}
 	switch t.Kind() {
 	case reflect.Struct:
-		object, err := decodeJSONObject(raw)
-		if err != nil {
-			return err
-		}
-		return validateRequiredJSON(t, object, nil)
+		return validateJSONStruct(t, raw)
 	case reflect.Map:
-		var object map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &object); err != nil {
+		if _, err := decodeJSONObject(raw); err != nil {
 			return fmt.Errorf("expected object: %w", err)
 		}
 		return nil
 	case reflect.Slice, reflect.Array:
-		var items []json.RawMessage
-		if err := json.Unmarshal(raw, &items); err != nil {
-			return fmt.Errorf("expected array: %w", err)
-		}
-		elem := t.Elem()
-		for elem.Kind() == reflect.Pointer {
-			elem = elem.Elem()
-		}
-		if elem.Kind() != reflect.Struct {
-			return nil
-		}
-		for _, item := range items {
-			object, err := decodeJSONObject(item)
-			if err != nil {
-				return err
-			}
-			if err := validateRequiredJSON(elem, object, nil); err != nil {
-				return err
-			}
+		return validateJSONArray(t.Elem(), raw)
+	}
+	return nil
+}
+
+func validateJSONStruct(t reflect.Type, raw json.RawMessage) error {
+	object, err := decodeJSONObject(raw)
+	if err != nil {
+		return err
+	}
+	return validateRequiredJSON(t, object, nil)
+}
+
+func validateJSONArray(elem reflect.Type, raw json.RawMessage) error {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return fmt.Errorf("expected array: %w", err)
+	}
+	for elem.Kind() == reflect.Pointer {
+		elem = elem.Elem()
+	}
+	if elem.Kind() != reflect.Struct {
+		return nil
+	}
+	for _, item := range items {
+		if err := validateJSONStruct(elem, item); err != nil {
+			return err
 		}
 	}
 	return nil
