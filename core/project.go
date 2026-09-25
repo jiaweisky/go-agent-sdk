@@ -11,6 +11,10 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
+// projectIDFile is the marker file, inside a repository's store, that caches
+// the resolved project id.
+const projectIDFile = "project-id"
+
 type ProjectResolved struct {
 	Previous  *schema.ProjectID
 	ID        schema.ProjectID
@@ -76,12 +80,12 @@ func (p *projectService) Resolve(input AbsolutePath) (*ProjectResolved, error) {
 }
 
 func (p *projectService) Commit(store AbsolutePath, id schema.ProjectID) error {
-	_ = WriteFileString(filepath.Join(string(store), "opencode"), string(id))
+	_ = WriteFileString(filepath.Join(string(store), projectIDFile), string(id))
 	return nil
 }
 
 func (p *projectService) cached(dir string) *schema.ProjectID {
-	value, err := ReadFileString(filepath.Join(dir, "opencode"))
+	value, err := ReadFileString(filepath.Join(dir, projectIDFile))
 	if err != nil {
 		return nil
 	}

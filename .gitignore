@@ -10,8 +10,5 @@
 .env.*
 !.env.example
 
-# opencode runtime state
-.opencode/opencode-loop/
-
 # Example state (see examples/internal/util.Client)
 examples/*/.data/

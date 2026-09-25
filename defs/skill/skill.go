@@ -1,6 +1,6 @@
-// Package skill scans explicit directories for SKILL.md files. Unlike the
-// opencode CLI it performs no environment, global or project discovery: the
-// caller supplies every directory to scan.
+// Package skill scans explicit directories for SKILL.md files. It performs no
+// environment, global or project discovery: the caller supplies every directory
+// to scan.
 package skill
 
 import (

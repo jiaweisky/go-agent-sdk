@@ -733,7 +733,7 @@ opencode 的 agent 与 skill 定义来自 `{agent,agents}/**/*.md`、`{mode,mode
 **只支持 markdown**（frontmatter + body），格式与 TS 完全一致，不引入 YAML 双格式：
 
 - 解析器 `core/util/markdown.go`（`ParseMarkdownOption`）逐行移植 TS 的 `ConfigMarkdown.parse`（含 `SanitizeMarkdown` 重试），不依赖第三方 frontmatter 库。
-- frontmatter 反序列化到 `opencode/config.AgentInfo`（json tag），body 作为 `system`（mode 文件额外置 `mode: primary`）。
+- frontmatter 反序列化到 `defs/config.AgentInfo`（json tag），body 作为 `system`（mode 文件额外置 `mode: primary`）。
 - **不做目录发现**：由 `ClientOptions.ConfigDirs` 显式给出目录，SDK 只扫描这些目录（见 DESIGN.md §11.1）。
 - legacy v1 agent markdown（旧字段名 → `V1MigrateAgent`）不移植，`core/v1/config` 已删除。
 
@@ -838,11 +838,11 @@ opencode 的 agent 与 skill 定义来自 `{agent,agents}/**/*.md`、`{mode,mode
 | `core/util/markdown.go` | packages/core/src/util/markdown.ts | `ParseMarkdown` ↔ `ConfigMarkdown.parse`, `ParseMarkdownOption` ↔ `ConfigMarkdown.parseOption`, `SanitizeMarkdown` ↔ `ConfigMarkdown.sanitize` |
 | `examples/internal/util/util.go` | — | — |
 | `jsonschema/jsonschema.go` | — | — |
-| `mcp/catalog.go` | index.ts | `serverSupportsTools` ↔ `client.getServerCapabilities()`, `ListPrompts` ↔ `McpCatalog.prompts`, `ListResources` ↔ `McpCatalog.resources`, `ListResourceTemplates` ↔ `McpCatalog.resourceTemplates` |
-| `mcp/client.go` | packages/opencode/src/mcp/client.ts | `timeouts` ↔ `convertTool`, `promptKey` ↔ `McpCatalog.fetch`, `resourceKey` ↔ `McpCatalog.fetch` |
+| `mcp/catalog.go` | index.ts | `serverCapabilities` ↔ `client.getServerCapabilities()`, `ListPrompts` ↔ `McpCatalog.prompts`, `ListResources` ↔ `McpCatalog.resources`, `ListResourceTemplates` ↔ `McpCatalog.resourceTemplates` |
+| `mcp/client.go` | packages/opencode/src/mcp/client.ts | `timeouts` ↔ `convertTool`, `sanitizedPromptKey` ↔ `McpCatalog.fetch`, `escapedResourceKey` ↔ `McpCatalog.fetch` |
 | `mcp/config.go` | packages/opencode/src/mcp/config.ts | `DefaultTimeout` ↔ `DEFAULT_TIMEOUT` |
 | `mcp/tool.go` | packages/opencode/src/mcp/tool.ts | `AdaptMCPTool` ↔ `McpCatalog.convertTool`, `MCPInputSchema` ↔ `convertTool` |
-| `opencode/config/entry_name.go` | packages/opencode/src/config/entry-name.ts | — |
+| `defs/config/entry_name.go` | packages/opencode/src/config/entry-name.ts | — |
 | `schema/agent.go` | packages/schema/src/agent.ts | `AgentInfoEmpty` ↔ `Agent.Info.empty` |
 | `schema/json_required.go` | packages/schema/src/json-required.ts | `allowsJSONNull` ↔ `Schema.Unknown` |
 | `schema/llm.go` | packages/schema/src/llm.ts | — |

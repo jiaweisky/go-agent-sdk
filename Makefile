@@ -24,8 +24,8 @@ $(BIN)/%$(EXE): $(GO_SOURCES) go.mod go.sum
 	@mkdir -p $(BIN)
 	$(GO) build -o $@ ./examples/$*
 
-# Run the chat example with examples/chat as its working directory, so its .env
-# and .opencode stay under examples/chat instead of the launch directory.
+# Run the chat example with examples/chat as its working directory, so its .env,
+# .config and .data stay under examples/chat instead of the launch directory.
 chat: $(BIN)/chat$(EXE)
 	$(BIN)/chat$(EXE) -C examples/chat
 

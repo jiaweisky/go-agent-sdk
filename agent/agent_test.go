@@ -1051,7 +1051,7 @@ func ptr[T any](value T) *T { return &value }
 func TestRegisterAgentModeAndHidden(t *testing.T) {
 	client := newTestClient(t)
 
-	// A new agent with no mode defaults to "all" (matching opencode), not "primary".
+	// A new agent with no mode defaults to "all", not "primary".
 	if err := client.RegisterAgent("fresh", AgentConfig{System: "s"}); err != nil {
 		t.Fatalf("register fresh: %v", err)
 	}

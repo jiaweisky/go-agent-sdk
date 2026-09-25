@@ -25,6 +25,9 @@ import (
 const (
 	skillConcurrency = 4
 	fileConcurrency  = 8
+	// skillVersionFile records the source version of a downloaded skill so a
+	// later refresh can skip unchanged content.
+	skillVersionFile = ".skill-version"
 )
 
 // FileSystem is the narrow filesystem surface SkillDiscovery needs. It is
@@ -155,7 +158,7 @@ func (d *Discovery) plan(sourceRoot string, source *url.URL, data Index) []skill
 			continue
 		}
 		skillURL := source.ResolveReference(&url.URL{Path: entry.Name + "/"})
-		versionFile := filepath.Join(root, ".opencode-version")
+		versionFile := filepath.Join(root, skillVersionFile)
 
 		files := make([]skillFile, 0, len(entry.Files))
 		invalid := false
@@ -224,7 +227,7 @@ func (d *Discovery) refresh(plan skillPlan, version string) {
 		!d.fileExists(filepath.Join(staging, plan.skill.Name+".md")) {
 		return
 	}
-	if err := d.fs.WriteFileString(filepath.Join(staging, ".opencode-version"), version); err != nil {
+	if err := d.fs.WriteFileString(filepath.Join(staging, skillVersionFile), version); err != nil {
 		return
 	}
 

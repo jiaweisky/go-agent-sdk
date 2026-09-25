@@ -21,11 +21,11 @@ import (
 	"github.com/user/go-agent-sdk/core/systemcontext"
 	"github.com/user/go-agent-sdk/core/tool"
 	"github.com/user/go-agent-sdk/core/util"
+	defsconfig "github.com/user/go-agent-sdk/defs/config"
+	defsskill "github.com/user/go-agent-sdk/defs/skill"
 	"github.com/user/go-agent-sdk/llm"
 	"github.com/user/go-agent-sdk/llm/route"
 	"github.com/user/go-agent-sdk/mcp"
-	opencodeconfig "github.com/user/go-agent-sdk/opencode/config"
-	opencodeskill "github.com/user/go-agent-sdk/opencode/skill"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -318,7 +318,7 @@ func buildAgents(opts *ClientOptions, location *core.Location, global core.Globa
 	if err := core.ApplyDefaultAgents(agents, location, global); err != nil {
 		return nil, err
 	}
-	if err := opencodeconfig.ApplyDirAgents(agents, opts.ConfigDirs, global); err != nil {
+	if err := defsconfig.ApplyDirAgents(agents, opts.ConfigDirs, global); err != nil {
 		return nil, err
 	}
 	return agents, nil
@@ -352,7 +352,7 @@ func buildSkills(opts *ClientOptions, global core.Global) (*core.Skill, error) {
 	discovery := core.NewSkillDiscovery(filepath.Join(global.Cache, "skills"), http.DefaultClient)
 	skills := core.NewSkill(discovery)
 	_, err := skills.Transform(func(draft core.SkillDraft) error {
-		for _, dir := range opencodeskill.DiscoverSkills(opts.ConfigDirs).Roots {
+		for _, dir := range defsskill.DiscoverSkills(opts.ConfigDirs).Roots {
 			draft.Source(schema.SkillDirectorySource{Type: "directory", Path: schema.AbsolutePath(dir)})
 		}
 		return nil

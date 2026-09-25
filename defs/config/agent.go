@@ -1,3 +1,7 @@
+// Package config loads agent definitions from explicit directories'
+// {agent,agents}/**/*.md and {mode,modes}/*.md files. It performs no
+// environment, global or project discovery: the caller supplies every
+// directory.
 package config
 
 import (

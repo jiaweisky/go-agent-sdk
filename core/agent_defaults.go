@@ -146,7 +146,6 @@ func ApplyDefaultAgents(agents *Agent, location *Location, global Global) error 
 				{Action: "plan_exit", Resource: "*", Effect: PermissionEffectAllow},
 				{Action: "external_directory", Resource: filepath.Join(global.Data, "plans", "*"), Effect: PermissionEffectAllow},
 				{Action: "edit", Resource: "*", Effect: PermissionEffectDeny},
-				{Action: "edit", Resource: filepath.Join(".opencode", "plans", "*.md"), Effect: PermissionEffectAllow},
 				{Action: "edit", Resource: planRelative, Effect: PermissionEffectAllow},
 			})...)
 		})

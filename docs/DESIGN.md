@@ -50,7 +50,7 @@ go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提
 | credential / catalog / integration 服务 | CLI 基础设施，SDK 改用窄输入（见 AGENTS.md） |
 | `weak` 包、`os.Root` 等安全特性 | 后续加固 |
 
-> 已实现（早期文档曾列为"推迟"，现已落地）：MCP 集成（§8）、Skill 系统（§9）、Config frontmatter 加载（`opencode/config`）、上下文压缩（§6）、Steer/Queue 输入、Plugin（窄化，§7.3）、Reference 服务、`task` 子 agent（§6.3）。
+> 已实现（早期文档曾列为"推迟"，现已落地）：MCP 集成（§8）、Skill 系统（§9）、Config frontmatter 加载（`defs/config`）、上下文压缩（§6）、Steer/Queue 输入、Plugin（窄化，§7.3）、Reference 服务、`task` 子 agent（§6.3）。
 
 ### MVP 用户代码示例
 

@@ -134,8 +134,7 @@ type AgentConfig struct {
 	System      string
 	Description string
 	// Mode is "primary", "subagent", or "all". When nil the agent keeps its
-	// current mode; a newly created agent defaults to "all" (matching
-	// opencode's Agent.Info.empty).
+	// current mode; a newly created agent defaults to "all".
 	Mode *string
 	// Hidden hides the agent from default selection. When nil the agent keeps
 	// its current value.
