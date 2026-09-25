@@ -190,7 +190,6 @@ go-agent-sdk/                            opencode TS
 ├── core/           ← packages/core/src/          (@opencode-ai/core)
 │   ├── schema.go                    re-exports (schema.ts)
 │   ├── global.go                    Global (global.ts)
-│   ├── policy.go                    Policy allow/deny statements (policy.ts)
 │   ├── provider.go                  ProviderV2 re-exports (provider.ts)
 │   ├── model.go                     ModelV2 re-exports + parse (model.ts)
 │   ├── file_mutation.go             file-mutation.ts
@@ -692,7 +691,6 @@ type ClientOptions struct {
     MCP              []MCPConfig               // MCP servers（工具注册为应用级）
     Plugins          []PluginConfig            // 启动时加载的插件
     References       map[string]core.ReferenceSource // 命名 reference 源
-    Policies         []schema.PolicyInfo       // allow/deny 策略
     ToolOutput       *ToolOutputConfig         // 工具输出落盘上限（MaxLines / MaxBytes）
 
     // 运行行为

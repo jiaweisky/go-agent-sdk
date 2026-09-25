@@ -62,8 +62,6 @@ type ClientOptions struct {
 	Plugins []PluginConfig
 	// References are named reference sources injected into the system context.
 	References map[string]core.ReferenceSource
-	// Policies are policy statements evaluated for tool access.
-	Policies []schema.PolicyInfo
 	// ToolOutput bounds oversized tool results. Nil uses the defaults.
 	ToolOutput *ToolOutputConfig
 
