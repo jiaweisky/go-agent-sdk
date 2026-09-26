@@ -15,6 +15,10 @@ type PluginID = schema.PluginID
 // skills and references. Catalog, credential and integration transforms are CLI
 // infrastructure and intentionally not ported.
 type PluginContext struct {
+	// Events is the runtime event log when the plugin manager was built with
+	// one; nil otherwise. Subscribe with Events.Listen and return the
+	// unsubscribe function as the plugin's cleanup.
+	Events    Event
 	Agents    *Agent
 	Skills    *Skill
 	Reference *Reference
@@ -48,7 +52,7 @@ func NewPlugin(events Event, agents *Agent, skills *Skill, reference *Reference)
 		failures: map[schema.PluginID]error{},
 		waiters:  map[schema.PluginID][]chan error{},
 	}
-	plugin.context = &PluginContext{Agents: agents, Skills: skills, Reference: reference, Plugin: plugin}
+	plugin.context = &PluginContext{Events: events, Agents: agents, Skills: skills, Reference: reference, Plugin: plugin}
 	return plugin
 }
 

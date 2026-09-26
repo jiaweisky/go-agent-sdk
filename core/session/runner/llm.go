@@ -47,7 +47,7 @@ var _ Snapshotter = (*core.Snapshot)(nil)
 // ToolRegistry is the narrow tool-registry surface the runner needs. The
 // session id lets embedders scope tools per session.
 type ToolRegistry interface {
-	MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization
+	MaterializeFor(sessionID string, permissions []core.PermissionRule) (*tool.Materialization, error)
 }
 
 // LLMRunner runs one durable coding-agent session until it settles.
@@ -383,7 +383,10 @@ func (r *LLMRunner) prepareTurnAttempt(
 	}
 
 	isLastStep := agent.Info != nil && agent.Info.Steps != nil && currentStep >= int(*agent.Info.Steps)
-	toolMaterialization := r.materializeTools(sessionID, agent, stored, isLastStep)
+	toolMaterialization, err := r.materializeTools(sessionID, agent, stored, isLastStep)
+	if err != nil {
+		return nil, err
+	}
 	request := buildTurnRequest(sessionID, agent, stored, system, contextMessagesOf(entries), model, isLastStep, toolMaterialization)
 
 	if compacted, err := r.compaction.CompactIfNeeded(session.CompactionInput{
@@ -482,9 +485,9 @@ func (r *LLMRunner) promotePendingDeliveries(sessionID schema.SessionID, promoti
 }
 
 // materializeTools resolves the tools for the attempt, or nil on the last step.
-func (r *LLMRunner) materializeTools(sessionID schema.SessionID, agent core.AgentSelection, stored *schema.SessionInfo, isLastStep bool) *tool.Materialization {
+func (r *LLMRunner) materializeTools(sessionID schema.SessionID, agent core.AgentSelection, stored *schema.SessionInfo, isLastStep bool) (*tool.Materialization, error) {
 	if isLastStep {
-		return nil
+		return nil, nil
 	}
 	var permissions []core.PermissionRule
 	if agent.Info != nil {

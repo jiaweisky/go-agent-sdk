@@ -133,8 +133,8 @@ type Materialization struct {
 // MaterializeFor is the session-aware materialization seam. The core registry
 // is session-agnostic, so it ignores the session id; embedders that scope tools
 // per session (for example the high-level agent package) provide their own.
-func (r *Registry) MaterializeFor(sessionID string, permissions []PermissionRule) *Materialization {
-	return r.Materialize(permissions)
+func (r *Registry) MaterializeFor(sessionID string, permissions []PermissionRule) (*Materialization, error) {
+	return r.Materialize(permissions), nil
 }
 
 func (r *Registry) Materialize(permissions []PermissionRule) *Materialization {

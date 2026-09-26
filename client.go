@@ -130,8 +130,14 @@ type MCPConfig struct {
 
 // PluginConfig registers a plugin loaded at client startup.
 type PluginConfig struct {
-	ID     string
-	Effect func(*core.PluginContext) (func(), error)
+	ID string
+	// Options is exposed to the plugin as PluginContext.Options.
+	Options map[string]any
+	// Tools are application tools contributed by this plugin. They are
+	// registered for every session created after startup, like
+	// ClientOptions.Tools.
+	Tools  []Tool
+	Effect PluginEffect
 }
 
 // AgentConfig defines a named agent.
@@ -270,7 +276,10 @@ func (c *Client) attachSession(session *Session, registry *tool.Registry, cfg *S
 	if err := c.trackSession(session); err != nil {
 		return err
 	}
-	c.rt.dispatcher.set(session.ID(), registry)
+	if err := c.rt.setSessionRegistry(session.ID(), registry); err != nil {
+		c.untrackSession(session)
+		return err
+	}
 	c.rt.setHooks(session.ID(), cfg.Hooks)
 	c.rt.permission.setHandler(session.ID(), cfg.OnPermissionRequest)
 	c.rt.question.setHandler(session.ID(), cfg.OnQuestion)
@@ -361,6 +370,13 @@ func (c *Client) Plugin() *core.Plugin {
 	return c.rt.plugin
 }
 
+// RegisterTools adds application tools after startup. They are registered for
+// sessions created afterwards and for live sessions. The returned function
+// unregisters them.
+func (c *Client) RegisterTools(tools ...Tool) (func(), error) {
+	return c.rt.toolRegistrar().Register(tools...)
+}
+
 // Agents returns the agent registry (built-ins plus config-registered agents).
 func (c *Client) Agents() *core.Agent {
 	return c.rt.agents
@@ -375,16 +391,7 @@ func (c *Client) Skills() *core.Skill {
 // Use it to observe task/subagent activity that Session.On (which filters by
 // session) does not surface. The returned function unsubscribes.
 func (c *Client) On(handler func(Event)) func() {
-	unsubscribe, err := c.rt.events.Listen(func(payload schema.EventPayload) error {
-		for _, event := range mapEvents(payload) {
-			handler(event)
-		}
-		return nil
-	})
-	if err != nil {
-		return func() {}
-	}
-	return unsubscribe
+	return listenEvents(c.rt.events, handler)
 }
 
 // Reference returns the reference service.

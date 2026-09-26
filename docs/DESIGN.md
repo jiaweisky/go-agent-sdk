@@ -540,7 +540,7 @@ func (r *Registry) Materialize(permissions core.PermissionRuleset) *Materializat
 func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 ```
 
-> MCP 已实现（见 §8，`mcp/` 包）。Plugin 已实现（窄化：`core/plugin.go` 的 lifecycle 管理器 + `agent` 接线，见 `PluginContext`）；TS 的动态工具（外部 JSON Schema）未移植，MCP 工具即通过 `jsonschema.Raw` 走这条路径。
+> MCP 已实现（见 §8，`mcp/` 包）。Plugin 已实现（窄化）：`core/plugin.go` 的 lifecycle 管理器（`Add`/`Remove`/`Wait`/`Close`，含 loading 环检测与失败缓存）。根包 `PluginContext` 内嵌 `core.PluginContext`（`Agents`/`Skills`/`Reference`/`Plugin`/`Events`），并加 `Options`（来自 `PluginConfig.Options`）、`Tools`（`*ToolRegistrar`，运行时注册应用级工具，对新旧会话均生效）与 `On`（订阅高层 `agent.Event`，含子会话）。`PluginConfig.Tools` 提供静态工具贡献；`Client.RegisterTools` 启动后动态注册/注销（与建会话共用同一把锁，避免并发漏注册）。`SessionHooks.OnToolDefinition` 在工具定义发给模型前逐条改写（错误中止本轮，对齐 TS `tool.definition`）。TS 的动态工具（外部 JSON Schema）未移植，MCP 工具即通过 `jsonschema.Raw` 走这条路径。
 
 > **工具输出限额**：`core.ToolOutputStore`（`MAX_LINES=2000` / `MAX_BYTES=50KB`）会把超限的 tool result 落盘为 `tool-output/tool_*`，只把 head/tail 预览发给模型（`core/tool/output_store.go` 适配 `tool.OutputStore`，由根包 `runtime.go` 通过 `tool.WithOutputStore` 注入）。**未注入时 registry 的 `store == nil`，限额被跳过**，一次大 `grep`/`read` 就能撑爆上下文窗口。
 >
@@ -689,7 +689,7 @@ type ClientOptions struct {
     // 工具与扩展
     Tools            []Tool                    // 应用级工具
     MCP              []MCPConfig               // MCP servers（工具注册为应用级）
-    Plugins          []PluginConfig            // 启动时加载的插件
+    Plugins          []PluginConfig            // 启动时加载的插件（ID/Options/Tools/Effect）
     References       map[string]core.ReferenceSource // 命名 reference 源
     ToolOutput       *ToolOutputConfig         // 工具输出落盘上限（MaxLines / MaxBytes）
 
@@ -713,6 +713,7 @@ func (c *Client) ListSessions(ctx) ([]SessionInfo, error)
 func (c *Client) DeleteSession(ctx, sessionID string) error
 func (c *Client) On(func(Event)) (unsubscribe func())   // 全局订阅（含子 agent 会话）
 func (c *Client) SessionMessages(sessionID string) ([]schema.SessionMessage, error) // 读任意会话（含子会话）的消息
+func (c *Client) RegisterTools(tools ...Tool) (unregister func(), err error) // 启动后动态注册/注销应用级工具
 func (c *Client) Close() error
 
 // ─── Session ────────────────────────────────────────────

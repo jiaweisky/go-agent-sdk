@@ -4,8 +4,28 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/schema"
 )
+
+// listenEvents subscribes handler to the high-level events mapped from every
+// payload. The returned function unsubscribes; a failed subscription yields a
+// no-op.
+func listenEvents(events core.Event, handler func(Event)) func() {
+	if events == nil {
+		return func() {}
+	}
+	unsubscribe, err := events.Listen(func(payload schema.EventPayload) error {
+		for _, event := range mapEvents(payload) {
+			handler(event)
+		}
+		return nil
+	})
+	if err != nil {
+		return func() {}
+	}
+	return unsubscribe
+}
 
 // Event is a high-level session event surfaced by Session.Send and Session.On.
 //

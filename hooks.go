@@ -17,6 +17,9 @@ type SessionHooks struct {
 	OnPostToolUse func(PostToolUseInput) (*PostToolUseOutput, error)
 	// OnPostToolUseFailure runs after a failed tool execution.
 	OnPostToolUseFailure func(PostToolUseFailureInput) (*PostToolUseFailureOutput, error)
+	// OnToolDefinition runs before tool definitions are sent to the model; it
+	// can rewrite a tool's description, input schema or metadata.
+	OnToolDefinition func(ToolDefinitionInput) (*ToolDefinitionOutput, error)
 	// OnUserPromptSubmitted runs before a prompt is admitted; it can rewrite it.
 	OnUserPromptSubmitted func(UserPromptSubmittedInput) (*UserPromptSubmittedOutput, error)
 	// OnSessionStart runs when a session is created or resumed. An error aborts
@@ -74,6 +77,18 @@ type PostToolUseFailureOutput struct {
 	AdditionalContext string
 }
 
+// ToolDefinitionInput describes a tool definition about to be sent to the model.
+type ToolDefinitionInput struct {
+	SessionID  string
+	ToolID     string
+	Definition llmschema.ToolDefinition
+}
+
+// ToolDefinitionOutput replaces the model-visible tool definition.
+type ToolDefinitionOutput struct {
+	Definition llmschema.ToolDefinition
+}
+
 // UserPromptSubmittedInput describes a prompt before admission.
 type UserPromptSubmittedInput struct {
 	SessionID string
@@ -119,7 +134,7 @@ type ErrorOccurredOutput struct {
 
 // toolMaterializer is the session-aware materialization surface.
 type toolMaterializer interface {
-	MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization
+	MaterializeFor(sessionID string, permissions []core.PermissionRule) (*tool.Materialization, error)
 }
 
 // hookedRegistry wraps a tool materializer so tool hooks fire around settlement.
@@ -128,10 +143,16 @@ type hookedRegistry struct {
 	hooksFor func(sessionID string) *SessionHooks
 }
 
-func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization {
-	mat := h.inner.MaterializeFor(sessionID, permissions)
+func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.PermissionRule) (*tool.Materialization, error) {
+	mat, err := h.inner.MaterializeFor(sessionID, permissions)
+	if err != nil {
+		return nil, err
+	}
 	if mat == nil {
 		mat = &tool.Materialization{}
+	}
+	if err := h.applyToolDefinitions(sessionID, mat); err != nil {
+		return nil, err
 	}
 	inner := mat.Settle
 	if inner == nil {
@@ -140,7 +161,7 @@ func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.Perm
 		mat.Settle = func(context.Context, tool.ExecuteInput) (*tool.Settlement, error) {
 			return hookError("unknown session: " + sessionID), nil
 		}
-		return mat
+		return mat, nil
 	}
 	mat.Settle = func(ctx context.Context, input tool.ExecuteInput) (*tool.Settlement, error) {
 		hooks := h.hooksForSession(input.SessionID)
@@ -159,7 +180,30 @@ func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.Perm
 		appendSettlementContext(settlement, preContext)
 		return settlement, nil
 	}
-	return mat
+	return mat, nil
+}
+
+// applyToolDefinitions lets OnToolDefinition rewrite the model-visible tool
+// definitions before they are sent.
+func (h hookedRegistry) applyToolDefinitions(sessionID string, mat *tool.Materialization) error {
+	hooks := h.hooksForSession(sessionID)
+	if hooks == nil || hooks.OnToolDefinition == nil {
+		return nil
+	}
+	for i := range mat.Definitions {
+		out, err := hooks.OnToolDefinition(ToolDefinitionInput{
+			SessionID:  sessionID,
+			ToolID:     mat.Definitions[i].Name,
+			Definition: mat.Definitions[i],
+		})
+		if err != nil {
+			return err
+		}
+		if out != nil {
+			mat.Definitions[i] = out.Definition
+		}
+	}
+	return nil
 }
 
 // hooksForSession returns the session's hooks, or nil when none are registered.

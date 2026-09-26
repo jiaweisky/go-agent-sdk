@@ -38,7 +38,9 @@ func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (TaskRunOutpu
 	if err != nil {
 		return TaskRunOutput{}, err
 	}
-	r.dispatcher.set(string(childID), registry)
+	if err := r.setSessionRegistry(string(childID), registry); err != nil {
+		return TaskRunOutput{}, err
+	}
 	defer r.dispatcher.remove(string(childID))
 
 	r.publishTaskProgress(input, childID, subagent, parent)

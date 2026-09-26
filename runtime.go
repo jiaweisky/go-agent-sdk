@@ -61,6 +61,79 @@ type runtime struct {
 	plugin      *core.Plugin
 	reference   *core.Reference
 	cancel      context.CancelFunc
+
+	toolsMu     sync.Mutex
+	pluginTools map[string][]pluginToolEntry
+}
+
+// pluginToolEntry is one runtime registration of an application tool. Entries
+// are tracked per name so unregistering one registration does not drop a tool
+// another plugin still provides.
+type pluginToolEntry struct {
+	token *int
+	tool  tool.Tool
+}
+
+// toolRegistrar returns the runtime's application-tool registration surface.
+func (r *runtime) toolRegistrar() *ToolRegistrar {
+	return &ToolRegistrar{runtime: r}
+}
+
+// registerTools adds application tools for sessions created afterwards and for
+// live sessions. The returned function removes them again.
+func (r *runtime) registerTools(tools map[string]tool.Tool) (func(), error) {
+	if len(tools) == 0 {
+		return func() {}, nil
+	}
+	for name := range tools {
+		if err := tool.ValidateName(name); err != nil {
+			return nil, err
+		}
+	}
+
+	// Hold toolsMu across both the registry update and the live-session
+	// registration, and across setSessionRegistry, so a session created
+	// concurrently lands on exactly one side of the registration.
+	token := new(int)
+	r.toolsMu.Lock()
+	if r.pluginTools == nil {
+		r.pluginTools = map[string][]pluginToolEntry{}
+	}
+	for name, item := range tools {
+		r.pluginTools[name] = append(r.pluginTools[name], pluginToolEntry{token: token, tool: item})
+	}
+	cleanupLive, err := r.dispatcher.registerAll(tools)
+	if err != nil {
+		r.removePluginToolsLocked(tools, token)
+		r.toolsMu.Unlock()
+		return nil, err
+	}
+	r.toolsMu.Unlock()
+
+	return func() {
+		r.toolsMu.Lock()
+		r.removePluginToolsLocked(tools, token)
+		r.toolsMu.Unlock()
+		cleanupLive()
+	}, nil
+}
+
+// removePluginToolsLocked drops the registration identified by token. The
+// caller must hold toolsMu.
+func (r *runtime) removePluginToolsLocked(tools map[string]tool.Tool, token *int) {
+	for name := range tools {
+		var kept []pluginToolEntry
+		for _, entry := range r.pluginTools[name] {
+			if entry.token != token {
+				kept = append(kept, entry)
+			}
+		}
+		if len(kept) > 0 {
+			r.pluginTools[name] = kept
+		} else {
+			delete(r.pluginTools, name)
+		}
+	}
 }
 
 // toolDispatcher routes materialization to the session-scoped registry. Every
@@ -72,14 +145,14 @@ type toolDispatcher struct {
 	sessions map[string]*tool.Registry
 }
 
-func (d *toolDispatcher) MaterializeFor(sessionID string, permissions []core.PermissionRule) *tool.Materialization {
+func (d *toolDispatcher) MaterializeFor(sessionID string, permissions []core.PermissionRule) (*tool.Materialization, error) {
 	d.mu.Lock()
 	registry := d.sessions[sessionID]
 	d.mu.Unlock()
 	if registry == nil {
-		return &tool.Materialization{}
+		return &tool.Materialization{}, nil
 	}
-	return registry.Materialize(permissions)
+	return registry.Materialize(permissions), nil
 }
 
 func (d *toolDispatcher) set(sessionID string, registry *tool.Registry) {
@@ -92,6 +165,34 @@ func (d *toolDispatcher) remove(sessionID string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.sessions, sessionID)
+}
+
+// registerAll registers tools into every live session registry, returning a
+// function that removes them again.
+func (d *toolDispatcher) registerAll(tools map[string]tool.Tool) (func(), error) {
+	d.mu.Lock()
+	registries := make([]*tool.Registry, 0, len(d.sessions))
+	for _, registry := range d.sessions {
+		registries = append(registries, registry)
+	}
+	d.mu.Unlock()
+
+	cleanups := make([]func(), 0, len(registries))
+	for _, registry := range registries {
+		cleanup, err := registry.Register(tools)
+		if err != nil {
+			for _, done := range cleanups {
+				done()
+			}
+			return nil, err
+		}
+		cleanups = append(cleanups, cleanup)
+	}
+	return func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}, nil
 }
 
 // sessionAgents resolves the agent a session runs with: the in-memory derived
@@ -151,10 +252,8 @@ func (r *runtime) newSessionRegistry(agent *schema.AgentInfo, sessionRules schem
 	if err := registerBuiltins(registry, r.builtin, permissions); err != nil {
 		return nil, err
 	}
-	if len(r.mcpTools) > 0 {
-		if _, err := registry.Register(r.mcpTools); err != nil {
-			return nil, err
-		}
+	if err := registerIfAny(registry, r.mcpTools); err != nil {
+		return nil, err
 	}
 	tools := make([]Tool, 0, len(r.clientTools)+len(sessionTools))
 	tools = append(tools, r.clientTools...)
@@ -165,6 +264,42 @@ func (r *runtime) newSessionRegistry(agent *schema.AgentInfo, sessionRules schem
 		}
 	}
 	return registry, nil
+}
+
+// registerIfAny registers tools when there are any.
+func registerIfAny(registry *tool.Registry, tools map[string]tool.Tool) error {
+	if len(tools) == 0 {
+		return nil
+	}
+	_, err := registry.Register(tools)
+	return err
+}
+
+// setSessionRegistry installs a session's tool registry, merging the currently
+// registered plugin tools under the same lock RegisterTools uses, so a
+// concurrent registration cannot miss this session.
+func (r *runtime) setSessionRegistry(sessionID string, registry *tool.Registry) error {
+	r.toolsMu.Lock()
+	defer r.toolsMu.Unlock()
+	if err := registerIfAny(registry, pluginToolSnapshot(r.pluginTools)); err != nil {
+		return err
+	}
+	r.dispatcher.set(sessionID, registry)
+	return nil
+}
+
+// pluginToolSnapshot returns the newest tool for each plugin-registered name.
+func pluginToolSnapshot(entries map[string][]pluginToolEntry) map[string]tool.Tool {
+	if len(entries) == 0 {
+		return nil
+	}
+	snapshot := make(map[string]tool.Tool, len(entries))
+	for name, list := range entries {
+		if len(list) > 0 {
+			snapshot[name] = list[len(list)-1].tool
+		}
+	}
+	return snapshot
 }
 
 // publishSessionStatus emits the live session.status event so subscribers (and
@@ -367,11 +502,24 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 func (r *runtime) loadPlugins(opts *ClientOptions) error {
 	r.plugin = core.NewPlugin(r.events, r.agents, r.skills, r.reference)
 	for _, config := range opts.Plugins {
-		if err := r.plugin.Add(schema.PluginID(config.ID), core.PluginEffect(config.Effect)); err != nil {
+		r.clientTools = append(r.clientTools, config.Tools...)
+		if err := r.plugin.Add(schema.PluginID(config.ID), r.adaptPlugin(config)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// adaptPlugin bridges a PluginEffect to the core lifecycle manager, extending
+// the core context with per-plugin options and the runtime tool registrar.
+func (r *runtime) adaptPlugin(config PluginConfig) core.PluginEffect {
+	return func(ctx *core.PluginContext) (func(), error) {
+		return config.Effect(&PluginContext{
+			PluginContext: *ctx,
+			Options:       config.Options,
+			Tools:         r.toolRegistrar(),
+		})
+	}
 }
 
 // resolveWorkingDirectory returns the absolute project directory.

@@ -714,10 +714,18 @@ func TestSessionToolIsolation(t *testing.T) {
 	}
 	defer second.Close()
 
-	if got := sharedToolDescription(client.rt.dispatcher.MaterializeFor(first.ID(), nil).Definitions); got != "from A" {
+	firstMat, err := client.rt.dispatcher.MaterializeFor(first.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize first: %v", err)
+	}
+	if got := sharedToolDescription(firstMat.Definitions); got != "from A" {
 		t.Fatalf("first session tool = %q", got)
 	}
-	if got := sharedToolDescription(client.rt.dispatcher.MaterializeFor(second.ID(), nil).Definitions); got != "from B" {
+	secondMat, err := client.rt.dispatcher.MaterializeFor(second.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize second: %v", err)
+	}
+	if got := sharedToolDescription(secondMat.Definitions); got != "from B" {
 		t.Fatalf("second session tool = %q", got)
 	}
 }
@@ -792,7 +800,7 @@ func TestClientPlugin(t *testing.T) {
 		LLM:   fakeLLM{reply: "x"},
 		Plugins: []PluginConfig{{
 			ID: "test",
-			Effect: func(ctx *core.PluginContext) (func(), error) {
+			Effect: func(ctx *PluginContext) (func(), error) {
 				loaded = true
 				_, err := ctx.Agents.Transform(func(draft core.AgentDraft) error {
 					draft.Update(schema.AgentID("build"), func(info *schema.AgentInfo) {
@@ -2098,7 +2106,10 @@ func TestHookedRegistryUnknownSessionSettlesWithError(t *testing.T) {
 	// A session with no registry materializes no tools; a stray tool call must
 	// settle with an error instead of calling a nil Settle.
 	reg := hookedRegistry{inner: &toolDispatcher{sessions: map[string]*tool.Registry{}}}
-	mat := reg.MaterializeFor("ses_missing", nil)
+	mat, err := reg.MaterializeFor("ses_missing", nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
 	if mat.Settle == nil {
 		t.Fatal("Settle is nil for an unknown session")
 	}
@@ -2108,5 +2119,349 @@ func TestHookedRegistryUnknownSessionSettlesWithError(t *testing.T) {
 	}
 	if settlement == nil || settlement.Result.Type != "error" {
 		t.Fatalf("settlement = %+v, want an error result", settlement)
+	}
+}
+
+func TestPluginOptionsAndTools(t *testing.T) {
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: ApproveAll,
+		LLM: fakeLLM{reply: "ok"},
+		Plugins: []PluginConfig{{
+			ID:      "greeter",
+			Options: map[string]any{"greeting": "hi"},
+			Tools: []Tool{DefineTool("greet", "greet the user",
+				func(struct{}, ToolContext) (string, error) { return "hi", nil })},
+			Effect: func(ctx *PluginContext) (func(), error) {
+				if ctx.Options["greeting"] != "hi" {
+					return nil, errors.New("options not exposed")
+				}
+				return nil, nil
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	mat, err := client.rt.dispatcher.MaterializeFor(session.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if !hasToolDefinition(mat.Definitions, "greet") {
+		t.Fatalf("plugin tool missing from %v", toolNames(mat.Definitions))
+	}
+}
+
+func TestPluginEvents(t *testing.T) {
+	received := make(chan string, 4)
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: ApproveAll,
+		LLM: fakeLLM{reply: "ok"},
+		Plugins: []PluginConfig{{
+			ID: "listener",
+			Effect: func(ctx *PluginContext) (func(), error) {
+				if ctx.Events == nil {
+					return nil, errors.New("events not exposed")
+				}
+				return ctx.Events.Listen(func(p schema.EventPayload) error {
+					received <- p.Type
+					return nil
+				})
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+
+	// Drain the plugin.added emitted while the plugin loaded.
+	select {
+	case <-received:
+	default:
+	}
+
+	if _, err := client.rt.events.Publish(schema.PluginEventAdded, map[string]any{"id": "manual"}, nil); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	select {
+	case <-received:
+	case <-time.After(time.Second):
+		t.Fatal("plugin listener did not receive the event")
+	}
+}
+
+func TestOnToolDefinitionHook(t *testing.T) {
+	client := newTestClient(t)
+	session, err := client.CreateSession(context.Background(), &SessionConfig{
+		Agent: "build",
+		Hooks: &SessionHooks{
+			OnToolDefinition: func(in ToolDefinitionInput) (*ToolDefinitionOutput, error) {
+				out := in.Definition
+				out.Description = "rewritten:" + in.ToolID
+				return &ToolDefinitionOutput{Definition: out}, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	reg := hookedRegistry{inner: client.rt.dispatcher, hooksFor: client.rt.hooksFor}
+	mat, err := reg.MaterializeFor(session.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if len(mat.Definitions) == 0 {
+		t.Fatal("no tool definitions")
+	}
+	for _, def := range mat.Definitions {
+		if def.Description != "rewritten:"+def.Name {
+			t.Fatalf("definition %q description = %q", def.Name, def.Description)
+		}
+	}
+}
+
+func TestOnToolDefinitionErrorAborts(t *testing.T) {
+	client := newTestClient(t)
+	boom := errors.New("boom")
+	session, err := client.CreateSession(context.Background(), &SessionConfig{
+		Agent: "build",
+		Hooks: &SessionHooks{
+			OnToolDefinition: func(ToolDefinitionInput) (*ToolDefinitionOutput, error) { return nil, boom },
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	reg := hookedRegistry{inner: client.rt.dispatcher, hooksFor: client.rt.hooksFor}
+	if _, err := reg.MaterializeFor(session.ID(), nil); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want boom", err)
+	}
+}
+
+func hasToolDefinition(defs []llmschema.ToolDefinition, name string) bool {
+	for _, def := range defs {
+		if def.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func toolNames(defs []llmschema.ToolDefinition) []string {
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, def.Name)
+	}
+	return names
+}
+
+func TestClientRegisterTools(t *testing.T) {
+	client := newTestClient(t)
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	reg := hookedRegistry{inner: client.rt.dispatcher, hooksFor: client.rt.hooksFor}
+	mat, err := reg.MaterializeFor(session.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if hasToolDefinition(mat.Definitions, "late") {
+		t.Fatal("late tool present before registration")
+	}
+
+	unregister, err := client.RegisterTools(DefineTool("late", "late",
+		func(struct{}, ToolContext) (string, error) { return "x", nil }))
+	if err != nil {
+		t.Fatalf("register tools: %v", err)
+	}
+	mat, err = reg.MaterializeFor(session.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if !hasToolDefinition(mat.Definitions, "late") {
+		t.Fatalf("late tool missing after registration from %v", toolNames(mat.Definitions))
+	}
+
+	unregister()
+	mat, err = reg.MaterializeFor(session.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if hasToolDefinition(mat.Definitions, "late") {
+		t.Fatal("late tool present after unregister")
+	}
+}
+
+func TestPluginContextRegistersTools(t *testing.T) {
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: ApproveAll,
+		LLM: fakeLLM{reply: "ok"},
+		Plugins: []PluginConfig{{
+			ID: "toolsmith",
+			Effect: func(ctx *PluginContext) (func(), error) {
+				return ctx.Tools.Register(DefineTool("from-plugin", "p",
+					func(struct{}, ToolContext) (string, error) { return "p", nil }))
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	mat, err := client.rt.dispatcher.MaterializeFor(session.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if !hasToolDefinition(mat.Definitions, "from-plugin") {
+		t.Fatalf("plugin-registered tool missing from %v", toolNames(mat.Definitions))
+	}
+}
+
+func TestPluginContextOn(t *testing.T) {
+	received := make(chan Event, 4)
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: ApproveAll,
+		LLM: fakeLLM{reply: "ok"},
+		Plugins: []PluginConfig{{
+			ID: "on",
+			Effect: func(ctx *PluginContext) (func(), error) {
+				return ctx.On(func(event Event) { received <- event }), nil
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+
+	if _, err := client.rt.events.Publish(schema.SessionStatusEventStatus, map[string]any{
+		"sessionID": "ses_x",
+		"status":    map[string]any{"type": "busy"},
+	}, nil); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	select {
+	case event := <-received:
+		status, ok := event.(SessionStatus)
+		if !ok {
+			t.Fatalf("event = %T, want SessionStatus", event)
+		}
+		if status.SessionID != "ses_x" || status.Status != "busy" {
+			t.Fatalf("status = %+v", status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("plugin On did not receive the event")
+	}
+}
+
+func TestClientRegisterToolsNewSession(t *testing.T) {
+	client := newTestClient(t)
+	unregister, err := client.RegisterTools(DefineTool("fresh", "fresh",
+		func(struct{}, ToolContext) (string, error) { return "x", nil }))
+	if err != nil {
+		t.Fatalf("register tools: %v", err)
+	}
+
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+	mat, err := client.rt.dispatcher.MaterializeFor(session.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if !hasToolDefinition(mat.Definitions, "fresh") {
+		t.Fatalf("fresh tool missing from %v", toolNames(mat.Definitions))
+	}
+
+	unregister()
+	second, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create second: %v", err)
+	}
+	defer second.Close()
+	mat, err = client.rt.dispatcher.MaterializeFor(second.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if hasToolDefinition(mat.Definitions, "fresh") {
+		t.Fatal("fresh tool present after unregister")
+	}
+}
+
+func TestRegisterToolsRejectsInvalidName(t *testing.T) {
+	client := newTestClient(t)
+	if _, err := client.RegisterTools(DefineTool("bad name", "x",
+		func(struct{}, ToolContext) (string, error) { return "", nil })); err == nil {
+		t.Fatal("expected an invalid tool name to be rejected")
+	}
+}
+
+func TestRegisterToolsRefCount(t *testing.T) {
+	client := newTestClient(t)
+	unregisterA, err := client.RegisterTools(DefineTool("dup", "A",
+		func(struct{}, ToolContext) (string, error) { return "a", nil }))
+	if err != nil {
+		t.Fatalf("register A: %v", err)
+	}
+	unregisterB, err := client.RegisterTools(DefineTool("dup", "B",
+		func(struct{}, ToolContext) (string, error) { return "b", nil }))
+	if err != nil {
+		t.Fatalf("register B: %v", err)
+	}
+
+	unregisterA()
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+	mat, err := client.rt.dispatcher.MaterializeFor(session.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if !hasToolDefinition(mat.Definitions, "dup") {
+		t.Fatalf("dup tool missing after unregistering one of two registrations: %v", toolNames(mat.Definitions))
+	}
+
+	unregisterB()
+	second, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create second: %v", err)
+	}
+	defer second.Close()
+	mat, err = client.rt.dispatcher.MaterializeFor(second.ID(), nil)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if hasToolDefinition(mat.Definitions, "dup") {
+		t.Fatal("dup tool present after unregistering both")
 	}
 }
