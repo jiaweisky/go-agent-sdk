@@ -118,7 +118,7 @@ func (m manyDeltasLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2
 	}, nil
 }
 
-func newTestClient(t *testing.T) *Client {
+func newTestClient(t testing.TB) *Client {
 	t.Helper()
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-responses", Credentials: APIKey("test"),
@@ -2549,5 +2549,109 @@ func TestSubagentInheritsSessionHandlers(t *testing.T) {
 	client.rt.clearSession(childID)
 	if client.rt.hooksFor(string(childID)) != nil {
 		t.Fatal("child hooks survived clearSession")
+	}
+}
+
+func TestConcurrentSessions(t *testing.T) {
+	client := newTestClient(t)
+
+	const sessions = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, sessions)
+	for i := 0; i < sessions; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer session.Close()
+			for _, err := range session.Send(context.Background(), MessageOptions{Prompt: "hi"}) {
+				if err != nil {
+					errs <- err
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent session: %v", err)
+	}
+}
+
+func BenchmarkSessionSend(b *testing.B) {
+	client := newTestClient(b)
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer session.Close()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, err := range session.Send(context.Background(), MessageOptions{Prompt: "hi"}) {
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkConcurrentSessions(b *testing.B) {
+	client := newTestClient(b)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+			if err != nil {
+				b.Error(err)
+				return
+			}
+			for _, err := range session.Send(context.Background(), MessageOptions{Prompt: "hi"}) {
+				if err != nil {
+					b.Error(err)
+					break
+				}
+			}
+			_ = session.Close()
+		}
+	})
+}
+
+func TestOnPanicReportsHandlerPanic(t *testing.T) {
+	panics := make(chan PanicInfo, 1)
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: ApproveAll,
+		LLM:     fakeLLM{reply: "ok"},
+		OnPanic: func(info PanicInfo) { panics <- info },
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	session.On(func(Event) { panic("boom") })
+	if _, err := client.rt.events.Publish(schema.SessionStatusEventStatus, map[string]any{
+		"sessionID": session.ID(),
+		"status":    map[string]any{"type": "busy"},
+	}, nil); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	select {
+	case info := <-panics:
+		if info.SessionID != session.ID() || info.Value != "boom" {
+			t.Fatalf("panic info = %+v", info)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OnPanic was not called")
 	}
 }

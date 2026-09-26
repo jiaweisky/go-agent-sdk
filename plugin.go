@@ -15,6 +15,8 @@ type PluginContext struct {
 	Options map[string]any
 	// Tools registers application tools for every session, including live ones.
 	Tools *ToolRegistrar
+
+	onPanic func(PanicInfo)
 }
 
 // PluginEffect loads a plugin. It returns an optional cleanup function invoked
@@ -24,7 +26,7 @@ type PluginEffect func(ctx *PluginContext) (cleanup func(), err error)
 // On subscribes to high-level events across every session, including subagent
 // child sessions. The returned function unsubscribes.
 func (c *PluginContext) On(handler func(Event)) func() {
-	return listenEvents(c.Events, handler)
+	return listenEvents(c.Events, handler, c.onPanic)
 }
 
 // ToolRegistrar registers application tools at runtime.

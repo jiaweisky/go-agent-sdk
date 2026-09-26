@@ -2,16 +2,21 @@ package session
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync"
 )
 
+// ErrStopped is returned by Run once the coordinator has been stopped.
+var ErrStopped = errors.New("session coordinator stopped")
+
 // Coordinator serializes execution per key while allowing different keys to run
 // concurrently.
 type Coordinator[K comparable] struct {
-	mu     sync.Mutex
-	active map[K]*coordinatorEntry
-	drain  func(ctx context.Context, key K, force bool) error
+	mu      sync.Mutex
+	active  map[K]*coordinatorEntry
+	drain   func(ctx context.Context, key K, force bool) error
+	stopped bool
 }
 
 type coordinatorEntry struct {
@@ -40,6 +45,10 @@ func (c *Coordinator[K]) Active() []K {
 // Run starts execution while idle or joins the active execution.
 func (c *Coordinator[K]) Run(ctx context.Context, key K) error {
 	c.mu.Lock()
+	if c.stopped {
+		c.mu.Unlock()
+		return ErrStopped
+	}
 	entry, ok := c.active[key]
 	if ok {
 		if entry.stopping {
@@ -65,6 +74,9 @@ func (c *Coordinator[K]) Run(ctx context.Context, key K) error {
 func (c *Coordinator[K]) Wake(key K) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.stopped {
+		return
+	}
 	if entry, ok := c.active[key]; ok {
 		entry.pendingWake = true
 		return
@@ -77,6 +89,9 @@ func (c *Coordinator[K]) Wake(key K) {
 // StopAll interrupts every active execution and waits for them to settle, or
 // until ctx is done. It is safe to call concurrently with Run/Wake.
 func (c *Coordinator[K]) StopAll(ctx context.Context) {
+	c.mu.Lock()
+	c.stopped = true
+	c.mu.Unlock()
 	for {
 		c.mu.Lock()
 		entries := make([]*coordinatorEntry, 0, len(c.active))

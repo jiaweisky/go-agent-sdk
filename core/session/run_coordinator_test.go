@@ -120,3 +120,14 @@ func TestCoordinatorStopAll(t *testing.T) {
 		t.Fatalf("active = %v", coordinator.Active())
 	}
 }
+
+func TestCoordinatorRejectsRunAfterStop(t *testing.T) {
+	coordinator := NewCoordinator(func(context.Context, string, bool) error { return nil })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	coordinator.StopAll(ctx)
+
+	if err := coordinator.Run(context.Background(), "k"); !errors.Is(err, ErrStopped) {
+		t.Fatalf("run after stop err = %v, want ErrStopped", err)
+	}
+}

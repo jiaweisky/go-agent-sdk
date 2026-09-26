@@ -248,7 +248,7 @@ func (s *Session) dispatch(payload schema.EventPayload) {
 			continue
 		}
 		for _, handler := range handlers {
-			notifyHandler(handler, event)
+			runHandler(handler, event, s.client.rt.onPanic, s.ID())
 		}
 	}
 }

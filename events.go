@@ -8,18 +8,24 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
+// PanicInfo describes a panic recovered from a user event handler.
+type PanicInfo struct {
+	SessionID string
+	Value     any
+}
+
 // listenEvents subscribes handler to the high-level events mapped from every
 // payload. Delivery is synchronous, like Session.On: a slow observer applies
 // backpressure to the publishing turn rather than losing events. The returned
 // function unsubscribes; a failed subscription yields a no-op.
-func listenEvents(events core.Event, handler func(Event)) func() {
+func listenEvents(events core.Event, handler func(Event), report func(PanicInfo)) func() {
 	if events == nil {
 		return func() {}
 	}
 	unsubscribe, err := events.Listen(func(payload schema.EventPayload) error {
 		mapped, count := mapEvents(payload)
 		for i := 0; i < count; i++ {
-			notifyHandler(handler, mapped[i])
+			runHandler(handler, mapped[i], report, "")
 		}
 		return nil
 	})
@@ -29,10 +35,15 @@ func listenEvents(events core.Event, handler func(Event)) func() {
 	return unsubscribe
 }
 
-// notifyHandler invokes a subscriber, isolating a panic so one bad handler
-// cannot crash the turn goroutine or skip the remaining subscribers.
-func notifyHandler(handler func(Event), event Event) {
-	defer func() { _ = recover() }()
+// runHandler invokes a subscriber, recovering a panic so one bad handler cannot
+// crash the turn goroutine or skip the remaining subscribers. A recovered panic
+// is reported through report when set.
+func runHandler(handler func(Event), event Event, report func(PanicInfo), sessionID string) {
+	defer func() {
+		if value := recover(); value != nil && report != nil {
+			report(PanicInfo{SessionID: sessionID, Value: value})
+		}
+	}()
 	handler(event)
 }
 

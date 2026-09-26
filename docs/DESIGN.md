@@ -463,7 +463,7 @@ type Agent struct {
 
 **工具描述**：由 `SubagentTypes(agents, 调用方权限)` 动态注入 `mode != "primary"` 且 `task` 权限未 deny 的 agent 列表，对齐 TS `registry.describeTask`。
 
-**可观测性**：`runTask` 通过工具的 progress 回调在父会话上发布 **durable** 的 `session.next.tool.progress` 事件（`structured` 携带 `sessionId` / `parentSessionId` / `subagentType` / `description` / `model`），对齐 v2 的 tool invocation progress（`Tool.Context.Progress`）。用 `Client.On` 全局订阅即可观察子会话的 reasoning/text/tool 事件（`Session.On` 按 session 过滤，看不到子会话）。事件分发统一为**同步无损**：`Client.On`/`PluginContext.On` 与 `Session.On`/`Session.Send` 一样在发布者 goroutine 上顺序调用（慢观察者会拖慢发布轮次，而不是丢事件）；观察者回调应保持轻量。
+**可观测性**：`runTask` 通过工具的 progress 回调在父会话上发布 **durable** 的 `session.next.tool.progress` 事件（`structured` 携带 `sessionId` / `parentSessionId` / `subagentType` / `description` / `model`），对齐 v2 的 tool invocation progress（`Tool.Context.Progress`）。用 `Client.On` 全局订阅即可观察子会话的 reasoning/text/tool 事件（`Session.On` 按 session 过滤，看不到子会话）。事件分发统一为**同步无损**：`Client.On`/`PluginContext.On` 与 `Session.On`/`Session.Send` 一样在发布者 goroutine 上顺序调用（慢观察者会拖慢发布轮次，而不是丢事件）；观察者回调应保持轻量。handler panic 一律被 recover（不崩进程），并可通过 `ClientOptions.OnPanic` 观测。
 
 **与 `mode` 的关系**：`mode: subagent`（或 `all`）的 agent 会出现在 `subagent_type` 列表；`primary` 只当主 agent。
 
@@ -603,7 +603,7 @@ type AdaptedTool struct { Def *sdk.Tool; Session *sdk.ClientSession; Server stri
 func (t AdaptedTool) CoreTool() tool.Tool
 ```
 
-- 运行时接线（根包）：`runtime.connectMCP` **并行**连接各 server 并预热工具缓存；每个会话的 registry 通过 `runtime.mcpToolSet` **动态读取**当前 MCP 工具，因此 server 的 `ToolListChanged`（`refreshTools` 更新缓存）对新会话生效。
+- 运行时接线（根包）：`runtime.connectMCP` **并行**连接各 server，并缓存「已转换的 MCP 工具集」；订阅 `mcp.tools.changed` 事件刷新缓存（`runtime.mcpToolSet` 读缓存），因此 server 的 `ToolListChanged` 对新会话生效且每建会话无需重建。
 - `schema/mcp_event.go`：`mcp.tools.changed` / `mcp.browser.open.failed`。
 - 远程鉴权：**完全对齐 TS** —— 只用 `ServerConfig.Headers`（如 `Authorization: Bearer <token>` 或 `X-API-Key: <key>`），不做 OAuth（TS 的 `oauth-provider.ts`/`oauth-callback.ts`/`browser.ts`/`auth.ts` 均不移植）。也不接 `EventV2Bridge`/`InstanceState`/`CrossSpawnSpawner`/`ConfigV1`。
 - 其他已对齐：`GetPrompt`/`ReadResource`、server `instructions`、`clientName` 过滤、运行时 `Add`、server 日志（`WithLogHandler`）。
@@ -679,6 +679,7 @@ type ClientOptions struct {
     // 位置
     WorkingDirectory string                    // 项目/worktree 根；空则用进程 cwd
     Root             string                    // SDK 状态根（data/cache/state/tmp）；**必填**，库不选默认位置
+    DatabaseMaxConns int                       // SQLite 连接池大小；0 用默认（4）
     ConfigDirs       []string                  // 内容配置目录（agent/skill markdown，见「配置模型」）
     Home             string                    // ~ 展开用；空则用 OS home
 
@@ -699,6 +700,7 @@ type ClientOptions struct {
     // 运行行为
     Permission       PermissionHandlerFunc     // 默认权限回调（默认 ApproveAll）
     Question         QuestionHandlerFunc       // 默认 question 回调（默认 RejectQuestions）
+    OnPanic          func(PanicInfo)           // 用户事件 handler panic 上报（panic 总会被 recover）
     SubagentDepth    int                       // task 子会话最大深度（默认 1）
     Shell            string                    // bash 工具使用的 shell（默认 sh）
     Locale           string                    // 列表排序 locale；空则用 LC_ALL/LC_COLLATE/LANG
@@ -772,7 +774,7 @@ type SessionHooks struct { /* Pre/PostToolUse, UserPromptSubmitted,
 - 权限：`OnPermissionRequest` 回调经装饰器桥接 `core.Permission`（allow/deny/ask → 回调 → 自动 reply）。
 - 工具 Hooks（Pre/PostToolUse）通过 `hookedRegistry` 包裹 settlement 实现。
 
-> 已接入：MCP 工具（`connectMCP`）、Plugin（窄化）、Reference 服务。system prompt sections 粒度比 copilot 粗。取消语义（对齐 TS `run-coordinator.ts` 的 `uninterruptibleMask`）：**只有 `Abort()`** 经 `coordinator.Interrupt` 取消 drain ctx 并中断进行中的 LLM 流与工具执行；取消 `Send(ctx)` 的 ctx 只停止等待，不中断当前轮。`Client.Close()` 会先 `coordinator.StopAll`（中断并等待所有活动轮，上限 `shutdownGrace`）再关会话与数据库，避免在运行中的轮下关闭 DB。`context` 已贯穿 `SessionRunner.Run` → `Transport.Frames` → `http.NewRequestWithContext`，所以 `Abort()` 能真正打断 provider 请求。默认 LLM HTTP client 对 provider 响应头设 `defaultLLMResponseHeaderTimeout`（不限制流式 body）；需要不同策略可注入 `ClientOptions.LLM`。
+> 已接入：MCP 工具（`connectMCP`）、Plugin（窄化）、Reference 服务。system prompt sections 粒度比 copilot 粗。取消语义（对齐 TS `run-coordinator.ts` 的 `uninterruptibleMask`）：**只有 `Abort()`** 经 `coordinator.Interrupt` 取消 drain ctx 并中断进行中的 LLM 流与工具执行；取消 `Send(ctx)` 的 ctx 只停止等待，不中断当前轮。`Client.Close()` 会先 `coordinator.StopAll`（中断并等待所有活动轮，上限 `shutdownGrace`；停止后协调器拒绝新轮，返回 `session.ErrStopped`），再关会话与数据库，避免在运行中的轮下关闭 DB；关闭时也以有界等待 drain reference 缓存预热。`context` 已贯穿 `SessionRunner.Run` → `Transport.Frames` → `http.NewRequestWithContext`，所以 `Abort()` 能真正打断 provider 请求。默认 LLM HTTP client 对 provider 响应头设 `defaultLLMResponseHeaderTimeout`（不限制流式 body）；需要不同策略可注入 `ClientOptions.LLM`。
 
 ### 11.1 配置模型（code config + 内容目录）
 

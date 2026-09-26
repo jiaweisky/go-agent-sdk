@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"sync"
 
 	"github.com/user/go-agent-sdk/schema"
@@ -37,6 +38,10 @@ type Reference struct {
 
 	mu           sync.Mutex
 	materialized map[string]schema.ReferenceInfo
+
+	ensureMu sync.Mutex
+	ensureWG sync.WaitGroup
+	closed   bool
 }
 
 // NewReference builds the reference service. events and cache may be nil.
@@ -98,15 +103,49 @@ func (r *Reference) materialize(global Global, cache *RepositoryCache, draft Ref
 			}
 			if cache != nil {
 				reference, branch := repository, source.Branch
-				go func() {
+				r.trackEnsure(func() {
 					_, _ = cache.Ensure(RepositoryCacheEnsureInput{Reference: reference, Refresh: true, Branch: branch})
-				}()
+				})
 			}
 		}
 	}
 	r.mu.Lock()
 	r.materialized = materialized
 	r.mu.Unlock()
+}
+
+// trackEnsure runs a cache-warming function in the background, tracked so
+// WaitContext can drain it. Once closed, further warmups are skipped.
+func (r *Reference) trackEnsure(fn func()) {
+	r.ensureMu.Lock()
+	if r.closed {
+		r.ensureMu.Unlock()
+		return
+	}
+	r.ensureWG.Add(1)
+	r.ensureMu.Unlock()
+	go func() {
+		defer r.ensureWG.Done()
+		fn()
+	}()
+}
+
+// WaitContext waits for in-flight reference cache warming, or until ctx is
+// done. After it returns, further warmups are skipped.
+func (r *Reference) WaitContext(ctx context.Context) {
+	r.ensureMu.Lock()
+	r.closed = true
+	r.ensureMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		r.ensureWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 func (r *Reference) Transform(update func(ReferenceDraft) error) (func() error, error) {

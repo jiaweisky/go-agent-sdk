@@ -30,6 +30,10 @@ type ClientOptions struct {
 	//	{Root}/state/  runtime state (reserved)
 	//	{Root}/tmp/    scratch space
 	Root string
+	// DatabaseMaxConns overrides the SQLite connection-pool size. Zero uses the
+	// default (database.DefaultMaxConns). WAL keeps reads concurrent; writes
+	// always serialize.
+	DatabaseMaxConns int
 	// ConfigDirs are explicit directories to load agents and skills from. Each
 	// is scanned for {agent,agents}/**/*.md, {mode,modes}/*.md and
 	// {skill,skills}/**/SKILL.md. No environment, global or project discovery is
@@ -71,6 +75,9 @@ type ClientOptions struct {
 	Permission PermissionHandlerFunc
 	// Question is the default question handler. Defaults to RejectQuestions.
 	Question QuestionHandlerFunc
+	// OnPanic is called when a user event handler panics; the panic is
+	// recovered either way. Nil ignores it.
+	OnPanic func(PanicInfo)
 	// SubagentDepth limits nested subagent (task) recursion. Defaults to 1.
 	SubagentDepth int
 	// Shell overrides the shell used by the bash tool. Empty uses the platform
@@ -391,7 +398,7 @@ func (c *Client) Skills() *core.Skill {
 // Use it to observe task/subagent activity that Session.On (which filters by
 // session) does not surface. The returned function unsubscribes.
 func (c *Client) On(handler func(Event)) func() {
-	return listenEvents(c.rt.events, handler)
+	return listenEvents(c.rt.events, handler, c.rt.onPanic)
 }
 
 // Reference returns the reference service.

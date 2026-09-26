@@ -50,7 +50,7 @@ type runtime struct {
 	subagentDepth int
 	name          string
 
-	hooksMu sync.Mutex
+	hooksMu sync.RWMutex
 	hooks   map[string]*SessionHooks
 
 	builtin     builtinDeps
@@ -63,6 +63,12 @@ type runtime struct {
 
 	toolsMu     sync.Mutex
 	pluginTools map[string][]pluginToolEntry
+
+	mcpToolsMu    sync.RWMutex
+	mcpTools      map[string]tool.Tool
+	mcpToolsUnsub func()
+
+	onPanic func(PanicInfo)
 }
 
 // pluginToolEntry is one runtime registration of an application tool. Entries
@@ -337,8 +343,8 @@ func (r *runtime) removeHooks(sessionID string) {
 }
 
 func (r *runtime) hooksFor(sessionID string) *SessionHooks {
-	r.hooksMu.Lock()
-	defer r.hooksMu.Unlock()
+	r.hooksMu.RLock()
+	defer r.hooksMu.RUnlock()
 	return r.hooks[sessionID]
 }
 
@@ -412,7 +418,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	}
 	global := core.NewGlobal(root, home)
 
-	db, err := openDatabase(global)
+	db, err := openDatabase(global, opts.DatabaseMaxConns)
 	if err != nil {
 		return nil, err
 	}
@@ -465,6 +471,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		agentSelector: newSessionAgents(agents),
 		reference:     references,
 		cancel:        cancel,
+		onPanic:       opts.OnPanic,
 	}
 	rt.buildBuiltins(opts, global, locale)
 	rt.buildRunner(opts, git, global, locale)
@@ -533,6 +540,7 @@ func (r *runtime) adaptPlugin(config PluginConfig) core.PluginEffect {
 			PluginContext: *ctx,
 			Options:       config.Options,
 			Tools:         r.toolRegistrar(),
+			onPanic:       r.onPanic,
 		})
 	}
 }
@@ -558,12 +566,12 @@ func resolveHomeAndRoot(opts *ClientOptions) (string, string, error) {
 }
 
 // openDatabase opens the session database under the state root.
-func openDatabase(global core.Global) (*database.Database, error) {
+func openDatabase(global core.Global, maxConns int) (*database.Database, error) {
 	dbPath := filepath.Join(global.Data, "agent.db")
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
-	return database.Open(dbPath)
+	return database.Open(dbPath, maxConns)
 }
 
 // ensureProject resolves the project location and records it, so the row the
@@ -720,30 +728,43 @@ func (r *runtime) connectMCP(ctx context.Context, configs []MCPConfig) {
 		}(cfg)
 	}
 	connected.Wait()
-	_ = client.Tools(ctx) // warm the tool cache
 	r.mcp = client
+	// Refresh the converted tool set whenever a server's list changes.
+	r.mcpToolsUnsub, _ = r.events.Listen(func(payload schema.EventPayload) error {
+		if payload.Type == schema.McpEventToolsChanged.Type {
+			r.refreshMCPTools()
+		}
+		return nil
+	})
+	r.refreshMCPTools()
 }
 
 // mcpToolListTimeout bounds a cache-miss tool listing during session setup.
 const mcpToolListTimeout = 5 * time.Second
 
-// mcpToolSet returns the currently connected MCP tools, read fresh so a server's
-// tool-list changes are picked up by new sessions.
-func (r *runtime) mcpToolSet() map[string]tool.Tool {
+// refreshMCPTools rebuilds the converted MCP tool set from the client cache.
+func (r *runtime) refreshMCPTools() {
 	if r.mcp == nil {
-		return nil
+		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), mcpToolListTimeout)
 	defer cancel()
 	adapted := r.mcp.Tools(ctx)
-	if len(adapted) == 0 {
-		return nil
-	}
 	tools := make(map[string]tool.Tool, len(adapted))
 	for name, item := range adapted {
 		tools[name] = item.CoreTool()
 	}
-	return tools
+	r.mcpToolsMu.Lock()
+	r.mcpTools = tools
+	r.mcpToolsMu.Unlock()
+}
+
+// mcpToolSet returns the cached MCP tool set. The map is replaced (never
+// mutated) on refresh, so callers may read it without holding the lock.
+func (r *runtime) mcpToolSet() map[string]tool.Tool {
+	r.mcpToolsMu.RLock()
+	defer r.mcpToolsMu.RUnlock()
+	return r.mcpTools
 }
 
 type mcpEventPublisher struct{ events core.Event }
@@ -801,6 +822,9 @@ func (r *runtime) close() error {
 	if r.plugin != nil {
 		_ = r.plugin.Close()
 	}
+	if r.mcpToolsUnsub != nil {
+		r.mcpToolsUnsub()
+	}
 	if r.mcp != nil {
 		r.mcp.Close()
 	}
@@ -809,6 +833,11 @@ func (r *runtime) close() error {
 	}
 	if r.question != nil {
 		_ = r.question.Close()
+	}
+	if r.reference != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		r.reference.WaitContext(ctx)
+		cancel()
 	}
 	return r.db.Close()
 }

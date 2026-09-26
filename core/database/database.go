@@ -12,19 +12,26 @@ type Database struct {
 	DB *sql.DB
 }
 
-// databaseMaxConns bounds the connection pool. SQLite serializes writers (every
-// transaction opens with BEGIN IMMEDIATE and busy_timeout backs off), while WAL
-// lets reads proceed concurrently, so a small pool raises multi-session
-// throughput without changing correctness.
-const databaseMaxConns = 4
+// DefaultMaxConns is the connection-pool size used when Open is given no
+// explicit size. SQLite serializes writers (every transaction opens with BEGIN
+// IMMEDIATE and busy_timeout backs off), while WAL lets reads proceed
+// concurrently, so a small pool raises multi-session throughput without
+// changing correctness.
+const DefaultMaxConns = 4
 
-func Open(filename string) (*Database, error) {
+// Open opens the database. maxConns optionally overrides DefaultMaxConns; a
+// non-positive value keeps the default.
+func Open(filename string, maxConns ...int) (*Database, error) {
+	conns := DefaultMaxConns
+	if len(maxConns) > 0 && maxConns[0] > 0 {
+		conns = maxConns[0]
+	}
 	db, err := sql.Open("sqlite", dsn(filename))
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(databaseMaxConns)
-	db.SetMaxIdleConns(databaseMaxConns)
+	db.SetMaxOpenConns(conns)
+	db.SetMaxIdleConns(conns)
 	// Truncate the WAL on open (a database-wide, connection-independent action).
 	if _, err := db.Exec("PRAGMA wal_checkpoint(PASSIVE)"); err != nil {
 		db.Close()
