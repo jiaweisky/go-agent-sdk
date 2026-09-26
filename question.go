@@ -51,6 +51,12 @@ func (q *questionHandler) removeHandler(sessionID string) {
 	q.handlers.remove(sessionID)
 }
 
+// handlerFor returns the session's effective handler: its override when set,
+// otherwise the client default.
+func (q *questionHandler) handlerFor(sessionID string) QuestionHandlerFunc {
+	return q.handlers.resolve(sessionID)
+}
+
 func (q *questionHandler) Ask(_ context.Context, input core.QuestionAskInput) ([]core.QuestionAnswer, error) {
 	return q.handlers.resolve(input.SessionID)(QuestionRequest{
 		SessionID: input.SessionID,

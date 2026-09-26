@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -84,6 +85,36 @@ func TestCoordinatorInterrupt(t *testing.T) {
 	coordinator.Interrupt("k")
 	if err := <-done; err == nil {
 		t.Fatalf("expected interrupt error")
+	}
+	if len(coordinator.Active()) != 0 {
+		t.Fatalf("active = %v", coordinator.Active())
+	}
+}
+
+func TestCoordinatorStopAll(t *testing.T) {
+	started := make(chan struct{})
+	var once sync.Once
+	coordinator := NewCoordinator(func(ctx context.Context, key string, force bool) error {
+		once.Do(func() { close(started) })
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- coordinator.Run(context.Background(), "k") }()
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	coordinator.StopAll(ctx)
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("run err = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after StopAll")
 	}
 	if len(coordinator.Active()) != 0 {
 		t.Fatalf("active = %v", coordinator.Active())

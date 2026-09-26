@@ -232,8 +232,8 @@ func (s *Session) Close() error {
 }
 
 func (s *Session) dispatch(payload schema.EventPayload) {
-	events := mapEvents(payload)
-	if len(events) == 0 {
+	mapped, count := mapEvents(payload)
+	if count == 0 {
 		return
 	}
 	s.mu.Lock()
@@ -242,12 +242,13 @@ func (s *Session) dispatch(payload schema.EventPayload) {
 		handlers = append(handlers, handler)
 	}
 	s.mu.Unlock()
-	for _, event := range events {
+	for i := 0; i < count; i++ {
+		event := mapped[i]
 		if event.sessionID() != s.ID() {
 			continue
 		}
 		for _, handler := range handlers {
-			handler(event)
+			notifyHandler(handler, event)
 		}
 	}
 }

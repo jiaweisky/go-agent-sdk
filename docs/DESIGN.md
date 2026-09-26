@@ -242,6 +242,8 @@ go-agent-sdk/                            opencode TS
 
 > 已实现：模块根包 `agent` 公开 API、core/session 主循环、12 个内置工具 + `task`、Skill、MCP、Plugin（窄化）、Reference 服务。尚未移植：`lsp` 工具。
 
+> **数据库**：`core/database` 用 `database/sql` + modernc SQLite。连接池 `MaxOpenConns=4`，per-connection pragma（`journal_mode=WAL`/`synchronous`/`busy_timeout`/`cache_size`/`foreign_keys`）经 DSN 注入，`_txlock=immediate` 让每个事务以 BEGIN IMMEDIATE 串行写；WAL 允许读并发，从而提升多会话吞吐（写仍串行，超 `busy_timeout` 报忙）。
+
 ---
 
 ## 5. LLM 层详细设计
@@ -444,7 +446,7 @@ type Agent struct {
 
 ### 6.3 Subagent (TaskTool) — 已实现
 
-对应 opencode `packages/opencode/src/tool/task.ts`。`task` 是一个内置工具：主 agent 调用它后，在**独立子会话**里运行另一个 agent，并把结果文本返回。实现在根包 `task.go`（工具定义 + `DeriveSubagentSessionPermission`）与 `task_run.go`（`runtime.runTask`）。
+对应 opencode `packages/opencode/src/tool/task.ts`。`task` 是一个内置工具：主 agent 调用它后，在**独立子会话**里运行另一个 agent，并把结果文本返回。实现在根包 `task.go`（工具定义 + `DeriveSubagentSessionPermission`）与 `task_run.go`（`runtime.runTask`）。子会话会继承父会话的 `SessionHooks` 与 per-session permission/question handler（`runtime.inheritSession`），因此 `OnPreToolUse`/`OnPostToolUse`/`OnToolDefinition` 对 subagent 的工具调用同样生效。
 
 **工具参数**：`description`、`prompt`、`subagent_type`、`task_id`（续跑同一子会话）、`command`、`background`（暂不支持，返回失败）。
 
@@ -461,7 +463,7 @@ type Agent struct {
 
 **工具描述**：由 `SubagentTypes(agents, 调用方权限)` 动态注入 `mode != "primary"` 且 `task` 权限未 deny 的 agent 列表，对齐 TS `registry.describeTask`。
 
-**可观测性**：`runTask` 通过工具的 progress 回调在父会话上发布 **durable** 的 `session.next.tool.progress` 事件（`structured` 携带 `sessionId` / `parentSessionId` / `subagentType` / `description` / `model`），对齐 v2 的 tool invocation progress（`Tool.Context.Progress`）。用 `Client.On` 全局订阅即可观察子会话的 reasoning/text/tool 事件（`Session.On` 按 session 过滤，看不到子会话）。
+**可观测性**：`runTask` 通过工具的 progress 回调在父会话上发布 **durable** 的 `session.next.tool.progress` 事件（`structured` 携带 `sessionId` / `parentSessionId` / `subagentType` / `description` / `model`），对齐 v2 的 tool invocation progress（`Tool.Context.Progress`）。用 `Client.On` 全局订阅即可观察子会话的 reasoning/text/tool 事件（`Session.On` 按 session 过滤，看不到子会话）。事件分发统一为**同步无损**：`Client.On`/`PluginContext.On` 与 `Session.On`/`Session.Send` 一样在发布者 goroutine 上顺序调用（慢观察者会拖慢发布轮次，而不是丢事件）；观察者回调应保持轻量。
 
 **与 `mode` 的关系**：`mode: subagent`（或 `all`）的 agent 会出现在 `subagent_type` 列表；`primary` 只当主 agent。
 
@@ -601,6 +603,7 @@ type AdaptedTool struct { Def *sdk.Tool; Session *sdk.ClientSession; Server stri
 func (t AdaptedTool) CoreTool() tool.Tool
 ```
 
+- 运行时接线（根包）：`runtime.connectMCP` **并行**连接各 server 并预热工具缓存；每个会话的 registry 通过 `runtime.mcpToolSet` **动态读取**当前 MCP 工具，因此 server 的 `ToolListChanged`（`refreshTools` 更新缓存）对新会话生效。
 - `schema/mcp_event.go`：`mcp.tools.changed` / `mcp.browser.open.failed`。
 - 远程鉴权：**完全对齐 TS** —— 只用 `ServerConfig.Headers`（如 `Authorization: Bearer <token>` 或 `X-API-Key: <key>`），不做 OAuth（TS 的 `oauth-provider.ts`/`oauth-callback.ts`/`browser.ts`/`auth.ts` 均不移植）。也不接 `EventV2Bridge`/`InstanceState`/`CrossSpawnSpawner`/`ConfigV1`。
 - 其他已对齐：`GetPrompt`/`ReadResource`、server `instructions`、`clientName` 过滤、运行时 `Add`、server 日志（`WithLogHandler`）。
@@ -769,7 +772,7 @@ type SessionHooks struct { /* Pre/PostToolUse, UserPromptSubmitted,
 - 权限：`OnPermissionRequest` 回调经装饰器桥接 `core.Permission`（allow/deny/ask → 回调 → 自动 reply）。
 - 工具 Hooks（Pre/PostToolUse）通过 `hookedRegistry` 包裹 settlement 实现。
 
-> 已接入：MCP 工具（`connectMCP`）、Plugin（窄化）、Reference 服务。system prompt sections 粒度比 copilot 粗。取消语义（对齐 TS `run-coordinator.ts` 的 `uninterruptibleMask`）：**只有 `Abort()`** 经 `coordinator.Interrupt` 取消 drain ctx 并中断进行中的 LLM 流与工具执行；取消 `Send(ctx)` 的 ctx 只停止等待，不中断当前轮。`context` 已贯穿 `SessionRunner.Run` → `Transport.Frames` → `http.NewRequestWithContext`，所以 `Abort()` 能真正打断 provider 请求。
+> 已接入：MCP 工具（`connectMCP`）、Plugin（窄化）、Reference 服务。system prompt sections 粒度比 copilot 粗。取消语义（对齐 TS `run-coordinator.ts` 的 `uninterruptibleMask`）：**只有 `Abort()`** 经 `coordinator.Interrupt` 取消 drain ctx 并中断进行中的 LLM 流与工具执行；取消 `Send(ctx)` 的 ctx 只停止等待，不中断当前轮。`Client.Close()` 会先 `coordinator.StopAll`（中断并等待所有活动轮，上限 `shutdownGrace`）再关会话与数据库，避免在运行中的轮下关闭 DB。`context` 已贯穿 `SessionRunner.Run` → `Transport.Frames` → `http.NewRequestWithContext`，所以 `Abort()` 能真正打断 provider 请求。默认 LLM HTTP client 对 provider 响应头设 `defaultLLMResponseHeaderTimeout`（不限制流式 body）；需要不同策略可注入 `ClientOptions.LLM`。
 
 ### 11.1 配置模型（code config + 内容目录）
 

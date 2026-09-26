@@ -9,15 +9,17 @@ import (
 )
 
 // listenEvents subscribes handler to the high-level events mapped from every
-// payload. The returned function unsubscribes; a failed subscription yields a
-// no-op.
+// payload. Delivery is synchronous, like Session.On: a slow observer applies
+// backpressure to the publishing turn rather than losing events. The returned
+// function unsubscribes; a failed subscription yields a no-op.
 func listenEvents(events core.Event, handler func(Event)) func() {
 	if events == nil {
 		return func() {}
 	}
 	unsubscribe, err := events.Listen(func(payload schema.EventPayload) error {
-		for _, event := range mapEvents(payload) {
-			handler(event)
+		mapped, count := mapEvents(payload)
+		for i := 0; i < count; i++ {
+			notifyHandler(handler, mapped[i])
 		}
 		return nil
 	})
@@ -25,6 +27,13 @@ func listenEvents(events core.Event, handler func(Event)) func() {
 		return func() {}
 	}
 	return unsubscribe
+}
+
+// notifyHandler invokes a subscriber, isolating a panic so one bad handler
+// cannot crash the turn goroutine or skip the remaining subscribers.
+func notifyHandler(handler func(Event), event Event) {
+	defer func() { _ = recover() }()
+	handler(event)
 }
 
 // Event is a high-level session event surfaced by Session.Send and Session.On.
@@ -367,22 +376,25 @@ func mapRunEvent(eventType string, data map[string]any, sessionID, messageID str
 	return nil, false
 }
 
+// maxEventsPerPayload bounds the events one payload can map to.
+const maxEventsPerPayload = 2
+
 // mapEvents converts a payload into every high-level event it carries. Most
-// payloads map to one event; step.ended also yields a Usage event.
-func mapEvents(payload schema.EventPayload) []Event {
+// payloads map to one event; step.ended also yields a Usage event. It returns a
+// fixed array and count so the per-event hot path allocates nothing.
+func mapEvents(payload schema.EventPayload) ([maxEventsPerPayload]Event, int) {
 	event, ok := mapEvent(payload)
 	if !ok {
-		return nil
+		return [maxEventsPerPayload]Event{}, 0
 	}
-	events := []Event{event}
-	if payload.Type == schema.SessionEventStepEnded.Type {
-		data, _ := payload.Data.(map[string]any)
-		events = append(events, Usage{
-			SessionID:        fieldString(data, "sessionID"),
-			ProviderMetadata: usageProviderMetadataFrom(data["tokens"]),
-		})
+	if payload.Type != schema.SessionEventStepEnded.Type {
+		return [maxEventsPerPayload]Event{event}, 1
 	}
-	return events
+	data, _ := payload.Data.(map[string]any)
+	return [maxEventsPerPayload]Event{event, Usage{
+		SessionID:        fieldString(data, "sessionID"),
+		ProviderMetadata: usageProviderMetadataFrom(data["tokens"]),
+	}}, 2
 }
 
 // usageProviderMetadataFrom extracts the provider's original usage payload from

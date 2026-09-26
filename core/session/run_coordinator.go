@@ -74,6 +74,34 @@ func (c *Coordinator[K]) Wake(key K) {
 	c.startLocked(key, next, false, false)
 }
 
+// StopAll interrupts every active execution and waits for them to settle, or
+// until ctx is done. It is safe to call concurrently with Run/Wake.
+func (c *Coordinator[K]) StopAll(ctx context.Context) {
+	for {
+		c.mu.Lock()
+		entries := make([]*coordinatorEntry, 0, len(c.active))
+		for _, entry := range c.active {
+			entry.stopping = true
+			entry.pendingWake = false
+			if entry.cancel != nil {
+				entry.cancel()
+			}
+			entries = append(entries, entry)
+		}
+		c.mu.Unlock()
+		if len(entries) == 0 {
+			return
+		}
+		for _, entry := range entries {
+			select {
+			case <-entry.done:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
 // Interrupt stops active execution. Idle interruption is a no-op.
 func (c *Coordinator[K]) Interrupt(key K) {
 	c.mu.Lock()

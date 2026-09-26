@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"iter"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2463,5 +2464,90 @@ func TestRegisterToolsRefCount(t *testing.T) {
 	}
 	if hasToolDefinition(mat.Definitions, "dup") {
 		t.Fatal("dup tool present after unregistering both")
+	}
+}
+
+func TestSessionOnHandlerPanicIsIsolated(t *testing.T) {
+	client := newTestClient(t)
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	got := make(chan Event, 1)
+	session.On(func(Event) { panic("boom") })
+	session.On(func(event Event) {
+		select {
+		case got <- event:
+		default:
+		}
+	})
+
+	if _, err := client.rt.events.Publish(schema.SessionStatusEventStatus, map[string]any{
+		"sessionID": session.ID(),
+		"status":    map[string]any{"type": "busy"},
+	}, nil); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	select {
+	case <-got:
+	case <-time.After(time.Second):
+		t.Fatal("second handler did not receive the event after the first panicked")
+	}
+}
+
+func TestDefaultLLMHTTPClientResponseHeaderTimeout(t *testing.T) {
+	client := newLLMHTTPClient()
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.ResponseHeaderTimeout != defaultLLMResponseHeaderTimeout {
+		t.Fatalf("ResponseHeaderTimeout = %v, want %v", transport.ResponseHeaderTimeout, defaultLLMResponseHeaderTimeout)
+	}
+}
+
+func TestSubagentInheritsSessionHandlers(t *testing.T) {
+	client := newTestClient(t)
+	called := false
+	session, err := client.CreateSession(context.Background(), &SessionConfig{
+		Agent: "build",
+		Hooks: &SessionHooks{
+			OnPreToolUse: func(PreToolUseInput) (*PreToolUseOutput, error) {
+				called = true
+				return nil, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	childID := schema.NewSessionID()
+	client.rt.inheritSession(schema.SessionID(session.ID()), childID)
+	defer client.rt.clearSession(childID)
+
+	hooks := client.rt.hooksFor(string(childID))
+	if hooks == nil || hooks.OnPreToolUse == nil {
+		t.Fatal("subagent did not inherit the parent hooks")
+	}
+	if _, err := hooks.OnPreToolUse(PreToolUseInput{}); err != nil {
+		t.Fatalf("inherited hook: %v", err)
+	}
+	if !called {
+		t.Fatal("inherited hook did not run")
+	}
+	if client.rt.permission.handlerFor(string(childID)) == nil {
+		t.Fatal("subagent did not inherit a permission handler")
+	}
+	if client.rt.question.handlerFor(string(childID)) == nil {
+		t.Fatal("subagent did not inherit a question handler")
+	}
+
+	client.rt.clearSession(childID)
+	if client.rt.hooksFor(string(childID)) != nil {
+		t.Fatal("child hooks survived clearSession")
 	}
 }

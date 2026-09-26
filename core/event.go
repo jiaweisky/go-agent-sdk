@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -208,11 +209,19 @@ type eventService struct {
 
 	mu               sync.Mutex
 	nextListenerID   int
-	listeners        []eventListenerEntry
+	listeners        atomic.Pointer[[]eventListenerEntry]
 	projectors       map[string][]EventProjector
 	typedSubscribers map[string][]*eventQueue
 	allSubscribers   []*eventQueue
 	durableWakes     map[string][]chan struct{}
+}
+
+// listenersSnapshot returns the current immutable listener slice.
+func (s *eventService) listenersSnapshot() []eventListenerEntry {
+	if current := s.listeners.Load(); current != nil {
+		return *current
+	}
+	return nil
 }
 
 func NewEvent(cfg EventConfig) Event {
@@ -231,7 +240,11 @@ func (s *eventService) Listen(listener EventListener) (func(), error) {
 	s.mu.Lock()
 	id := s.nextListenerID
 	s.nextListenerID++
-	s.listeners = append(s.listeners, eventListenerEntry{id: id, fn: listener})
+	current := s.listenersSnapshot()
+	next := make([]eventListenerEntry, 0, len(current)+1)
+	next = append(next, current...)
+	next = append(next, eventListenerEntry{id: id, fn: listener})
+	s.listeners.Store(&next)
 	s.mu.Unlock()
 
 	var once sync.Once
@@ -239,12 +252,14 @@ func (s *eventService) Listen(listener EventListener) (func(), error) {
 		once.Do(func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			for i, entry := range s.listeners {
-				if entry.id == id {
-					s.listeners = append(s.listeners[:i], s.listeners[i+1:]...)
-					break
+			current := s.listenersSnapshot()
+			kept := make([]eventListenerEntry, 0, len(current))
+			for _, entry := range current {
+				if entry.id != id {
+					kept = append(kept, entry)
 				}
 			}
+			s.listeners.Store(&kept)
 		})
 	}, nil
 }
@@ -863,7 +878,7 @@ func (s *eventService) readAfter(aggregateID string, after int) ([]schema.EventP
 
 func (s *eventService) notify(event schema.EventPayload, isolate bool) error {
 	s.mu.Lock()
-	listeners := append([]eventListenerEntry(nil), s.listeners...)
+	listeners := s.listenersSnapshot()
 	typed := append([]*eventQueue(nil), s.typedSubscribers[event.Type]...)
 	all := append([]*eventQueue(nil), s.allSubscribers...)
 	s.mu.Unlock()
@@ -883,16 +898,15 @@ func (s *eventService) notify(event schema.EventPayload, isolate bool) error {
 }
 
 func (s *eventService) runListener(listener EventListener, event schema.EventPayload, isolate bool) (err error) {
-	if !isolate {
-		return listener(event)
-	}
+	// A panicking listener must never unwind into the publisher's goroutine
+	// (which may be a session turn): recover for durable and live events alike.
 	defer func() {
 		if recover() != nil {
 			err = nil
 		}
 	}()
 	err = listener(event)
-	if err != nil && !isEventInterrupt(err) {
+	if isolate && err != nil && !isEventInterrupt(err) {
 		return nil
 	}
 	return err

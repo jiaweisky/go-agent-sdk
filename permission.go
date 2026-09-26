@@ -107,6 +107,12 @@ func (p *permissionHandler) removeHandler(sessionID string) {
 	p.handlers.remove(sessionID)
 }
 
+// handlerFor returns the session's effective handler: its override when set,
+// otherwise the client default.
+func (p *permissionHandler) handlerFor(sessionID string) PermissionHandlerFunc {
+	return p.handlers.resolve(sessionID)
+}
+
 func (p *permissionHandler) Ask(input core.PermissionAssertInput) (*core.PermissionAskResult, error) {
 	return p.inner.Ask(input)
 }

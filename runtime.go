@@ -40,7 +40,6 @@ type runtime struct {
 	skills        *core.Skill
 	outputStore   tool.OutputStore
 	toolOutput    *core.ToolOutputStore
-	mcpTools      map[string]tool.Tool
 	permission    *permissionHandler
 	question      *questionHandler
 	runner        *runner.LLMRunner
@@ -252,7 +251,7 @@ func (r *runtime) newSessionRegistry(agent *schema.AgentInfo, sessionRules schem
 	if err := registerBuiltins(registry, r.builtin, permissions); err != nil {
 		return nil, err
 	}
-	if err := registerIfAny(registry, r.mcpTools); err != nil {
+	if err := registerIfAny(registry, r.mcpToolSet()); err != nil {
 		return nil, err
 	}
 	tools := make([]Tool, 0, len(r.clientTools)+len(sessionTools))
@@ -353,6 +352,22 @@ func (r *runtime) detach(sessionID string) {
 	r.permission.removeHandler(sessionID)
 	r.question.removeHandler(sessionID)
 	r.agentSelector.remove(schema.SessionID(sessionID))
+}
+
+// inheritSession copies a parent session's hooks and per-session permission and
+// question handlers to a child (subagent) session, so they apply to subagent
+// tool calls too.
+func (r *runtime) inheritSession(parentID, childID schema.SessionID) {
+	r.setHooks(string(childID), r.hooksFor(string(parentID)))
+	r.permission.setHandler(string(childID), r.permission.handlerFor(string(parentID)))
+	r.question.setHandler(string(childID), r.question.handlerFor(string(parentID)))
+}
+
+// clearSession drops the per-session state inheritSession installed.
+func (r *runtime) clearSession(sessionID schema.SessionID) {
+	r.removeHooks(string(sessionID))
+	r.permission.removeHandler(string(sessionID))
+	r.question.removeHandler(string(sessionID))
 }
 
 // resolveRuntimePaths resolves the working directory plus the home and state
@@ -688,24 +703,47 @@ func applicationName(name string) string {
 	return name
 }
 
-// connectMCP connects the configured MCP servers and collects their tools; each
-// session registry picks them up from r.mcpTools. Servers that fail to connect
-// or list tools simply contribute none.
+// connectMCP connects the configured MCP servers in parallel and warms their
+// tool cache; session registries read the cache through mcpToolSet. Servers
+// that fail to connect or list tools simply contribute none.
 func (r *runtime) connectMCP(ctx context.Context, configs []MCPConfig) {
 	if len(configs) == 0 {
 		return
 	}
 	client := mcp.NewClient(string(r.location.Directory), r.name, installation.InstallationVersion, mcp.WithEvents(mcpEventPublisher{events: r.events}))
+	var connected sync.WaitGroup
 	for _, cfg := range configs {
-		client.Connect(ctx, cfg.Name, cfg.Server)
+		connected.Add(1)
+		go func(cfg MCPConfig) {
+			defer connected.Done()
+			client.Connect(ctx, cfg.Name, cfg.Server)
+		}(cfg)
 	}
-	if r.mcpTools == nil {
-		r.mcpTools = map[string]tool.Tool{}
-	}
-	for name, adapted := range client.Tools(ctx) {
-		r.mcpTools[name] = adapted.CoreTool()
-	}
+	connected.Wait()
+	_ = client.Tools(ctx) // warm the tool cache
 	r.mcp = client
+}
+
+// mcpToolListTimeout bounds a cache-miss tool listing during session setup.
+const mcpToolListTimeout = 5 * time.Second
+
+// mcpToolSet returns the currently connected MCP tools, read fresh so a server's
+// tool-list changes are picked up by new sessions.
+func (r *runtime) mcpToolSet() map[string]tool.Tool {
+	if r.mcp == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), mcpToolListTimeout)
+	defer cancel()
+	adapted := r.mcp.Tools(ctx)
+	if len(adapted) == 0 {
+		return nil
+	}
+	tools := make(map[string]tool.Tool, len(adapted))
+	for name, item := range adapted {
+		tools[name] = item.CoreTool()
+	}
+	return tools
 }
 
 type mcpEventPublisher struct{ events core.Event }
@@ -721,7 +759,39 @@ func chooseLLM(opts *ClientOptions) route.LLMClient {
 	if opts.LLM != nil {
 		return opts.LLM
 	}
-	return llm.NewClient(route.TransportRuntime{HTTP: route.NewExecutor(http.DefaultClient)})
+	return llm.NewClient(route.TransportRuntime{HTTP: route.NewExecutor(newLLMHTTPClient())})
+}
+
+// defaultLLMResponseHeaderTimeout bounds how long a provider may take to send
+// response headers, so a hung connection fails instead of blocking a turn
+// forever. The streaming body is not affected. Callers needing a different
+// policy can inject ClientOptions.LLM.
+const defaultLLMResponseHeaderTimeout = 2 * time.Minute
+
+// newLLMHTTPClient builds the default HTTP client for provider requests. It
+// clones the default transport so it does not mutate the process-wide one.
+func newLLMHTTPClient() *http.Client {
+	transport := http.DefaultTransport
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		clone := base.Clone()
+		clone.ResponseHeaderTimeout = defaultLLMResponseHeaderTimeout
+		transport = clone
+	}
+	return &http.Client{Transport: transport}
+}
+
+// shutdownGrace bounds how long Close waits for in-flight turns to stop.
+const shutdownGrace = 5 * time.Second
+
+// stopTurns interrupts and waits for every active session turn so teardown does
+// not close the database under a running turn.
+func (r *runtime) stopTurns() {
+	if r.coord == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	r.coord.StopAll(ctx)
 }
 
 func (r *runtime) close() error {

@@ -11,7 +11,7 @@ import (
 )
 
 func TestUsageEventFromStepEnded(t *testing.T) {
-	events := mapEvents(schema.EventPayload{
+	events, count := mapEvents(schema.EventPayload{
 		Type: schema.SessionEventStepEnded.Type,
 		Data: map[string]any{
 			"sessionID":          "ses_1",
@@ -30,7 +30,7 @@ func TestUsageEventFromStepEnded(t *testing.T) {
 		},
 	})
 	var found *Usage
-	for i := range events {
+	for i := 0; i < count; i++ {
 		if usage, ok := events[i].(Usage); ok {
 			found = &usage
 		}

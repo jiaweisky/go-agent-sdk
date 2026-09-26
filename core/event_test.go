@@ -650,7 +650,7 @@ func TestEventAllBoundedDelivers(t *testing.T) {
 		got <- collectEventN(ctx, events.AllBounded(ctx, 8), 2)
 	}()
 	waitForEventRegistration(t, events, func(svc *eventService) bool {
-		return len(svc.listeners) >= 1
+		return len(svc.listenersSnapshot()) >= 1
 	})
 
 	if _, err := events.Publish(eventTestMessage, map[string]any{"text": "one"}, nil); err != nil {

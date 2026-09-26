@@ -42,6 +42,9 @@ func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (TaskRunOutpu
 		return TaskRunOutput{}, err
 	}
 	defer r.dispatcher.remove(string(childID))
+	// Subagent tool calls inherit the parent session's hooks and handlers.
+	r.inheritSession(parent.ID, childID)
+	defer r.clearSession(childID)
 
 	r.publishTaskProgress(input, childID, subagent, parent)
 	if err := r.runChildSession(ctx, childID, input.Prompt); err != nil {

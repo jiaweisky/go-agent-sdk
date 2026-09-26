@@ -416,6 +416,9 @@ func (c *Client) Close() error {
 	}
 	c.sessions = map[string]*Session{}
 	c.mu.Unlock()
+	// Stop in-flight turns before tearing down sessions and the database, so a
+	// running turn never touches a closed database.
+	c.rt.stopTurns()
 	for _, session := range sessions {
 		_ = session.Close()
 	}
