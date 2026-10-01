@@ -687,6 +687,8 @@ type ClientOptions struct {
     Model            string                    // 默认模型
     Protocol         schema.ProtocolID         // 协议 id（"openai-responses"|"anthropic-messages"|"gemini"|...）
     ModelInfo        ModelInfoProvider         // 可选：catalog 元数据（protocol/endpoint/limits/headers）
+    ContextLimit     int                       // 覆盖模型 context window（tokens），自动压缩阈值；0 用 ModelInfo 的 limit
+    OutputLimit      int                       // 覆盖模型 output 预算（tokens）；0 用 ModelInfo 的 limit
     Credentials      CredentialProvider        // provider → 秘密（APIKey / AWS）
     LLM              route.LLMClient           // 可选：注入自定义 LLM client
 

@@ -530,6 +530,48 @@ func TestModelResolverCarriesLimits(t *testing.T) {
 	}
 }
 
+// TestModelResolverLimitOverrides guards ClientOptions.ContextLimit/OutputLimit:
+// they override ModelInfo limits and supply limits when only Protocol is set.
+func TestModelResolverLimitOverrides(t *testing.T) {
+	resolve, err := buildModelResolver(&ClientOptions{
+		Model:    "default-model",
+		Protocol: "openai-compatible-chat",
+		ModelInfo: func(id string) (schema.ModelInfo, error) {
+			return NewModelInfo("openai-compatible-chat", id, "https://api.test/v1", schema.ModelLimit{Context: 1_000_000, Output: 32_000})
+		},
+		ContextLimit: 200_000,
+		OutputLimit:  8_000,
+	})
+	if err != nil {
+		t.Fatalf("build resolver: %v", err)
+	}
+	model, err := resolve(schema.SessionInfo{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	limits := model.Route.Defaults.Limits
+	if limits == nil || limits.Context != 200_000 || limits.Output != 8_000 {
+		t.Fatalf("limits = %+v, want context=200000 output=8000", limits)
+	}
+
+	// Without ModelInfo, ContextLimit alone supplies the limit.
+	protocolOnly, err := buildModelResolver(&ClientOptions{
+		Model:        "default-model",
+		Protocol:     "openai-responses",
+		ContextLimit: 128_000,
+	})
+	if err != nil {
+		t.Fatalf("build resolver: %v", err)
+	}
+	fallback, err := protocolOnly(schema.SessionInfo{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if limits := fallback.Route.Defaults.Limits; limits == nil || limits.Context != 128_000 {
+		t.Fatalf("limits = %+v, want context=128000", limits)
+	}
+}
+
 func TestModelResolverUsesSessionModel(t *testing.T) {
 	resolve, err := buildModelResolver(&ClientOptions{
 		Model:    "default-model",

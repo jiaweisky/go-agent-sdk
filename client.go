@@ -53,6 +53,13 @@ type ClientOptions struct {
 	// own) metadata. When set it takes precedence over Protocol. Build the value
 	// with NewModelInfo for the SDK's supported protocols.
 	ModelInfo ModelInfoProvider
+	// ContextLimit overrides the model context window (in tokens) the SDK uses
+	// to decide when automatic compaction runs. Zero keeps the ModelInfo limit;
+	// when neither is set, automatic compaction is disabled.
+	ContextLimit int
+	// OutputLimit overrides the model output token budget, which sizes the
+	// compaction summary. Zero keeps the ModelInfo limit.
+	OutputLimit int
 	// Credentials supplies the provider secret used to authenticate requests.
 	// The protocol decides how it is applied, so callers supply only the secret.
 	Credentials CredentialProvider

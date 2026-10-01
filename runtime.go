@@ -932,10 +932,25 @@ func resolveStoredModel(opts *ClientOptions, stored schema.SessionInfo) (route.M
 }
 
 // resolveModelInfo returns the model metadata: the caller's ModelInfo when set,
-// otherwise a ModelInfo synthesized from Protocol.
+// otherwise a ModelInfo synthesized from Protocol. ContextLimit and OutputLimit
+// override the resolved limits so callers can supply them without a full
+// ModelInfoProvider.
 func resolveModelInfo(opts *ClientOptions, id string) (schema.ModelInfo, error) {
+	var info schema.ModelInfo
+	var err error
 	if opts.ModelInfo != nil {
-		return opts.ModelInfo(id)
+		info, err = opts.ModelInfo(id)
+	} else {
+		info, err = NewModelInfo(opts.Protocol, id, "", schema.ModelLimit{})
 	}
-	return NewModelInfo(opts.Protocol, id, "", schema.ModelLimit{})
+	if err != nil {
+		return info, err
+	}
+	if opts.ContextLimit > 0 {
+		info.Limit.Context = opts.ContextLimit
+	}
+	if opts.OutputLimit > 0 {
+		info.Limit.Output = opts.OutputLimit
+	}
+	return info, nil
 }
