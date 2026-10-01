@@ -4,6 +4,7 @@
 
 - **`docs/DESIGN.md`** — 架构设计、模块详细设计、MVP 范围、SDK 公开 API（**项目范围与公开 API 以本文档为准**）
 - **`docs/PORTING-STRATEGY.md`** — TS/Effect → Go 的移植策略与决策树
+- **`docs/DESIGN-A2A.md`** — A2A 协议支持的分册设计（草案）。A2A 在 opencode 中**无 TS 对应物**，属 Go 专属能力，不适用上面的移植规则
 
 ## 文档中的 Go 代码
 
