@@ -354,6 +354,13 @@ func openaiChatLowerMessages(request *schema.LLMRequest) ([]openaiChatMessage, e
 			if err != nil {
 				return nil, err
 			}
+			// OpenAI Chat requires an assistant message to set content or
+			// tool_calls. A reasoning-only message (for example a turn
+			// interrupted while the model was still thinking) lowers to a null
+			// content, which providers reject, so drop it.
+			if m.Content == nil && len(m.ToolCalls) == 0 {
+				continue
+			}
 			msgs = append(msgs, m)
 		}
 	}
