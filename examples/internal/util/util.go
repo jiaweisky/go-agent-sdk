@@ -6,12 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"github.com/user/go-agent-sdk"
 	"github.com/user/go-agent-sdk/core"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
 	"github.com/user/go-agent-sdk/schema"
 )
 
@@ -52,6 +50,54 @@ func ExampleDir() string {
 func WithMCP(configs ...agent.MCPConfig) Option {
 	return func(opts *agent.ClientOptions) {
 		opts.MCP = append(opts.MCP, configs...)
+	}
+}
+
+// WithModelLimits wraps the client's model metadata with per-model token
+// limits, keyed by model id. A model the function returns no limits for keeps
+// the base limit (so automatic compaction stays off for unknown models).
+func WithModelLimits(limits func(modelID string) schema.ModelLimit) Option {
+	return func(opts *agent.ClientOptions) {
+		base := opts.ModelInfo
+		opts.ModelInfo = func(id string) (schema.ModelInfo, error) {
+			info, err := base(id)
+			if err != nil {
+				return info, err
+			}
+			limit := limits(id)
+			if limit.Context > 0 {
+				info.Limit.Context = limit.Context
+			}
+			if limit.Output > 0 {
+				info.Limit.Output = limit.Output
+			}
+			return info, nil
+		}
+	}
+}
+
+// WithCompaction overrides the client's compaction settings.
+func WithCompaction(config agent.CompactionConfig) Option {
+	return func(opts *agent.ClientOptions) {
+		opts.Compaction = &config
+	}
+}
+
+// WithReference registers a named reference source injected into the model's
+// system context.
+func WithReference(name string, source core.ReferenceSource) Option {
+	return func(opts *agent.ClientOptions) {
+		if opts.References == nil {
+			opts.References = map[string]core.ReferenceSource{}
+		}
+		opts.References[name] = source
+	}
+}
+
+// WithSubagentDepth sets the maximum nesting depth for task subagents.
+func WithSubagentDepth(depth int) Option {
+	return func(opts *agent.ClientOptions) {
+		opts.SubagentDepth = depth
 	}
 }
 
@@ -97,10 +143,6 @@ func Client(dir string, options ...Option) (*agent.Client, error) {
 			providerType, apiKeyHint(providerType))
 	}
 	baseURL := os.Getenv("AGENT_BASE_URL")
-	var limit schema.ModelLimit
-	if value := envLimits(); value != nil {
-		limit = schema.ModelLimit{Context: value.Context, Output: value.Output}
-	}
 	opts := &agent.ClientOptions{
 		// The SDK never picks a state directory, so the example keeps its state
 		// next to itself (git-ignored) instead of in the user's home.
@@ -108,7 +150,7 @@ func Client(dir string, options ...Option) (*agent.Client, error) {
 		Model:    model,
 		Protocol: protocol,
 		ModelInfo: func(id string) (schema.ModelInfo, error) {
-			info, err := agent.NewModelInfo(protocol, id, baseURL, limit)
+			info, err := agent.NewModelInfo(protocol, id, baseURL, schema.ModelLimit{})
 			if err != nil {
 				return info, err
 			}
@@ -261,23 +303,4 @@ func projectRoot(start string) string {
 		return filepath.Dir(matches[0])
 	}
 	return filepath.VolumeName(start) + string(filepath.Separator)
-}
-
-// envLimits reads AGENT_CONTEXT_LIMIT / AGENT_OUTPUT_LIMIT so the runner
-// can compact history before the provider rejects an oversized request. Without
-// limits, automatic compaction is disabled.
-func envLimits() *llmschema.ModelLimits {
-	context := envInt("AGENT_CONTEXT_LIMIT")
-	output := envInt("AGENT_OUTPUT_LIMIT")
-	if context == 0 && output == 0 {
-		return nil
-	}
-	return llmschema.NewModelLimits(context, output)
-}
-
-func envInt(key string) int {
-	if value, err := strconv.Atoi(os.Getenv(key)); err == nil {
-		return value
-	}
-	return 0
 }

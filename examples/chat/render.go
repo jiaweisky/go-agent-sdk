@@ -22,6 +22,9 @@ type chat struct {
 	usage      chatUsage
 	busy       map[string]bool
 	parentBusy bool
+	// session is the active session; /persona replaces it, so chatLoop reads it
+	// from here instead of a fixed local.
+	session *agent.Session
 	// tasks tracks the subagent tasks this chat started.
 	tasks taskSet
 	// calls maps an open parent tool call to its tool name, and running holds
@@ -34,6 +37,12 @@ type chat struct {
 	// "Assistant:" prefix was printed for this turn.
 	stream  *markdownStream
 	labeled bool
+	// interruptArmed is set after a first Esc, so the status line prompts for a
+	// second press to interrupt the running turn.
+	interruptArmed bool
+	// tools holds the unregister functions of the runtime tools added with
+	// /tool, keyed by name.
+	tools map[string]func()
 }
 
 func newChat(console *console, client *agent.Client, parent, model string) *chat {
@@ -45,6 +54,7 @@ func newChat(console *console, client *agent.Client, parent, model string) *chat
 		busy:    map[string]bool{},
 		tasks:   newTaskSet(),
 		calls:   map[string]string{},
+		tools:   map[string]func(){},
 	}
 }
 
@@ -124,7 +134,8 @@ func (c *chat) flushStream() {
 func (c *chat) handleParent(event agent.Event) {
 	// A tool or task line must not appear before text that streamed earlier.
 	switch event.(type) {
-	case agent.ToolProgress, agent.ToolCalled, agent.ToolSuccess, agent.ToolFailed:
+	case agent.ToolProgress, agent.ToolCalled, agent.ToolSuccess, agent.ToolFailed,
+		agent.CompactionStarted, agent.CompactionEnded:
 		c.flushStream()
 	}
 	switch e := event.(type) {
@@ -141,6 +152,13 @@ func (c *chat) handleParent(event agent.Event) {
 		c.finishTool(e.CallID, errorMessage(e.Error))
 	case agent.SessionStatus:
 		c.parentBusy = e.Status == "busy"
+	case agent.CompactionStarted:
+		c.console.write(fmt.Sprintf("%s[compact] summarizing history...%s\n", dim, reset))
+	case agent.CompactionEnded:
+		c.console.write(fmt.Sprintf("%s[compact] summary:%s\n", dim, reset))
+		if e.Text != "" {
+			c.console.write(renderMarkdown(e.Text))
+		}
 	case agent.ReasoningDelta:
 		c.writeReasoning(e.Delta)
 	case agent.ReasoningEnded:

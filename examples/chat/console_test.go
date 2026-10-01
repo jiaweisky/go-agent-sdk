@@ -5,15 +5,19 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/user/go-agent-sdk"
 )
 
-func TestEditorEscExits(t *testing.T) {
+// TestEditorEscIsIgnored guards that a lone Esc no longer ends input (exit is
+// Ctrl+C / Ctrl+D, matching opencode).
+func TestEditorEscIsIgnored(t *testing.T) {
 	var out strings.Builder
-	editor := &editor{in: bufio.NewReader(strings.NewReader("\x1b")), out: &out}
-	if _, err := editor.readLine("> "); err != io.EOF {
-		t.Fatalf("err = %v, want io.EOF", err)
+	editor := &editor{in: bufio.NewReader(strings.NewReader("")), out: &out}
+	state := &lineState{}
+	if err := editor.applyEscape(state); err != nil {
+		t.Fatalf("lone Esc returned %v, want nil", err)
 	}
 }
 
@@ -106,29 +110,76 @@ func TestRuneWidth(t *testing.T) {
 	}
 }
 
-func TestWatchInterrupt(t *testing.T) {
+// TestWatchInterruptDoubleEsc guards that a single Esc only arms the interrupt
+// and a second Esc aborts the turn.
+func TestWatchInterruptDoubleEsc(t *testing.T) {
 	keys := make(chan rune, 4)
 	c := &console{keys: keys}
 	done := make(chan struct{})
-	interrupted := make(chan struct{})
+	aborted := make(chan struct{})
+	armed := make(chan bool, 4)
 
 	go func() {
-		keys <- 'a' // ignored during a turn
-		keys <- keyEsc
+		keys <- 'a'    // ignored during a turn
+		keys <- keyEsc // arm
+		keys <- keyEsc // abort
 	}()
 
-	if !c.watchInterrupt(done, func() { close(interrupted) }, nil) {
-		t.Fatal("expected an interrupt")
+	action := c.watchInterrupt(done, func() { close(aborted) }, nil, func(v bool) { armed <- v })
+	if action != interruptAbort {
+		t.Fatalf("action = %v, want interruptAbort", action)
 	}
-	<-interrupted
+	<-aborted
+	if first := <-armed; !first {
+		t.Fatal("the first Esc should arm the interrupt")
+	}
+}
+
+// TestWatchInterruptSingleEscArms guards that one Esc does not abort the turn.
+func TestWatchInterruptSingleEscArms(t *testing.T) {
+	keys := make(chan rune, 1)
+	c := &console{keys: keys}
+	done := make(chan struct{})
+	aborted := false
+	var armed []bool
+
+	go func() {
+		keys <- keyEsc
+		time.Sleep(50 * time.Millisecond) // let it arm, then finish the turn
+		close(done)
+	}()
+
+	action := c.watchInterrupt(done, func() { aborted = true }, nil, func(v bool) { armed = append(armed, v) })
+	if action != interruptNone || aborted {
+		t.Fatalf("action = %v aborted = %v, want none and not aborted", action, aborted)
+	}
+	if len(armed) == 0 || !armed[0] {
+		t.Fatalf("armed = %v, want the first Esc to arm", armed)
+	}
+}
+
+// TestWatchInterruptCtrlCExits guards that Ctrl+C aborts and asks to exit.
+func TestWatchInterruptCtrlCExits(t *testing.T) {
+	keys := make(chan rune, 1)
+	c := &console{keys: keys}
+	done := make(chan struct{})
+	aborted := make(chan struct{})
+
+	go func() { keys <- keyCtrlC }()
+
+	action := c.watchInterrupt(done, func() { close(aborted) }, nil, nil)
+	if action != interruptExit {
+		t.Fatalf("action = %v, want interruptExit", action)
+	}
+	<-aborted
 }
 
 func TestWatchInterruptStopsWhenTurnDone(t *testing.T) {
 	c := &console{keys: make(chan rune)}
 	done := make(chan struct{})
 	close(done)
-	if c.watchInterrupt(done, func() { t.Fatal("unexpected interrupt") }, nil) {
-		t.Fatal("expected no interrupt")
+	if action := c.watchInterrupt(done, func() { t.Fatal("unexpected interrupt") }, nil, nil); action != interruptNone {
+		t.Fatalf("action = %v, want interruptNone", action)
 	}
 }
 
@@ -136,8 +187,8 @@ func TestWatchInterruptNonTTY(t *testing.T) {
 	c := &console{} // keys == nil on a non-TTY
 	done := make(chan struct{})
 	close(done)
-	if c.watchInterrupt(done, func() { t.Fatal("unexpected interrupt") }, nil) {
-		t.Fatal("expected no interrupt")
+	if action := c.watchInterrupt(done, func() { t.Fatal("unexpected interrupt") }, nil, nil); action != interruptNone {
+		t.Fatalf("action = %v, want interruptNone", action)
 	}
 }
 

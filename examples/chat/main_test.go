@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +10,33 @@ import (
 	"github.com/user/go-agent-sdk"
 	"github.com/user/go-agent-sdk/schema"
 )
+
+// TestExpandPath guards the .env path handling: the loader stores values
+// verbatim, so weatherMCP expands $VAR and a leading ~ itself.
+func TestExpandPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AGENT_UNSET", "")
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", "", ""},
+		{"absolute", "/tmp/server.js", "/tmp/server.js"},
+		{"dollar home", "$HOME/server.js", filepath.Join(home, "server.js")},
+		{"braced home", "${HOME}/server.js", filepath.Join(home, "server.js")},
+		{"tilde", "~/server.js", filepath.Join(home, "server.js")},
+		{"bare tilde", "~", home},
+		{"unset var", "$AGENT_UNSET/server.js", "/server.js"},
+	}
+	for _, c := range cases {
+		if got := expandPath(c.in); got != c.want {
+			t.Errorf("%s: expandPath(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
 
 func TestParseAnswer(t *testing.T) {
 	options := []schema.QuestionOption{{Label: "One"}, {Label: "Two"}, {Label: "Three"}}

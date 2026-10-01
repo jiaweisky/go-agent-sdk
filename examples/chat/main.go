@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -66,10 +67,11 @@ func run() error {
 	// Client.On sees every session, so subagent (task) sessions are rendered
 	// nested under their task.
 	renderer := newChat(console, client, session.ID(), os.Getenv("AGENT_MODEL"))
+	renderer.session = session
 	client.On(renderer.handle)
 	writeBanner(console, yolo)
 
-	return chatLoop(ctx, console, session, renderer)
+	return chatLoop(ctx, console, renderer)
 }
 
 // parseFlags reads the command line. -C runs as if started in the given
@@ -108,12 +110,13 @@ func writeBanner(console *console, yolo bool) {
 	if yolo {
 		console.write(yellow + "warning: --yolo skips all permission prompts" + reset + "\n")
 	}
-	console.write("Chat with go-agent-sdk (Esc or Ctrl+C to exit; interrupts a running turn)\n")
-	console.write(dim + "Commands: /skills  /agents  /mcps  /task [<#n>]" + reset + "\n\n")
+	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts a running turn)\n")
+	console.write(dim + "Commands: /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /history" + reset + "\n\n")
 }
 
-// chatLoop prompts until stdin closes or the user interrupts a turn.
-func chatLoop(ctx context.Context, console *console, session *agent.Session, renderer *chat) error {
+// chatLoop prompts until stdin closes or the user interrupts a turn. The active
+// session lives on the renderer, so /persona can replace it.
+func chatLoop(ctx context.Context, console *console, renderer *chat) error {
 	for {
 		input, err := console.prompt("You: ")
 		if input == "" {
@@ -126,33 +129,33 @@ func chatLoop(ctx context.Context, console *console, session *agent.Session, ren
 		if handleCommand(renderer, input) {
 			continue
 		}
-		if runTurn(ctx, console, session, renderer, input) {
+		if runTurn(ctx, console, renderer, input) {
 			return nil
 		}
 	}
 }
 
-// runTurn sends one prompt and watches for an interrupt while it runs, returning
-// whether the user interrupted it (which exits the chat).
-func runTurn(ctx context.Context, console *console, session *agent.Session, renderer *chat, input string) bool {
+// runTurn sends one prompt and watches for an interrupt while it runs. Esc
+// (pressed twice) aborts the turn and keeps the chat alive; Ctrl+C aborts and
+// exits. It returns whether the chat should exit.
+func runTurn(ctx context.Context, console *console, renderer *chat, input string) bool {
 	renderer.beginTurn()
 	turnDone := make(chan struct{})
 	go func() {
 		defer close(turnDone)
-		sendTurn(ctx, console, session, input)
+		sendTurn(ctx, console, renderer.session, input)
 	}()
-	// While the turn runs, Esc/Ctrl+C aborts it and exits the chat; the bottom
-	// status line animates a spinner for busy sessions.
-	if !console.watchInterrupt(turnDone, session.Abort, renderer.updateStatus) {
-		renderer.clearStatus()
-		console.write("\n")
-		return false
-	}
+	// While the turn runs, the bottom status line animates a spinner and prompts
+	// for the second Esc after the first.
+	action := console.watchInterrupt(turnDone, renderer.session.Abort, renderer.updateStatus, renderer.setInterruptArmed)
 	<-turnDone
-	// Leave the terminal on a clean line before exiting.
-	console.setStatus("")
+	if action == interruptNone {
+		console.setStatus("")
+	} else {
+		renderer.clearStatus()
+	}
 	console.write("\n")
-	return true
+	return action == interruptExit
 }
 
 // handleCommand runs a slash command from the prompt, and reports whether the
@@ -168,6 +171,16 @@ func handleCommand(c *chat, input string) bool {
 		c.mcpsCommand()
 	case command == "/task" || strings.HasPrefix(command, "/task "):
 		c.taskCommand(command)
+	case command == "/compact":
+		compactCommand(c)
+	case command == "/tool" || strings.HasPrefix(command, "/tool "):
+		c.toolsCommand(command)
+	case command == "/reference" || strings.HasPrefix(command, "/reference "):
+		c.referenceCommand(command)
+	case command == "/persona" || strings.HasPrefix(command, "/persona "):
+		c.personaCommand(command)
+	case command == "/history":
+		c.historyCommand()
 	default:
 		return false
 	}
@@ -188,10 +201,26 @@ func sendTurn(ctx context.Context, console *console, session *agent.Session, pro
 // clientOptions builds the chat's client options. With yolo the interactive
 // permission handler is omitted, so util.Client falls back to agent.ApproveAll
 // and every "ask" is approved without a prompt. Questions stay interactive.
+// Model limits come from the demo's model catalog, which is what lets automatic
+// compaction run.
 func clientOptions(console *console, yolo bool) []util.Option {
+	// A local reference to the SDK docs, advertised in the model's system
+	// context so it can read them when relevant.
+	docsDir := filepath.Join(filepath.Dir(filepath.Dir(util.ExampleDir())), "docs")
+	docsDescription := "go-agent-sdk design and porting documentation"
 	options := []util.Option{
 		util.WithQuestion(interactiveQuestion(console)),
 		util.WithMCP(weatherMCP()...),
+		util.WithModelLimits(modelLimits),
+		// Keep only a small tail of history verbatim so /compact has something
+		// to summarize in a short demo session.
+		util.WithCompaction(agent.CompactionConfig{PreserveRecentTokens: 2000}),
+		util.WithReference("docs", core.ReferenceLocalSource{
+			Type: "local", Path: schema.AbsolutePath(docsDir), Description: &docsDescription,
+		}),
+		// Allow a subagent to start another subagent, so nesting is visible in
+		// the /task list.
+		util.WithSubagentDepth(2),
 	}
 	if !yolo {
 		options = append(options, util.WithPermission(interactivePermission(console)))
@@ -273,7 +302,7 @@ func parseAnswer(input string, options []schema.QuestionOption) []string {
 // enabled only when AGENT_WEATHER_MCP points at the server entry script;
 // AMAP_API_KEY is passed through to the server. No path or key is hardcoded.
 func weatherMCP() []agent.MCPConfig {
-	server := os.Getenv("AGENT_WEATHER_MCP")
+	server := expandPath(os.Getenv("AGENT_WEATHER_MCP"))
 	if server == "" {
 		return nil
 	}
@@ -285,4 +314,20 @@ func weatherMCP() []agent.MCPConfig {
 			Environment: map[string]string{"AMAP_API_KEY": os.Getenv("AMAP_API_KEY")},
 		},
 	}}
+}
+
+// expandPath expands $VAR references and a leading ~ in a configured path, so a
+// .env can write $HOME/... or ~/... (the dotenv loader stores the value
+// verbatim; the shell is not involved).
+func expandPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	path = os.ExpandEnv(path)
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/"))
+		}
+	}
+	return path
 }

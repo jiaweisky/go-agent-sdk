@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -11,6 +13,10 @@ import (
 	"github.com/user/go-agent-sdk/examples/internal/util"
 	"github.com/user/go-agent-sdk/schema"
 )
+
+// ansiPattern matches SGR color sequences, so command tests assert on the
+// visible text instead of the escape codes.
+var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func runCommand(t *testing.T, configDirs []string, fn func(*chat)) string {
 	t.Helper()
@@ -28,7 +34,7 @@ func runCommand(t *testing.T, configDirs []string, fn func(*chat)) string {
 	var out strings.Builder
 	console := &console{out: &out, lineStart: true}
 	fn(newChat(console, client, "ses_1", "test-model"))
-	return out.String()
+	return ansiPattern.ReplaceAllString(out.String(), "")
 }
 
 func TestSkillsCommandEmpty(t *testing.T) {
@@ -82,6 +88,77 @@ func TestSkillsCommandWithPaddedInput(t *testing.T) {
 	}
 }
 
+// TestCompactCommandWithoutSession guards that /compact is wired as a command;
+// without a session it reports the no-op rather than sending the text to the
+// model.
+func TestCompactCommandWithoutSession(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		if !handleCommand(c, "/compact") {
+			t.Error("/compact was not recognised")
+		}
+	})
+	if !strings.Contains(out, "no active session") {
+		t.Fatalf("out = %q, want the no-session hint", out)
+	}
+}
+
+// TestToolCommand guards the runtime tool lifecycle: list, add, duplicate, an
+// unknown name, and remove.
+func TestToolCommand(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		c.console.write("--empty--\n")
+		c.toolsCommand("/tool")
+		c.console.write("--add--\n")
+		c.toolsCommand("/tool add now")
+		c.toolsCommand("/tool add now")
+		c.toolsCommand("/tool add nope")
+		c.console.write("--list--\n")
+		c.toolsCommand("/tool")
+		c.console.write("--remove--\n")
+		c.toolsCommand("/tool remove now")
+		c.toolsCommand("/tool remove now")
+	})
+	for _, want := range []string{
+		"(no runtime tools",
+		"registered tool now",
+		"now is already registered",
+		"unknown tool: nope",
+		"Runtime tools (1):",
+		"removed tool now",
+		"now is not registered",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("out = %q, missing %q", out, want)
+		}
+	}
+}
+
+// TestReferenceCommand guards the reference lifecycle: list, add, list again,
+// and remove.
+func TestReferenceCommand(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		c.console.write("--empty--\n")
+		c.referenceCommand("/reference")
+		c.console.write("--add--\n")
+		c.referenceCommand("/reference add notes /tmp/notes")
+		c.console.write("--list--\n")
+		c.referenceCommand("/reference")
+		c.console.write("--remove--\n")
+		c.referenceCommand("/reference remove notes")
+	})
+	for _, want := range []string{
+		"(no references",
+		"added reference notes",
+		"References (1):",
+		"/tmp/notes",
+		"removed reference notes",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("out = %q, missing %q", out, want)
+		}
+	}
+}
+
 // TestTaskCommands covers the task lifecycle lines and /task: the list, the
 // drill-down by handle, and an unknown argument.
 func TestTaskCommands(t *testing.T) {
@@ -113,6 +190,49 @@ func TestTaskCommands(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("out = %q, missing %q", out, want)
 		}
+	}
+}
+
+// TestPersonaCommandUsage guards the no-argument case.
+func TestPersonaCommandUsage(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		if !handleCommand(c, "/persona") {
+			t.Error("/persona was not recognised")
+		}
+	})
+	if !strings.Contains(out, "usage: /persona") {
+		t.Fatalf("out = %q, want the usage hint", out)
+	}
+}
+
+// TestPersonaCommandCreatesSession guards that /persona starts a new session
+// with an appended system prompt and switches the chat to it.
+func TestPersonaCommandCreatesSession(t *testing.T) {
+	var session *agent.Session
+	out := runCommand(t, nil, func(c *chat) {
+		c.personaCommand("/persona Reply only in haiku.")
+		session = c.session
+	})
+	if session == nil {
+		t.Fatal("persona did not create a session")
+	}
+	if !strings.Contains(out, "new persona session") {
+		t.Fatalf("out = %q, want the new-session notice", out)
+	}
+}
+
+// TestHistoryCommandEmpty guards that /history reports an empty session.
+func TestHistoryCommandEmpty(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		session, err := c.client.CreateSession(context.Background(), &agent.SessionConfig{Agent: "build"})
+		if err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+		c.session = session
+		c.historyCommand()
+	})
+	if !strings.Contains(out, "(no history)") {
+		t.Fatalf("out = %q, want the empty-history hint", out)
 	}
 }
 

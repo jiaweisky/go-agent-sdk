@@ -28,16 +28,28 @@ func (c *chat) drawStatusLocked(frame int) {
 }
 
 // statusLine renders what is running plus the usage totals, joined for the
-// bottom line.
+// bottom line. While an interrupt is armed it prompts for the second Esc.
 func (c *chat) statusLine(frame int) string {
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if work := c.workLabel(frame); work != "" {
 		parts = append(parts, work)
+	}
+	if c.interruptArmed {
+		parts = append(parts, "Esc again to interrupt")
 	}
 	if usage := c.usageLine(); usage != "" {
 		parts = append(parts, usage)
 	}
 	return strings.Join(parts, " · ")
+}
+
+// setInterruptArmed records whether a first Esc armed an interrupt, so the
+// status line can prompt for a second press.
+func (c *chat) setInterruptArmed(armed bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.interruptArmed = armed
+	c.drawStatusLocked(0)
 }
 
 // workLabel names what is running: the current tool of every busy task, or the

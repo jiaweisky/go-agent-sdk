@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -120,4 +121,21 @@ func serverMeta(info mcp.ServerMetadata) string {
 		return info.Version
 	}
 	return meta + " " + info.Version
+}
+
+// compactCommand summarizes the session history on demand, demonstrating the
+// SDK's session compaction. The summary itself is rendered from the compaction
+// events, so this only reports failures and the no-op case.
+func compactCommand(c *chat) {
+	if c.session == nil {
+		c.console.write("(no active session)\n")
+		return
+	}
+	compacted, err := c.session.Compact(context.Background())
+	switch {
+	case err != nil:
+		c.console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))
+	case !compacted:
+		c.console.write("(nothing to compact; the history is already short)\n")
+	}
 }

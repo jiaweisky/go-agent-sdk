@@ -114,13 +114,13 @@ func (e *editor) applyKey(state *lineState, r rune) (bool, error) {
 	return false, nil
 }
 
-// applyEscape consumes an escape sequence, or a lone Esc, which ends input.
+// applyEscape consumes an escape sequence, or a lone Esc, which is ignored
+// (exiting is Ctrl+C or Ctrl+D, matching opencode).
 func (e *editor) applyEscape(state *lineState) error {
 	// A lone Esc has no buffered follow-up rune; a real escape sequence (arrows,
 	// etc.) is sent as one write and shows up shortly after.
 	if !e.waitPending(30 * time.Millisecond) {
-		fmt.Fprint(e.out, "\r\n")
-		return io.EOF
+		return nil
 	}
 	key, err := e.readEscape()
 	if err != nil {

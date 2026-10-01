@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -54,44 +53,14 @@ func (u *chatUsage) addUsage(modelID string, providerMetadata map[string]map[str
 	}
 }
 
-// deepseekPricing is the per-million-token peak price in CNY.
-type deepseekPricing struct {
-	cacheHit  float64
-	cacheMiss float64
-	output    float64
-}
-
-// Peak-hour rates from https://api-docs.deepseek.com/zh-cn/quick_start/pricing.
-// Off-peak is half price.
-var (
-	deepseekFlashPricing = deepseekPricing{cacheHit: 0.04, cacheMiss: 2.0, output: 8.0}
-	deepseekProPricing   = deepseekPricing{cacheHit: 0.30, cacheMiss: 9.0, output: 27.0}
-)
-
-// deepseekPricingFor returns the DeepSeek schedule for modelID, if this demo can
-// price it. Only DeepSeek ids from the priced families are matched: keying on
-// "pro" alone would price another vendor's model (gemini-2.5-pro, gpt-5-pro)
-// with DeepSeek's schedule, and an unlisted DeepSeek id gets no invented rate.
-func deepseekPricingFor(modelID string) (deepseekPricing, bool) {
-	if !strings.HasPrefix(modelID, "deepseek") {
-		return deepseekPricing{}, false
-	}
-	switch {
-	case strings.Contains(modelID, "pro"):
-		return deepseekProPricing, true
-	case strings.Contains(modelID, "flash"):
-		return deepseekFlashPricing, true
-	default:
-		return deepseekPricing{}, false
-	}
-}
-
-// deepseekCost prices one turn. It returns ok=false for models it does not know.
+// deepseekCost prices one turn with the model's catalog pricing. It returns
+// ok=false for models the demo does not know.
 func deepseekCost(modelID string, cacheHit, cacheMiss, output float64, at time.Time) (float64, bool) {
-	pricing, ok := deepseekPricingFor(modelID)
+	meta, ok := modelMetadataFor(modelID)
 	if !ok {
 		return 0, false
 	}
+	pricing := meta.pricing
 	if !deepseekPeak(at) {
 		pricing.cacheHit /= 2
 		pricing.cacheMiss /= 2

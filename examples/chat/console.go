@@ -49,6 +49,9 @@ const (
 	stdinQueue = 64
 	// watchTick is the status-line refresh interval (spinner animation).
 	watchTick = 100 * time.Millisecond
+	// interruptWindow is how long a first Esc stays armed, so a second Esc
+	// within it interrupts the turn (matching opencode's "again to interrupt").
+	interruptWindow = 5 * time.Second
 )
 
 // console owns terminal input and output. On a TTY it runs a raw-mode,
@@ -143,14 +146,29 @@ func enqueue(ch chan rune, r rune) {
 	}
 }
 
-// watchInterrupt waits until done closes or the user presses Esc/Ctrl+C,
-// calling onInterrupt in the latter case. It reports whether an interrupt key
-// was pressed. onTick (if non-nil) is called about every watchTick with a
-// monotonically increasing frame counter, so callers can animate a spinner.
+// interruptAction is why watchInterrupt stopped watching a running turn.
+type interruptAction int
+
+const (
+	// interruptNone: the turn finished on its own.
+	interruptNone interruptAction = iota
+	// interruptAbort: Esc was pressed twice; the turn was aborted and the chat
+	// continues.
+	interruptAbort
+	// interruptExit: Ctrl+C; the turn was aborted and the chat should exit.
+	interruptExit
+)
+
+// watchInterrupt waits until done closes or the user interrupts the turn. A
+// first Esc arms the interrupt and calls onArm(true) so the UI can prompt for a
+// second press; a second Esc within interruptWindow aborts the turn and keeps
+// the chat alive. Ctrl+C aborts and asks the caller to exit. onTick (if non-nil)
+// is called about every watchTick with a monotonically increasing frame counter,
+// so callers can animate a spinner.
 //
 // Runes typed while a prompt owns stdin are routed to the editor by readStdin,
 // so the watcher only ever sees keys meant for the turn it is watching.
-func (c *console) watchInterrupt(done <-chan struct{}, onInterrupt func(), onTick func(int)) bool {
+func (c *console) watchInterrupt(done <-chan struct{}, abort func(), onTick func(int), onArm func(bool)) interruptAction {
 	ticker := time.NewTicker(watchTick)
 	defer ticker.Stop()
 	frame := 0
@@ -160,30 +178,70 @@ func (c *console) watchInterrupt(done <-chan struct{}, onInterrupt func(), onTic
 			onTick(frame)
 		}
 	}
+
+	armed := false
+	disarm := func() {
+		if armed {
+			armed = false
+			if onArm != nil {
+				onArm(false)
+			}
+		}
+	}
+	var armTimer *time.Timer
+	defer func() {
+		if armTimer != nil {
+			armTimer.Stop()
+		}
+		disarm()
+	}()
+
 	if c.keys == nil {
 		for {
 			select {
 			case <-done:
-				return false
+				return interruptNone
 			case <-ticker.C:
 				tick()
 			}
 		}
 	}
+
+	var armC <-chan time.Time
 	for {
 		select {
 		case <-done:
-			return false
+			return interruptNone
 		case <-ticker.C:
 			tick()
+		case <-armC:
+			armC = nil
+			disarm()
 		case r, ok := <-c.keys:
 			if !ok {
 				<-done
-				return false
+				return interruptNone
 			}
-			if r == keyEsc || r == keyCtrlC {
-				onInterrupt()
-				return true
+			switch r {
+			case keyCtrlC:
+				abort()
+				return interruptExit
+			case keyEsc:
+				if !armed {
+					armed = true
+					if onArm != nil {
+						onArm(true)
+					}
+					if armTimer == nil {
+						armTimer = time.NewTimer(interruptWindow)
+					} else {
+						armTimer.Reset(interruptWindow)
+					}
+					armC = armTimer.C
+					continue
+				}
+				abort()
+				return interruptAbort
 			}
 		}
 	}
