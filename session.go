@@ -129,6 +129,16 @@ func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event,
 	}
 }
 
+// Steer admits a prompt into the session's input queue with steer delivery and
+// returns immediately: it does not run the coordinator or subscribe to events.
+// The active turn picks the prompt up at its next step boundary; if no turn is
+// running, it stays queued until the next Send. Use it to feed input into a
+// turn already in flight without starting a new turn or duplicating its event
+// stream.
+func (s *Session) Steer(prompt string) error {
+	return s.client.rt.admit(s.id, prompt, schema.SessionDeliverySteer)
+}
+
 // turnEvents hands a turn's events to the caller with backpressure: the offer
 // blocks while the buffer is full, and close releases it once the caller stops
 // iterating.

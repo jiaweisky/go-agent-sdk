@@ -740,6 +740,7 @@ type MessageOptions struct { Prompt string; Mode string } // Mode: "queue"(默�
 func (s *Session) ID() string
 func (s *Session) Messages() ([]schema.SessionMessage, error)       // 历史读取
 func (s *Session) Send(ctx, MessageOptions) iter.Seq2[Event, error] // 本轮流，结尾 Idle
+func (s *Session) Steer(prompt string) error                        // 仅入队（steer），立即返回；由活动轮在下个 step 边界吸收
 func (s *Session) Compact(ctx) (bool, error)                        // 手动压缩历史（空闲时）；活动轮中返回 ErrSessionBusy
 func (s *Session) On(func(Event)) (unsubscribe func())
 func (s *Session) Abort()

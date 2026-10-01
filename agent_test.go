@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/user/go-agent-sdk/core"
+	coresession "github.com/user/go-agent-sdk/core/session"
 	"github.com/user/go-agent-sdk/core/tool"
 	"github.com/user/go-agent-sdk/core/util"
 	llmschema "github.com/user/go-agent-sdk/llm/schema"
@@ -135,6 +136,38 @@ func newTestClient(t testing.TB) *Client {
 		t.Fatalf("register agent: %v", err)
 	}
 	return client
+}
+
+func TestSessionSteerAdmitsWithoutRunningTurn(t *testing.T) {
+	client := newTestClient(t)
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer session.Close()
+
+	events := 0
+	unsubscribe := session.On(func(Event) { events++ })
+	defer unsubscribe()
+
+	if err := session.Steer("steer me"); err != nil {
+		t.Fatalf("steer: %v", err)
+	}
+
+	id := schema.SessionID(session.ID())
+	pending, err := coresession.HasPending(client.rt.db.DB, id, schema.SessionDeliverySteer)
+	if err != nil {
+		t.Fatalf("has pending: %v", err)
+	}
+	if !pending {
+		t.Fatal("steer input was not admitted")
+	}
+	if client.rt.coord.IsActive(id) {
+		t.Fatal("Steer started a turn")
+	}
+	if events != 0 {
+		t.Fatalf("Steer emitted %d events", events)
+	}
 }
 
 func TestClientOpenAICompatibleProvider(t *testing.T) {
