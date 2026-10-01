@@ -628,6 +628,66 @@ func TestSessionSend(t *testing.T) {
 	}
 }
 
+// TestSessionCompact guards on-demand compaction: after a turn records history,
+// Session.Compact summarizes it and the stored context starts at the summary.
+func TestSessionCompact(t *testing.T) {
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("test"),
+		Model:      "test-model",
+		Root:       t.TempDir(),
+		Permission: ApproveAll,
+		LLM:        fakeLLM{reply: "hello world"},
+		Compaction: &CompactionConfig{PreserveRecentTokens: 1},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	defer client.Close()
+	if err := client.RegisterAgent("build", AgentConfig{System: "You are a test."}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer session.Close()
+
+	for _, err := range session.Send(context.Background(), MessageOptions{Prompt: "hi"}) {
+		if err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+
+	var ended *CompactionEnded
+	unsubscribe := session.On(func(event Event) {
+		if e, ok := event.(CompactionEnded); ok {
+			ended = &e
+		}
+	})
+	defer unsubscribe()
+
+	compacted, err := session.Compact(context.Background())
+	if err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	if !compacted {
+		t.Fatal("expected the session to compact")
+	}
+	if ended == nil || ended.Text != "hello world" {
+		t.Fatalf("CompactionEnded = %+v, want the summary text", ended)
+	}
+	messages, err := session.Messages()
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if len(messages) == 0 {
+		t.Fatal("expected a compacted context")
+	}
+	if _, ok := messages[0].(schema.SessionMessageCompaction); !ok {
+		t.Fatalf("context starts with %T, want a compaction message", messages[0])
+	}
+}
+
 // TestSessionSendDoesNotDropEvents guards the backpressure handoff: a consumer
 // slower than the producer must still see every delta, so the buffer only
 // smooths bursts and never drops.

@@ -142,14 +142,33 @@ func (c *Compaction) CompactIfNeeded(input CompactionInput) (bool, error) {
 	return c.CompactAfterOverflow(input)
 }
 
+// Compact compacts the history on demand, regardless of the automatic
+// threshold. It reports whether anything was compacted.
+func (c *Compaction) Compact(input CompactionInput) (bool, error) {
+	return c.compact(input, "manual", false)
+}
+
 // CompactAfterOverflow compacts the history after the provider reported a context
 // overflow.
 func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
+	return c.compact(input, "auto", true)
+}
+
+// compact selects the history to summarize and publishes the summary. It skips
+// sessions whose model has no context limit unless requireLimit is false, so
+// manual compaction still works when the caller supplied no limits.
+func (c *Compaction) compact(input CompactionInput, reason string, requireLimit bool) (bool, error) {
 	limits := compactionModelLimits(input.Model)
-	if limits == nil || limits.Context <= 0 {
-		return false, nil
+	contextLimit := 0
+	if limits != nil {
+		contextLimit = limits.Context
 	}
-	contextLimit := limits.Context
+	if contextLimit <= 0 {
+		if requireLimit {
+			return false, nil
+		}
+		limits = nil
+	}
 	output := compactionOutput(input.Request, limits)
 
 	selected, ok := compactionSelect(input.Entries, c.config.Tokens)
@@ -179,7 +198,7 @@ func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
 		summaryOutput = compactionSummaryOutputTokens
 	}
 	summaryOutput = min(summaryOutput, compactionSummaryOutputTokens)
-	if util.TokenEstimate(summaryPrompt) > contextLimit-summaryOutput {
+	if contextLimit > 0 && util.TokenEstimate(summaryPrompt) > contextLimit-summaryOutput {
 		return false, nil
 	}
 
@@ -188,7 +207,7 @@ func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
 		"sessionID": input.SessionID,
 		"messageID": messageID,
 		"timestamp": time.Now().UnixMilli(),
-		"reason":    "auto",
+		"reason":    reason,
 	}); err != nil {
 		return false, err
 	}
@@ -205,7 +224,7 @@ func (c *Compaction) CompactAfterOverflow(input CompactionInput) (bool, error) {
 		"sessionID": input.SessionID,
 		"messageID": messageID,
 		"timestamp": time.Now().UnixMilli(),
-		"reason":    "auto",
+		"reason":    reason,
 		"text":      summary,
 		"recent":    selected.Recent,
 	}); err != nil {

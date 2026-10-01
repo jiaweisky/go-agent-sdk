@@ -43,6 +43,16 @@ func contextEpochBaselineSeq(db *database.Database, sessionID schema.SessionID) 
 	return &seq, nil
 }
 
+// ContextEpochBaseline returns the session's context-epoch baseline sequence, or
+// 0 when the session has no epoch.
+func ContextEpochBaseline(db *database.Database, sessionID schema.SessionID) (int64, error) {
+	seq, err := contextEpochBaselineSeq(db, sessionID)
+	if err != nil || seq == nil {
+		return 0, err
+	}
+	return *seq, nil
+}
+
 func messageRows(
 	db *database.Database,
 	sessionID schema.SessionID,

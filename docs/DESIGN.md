@@ -425,7 +425,7 @@ SessionRunner.Run(sessionID, force)
       → 检查队列输入 → 继续外层循环
 ```
 
-> 上下文压缩依赖模型的 `Limits`（`ModelInfo.Limit` → route defaults → `compactionModelLimits`）。**未设置 `Limits` 时自动压缩被禁用**，超长请求会直接以 provider 400 失败。SDK 不内置模型目录（catalog），由调用方按需提供 `Context`/`Output` 限额。
+> 上下文压缩依赖模型的 `Limits`（`ModelInfo.Limit` → route defaults → `compactionModelLimits`）。**未设置 `Limits` 时自动压缩被禁用**，超长请求会直接以 provider 400 失败。SDK 不内置模型目录（catalog），由调用方按需提供 `Context`/`Output` 限额。除自动压缩（阈值触发）与溢出后压缩外，`Session.Compact(ctx)` 提供**手动压缩**（空闲会话，无需 `Limits`，`reason` 记为 `manual`）。
 
 ### 6.2 Agent 定义
 
@@ -740,6 +740,7 @@ type MessageOptions struct { Prompt string; Mode string } // Mode: "queue"(默�
 func (s *Session) ID() string
 func (s *Session) Messages() ([]schema.SessionMessage, error)       // 历史读取
 func (s *Session) Send(ctx, MessageOptions) iter.Seq2[Event, error] // 本轮流，结尾 Idle
+func (s *Session) Compact(ctx) (bool, error)                        // 手动压缩历史（空闲时）；活动轮中返回 ErrSessionBusy
 func (s *Session) On(func(Event)) (unsubscribe func())
 func (s *Session) Abort()
 func (s *Session) Close() error

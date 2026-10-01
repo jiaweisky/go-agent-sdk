@@ -328,6 +328,15 @@ func (r *runtime) admit(sessionID schema.SessionID, prompt string, delivery sche
 	return err
 }
 
+// compact summarizes a session's history on demand. It refuses while a turn is
+// active so the summary cannot race the turn's own writes.
+func (r *runtime) compact(ctx context.Context, sessionID schema.SessionID) (bool, error) {
+	if r.coord != nil && r.coord.IsActive(sessionID) {
+		return false, ErrSessionBusy
+	}
+	return r.runner.Compact(ctx, sessionID)
+}
+
 func (r *runtime) setHooks(sessionID string, hooks *SessionHooks) {
 	r.hooksMu.Lock()
 	defer r.hooksMu.Unlock()

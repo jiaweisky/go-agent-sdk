@@ -42,6 +42,14 @@ func (c *Coordinator[K]) Active() []K {
 	return keys
 }
 
+// IsActive reports whether the key has an execution owned by this coordinator.
+func (c *Coordinator[K]) IsActive(key K) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.active[key]
+	return ok
+}
+
 // Run starts execution while idle or joins the active execution.
 func (c *Coordinator[K]) Run(ctx context.Context, key K) error {
 	c.mu.Lock()

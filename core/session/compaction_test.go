@@ -185,6 +185,27 @@ func TestCompactionCompactAfterOverflowSkipsWhenNoContextLimit(t *testing.T) {
 	}
 }
 
+func TestCompactionCompactOnDemandWithoutLimit(t *testing.T) {
+	model := compactionTestModel(0, 0)
+	publisher := &compactionTestPublisher{}
+	compaction := NewCompaction(CompactionDependencies{
+		Events:   publisher,
+		LLM:      compactionTextLLM("manual summary"),
+		Settings: CompactionSettings{Auto: false, Tokens: 1},
+	})
+	compacted, err := compaction.Compact(CompactionInput{
+		SessionID: "ses_1",
+		Entries:   []CompactionEntry{userEntry(1, "hello")},
+		Model:     model,
+	})
+	if err != nil || !compacted {
+		t.Fatalf("compacted = %v err = %v", compacted, err)
+	}
+	if publisher.ended["text"] != "manual summary" || publisher.ended["reason"] != "manual" {
+		t.Fatalf("ended = %+v", publisher.ended)
+	}
+}
+
 func TestCompactionCompactIfNeeded(t *testing.T) {
 	publisher := &compactionTestPublisher{}
 	compaction := NewCompaction(CompactionDependencies{

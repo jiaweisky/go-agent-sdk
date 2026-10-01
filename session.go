@@ -2,11 +2,16 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"sync"
 
 	"github.com/user/go-agent-sdk/schema"
 )
+
+// ErrSessionBusy is returned by Session.Compact while the session is running a
+// turn: compaction only runs on an idle session.
+var ErrSessionBusy = errors.New("session is busy")
 
 // SessionConfig configures a session.
 type SessionConfig struct {
@@ -64,6 +69,13 @@ func (s *Session) ID() string { return string(s.id) }
 // Messages returns the session's stored messages (user, assistant, tool parts).
 func (s *Session) Messages() ([]schema.SessionMessage, error) {
 	return s.client.rt.store.Context(s.id)
+}
+
+// Compact summarizes the session's history on demand, replacing the summarized
+// span with a summary message. It reports whether anything was compacted, and
+// fails with ErrSessionBusy while a turn is active.
+func (s *Session) Compact(ctx context.Context) (bool, error) {
+	return s.client.rt.compact(ctx, s.id)
 }
 
 // On subscribes to session events. The returned function unsubscribes.

@@ -89,6 +89,42 @@ func (r *LLMRunner) compactionStream(ctx context.Context, request llmschema.LLMR
 	return stream
 }
 
+// Compact summarizes a session's stored history on demand, replacing it with the
+// summary and the most recent messages. It reports whether anything was
+// compacted, and is intended to run while the session is idle.
+func (r *LLMRunner) Compact(ctx context.Context, sessionID schema.SessionID) (bool, error) {
+	stored, err := r.Store.Get(sessionID)
+	if err != nil {
+		return false, err
+	}
+	if stored == nil {
+		return false, fmt.Errorf("Session not found: %s", sessionID)
+	}
+	model, err := r.Models(*stored)
+	if err != nil {
+		return false, err
+	}
+	baseline, err := session.ContextEpochBaseline(r.DB, sessionID)
+	if err != nil {
+		return false, err
+	}
+	entries, err := session.EntriesForRunner(r.DB, sessionID, baseline)
+	if err != nil {
+		return false, err
+	}
+	request := llm.NewRequest(llm.RequestInput{
+		Model: model,
+		Http:  &llmschema.HttpOptions{Headers: sessionHeaders(sessionID, stored)},
+	})
+	return r.compaction.Compact(session.CompactionInput{
+		SessionID: sessionID,
+		Entries:   compactionEntries(entries),
+		Model:     model,
+		Request:   *request,
+		Context:   ctx,
+	})
+}
+
 // errInterrupted wraps context.Canceled, so callers can distinguish an
 // interrupted turn from a failed one with errors.Is.
 var errInterrupted = fmt.Errorf("session runner interrupted: %w", context.Canceled)
@@ -522,13 +558,7 @@ func buildTurnRequest(
 	if sessionIDShape.MatchString(string(sessionID)) {
 		promptCacheKey = string(sessionID)[4:]
 	}
-	headers := map[string]string{
-		"x-session-affinity": string(sessionID),
-		"X-Session-Id":       string(sessionID),
-	}
-	if stored.ParentID != nil {
-		headers["x-parent-session-id"] = string(*stored.ParentID)
-	}
+	headers := sessionHeaders(sessionID, stored)
 	systemParts := make([]llmschema.SystemPart, 0, 2)
 	if agent.Info != nil && agent.Info.System != nil && *agent.Info.System != "" {
 		systemParts = append(systemParts, llmschema.NewSystemPart(*agent.Info.System))
@@ -553,6 +583,19 @@ func buildTurnRequest(
 		Tools:           tools,
 		ToolChoice:      toolChoice(isLastStep),
 	})
+}
+
+// sessionHeaders carries the per-session routing headers every provider request
+// for the session shares.
+func sessionHeaders(sessionID schema.SessionID, stored *schema.SessionInfo) map[string]string {
+	headers := map[string]string{
+		"x-session-affinity": string(sessionID),
+		"X-Session-Id":       string(sessionID),
+	}
+	if stored.ParentID != nil {
+		headers["x-parent-session-id"] = string(*stored.ParentID)
+	}
+	return headers
 }
 
 // consumeStream publishes the provider stream and settles each tool call.
