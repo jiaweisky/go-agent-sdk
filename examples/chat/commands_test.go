@@ -88,6 +88,20 @@ func TestSkillsCommandWithPaddedInput(t *testing.T) {
 	}
 }
 
+// TestHelpCommandListsCommands guards that /help lists the available commands.
+func TestHelpCommandListsCommands(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		if !handleCommand(c, "/help") {
+			t.Error("/help was not recognised")
+		}
+	})
+	for _, want := range []string{"Commands:", "/new", "/sessions", "/delete", "/persona", "/history", "/help"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("out = %q, missing %q", out, want)
+		}
+	}
+}
+
 // TestCompactCommandWithoutSession guards that /compact is wired as a command;
 // without a session it reports the no-op rather than sending the text to the
 // model.

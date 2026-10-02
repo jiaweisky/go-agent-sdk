@@ -111,7 +111,7 @@ func writeBanner(console *console, yolo bool) {
 		console.write(yellow + "warning: --yolo skips all permission prompts" + reset + "\n")
 	}
 	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts a running turn)\n")
-	console.write(dim + "Commands: /new  /sessions [<#n|id>]  /delete <#n|id>  /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /history" + reset + "\n\n")
+	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /history" + reset + "\n\n")
 }
 
 // chatLoop prompts until stdin closes or the user interrupts a turn. The active
@@ -189,11 +189,27 @@ func handleCommand(c *chat, input string) bool {
 		c.personaCommand(command)
 	case command == "/history":
 		c.historyCommand()
+	case command == "/help" || strings.HasPrefix(command, "/help "):
+		c.helpCommand()
+	case strings.HasPrefix(command, "/"):
+		// A slash-prefixed input is a command attempt, not a prompt: report it
+		// instead of sending it to the model.
+		c.console.write("unknown command: " + commandName(command) + "\n")
 	default:
 		return false
 	}
 	c.console.write("\n")
 	return true
+}
+
+// commandName returns the command token of a slash command, dropping any
+// arguments, so "unknown command: /help" names the command rather than the
+// whole line.
+func commandName(command string) string {
+	if fields := strings.Fields(command); len(fields) > 0 {
+		return fields[0]
+	}
+	return command
 }
 
 // sendTurn drives one turn; rendering happens in the client event handler.

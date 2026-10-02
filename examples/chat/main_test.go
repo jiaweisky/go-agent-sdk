@@ -123,11 +123,22 @@ func TestHandleCommandTrimsInput(t *testing.T) {
 		t.Fatalf("out = %q, want the empty task list", out.String())
 	}
 
+	// An unknown slash command is reported, not sent to the model, and only the
+	// command token is named.
 	out.Reset()
-	if handleCommand(c, "/unknown") {
-		t.Fatal("a non-command was treated as one")
+	if !handleCommand(c, "/nope now") {
+		t.Fatal("an unknown slash command was not recognised")
+	}
+	if !strings.Contains(out.String(), "unknown command: /nope") {
+		t.Fatalf("out = %q, want the unknown-command hint", out.String())
+	}
+
+	// Plain input is a prompt, not a command.
+	out.Reset()
+	if handleCommand(c, "plain text") {
+		t.Fatal("plain input was treated as a command")
 	}
 	if out.String() != "" {
-		t.Fatalf("out = %q, want a non-command to print nothing", out.String())
+		t.Fatalf("out = %q, want plain input to print nothing", out.String())
 	}
 }

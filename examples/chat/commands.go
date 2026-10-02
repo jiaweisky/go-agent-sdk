@@ -123,6 +123,39 @@ func serverMeta(info mcp.ServerMetadata) string {
 	return meta + " " + info.Version
 }
 
+// helpCommand lists the slash commands. It mirrors the startup banner but adds
+// each command's arguments, aliases and a one-line description.
+func (c *chat) helpCommand() {
+	c.console.write(fmt.Sprintf("%sCommands:%s\n", bold, reset))
+	for _, entry := range helpCommands {
+		c.console.write(fmt.Sprintf("  %s%s%s — %s\n", cyan, entry.usage, reset, entry.summary))
+	}
+}
+
+// helpEntry is one row of the /help listing.
+type helpEntry struct {
+	usage   string
+	summary string
+}
+
+// helpCommands is the single source of truth for the available commands. Keep
+// it in sync with handleCommand.
+var helpCommands = []helpEntry{
+	{"/new, /clear", "start a new session"},
+	{"/sessions [<#n|id>]", "list sessions, or switch to one (/resume, /continue)"},
+	{"/delete <#n|id>", "delete a session"},
+	{"/skills", "list discovered skills"},
+	{"/agents", "list subagents"},
+	{"/mcps", "list MCP servers"},
+	{"/task [<#n>]", "list subagent tasks, or show one's output"},
+	{"/compact", "summarize the history now"},
+	{"/tool [add|remove <name>]", "list or manage runtime tools"},
+	{"/reference [add <name> <path> | remove <name>]", "list or manage reference sources"},
+	{"/persona <text>", "start a session with an appended system prompt"},
+	{"/history", "show the session's stored messages"},
+	{"/help", "show this help"},
+}
+
 // compactCommand summarizes the session history on demand, demonstrating the
 // SDK's session compaction. The summary itself is rendered from the compaction
 // events, so this only reports failures and the no-op case.
