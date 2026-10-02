@@ -287,10 +287,14 @@ func (c *console) drawStatusLocked() {
 // trimmed (on both the TTY and the piped path), so callers can compare it to a
 // command or test it for emptiness.
 func (c *console) prompt(prompt string) (string, error) {
-	c.prompting.Store(true)
-	defer c.prompting.Store(false)
 	c.mu.Lock()
+	// Claim stdin only while holding the lock, and release it before unlocking.
+	// Parallel tool calls can request permission (or questions) at the same
+	// time; without this a waiting prompt would find stdin already handed back
+	// and read from the turn watcher's channel instead of the editor.
+	c.prompting.Store(true)
 	defer func() {
+		c.prompting.Store(false)
 		// The editor wrote directly to the terminal; the next status update
 		// redraws from a clean line.
 		c.statusDrawn = false
