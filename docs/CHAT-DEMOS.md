@@ -86,10 +86,14 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   所以这几条渲染分支目前不会触发；补生产者属 SDK 侧改动、且与"对齐 V2"相悖，已在
   `events.go` / `schema/session_event.go` 注释说明。
 
-### 2.6 运行时注册 agent — 中
+### 2.6 运行时注册 agent — 中 ✅ 已实现
 
-- API：`Client.RegisterAgent`（`client.go:214`）、`AgentConfig{Mode,Hidden,Steps,Model,Permissions}`（`client.go:172`）
-- 切入点：`/agent add` 注册一个 hidden 子 agent，`/agents` 立即出现；用 `Steps` 演示步数上限。
+- 实现：`/agent add <name> [<description>]`（`examples/chat/agent.go`）调用 `Client.RegisterAgent`，注册一个
+  hidden subagent（`Mode=subagent`、`Hidden`、`Steps=2`、allow-all 权限、生成的 system prompt）。
+- 效果：`/agents` 立即列出它（`task.go` 的 `SubagentTypes` 只过滤 primary/被 deny，不过滤 hidden）；
+  模型可用 `task` 委派给它，`Steps=2` 演示步数上限。
+- 保护：若名字已存在则拒绝（`RegisterAgent` 的 `draft.Update` 会**原地覆盖**已有 agent，含内置 build）。
+- 备注：`AgentConfig.Model` 未在命令里暴露（聚焦 Mode/Hidden/Steps/Description/System）。
 
 ### 2.7 SystemPrompt 模式与 section — 中
 
