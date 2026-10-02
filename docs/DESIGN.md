@@ -707,6 +707,15 @@ type ClientOptions struct {
     Shell            string                    // bash 工具使用的 shell（默认 sh）
     Locale           string                    // 列表排序 locale；空则用 LC_ALL/LC_COLLATE/LANG
     Compaction       *CompactionConfig         // 上下文压缩（Auto / PreserveRecentTokens / Reserved）
+    Title            *TitleConfig              // 自动会话标题（Auto，默认关闭）；见 §
+}
+// TitleConfig 控制内置 "title" agent 的自动标题生成：首个用户轮后，若会话仍是默认标题
+// 且历史恰好一条 user 消息，则用 "title" agent 生成标题并持久化（session.next.title.updated）。
+// 模型优先级：TitleConfig.Model → "title" agent 的 model → 会话 model。内置 agent 的 model
+// 可经 RegisterAgent("title", AgentConfig{Model: ...}) 或插件指定。
+type TitleConfig struct {
+    Auto  *bool  // 是否启用；nil 默认关闭
+    Model string // 覆盖标题模型；空则回退到 title agent / 会话 model
 }
 // 用 NewModelInfo(protocol, modelID, baseURL, limit) 构造受支持的 ModelInfo。
 // ModelInfo 是 models.dev catalog 的窄输入替代：调用方提供 limits/endpoint/headers/variants，
@@ -716,7 +725,7 @@ func NewClient(*ClientOptions) (*Client, error)
 func (c *Client) RegisterAgent(name string, cfg AgentConfig) error
 func (c *Client) CreateSession(ctx, *SessionConfig) (*Session, error)
 func (c *Client) ResumeSession(ctx, sessionID string, *SessionConfig) (*Session, error)
-func (c *Client) ListSessions(ctx) ([]SessionInfo, error)
+func (c *Client) ListSessions(ctx) ([]SessionInfo, error) // SessionInfo.ParentID 区分顶层/子会话
 func (c *Client) DeleteSession(ctx, sessionID string) error
 func (c *Client) On(func(Event)) (unsubscribe func())   // 全局订阅（含子 agent 会话）
 func (c *Client) SessionMessages(sessionID string) ([]schema.SessionMessage, error) // 读任意会话（含子会话）的消息
@@ -756,8 +765,8 @@ func (s *Session) Close() error
 type Event interface{ eventKind() string }
 // TextDelta / TextEnded / ReasoningDelta / ReasoningStarted / ReasoningEnded /
 // ToolInputStarted / ToolCalled / ToolProgress / ToolSuccess / ToolFailed /
-// StepStarted / StepEnded / StepFailed / Retried / SessionStatus / Usage /
-// CompactionStarted / CompactionEnded / ShellStarted / ShellEnded /
+// StepStarted / StepEnded / StepFailed / Retried / SessionStatus / TitleUpdated /
+// Usage / CompactionStarted / CompactionEnded / ShellStarted / ShellEnded /
 // ErrorEvent / Idle
 
 // ─── 用户工具 ───────────────────────────────────────────

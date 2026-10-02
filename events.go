@@ -182,6 +182,15 @@ type SessionStatus struct {
 
 func (e SessionStatus) sessionID() string { return e.SessionID }
 
+// TitleUpdated reports that the session's title changed, so callers can refresh
+// a session list without re-querying.
+type TitleUpdated struct {
+	SessionID string
+	Title     string
+}
+
+func (e TitleUpdated) sessionID() string { return e.SessionID }
+
 // CompactionStarted reports that context compaction started.
 type CompactionStarted struct {
 	SessionID string
@@ -364,6 +373,8 @@ func mapRunEvent(eventType string, data map[string]any, sessionID, messageID str
 		return Retried{SessionID: sessionID, Attempt: data["attempt"], Error: data["error"]}, true
 	case schema.SessionStatusEventStatus.Type:
 		return SessionStatus{SessionID: sessionID, Status: sessionStatusType(data["status"])}, true
+	case schema.SessionEventTitleUpdated.Type:
+		return TitleUpdated{SessionID: sessionID, Title: fieldString(data, "title")}, true
 	case schema.SessionEventCompactionStarted.Type:
 		return CompactionStarted{SessionID: sessionID, MessageID: fieldString(data, "messageID"), Reason: data["reason"]}, true
 	case schema.SessionEventStepStarted.Type:

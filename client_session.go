@@ -13,10 +13,13 @@ import (
 
 // SessionInfo summarizes a stored session.
 type SessionInfo struct {
-	ID          string
-	Title       string
-	Agent       string
-	Directory   string
+	ID        string
+	Title     string
+	Agent     string
+	Directory string
+	// ParentID is the parent session id for a subagent (task) child session,
+	// or empty for a top-level session.
+	ParentID    string
 	TimeCreated int64
 	TimeUpdated int64
 }
@@ -107,11 +110,13 @@ func (c *Client) SessionMessages(sessionID string) ([]schema.SessionMessage, err
 	return c.rt.store.Context(schema.SessionID(sessionID))
 }
 
-// ListSessions returns the sessions in the client's project, newest first. The
-// context is accepted for API symmetry; the query is synchronous.
+// ListSessions returns the sessions in the client's project, newest first,
+// including subagent (task) child sessions; use SessionInfo.ParentID to tell
+// the two apart. The context is accepted for API symmetry; the query is
+// synchronous.
 func (c *Client) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 	rows, err := c.rt.db.DB.Query(
-		"SELECT `id`,`title`,`agent`,`directory`,`time_created`,`time_updated` FROM `session` WHERE `project_id` = ? ORDER BY `time_updated` DESC",
+		"SELECT `id`,`title`,`agent`,`directory`,`parent_id`,`time_created`,`time_updated` FROM `session` WHERE `project_id` = ? ORDER BY `time_updated` DESC",
 		string(c.rt.projectID),
 	)
 	if err != nil {
@@ -121,12 +126,15 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 	var result []SessionInfo
 	for rows.Next() {
 		var info SessionInfo
-		var agent *string
-		if err := rows.Scan(&info.ID, &info.Title, &agent, &info.Directory, &info.TimeCreated, &info.TimeUpdated); err != nil {
+		var agent, parentID *string
+		if err := rows.Scan(&info.ID, &info.Title, &agent, &info.Directory, &parentID, &info.TimeCreated, &info.TimeUpdated); err != nil {
 			return nil, err
 		}
 		if agent != nil {
 			info.Agent = *agent
+		}
+		if parentID != nil {
+			info.ParentID = *parentID
 		}
 		result = append(result, info)
 	}
@@ -182,7 +190,7 @@ func (c *Client) insertSession(cfg *SessionConfig, sessionID schema.SessionID, a
 	providerID := string(c.opts.Protocol)
 	title := cfg.Title
 	if title == "" {
-		title = "Session"
+		title = defaultSessionTitle(time.Now())
 	}
 	permissionJSON, err := encodePermissionRules(cfg.Permissions)
 	if err != nil {
@@ -199,6 +207,13 @@ func (c *Client) insertSession(cfg *SessionConfig, sessionID schema.SessionID, a
 		Permission: permissionJSON,
 		Revert:     &revert,
 	})
+}
+
+// defaultSessionTitle is the placeholder title a fresh session carries until
+// the title agent replaces it. The shape matches opencode (an ISO-8601 UTC
+// timestamp), so IsDefaultTitle can recognize it.
+func defaultSessionTitle(now time.Time) string {
+	return "New session - " + now.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
 func agentIDOf(info *schema.SessionInfo) string {

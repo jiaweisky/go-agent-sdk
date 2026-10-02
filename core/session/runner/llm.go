@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +64,7 @@ type LLMRunner struct {
 	SkillGuidance     *skill.Guidance
 	ReferenceGuidance *reference.Guidance
 	Compaction        session.CompactionSettings
+	Title             session.TitleSettings
 	Snapshots         Snapshotter
 	DB                *database.Database
 
@@ -181,7 +183,156 @@ func (r *LLMRunner) Run(ctx context.Context, input RunInput) error {
 		}
 		promotion = queuePromotion(shouldRun)
 	}
+	r.ensureTitle(ctx, input.SessionID)
 	return nil
+}
+
+// ensureTitle generates a session title once, after the first user turn, when
+// title generation is enabled and the session is a root with a default title
+// and exactly one user message. Failures are ignored: a missing title must not
+// fail the turn.
+func (r *LLMRunner) ensureTitle(ctx context.Context, sessionID schema.SessionID) {
+	if !r.Title.Auto || ctx.Err() != nil {
+		return
+	}
+	stored, err := r.Store.Get(sessionID)
+	if err != nil || stored == nil {
+		return
+	}
+	if !titleEligible(stored) {
+		return
+	}
+	prompt, ok := singleUserPrompt(r.DB, sessionID)
+	if !ok {
+		return
+	}
+	titleID := "title"
+	agent := r.Agents.Select(sessionID, &titleID)
+	if agent.Info == nil {
+		return
+	}
+	model, ok := r.titleModel(stored, agent.Info)
+	if !ok {
+		return
+	}
+	title, ok := r.generateTitle(ctx, titleRequest(sessionID, stored, agent.Info, model, prompt))
+	if !ok {
+		return
+	}
+	r.publishTitle(sessionID, title)
+}
+
+// titleEligible reports whether a session can still be auto-titled: it must be
+// a root whose title is still the placeholder.
+func titleEligible(stored *schema.SessionInfo) bool {
+	return stored.ParentID == nil && session.IsDefaultTitle(stored.Title)
+}
+
+// singleUserPrompt returns the text of a session's only user message, and
+// whether the history has exactly one non-empty user message. A conversation
+// with any other shape is not titled.
+func singleUserPrompt(db *database.Database, sessionID schema.SessionID) (string, bool) {
+	entries, err := session.EntriesForRunner(db, sessionID, 0)
+	if err != nil {
+		return "", false
+	}
+	prompt := ""
+	users := 0
+	for _, entry := range entries {
+		user, ok := entry.Message.(schema.SessionMessageUser)
+		if !ok {
+			continue
+		}
+		users++
+		if prompt == "" {
+			prompt = strings.TrimSpace(user.Text)
+		}
+	}
+	return prompt, users == 1 && prompt != ""
+}
+
+// titleModel resolves the model used to generate titles: the explicit
+// configuration, the title agent's own model, or the session model, in order of
+// precedence. It reports false when even the session model cannot be resolved.
+func (r *LLMRunner) titleModel(stored *schema.SessionInfo, agent *schema.AgentInfo) (route.Model, bool) {
+	model, ok := r.modelForRef(stored, stored.Model)
+	if !ok {
+		return route.Model{}, false
+	}
+	if agent.Model != nil {
+		if agentModel, valid := r.modelForRef(stored, agent.Model); valid {
+			model = agentModel
+		}
+	}
+	if r.Title.Model != "" {
+		override := &schema.ModelRef{ID: schema.ModelID(r.Title.Model)}
+		if overrideModel, valid := r.modelForRef(stored, override); valid {
+			model = overrideModel
+		}
+	}
+	return model, true
+}
+
+// modelForRef resolves a model reference against the session's routing context.
+func (r *LLMRunner) modelForRef(stored *schema.SessionInfo, ref *schema.ModelRef) (route.Model, bool) {
+	synthetic := *stored
+	synthetic.Model = ref
+	model, err := r.Models(synthetic)
+	if err != nil {
+		return route.Model{}, false
+	}
+	return model, true
+}
+
+// titleRequest builds the provider request that asks the title agent to name the
+// conversation.
+func titleRequest(
+	sessionID schema.SessionID,
+	stored *schema.SessionInfo,
+	agent *schema.AgentInfo,
+	model route.Model,
+	prompt string,
+) llm.LLMRequest {
+	var system []llmschema.SystemPart
+	if agent.System != nil && *agent.System != "" {
+		system = append(system, llmschema.NewSystemPart(*agent.System))
+	}
+	return *llm.NewRequest(llm.RequestInput{
+		Model:    model,
+		Http:     &llmschema.HttpOptions{Headers: sessionHeaders(sessionID, stored)},
+		System:   system,
+		Messages: []llm.Message{llmschema.MessageUser(session.TitlePromptPrefix + prompt)},
+		Tools:    []llm.ToolDefinition{},
+	})
+}
+
+// generateTitle streams the title request and returns the cleaned reply, or
+// false when the stream failed or produced nothing usable.
+func (r *LLMRunner) generateTitle(ctx context.Context, request llm.LLMRequest) (string, bool) {
+	stream, err := r.LLM.Stream(ctx, &request)
+	if err != nil {
+		return "", false
+	}
+	var chunks []string
+	for event, streamErr := range stream {
+		if streamErr != nil {
+			return "", false
+		}
+		if event.IsTextDelta() {
+			chunks = append(chunks, event.Text)
+		}
+	}
+	title := session.CleanTitle(strings.Join(chunks, ""))
+	return title, title != ""
+}
+
+// publishTitle records a generated title as a durable session event.
+func (r *LLMRunner) publishTitle(sessionID schema.SessionID, title string) {
+	_, _ = r.Events.Publish(schema.SessionEventTitleUpdated, map[string]any{
+		"timestamp": time.Now().UnixMilli(),
+		"sessionID": sessionID,
+		"title":     title,
+	})
 }
 
 // deliveryPromotion is the initial input kind to promote, if any.

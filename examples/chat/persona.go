@@ -25,11 +25,7 @@ func (c *chat) personaCommand(input string) {
 		c.console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))
 		return
 	}
-	previous := c.session
-	c.switchSession(session)
-	if previous != nil {
-		_ = previous.Close()
-	}
+	c.replaceSession(session)
 	c.console.write(fmt.Sprintf("new persona session %s%s%s\n", cyan, session.ID(), reset))
 }
 

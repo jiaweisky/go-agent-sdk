@@ -16,11 +16,11 @@ func TestSessionEventDurableVersions(t *testing.T) {
 	if SessionEventTextDelta.Durable != nil {
 		t.Fatalf("text delta should be live-only")
 	}
-	if len(SessionEventDurableDefinitions) != 28 {
-		t.Fatalf("durable definitions = %d, want 28", len(SessionEventDurableDefinitions))
+	if len(SessionEventDurableDefinitions) != 29 {
+		t.Fatalf("durable definitions = %d, want 29", len(SessionEventDurableDefinitions))
 	}
-	if len(SessionEventDefinitions) != 32 {
-		t.Fatalf("definitions = %d, want 32", len(SessionEventDefinitions))
+	if len(SessionEventDefinitions) != 33 {
+		t.Fatalf("definitions = %d, want 33", len(SessionEventDefinitions))
 	}
 }
 

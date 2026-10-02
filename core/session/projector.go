@@ -40,6 +40,7 @@ func RegisterProjectors(events ProjectRegistrar) error {
 		{schema.SessionEventMoved, projectMoved},
 		{schema.SessionEventAgentSwitched, projectAgentSwitched},
 		{schema.SessionEventModelSwitched, projectModelSwitched},
+		{schema.SessionEventTitleUpdated, projectTitleUpdated},
 		{schema.SessionEventPrompted, projectPrompted},
 		{schema.SessionEventPromptAdmitted, projectPromptAdmitted},
 		{schema.SessionEventContextUpdated, runProjector},
@@ -787,6 +788,18 @@ func projectModelSwitched(event schema.EventPayload, tx DB) error {
 		return err
 	}
 	return runProjector(event, tx)
+}
+
+func projectTitleUpdated(event schema.EventPayload, tx DB) error {
+	data, err := decodeEventData[schema.SessionEventTitleUpdatedData](event.Data)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(
+		"UPDATE `session` SET `title` = ?, `time_updated` = ? WHERE `id` = ?",
+		data.Title, int64(data.Timestamp), string(data.SessionID),
+	)
+	return err
 }
 
 func projectPrompted(event schema.EventPayload, tx DB) error {

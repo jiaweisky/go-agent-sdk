@@ -96,6 +96,20 @@ type ClientOptions struct {
 	Locale string
 	// Compaction controls automatic history compaction. Nil uses the defaults.
 	Compaction *CompactionConfig
+	// Title controls automatic session title generation. Nil keeps it disabled.
+	Title *TitleConfig
+}
+
+// TitleConfig controls automatic session title generation. The SDK runs the
+// built-in "title" agent over the first user message once per session and
+// stores the result as the session title.
+type TitleConfig struct {
+	// Auto enables title generation. Nil keeps the default (disabled).
+	Auto *bool
+	// Model overrides the model used to generate titles, taking priority over
+	// the built-in "title" agent's own model. Empty falls back to the title
+	// agent's model and then to the session's model.
+	Model string
 }
 
 // DefaultName is the application name reported to MCP servers when

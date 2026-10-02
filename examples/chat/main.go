@@ -111,11 +111,11 @@ func writeBanner(console *console, yolo bool) {
 		console.write(yellow + "warning: --yolo skips all permission prompts" + reset + "\n")
 	}
 	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts a running turn)\n")
-	console.write(dim + "Commands: /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /history" + reset + "\n\n")
+	console.write(dim + "Commands: /new  /sessions [<#n|id>]  /delete <#n|id>  /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /history" + reset + "\n\n")
 }
 
 // chatLoop prompts until stdin closes or the user interrupts a turn. The active
-// session lives on the renderer, so /persona can replace it.
+// session lives on the renderer, so /new, /sessions and /persona can replace it.
 func chatLoop(ctx context.Context, console *console, renderer *chat) error {
 	for {
 		input, err := console.prompt("You: ")
@@ -163,6 +163,14 @@ func runTurn(ctx context.Context, console *console, renderer *chat, input string
 // here so that "/skills " (or a leading space) is still a command.
 func handleCommand(c *chat, input string) bool {
 	switch command := strings.TrimSpace(input); {
+	case command == "/new" || command == "/clear":
+		c.newCommand()
+	case command == "/sessions" || strings.HasPrefix(command, "/sessions ") ||
+		command == "/resume" || strings.HasPrefix(command, "/resume ") ||
+		command == "/continue" || strings.HasPrefix(command, "/continue "):
+		c.sessionsCommand(command)
+	case command == "/delete" || strings.HasPrefix(command, "/delete "):
+		c.deleteCommand(command)
 	case command == "/skills":
 		c.skillsCommand()
 	case command == "/agents":
@@ -208,10 +216,14 @@ func clientOptions(console *console, yolo bool) []util.Option {
 	// context so it can read them when relevant.
 	docsDir := filepath.Join(filepath.Dir(filepath.Dir(util.ExampleDir())), "docs")
 	docsDescription := "go-agent-sdk design and porting documentation"
+	titleEnabled := true
 	options := []util.Option{
 		util.WithQuestion(interactiveQuestion(console)),
 		util.WithMCP(weatherMCP()...),
 		util.WithModelLimits(modelLimits),
+		// Generate a session title from the first user message, so /sessions
+		// lists something more useful than the placeholder.
+		util.WithTitle(agent.TitleConfig{Auto: &titleEnabled}),
 		// Keep only a small tail of history verbatim so /compact has something
 		// to summarize in a short demo session.
 		util.WithCompaction(agent.CompactionConfig{PreserveRecentTokens: 2000}),

@@ -83,6 +83,13 @@ func WithCompaction(config agent.CompactionConfig) Option {
 	}
 }
 
+// WithTitle overrides the client's automatic session title settings.
+func WithTitle(config agent.TitleConfig) Option {
+	return func(opts *agent.ClientOptions) {
+		opts.Title = &config
+	}
+}
+
 // WithReference registers a named reference source injected into the model's
 // system context.
 func WithReference(name string, source core.ReferenceSource) Option {

@@ -22,8 +22,9 @@ type chat struct {
 	usage      chatUsage
 	busy       map[string]bool
 	parentBusy bool
-	// session is the active session; /persona replaces it, so chatLoop reads it
-	// from here instead of a fixed local.
+	// session is the active session; the session commands (/new, /sessions,
+	// /delete, /persona) replace it, so chatLoop reads it from here instead of
+	// a fixed local.
 	session *agent.Session
 	// tasks tracks the subagent tasks this chat started.
 	tasks taskSet

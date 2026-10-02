@@ -18,6 +18,11 @@ type SessionEventModelSwitchedData struct {
 	Model     ModelRef  `json:"model"`
 }
 
+type SessionEventTitleUpdatedData struct {
+	SessionEventEnvelope
+	Title string `json:"title"`
+}
+
 type SessionEventMovedData struct {
 	SessionEventEnvelope
 	Location     LocationRef   `json:"location"`

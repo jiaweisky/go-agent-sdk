@@ -31,6 +31,14 @@ var SessionEventModelSwitched = Define(DefineInput{
 	},
 })
 
+var SessionEventTitleUpdated = Define(DefineInput{
+	Type:    "session.next.title.updated",
+	Durable: sessionEventDurable,
+	Schema: map[string]any{
+		"timestamp": nil, "sessionID": nil, "title": nil,
+	},
+})
+
 var SessionEventMoved = Define(DefineInput{
 	Type:    "session.next.moved",
 	Durable: sessionEventDurable,
@@ -277,6 +285,7 @@ var SessionEventRevertCommitted = Define(DefineInput{
 var SessionEventDurableDefinitions = Inventory(
 	SessionEventAgentSwitched,
 	SessionEventModelSwitched,
+	SessionEventTitleUpdated,
 	SessionEventMoved,
 	SessionEventPrompted,
 	SessionEventPromptAdmitted,
@@ -310,6 +319,7 @@ var SessionEventDurableDefinitions = Inventory(
 var SessionEventDefinitions = Inventory(
 	SessionEventAgentSwitched,
 	SessionEventModelSwitched,
+	SessionEventTitleUpdated,
 	SessionEventMoved,
 	SessionEventPrompted,
 	SessionEventPromptAdmitted,

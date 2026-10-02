@@ -229,7 +229,10 @@ func (s *sessionAgents) remove(sessionID schema.SessionID) {
 }
 
 func (s *sessionAgents) Select(sessionID schema.SessionID, id *string) core.AgentSelection {
-	if info, ok := s.effectiveFor(sessionID); ok {
+	// A session-scoped override (a derived agent) only answers for its own base
+	// agent. Other ids, such as the built-in "title" agent, resolve from the
+	// shared registry.
+	if info, ok := s.effectiveFor(sessionID); ok && (id == nil || *id == "" || baseAgentID(string(info.ID)) == *id) {
 		selected := info
 		return core.AgentSelection{ID: selected.ID, Info: &selected}
 	}
@@ -518,6 +521,7 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		SkillGuidance:     skill.NewGuidance(r.skills, ruleEvaluator{}, locale),
 		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: r.reference}, locale),
 		Compaction:        compactionSettings(opts),
+		Title:             titleSettings(opts),
 		Snapshots:         buildSnapshots(git, global, &r.location),
 		DB:                r.db,
 	})
@@ -900,6 +904,20 @@ func compactionSettings(opts *ClientOptions) session.CompactionSettings {
 	if opts.Compaction.PreserveRecentTokens > 0 {
 		settings.Tokens = opts.Compaction.PreserveRecentTokens
 	}
+	return settings
+}
+
+// titleSettings maps ClientOptions.Title to the title settings, applying the
+// built-in default (disabled) for a nil config.
+func titleSettings(opts *ClientOptions) session.TitleSettings {
+	settings := session.DefaultTitleSettings()
+	if opts.Title == nil {
+		return settings
+	}
+	if opts.Title.Auto != nil {
+		settings.Auto = *opts.Title.Auto
+	}
+	settings.Model = opts.Title.Model
 	return settings
 }
 
