@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"sync"
+	"time"
 
 	"github.com/user/go-agent-sdk/schema"
 )
@@ -76,6 +78,72 @@ func (s *Session) Messages() ([]schema.SessionMessage, error) {
 // fails with ErrSessionBusy while a turn is active.
 func (s *Session) Compact(ctx context.Context) (bool, error) {
 	return s.client.rt.compact(ctx, s.id)
+}
+
+// SetModel switches the session's model. The change takes effect on the next
+// turn: it records a model-switched event that updates the stored session, so
+// the session is kept rather than replaced. Setting the current model is a
+// no-op. An empty model ref provider keeps the one the session routes through.
+func (s *Session) SetModel(model schema.ModelRef) error {
+	stored, err := s.client.rt.store.Get(s.id)
+	if err != nil {
+		return err
+	}
+	if stored == nil {
+		return fmt.Errorf("session not found: %s", s.id)
+	}
+	if model.ProviderID == "" && stored.Model != nil {
+		model.ProviderID = stored.Model.ProviderID
+	}
+	if sameModelRef(stored.Model, model) {
+		return nil
+	}
+	_, err = s.client.rt.events.Publish(schema.SessionEventModelSwitched, map[string]any{
+		"sessionID": string(s.id),
+		"messageID": schema.NewMessageID(),
+		"timestamp": time.Now().UnixMilli(),
+		"model":     model,
+	}, nil)
+	return err
+}
+
+// SetAgent switches the session's agent. The change takes effect on the next
+// turn: it records an agent-switched event that updates the stored session, so
+// the session is kept rather than replaced. Unlike SetModel it always records
+// the switch, matching the upstream operation.
+func (s *Session) SetAgent(agentID string) error {
+	stored, err := s.client.rt.store.Get(s.id)
+	if err != nil {
+		return err
+	}
+	if stored == nil {
+		return fmt.Errorf("session not found: %s", s.id)
+	}
+	_, err = s.client.rt.events.Publish(schema.SessionEventAgentSwitched, map[string]any{
+		"sessionID": string(s.id),
+		"messageID": schema.NewMessageID(),
+		"timestamp": time.Now().UnixMilli(),
+		"agent":     agentID,
+	}, nil)
+	return err
+}
+
+// sameModelRef reports whether two references select the same model and variant,
+// treating a missing variant as the model's default.
+func sameModelRef(current *schema.ModelRef, next schema.ModelRef) bool {
+	if current == nil {
+		return false
+	}
+	return current.ID == next.ID &&
+		current.ProviderID == next.ProviderID &&
+		variantOrDefault(current.Variant) == variantOrDefault(next.Variant)
+}
+
+func variantOrDefault(variant *schema.ModelVariantID) string {
+	if variant == nil || *variant == "" {
+		return "default"
+	}
+	return string(*variant)
 }
 
 // On subscribes to session events. The returned function unsubscribes.
