@@ -12,6 +12,16 @@
 
 ## 移植规则
 
+### 对齐目标：以 v2 core 为准
+
+**对齐目标是 v2 core（`packages/core/src/`）**：Go 的行为与结构应对齐 v2 core；v2 core 尚未实现或未定义的部分（包括它源码里的 TODO）默认**不自行发挥**，等 v2 落地再跟。
+
+**需要对 V1 对齐的部分属于例外**：必须先与用户专门讨论并确认，再记入下方「例外清单」。判定信号参考「移植范围」一节的 legacy 信号。
+
+**例外清单**：
+- **V1 对齐**（v2 core 没有、但已实现）：`task` 工具与子会话（`task.go` / `task_run.go`）、自动标题生成（`TitleConfig` / `ensureTitle`）。
+- **v2 范围内刻意排除**：`websearch` 工具——v2 core `tool/websearch.ts` 已实现并注册，但 MVP 内置工具范围限定为 11 个（见 `docs/DESIGN.md`）。
+
 ### 移植范围：legacy / v1 代码默认不移植
 
 默认只移植 **v2 core**（`packages/core/src/`）。**legacy / v1 代码默认不移植**，除非确认它是 v2 core 的必需依赖——此时**先与用户确认**再动手。

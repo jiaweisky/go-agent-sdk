@@ -11,6 +11,8 @@ import (
 
 const WriteName = "write"
 
+// TODO: Revisit whether model-facing mutation schemas should prefer absolute
+// `filePath` naming for trained-in compatibility after evaluating model behavior.
 var WriteInputSchema = jsonschema.Object(
 	jsonschema.Required("path", jsonschema.String(jsonschema.Description(
 		"File path to write. Relative paths resolve within the active Location. "+
@@ -51,6 +53,12 @@ type WriteDeps struct {
 	Files      core.FileMutation
 	Permission core.Permission
 }
+
+// Deferred V2 write UX integrations remain visible at the model-facing seam.
+// TODO: Add formatter integration after V2 formatter runtime exists.
+// TODO: Publish watcher/file-edit events after V2 watcher integration exists.
+// TODO: Add snapshots / undo after design exists.
+// TODO: Add LSP notification and diagnostics after V2 LSP runtime exists.
 
 func MakeWrite(deps WriteDeps) *Def[WriteInput, WriteOutput, WriteOutput] {
 	return Make(Config[WriteInput, WriteOutput, WriteOutput]{
