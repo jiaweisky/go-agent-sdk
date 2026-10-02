@@ -37,11 +37,11 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   - `OnErrorOccurred`
 - 价值：覆盖面最大，几乎每个 hook 都能在 REPL 里立刻看到效果。
 
-### 2.2 Steer（运行中改道）— 高
+### 2.2 Steer（运行中改道）— 高 ✅ 已实现
 
-- API：`Session.Steer`（`session.go:138`）、`MessageOptions.Mode="steer"`（`session.go:44`）
-- 现状：`sendTurn` 只用默认 queue。
-- 切入点：turn 进行中按 Enter 把输入作为 steer 送进当前轮（而非新轮），或加 `/steer <text>`；状态栏提示。
+- API：`Session.Steer`（`session.go:138`）
+- 实现：turn 进行中键入文本会在状态栏显示 `steer: <draft>`，Enter 通过 `Session.Steer` 送进当前轮
+  （`watchInterrupt` 新增 steer 回调与转义序列处理，见 `examples/chat/turn.go`）；Esc/Ctrl+C 中断行为不变。
 
 ### 2.3 权限 Always / 持久化 — 高
 

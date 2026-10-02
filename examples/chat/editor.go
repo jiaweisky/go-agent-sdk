@@ -114,12 +114,12 @@ func (e *editor) applyKey(state *lineState, r rune) (bool, error) {
 	return false, nil
 }
 
-// applyEscape consumes an escape sequence, or a lone Esc, which is ignored
-// (exiting is Ctrl+C or Ctrl+D, matching opencode).
+// applyEscape consumes an escape sequence, or a lone Esc, which is ignored;
+// exiting is Ctrl+C or Ctrl+D.
 func (e *editor) applyEscape(state *lineState) error {
 	// A lone Esc has no buffered follow-up rune; a real escape sequence (arrows,
 	// etc.) is sent as one write and shows up shortly after.
-	if !e.waitPending(30 * time.Millisecond) {
+	if !waitRune(e.in, 30*time.Millisecond) {
 		return nil
 	}
 	key, err := e.readEscape()
@@ -220,20 +220,26 @@ func (s *lineState) historyDown(history []string) {
 	s.pos = len(s.runes)
 }
 
-// waitPending reports whether another rune arrives within timeout. A lone Esc
-// yields none; an escape sequence's remaining runes arrive within a few ms.
-func (e *editor) waitPending(timeout time.Duration) bool {
-	if e.in.Buffered() > 0 {
+// waitRune reports whether in has a rune within timeout. A lone Esc yields none;
+// an escape sequence's remaining runes arrive within a few milliseconds.
+func waitRune(in keyReader, timeout time.Duration) bool {
+	if in.Buffered() > 0 {
 		return true
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		time.Sleep(2 * time.Millisecond)
-		if e.in.Buffered() > 0 {
+		if in.Buffered() > 0 {
 			return true
 		}
 	}
 	return false
+}
+
+// isEscapeFinal reports whether r ends an escape sequence: the letter final of a
+// CSI/SS3 sequence, or the "~" of a numeric-parameter sequence.
+func isEscapeFinal(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == keyTilde
 }
 
 func (e *editor) readEscape() (rune, error) {
@@ -267,14 +273,14 @@ func (e *editor) readCSI() (rune, error) {
 		if err != nil {
 			return 0, err
 		}
-		switch {
-		case (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'):
-			return r, nil
-		case r == keyTilde:
-			return tildeKey(last), nil
-		default:
+		if !isEscapeFinal(r) {
 			last = r
+			continue
 		}
+		if r == keyTilde {
+			return tildeKey(last), nil
+		}
+		return r, nil
 	}
 }
 

@@ -49,8 +49,8 @@ const (
 	stdinQueue = 64
 	// watchTick is the status-line refresh interval (spinner animation).
 	watchTick = 100 * time.Millisecond
-	// interruptWindow is how long a first Esc stays armed, so a second Esc
-	// within it interrupts the turn (matching opencode's "again to interrupt").
+	// interruptWindow is how long a first Esc stays armed, so that pressing Esc
+	// again within it interrupts the turn.
 	interruptWindow = 5 * time.Second
 )
 
@@ -79,6 +79,9 @@ type console struct {
 	status      string
 	statusDrawn bool
 	lineStart   bool
+	// draft is the steering input typed while a turn runs, shown in the status
+	// line and submitted with Enter.
+	draft []rune
 }
 
 func newConsole() (*console, func(), error) {
@@ -162,13 +165,20 @@ const (
 // watchInterrupt waits until done closes or the user interrupts the turn. A
 // first Esc arms the interrupt and calls onArm(true) so the UI can prompt for a
 // second press; a second Esc within interruptWindow aborts the turn and keeps
-// the chat alive. Ctrl+C aborts and asks the caller to exit. onTick (if non-nil)
+// the chat alive. Ctrl+C aborts and asks the caller to exit. Text typed while
+// the turn runs is buffered and submitted to steer on Enter. onTick (if non-nil)
 // is called about every watchTick with a monotonically increasing frame counter,
 // so callers can animate a spinner.
 //
 // Runes typed while a prompt owns stdin are routed to the editor by readStdin,
 // so the watcher only ever sees keys meant for the turn it is watching.
-func (c *console) watchInterrupt(done <-chan struct{}, abort func(), onTick func(int), onArm func(bool)) interruptAction {
+func (c *console) watchInterrupt(
+	done <-chan struct{},
+	abort func(),
+	steer func(string),
+	onTick func(int),
+	onArm func(bool),
+) interruptAction {
 	ticker := time.NewTicker(watchTick)
 	defer ticker.Stop()
 	frame := 0
@@ -178,23 +188,6 @@ func (c *console) watchInterrupt(done <-chan struct{}, abort func(), onTick func
 			onTick(frame)
 		}
 	}
-
-	armed := false
-	disarm := func() {
-		if armed {
-			armed = false
-			if onArm != nil {
-				onArm(false)
-			}
-		}
-	}
-	var armTimer *time.Timer
-	defer func() {
-		if armTimer != nil {
-			armTimer.Stop()
-		}
-		disarm()
-	}()
 
 	if c.keys == nil {
 		for {
@@ -207,41 +200,30 @@ func (c *console) watchInterrupt(done <-chan struct{}, abort func(), onTick func
 		}
 	}
 
-	var armC <-chan time.Time
+	watcher := newTurnWatcher(c, abort, steer, onArm)
+	defer watcher.close()
 	for {
+		if r, ok := watcher.next(); ok {
+			if action, stop := watcher.handle(r); stop {
+				return action
+			}
+			continue
+		}
 		select {
 		case <-done:
 			return interruptNone
 		case <-ticker.C:
 			tick()
-		case <-armC:
-			armC = nil
-			disarm()
+		case <-watcher.armTimeout:
+			watcher.armTimeout = nil
+			watcher.disarm()
 		case r, ok := <-c.keys:
 			if !ok {
 				<-done
 				return interruptNone
 			}
-			switch r {
-			case keyCtrlC:
-				abort()
-				return interruptExit
-			case keyEsc:
-				if !armed {
-					armed = true
-					if onArm != nil {
-						onArm(true)
-					}
-					if armTimer == nil {
-						armTimer = time.NewTimer(interruptWindow)
-					} else {
-						armTimer.Reset(interruptWindow)
-					}
-					armC = armTimer.C
-					continue
-				}
-				abort()
-				return interruptAbort
+			if action, stop := watcher.handle(r); stop {
+				return action
 			}
 		}
 	}
@@ -279,12 +261,25 @@ func (c *console) eraseStatusLocked() {
 }
 
 // drawStatusLocked redraws the status line, but only when it is safe: on a TTY,
-// at the start of a line, and not while a prompt owns the line.
+// at the start of a line, and not while a prompt owns the line. The steering
+// draft, if any, is appended so the user sees what will be sent on Enter.
 func (c *console) drawStatusLocked() {
-	if c.status == "" || !c.lineStart || c.editor == nil || c.prompting.Load() {
+	if !c.lineStart || c.editor == nil || c.prompting.Load() {
 		return
 	}
-	fmt.Fprint(c.out, c.status)
+	line := c.status
+	if len(c.draft) > 0 {
+		label := "steer: " + string(c.draft)
+		if line == "" {
+			line = dim + label + reset
+		} else {
+			line += dim + " · " + label + reset
+		}
+	}
+	if line == "" {
+		return
+	}
+	fmt.Fprint(c.out, line)
 	c.statusDrawn = true
 }
 

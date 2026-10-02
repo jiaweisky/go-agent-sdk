@@ -114,7 +114,7 @@ func writeBanner(console *console, yolo bool) {
 	if yolo {
 		console.write(yellow + "warning: --yolo skips all permission prompts" + reset + "\n")
 	}
-	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts a running turn)\n")
+	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts; type during a turn to steer it)\n")
 	console.write(dim + "SessionHooks: lifecycle logged as [hook]; \"?<text>\" asks for a concise answer; rm -rf is denied" + reset + "\n")
 	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /history" + reset + "\n\n")
 }
@@ -152,7 +152,8 @@ func runTurn(ctx context.Context, console *console, renderer *chat, input string
 	}()
 	// While the turn runs, the bottom status line animates a spinner and prompts
 	// for the second Esc after the first.
-	action := console.watchInterrupt(turnDone, renderer.session.Abort, renderer.updateStatus, renderer.setInterruptArmed)
+	// Typing during the turn steers it (Enter sends); Esc/Ctrl+C interrupt.
+	action := console.watchInterrupt(turnDone, renderer.session.Abort, renderer.steer, renderer.updateStatus, renderer.setInterruptArmed)
 	<-turnDone
 	if action == interruptNone {
 		console.setStatus("")
@@ -225,6 +226,20 @@ func sendTurn(ctx context.Context, console *console, session *agent.Session, pro
 			break
 		}
 	}
+}
+
+// steer feeds text into the running turn as steering input instead of starting a
+// new turn. The turn watcher calls it when the user types during a turn and
+// presses Enter; the active turn picks the text up at its next step boundary.
+func (c *chat) steer(text string) {
+	if c.session == nil {
+		return
+	}
+	if err := c.session.Steer(text); err != nil {
+		c.console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))
+		return
+	}
+	c.console.write(fmt.Sprintf("%s[steer] %s%s\n", dim, text, reset))
 }
 
 // clientOptions builds the chat's client options. With yolo the interactive
