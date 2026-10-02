@@ -220,6 +220,11 @@ type permissionAgents struct{ agents *core.Agent }
 func (a permissionAgents) Resolve(agentID string) (*core.PermissionAgentInfo, bool) {
 	info := a.agents.Get(schema.AgentID(agentID))
 	if info == nil {
+		// A session-derived agent ("build#ses_x") is not in the registry: it is
+		// an in-memory copy of its base agent, which carries the permissions.
+		info = a.agents.Get(schema.AgentID(baseAgentID(agentID)))
+	}
+	if info == nil {
 		return nil, false
 	}
 	return &core.PermissionAgentInfo{ID: string(info.ID), Permissions: info.Permissions}, true
