@@ -46,17 +46,17 @@ func TestSkillsCommandEmpty(t *testing.T) {
 
 func TestSkillsCommandListsConfiguredSkill(t *testing.T) {
 	dir := t.TempDir()
-	skillDir := filepath.Join(dir, "skill", "demo")
+	skillDir := filepath.Join(dir, "skill", "sample")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	content := "---\nname: demo\ndescription: A demo skill.\n---\nDo the demo.\n"
+	content := "---\nname: sample\ndescription: A sample skill.\n---\nDo the sample.\n"
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	out := runCommand(t, []string{dir}, func(c *chat) { c.skillsCommand() })
-	if !strings.Contains(out, "demo") || !strings.Contains(out, "A demo skill.") {
+	if !strings.Contains(out, "sample") || !strings.Contains(out, "A sample skill.") {
 		t.Fatalf("out = %q, want the skill from ConfigDirs", out)
 	}
 }
@@ -250,9 +250,9 @@ func TestHistoryCommandEmpty(t *testing.T) {
 	}
 }
 
-// TestDemoConfigDiscovered loads the demo config from the package's .config
+// TestSampleConfigDiscovered loads the sample config from the package's .config
 // directory (go test runs with the package directory as the working directory).
-func TestDemoConfigDiscovered(t *testing.T) {
+func TestSampleConfigDiscovered(t *testing.T) {
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
 		Model:      "test-model",

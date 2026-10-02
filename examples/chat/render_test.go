@@ -378,8 +378,8 @@ func TestAsterisksAreNotEmphasis(t *testing.T) {
 	}
 }
 
-// TestUsageLineOmitsUnpricedCost guards the status line for a model this demo
-// cannot price: the tokens stand alone instead of being reported as ¥0.
+// TestUsageLineOmitsUnpricedCost guards the status line for a model without a
+// known price: the tokens stand alone instead of being reported as ¥0.
 func TestUsageLineOmitsUnpricedCost(t *testing.T) {
 	c := newChat(&console{out: &strings.Builder{}}, nil, "ses_parent", "")
 	c.usage.output = 1500

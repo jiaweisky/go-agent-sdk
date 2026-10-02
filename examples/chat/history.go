@@ -6,9 +6,9 @@ import (
 	"github.com/user/go-agent-sdk/schema"
 )
 
-// historyCommand prints the session's stored messages, demonstrating
-// Session.Messages: the projected history, which starts at the latest
-// compaction and drops aborted/empty assistant turns.
+// historyCommand prints the session's stored messages via Session.Messages: the
+// projected history, which starts at the latest compaction and drops
+// aborted/empty assistant turns.
 func (c *chat) historyCommand() {
 	if c.session == nil {
 		c.console.write("(no active session)\n")

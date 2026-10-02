@@ -9,18 +9,17 @@ import (
 )
 
 // personaCommand starts a new session whose system prompt is the build agent's
-// plus the given text, demonstrating SessionConfig.SystemPrompt. The chat
-// switches to the new session and closes the previous one.
+// plus the given text, using SessionConfig.SystemPrompt. The chat switches to
+// the new session and closes the previous one.
 func (c *chat) personaCommand(input string) {
 	persona := strings.TrimSpace(strings.TrimPrefix(input, "/persona"))
 	if persona == "" {
 		c.console.write("usage: /persona <text>  (start a new session with an appended system prompt)\n")
 		return
 	}
-	session, err := c.client.CreateSession(context.Background(), &agent.SessionConfig{
-		Agent:        agentName,
-		SystemPrompt: &agent.SystemPromptConfig{Mode: agent.SystemPromptAppend, Content: persona},
-	})
+	config := c.sessionConfig()
+	config.SystemPrompt = &agent.SystemPromptConfig{Mode: agent.SystemPromptAppend, Content: persona}
+	session, err := c.client.CreateSession(context.Background(), config)
 	if err != nil {
 		c.console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))
 		return

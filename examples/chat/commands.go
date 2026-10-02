@@ -156,9 +156,9 @@ var helpCommands = []helpEntry{
 	{"/help", "show this help"},
 }
 
-// compactCommand summarizes the session history on demand, demonstrating the
-// SDK's session compaction. The summary itself is rendered from the compaction
-// events, so this only reports failures and the no-op case.
+// compactCommand summarizes the session history on demand via Session.Compact.
+// The summary itself is rendered from the compaction events, so this only
+// reports failures and the no-op case.
 func compactCommand(c *chat) {
 	if c.session == nil {
 		c.console.write("(no active session)\n")

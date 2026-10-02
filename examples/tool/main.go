@@ -1,4 +1,4 @@
-// Command tool demonstrates a custom tool with a permission handler.
+// Command tool registers a custom tool that requires a permission prompt.
 package main
 
 import (

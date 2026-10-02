@@ -16,10 +16,10 @@ var (
 	deepseekProPricing   = deepseekPricing{cacheHit: 0.30, cacheMiss: 9.0, output: 27.0}
 )
 
-// modelMetadata is the demo provider's per-model knowledge: the token limits the
-// SDK uses to time automatic compaction, and the peak pricing the usage view
-// applies. Only models this demo knows are listed; an unknown model gets no
-// limit (automatic compaction stays off) and no price.
+// modelMetadata is the provider's per-model knowledge: the token limits the SDK
+// uses to time automatic compaction, and the peak pricing the usage view
+// applies. Only models listed here are known; an unknown model gets no limit
+// (automatic compaction stays off) and no price.
 type modelMetadata struct {
 	context int
 	output  int
@@ -34,7 +34,7 @@ var modelCatalog = map[string]modelMetadata{
 	"deepseek-v4-pro":   {context: 1_000_000, output: 384_000, pricing: deepseekProPricing},
 }
 
-// modelMetadataFor returns the metadata for modelID, if the demo knows it.
+// modelMetadataFor returns the metadata for modelID, when it is listed.
 func modelMetadataFor(modelID string) (modelMetadata, bool) {
 	meta, ok := modelCatalog[modelID]
 	return meta, ok

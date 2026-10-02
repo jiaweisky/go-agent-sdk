@@ -18,7 +18,7 @@ import (
 )
 
 // agentName is the primary agent the chat session runs. util.Client registers it
-// with a system prompt; the permission demo below extends the same agent.
+// with a system prompt; the ask rule added below extends the same agent.
 const agentName = "build"
 
 func main() {
@@ -53,12 +53,17 @@ func run() error {
 	defer client.Close()
 
 	if !yolo {
-		if err := addPermissionDemo(client); err != nil {
+		if err := addBashAskRule(client); err != nil {
 			return err
 		}
 	}
 
-	session, err := client.CreateSession(ctx, &agent.SessionConfig{Agent: agentName})
+	writeBanner(console, yolo)
+
+	session, err := client.CreateSession(ctx, &agent.SessionConfig{
+		Agent: agentName,
+		Hooks: newSessionHooks(console),
+	})
 	if err != nil {
 		return err
 	}
@@ -69,7 +74,6 @@ func run() error {
 	renderer := newChat(console, client, session.ID(), os.Getenv("AGENT_MODEL"))
 	renderer.session = session
 	client.On(renderer.handle)
-	writeBanner(console, yolo)
 
 	return chatLoop(ctx, console, renderer)
 }
@@ -85,11 +89,11 @@ func parseFlags() (dir string, yolo bool) {
 	return *flagDir, *flagYolo
 }
 
-// addPermissionDemo appends an "ask" rule for bash to the build agent, which
+// addBashAskRule appends an "ask" rule for bash to the build agent, which
 // otherwise allows every tool, so interactive approval has something to ask
 // about.
-func addPermissionDemo(client *agent.Client) error {
-	return client.Plugin().Add("chat-permission-demo", func(pluginCtx *core.PluginContext) (func(), error) {
+func addBashAskRule(client *agent.Client) error {
+	return client.Plugin().Add("chat-permission", func(pluginCtx *core.PluginContext) (func(), error) {
 		_, err := pluginCtx.Agents.Transform(func(draft core.AgentDraft) error {
 			draft.Update(schema.AgentID(agentName), func(info *schema.AgentInfo) {
 				info.Permissions = append(info.Permissions, schema.PermissionRule{
@@ -111,6 +115,7 @@ func writeBanner(console *console, yolo bool) {
 		console.write(yellow + "warning: --yolo skips all permission prompts" + reset + "\n")
 	}
 	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts a running turn)\n")
+	console.write(dim + "SessionHooks: lifecycle logged as [hook]; \"?<text>\" asks for a concise answer; rm -rf is denied" + reset + "\n")
 	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /history" + reset + "\n\n")
 }
 
@@ -225,8 +230,8 @@ func sendTurn(ctx context.Context, console *console, session *agent.Session, pro
 // clientOptions builds the chat's client options. With yolo the interactive
 // permission handler is omitted, so util.Client falls back to agent.ApproveAll
 // and every "ask" is approved without a prompt. Questions stay interactive.
-// Model limits come from the demo's model catalog, which is what lets automatic
-// compaction run.
+// Model limits come from the example's model catalog, which is what lets
+// automatic compaction run.
 func clientOptions(console *console, yolo bool) []util.Option {
 	// A local reference to the SDK docs, advertised in the model's system
 	// context so it can read them when relevant.
@@ -241,7 +246,7 @@ func clientOptions(console *console, yolo bool) []util.Option {
 		// lists something more useful than the placeholder.
 		util.WithTitle(agent.TitleConfig{Auto: &titleEnabled}),
 		// Keep only a small tail of history verbatim so /compact has something
-		// to summarize in a short demo session.
+		// to summarize in a short session.
 		util.WithCompaction(agent.CompactionConfig{PreserveRecentTokens: 2000}),
 		util.WithReference("docs", core.ReferenceLocalSource{
 			Type: "local", Path: schema.AbsolutePath(docsDir), Description: &docsDescription,

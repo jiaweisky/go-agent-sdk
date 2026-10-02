@@ -14,7 +14,7 @@ import (
 // it, closing the previous session. It is the plain counterpart to /persona,
 // which starts a session with an appended system prompt.
 func (c *chat) newCommand() {
-	session, err := c.client.CreateSession(context.Background(), &agent.SessionConfig{Agent: agentName})
+	session, err := c.client.CreateSession(context.Background(), c.sessionConfig())
 	if err != nil {
 		c.console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))
 		return
@@ -64,7 +64,7 @@ func (c *chat) deleteCommand(input string) {
 		return
 	}
 	if c.session != nil && c.session.ID() == id {
-		session, err := c.client.CreateSession(context.Background(), &agent.SessionConfig{Agent: agentName})
+		session, err := c.client.CreateSession(context.Background(), c.sessionConfig())
 		if err != nil {
 			c.console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))
 			return
@@ -85,13 +85,19 @@ func (c *chat) resumeCommand(id string) {
 		c.console.write("(already the active session)\n")
 		return
 	}
-	session, err := c.client.ResumeSession(context.Background(), id, nil)
+	session, err := c.client.ResumeSession(context.Background(), id, c.sessionConfig())
 	if err != nil {
 		c.console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))
 		return
 	}
 	c.replaceSession(session)
 	c.console.write(fmt.Sprintf("switched to session %s%s%s\n", cyan, session.ID(), reset))
+}
+
+// sessionConfig is the base config for sessions the chat creates or resumes: the
+// build agent plus the session hooks.
+func (c *chat) sessionConfig() *agent.SessionConfig {
+	return &agent.SessionConfig{Agent: agentName, Hooks: newSessionHooks(c.console)}
 }
 
 // replaceSession points the renderer at next and closes the previous live

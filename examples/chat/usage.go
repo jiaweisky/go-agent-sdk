@@ -16,14 +16,14 @@ type chatUsage struct {
 	output    int
 	cost      float64 // CNY
 	// priced is set once a turn was priced, so the status line can show a cost
-	// only for the models this demo knows the rates of.
+	// only for models whose rates are known.
 	priced bool
 }
 
 func (u chatUsage) tokens() int { return u.cacheHit + u.cacheMiss + u.output }
 
 // addUsage folds one turn's raw provider usage into the totals, pricing it with
-// the DeepSeek schedule (the demo provider).
+// the DeepSeek schedule.
 func (u *chatUsage) addUsage(modelID string, providerMetadata map[string]map[string]any, at time.Time) {
 	raw := providerMetadata["openai"] // openai-chat protocol key (DeepSeek speaks it)
 	if raw == nil {
@@ -54,7 +54,7 @@ func (u *chatUsage) addUsage(modelID string, providerMetadata map[string]map[str
 }
 
 // deepseekCost prices one turn with the model's catalog pricing. It returns
-// ok=false for models the demo does not know.
+// ok=false for models absent from the catalog.
 func deepseekCost(modelID string, cacheHit, cacheMiss, output float64, at time.Time) (float64, bool) {
 	meta, ok := modelMetadataFor(modelID)
 	if !ok {

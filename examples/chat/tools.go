@@ -10,7 +10,7 @@ import (
 	"github.com/user/go-agent-sdk"
 )
 
-// runtimeTool returns one of the demo tools /tool can register at runtime, and
+// runtimeTool returns one of the tools /tool can register at runtime, and
 // reports whether the name is known.
 func runtimeTool(name string) (agent.Tool, bool) {
 	switch name {
@@ -29,8 +29,8 @@ func runtimeTool(name string) (agent.Tool, bool) {
 }
 
 // toolsCommand handles "/tool" (list), "/tool add <name>" and
-// "/tool remove <name>". It demonstrates Client.RegisterTools: tools added here
-// become available to the live session on the next turn, without restarting.
+// "/tool remove <name>". It uses Client.RegisterTools: tools added here become
+// available to the live session on the next turn, without restarting.
 func (c *chat) toolsCommand(input string) {
 	args := strings.Fields(strings.TrimSpace(strings.TrimPrefix(input, "/tool")))
 	if len(args) == 0 {
