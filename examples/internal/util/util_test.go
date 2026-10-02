@@ -3,40 +3,29 @@ package util
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestResolveAPIKey(t *testing.T) {
-	t.Setenv("AGENT_API_KEY", "")
+func TestDefaultModel(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
-
-	// openai and the unknown-provider fallback route honor OPENAI_API_KEY.
-	t.Setenv("OPENAI_API_KEY", "sk-openai")
-	if got := resolveAPIKey("openai"); got != "sk-openai" {
-		t.Fatalf("openai = %q", got)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	_, err := DefaultCatalog.DefaultModel()
+	if err == nil {
+		t.Fatal("DefaultModel should error without any provider key")
 	}
-	if got := resolveAPIKey(""); got != "sk-openai" {
-		t.Fatalf("default = %q", got)
-	}
-	// anthropic honors ANTHROPIC_API_KEY (not yet set).
-	if got := resolveAPIKey("anthropic"); got != "" {
-		t.Fatalf("anthropic (unset) = %q", got)
-	}
-	t.Setenv("ANTHROPIC_API_KEY", "sk-anthropic")
-	if got := resolveAPIKey("anthropic"); got != "sk-anthropic" {
-		t.Fatalf("anthropic = %q", got)
-	}
-	// openai-compatible has no env fallback.
-	if got := resolveAPIKey("openai-compatible"); got != "" {
-		t.Fatalf("openai-compatible = %q", got)
-	}
-	// AGENT_API_KEY wins for every provider.
-	t.Setenv("AGENT_API_KEY", "sk-test")
-	for _, provider := range []string{"openai", "anthropic", "openai-compatible"} {
-		if got := resolveAPIKey(provider); got != "sk-test" {
-			t.Fatalf("%s = %q, want sk-test", provider, got)
+	// The hint is derived from the catalog, so every provider key is named.
+	for _, env := range DefaultCatalog.providerKeyEnvs() {
+		if !strings.Contains(err.Error(), env) {
+			t.Fatalf("error %q missing %s", err, env)
 		}
+	}
+
+	t.Setenv("DEEPSEEK_API_KEY", "test")
+	got, err := DefaultCatalog.DefaultModel()
+	if err != nil || got != "deepseek-v4-flash" {
+		t.Fatalf("DefaultModel = %q, %v; want deepseek-v4-flash", got, err)
 	}
 }
 

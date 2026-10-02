@@ -56,16 +56,16 @@ func (u *chatUsage) addUsage(modelID string, providerMetadata map[string]map[str
 // deepseekCost prices one turn with the model's catalog pricing. It returns
 // ok=false for models absent from the catalog.
 func deepseekCost(modelID string, cacheHit, cacheMiss, output float64, at time.Time) (float64, bool) {
-	pricing, ok := models.pricing(modelID)
+	pricing, ok := models.Pricing(modelID)
 	if !ok {
 		return 0, false
 	}
 	if !deepseekPeak(at) {
-		pricing.cacheHit /= 2
-		pricing.cacheMiss /= 2
-		pricing.output /= 2
+		pricing.CacheHit /= 2
+		pricing.CacheMiss /= 2
+		pricing.Output /= 2
 	}
-	cost := (cacheHit*pricing.cacheHit + cacheMiss*pricing.cacheMiss + output*pricing.output) / 1_000_000
+	cost := (cacheHit*pricing.CacheHit + cacheMiss*pricing.CacheMiss + output*pricing.Output) / 1_000_000
 	return cost, true
 }
 

@@ -10,7 +10,6 @@ import (
 
 	"github.com/user/go-agent-sdk"
 	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/schema"
 )
 
 // Option customizes the client built by Client.
@@ -53,29 +52,6 @@ func WithMCP(configs ...agent.MCPConfig) Option {
 	}
 }
 
-// WithModelLimits wraps the client's model metadata with per-model token
-// limits, keyed by model id. A model the function returns no limits for keeps
-// the base limit (so automatic compaction stays off for unknown models).
-func WithModelLimits(limits func(modelID string) schema.ModelLimit) Option {
-	return func(opts *agent.ClientOptions) {
-		base := opts.ModelInfo
-		opts.ModelInfo = func(id string) (schema.ModelInfo, error) {
-			info, err := base(id)
-			if err != nil {
-				return info, err
-			}
-			limit := limits(id)
-			if limit.Context > 0 {
-				info.Limit.Context = limit.Context
-			}
-			if limit.Output > 0 {
-				info.Limit.Output = limit.Output
-			}
-			return info, nil
-		}
-	}
-}
-
 // WithCompaction overrides the client's compaction settings.
 func WithCompaction(config agent.CompactionConfig) Option {
 	return func(opts *agent.ClientOptions) {
@@ -108,72 +84,34 @@ func WithSubagentDepth(depth int) Option {
 	}
 }
 
-// Client builds a client from environment variables:
-//
-//	AGENT_PROVIDER     openai (default) | anthropic | openai-compatible | gemini
-//	AGENT_PROVIDER_ID  provider id for openai-compatible (optional)
-//	AGENT_BASE_URL     provider base URL (optional)
-//	AGENT_API_KEY      provider API key (falls back to OPENAI_API_KEY for
-//	                      openai, ANTHROPIC_API_KEY for anthropic; none for
-//	                      openai-compatible)
-//	AGENT_MODEL        default model id (optional; an option may supply one)
+// Client builds a client from the caller's options. The model, its metadata and
+// its credentials come from an option (for example a Catalog option), so there
+// is nothing provider-specific to configure through the environment.
 //
 // Credentials are passed in explicitly; the SDK does not read them from a
 // config file. Call LoadDotEnv from main to read a .env file in the working
 // directory (without overriding variables already set in the environment).
 //
-// When no API key is resolved, the credential is left unset, so requests carry
-// no auth header (route.None): a keyless local endpoint works, while a hosted
-// provider fails to authenticate. An option may also supply credentials (for
-// example a multi-provider catalog).
-//
 // The default permission handler is agent.ApproveAll; override it with
 // WithPermission.
 func Client(dir string, options ...Option) (*agent.Client, error) {
-	providerType := envOr("AGENT_PROVIDER", "openai")
-	protocol, err := protocolFor(providerType)
-	if err != nil {
-		return nil, err
-	}
-	apiKey := resolveAPIKey(providerType)
-	baseURL := os.Getenv("AGENT_BASE_URL")
 	opts := &agent.ClientOptions{
 		// The SDK never picks a state directory, so the example keeps its state
 		// next to itself (git-ignored) instead of in the user's home.
-		Root: filepath.Join(dir, ".data"),
-		// The model is provider-specific. AGENT_MODEL is the default, but an
-		// option (for example a model catalog default) may supply one, so the
-		// value is checked after options are applied.
-		Model:    os.Getenv("AGENT_MODEL"),
-		Protocol: protocol,
-		ModelInfo: func(id string) (schema.ModelInfo, error) {
-			info, err := agent.NewModelInfo(protocol, id, baseURL, schema.ModelLimit{})
-			if err != nil {
-				return info, err
-			}
-			if providerID := os.Getenv("AGENT_PROVIDER_ID"); providerID != "" {
-				info.ProviderID = schema.ProviderID(providerID)
-			}
-			return info, nil
-		},
+		Root:       filepath.Join(dir, ".data"),
 		Permission: agent.ApproveAll,
 		// The example's sample agents/skills, then .config in the working
 		// directory (-C pins it) so a project can override them.
 		ConfigDirs: []string{filepath.Join(dir, ".config"), ".config"},
 	}
-	if apiKey != "" {
-		opts.Credentials = agent.APIKey(apiKey)
-	}
 	for _, option := range options {
 		option(opts)
 	}
-	if opts.Model == "" {
-		return nil, fmt.Errorf("no model configured: set AGENT_MODEL or provide one through an option")
+	if opts.ModelInfo == nil {
+		return nil, fmt.Errorf("no model info: pass a catalog option")
 	}
-	if opts.Credentials == nil {
-		fmt.Fprintf(os.Stderr,
-			"warning: no API key set for provider %q (%s); requests will fail to authenticate\r\n",
-			providerType, apiKeyHint(providerType))
+	if opts.Model == "" {
+		return nil, fmt.Errorf("no model configured: pass a model option")
 	}
 	client, err := agent.NewClient(opts)
 	if err != nil {
@@ -186,59 +124,6 @@ func Client(dir string, options ...Option) (*agent.Client, error) {
 		return nil, err
 	}
 	return client, nil
-}
-
-// protocolFor maps the AGENT_PROVIDER value to a native protocol id.
-func protocolFor(providerType string) (schema.ProtocolID, error) {
-	switch providerType {
-	case "", "openai":
-		return "openai-responses", nil
-	case "anthropic":
-		return "anthropic-messages", nil
-	case "openai-compatible":
-		return "openai-compatible-chat", nil
-	case "gemini":
-		return "gemini", nil
-	default:
-		return "", fmt.Errorf("unsupported AGENT_PROVIDER %q", providerType)
-	}
-}
-
-// resolveAPIKey is the credential the provider's route auth uses:
-// AGENT_API_KEY first, then the provider's conventional env var. The generic
-// openai-compatible provider has no fallback.
-func resolveAPIKey(providerType string) string {
-	if key := os.Getenv("AGENT_API_KEY"); key != "" {
-		return key
-	}
-	switch providerType {
-	case "anthropic":
-		return os.Getenv("ANTHROPIC_API_KEY")
-	case "openai-compatible":
-		// No env fallback: its route auth is BearerAuth(..., nil), so only the
-		// explicit AGENT_API_KEY (above) can satisfy it.
-		return ""
-	default: // "openai", "" and the unknown-provider fallback route
-		return os.Getenv("OPENAI_API_KEY")
-	}
-}
-
-func apiKeyHint(providerType string) string {
-	switch providerType {
-	case "anthropic":
-		return "AGENT_API_KEY / ANTHROPIC_API_KEY"
-	case "openai-compatible":
-		return "AGENT_API_KEY"
-	default:
-		return "AGENT_API_KEY / OPENAI_API_KEY"
-	}
-}
-
-func envOr(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
 }
 
 // LoadDotEnv loads KEY=VALUE pairs from the first .env found searching the

@@ -63,13 +63,13 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   - `/model [<id>]` —— 无参列出**可用**模型；`/model <id>` 在**当前会话**切换模型。
   - `/agent [<id>]` —— 无参列出可切换的主 agent；`/agent <id>` 在**当前会话**切换 agent。
   两者都**不新建会话**。
-- **模型目录（in-code manifest）**：`examples/chat/model.go` 用一份条目清单描述每个模型的
+- **模型目录（in-code manifest）**：`examples/internal/util/catalog.go` 用一份条目清单描述每个模型的
   provider/protocol/baseURL/apiKeyEnv/limits/pricing，派生 `ModelInfoProvider` + `CredentialProvider`
   注入 client。协议取自 `ModelInfo.API.Protocol`、凭据按 providerID，所以**一个 client 可路由多家 provider**；
-  仅列出 API key 已设置的模型。匹配 `AGENT_PROVIDER`/`AGENT_PROVIDER_ID` 的条目用 `AGENT_API_KEY`/`AGENT_BASE_URL`
-  （与原有 env 配置兼容），其余条目用各自的 provider env。`util.Client` 的默认模型现在可由 option 提供。
+  每条用各自的 `APIKeyEnv`/`BaseURL`，仅列出 API key 已设置的模型。`chat` 与 `tool` 共用这份 catalog，
+  模型经 `util.WithModel` 传给 `util.Client`。
 - **持久化上次选择**：`examples/chat/state.go` 把上次选的 model/agent 写入 `{ExampleDir}/.data/state.json`；
-  启动优先级 **上次选择 > `AGENT_MODEL` > catalog 默认**（`Default: true`，不可用则第一个可用）——
+  启动优先级 **上次选择 > catalog 默认**（`Default: true`，不可用则第一个可用）——
   上次选择优先，这样切换会跨重启保留（TUI 的 `model.json` 是 `config.model > recent`，此处刻意让持久化优先）。
 - 已删除原拟的 `/sandbox`（`SessionConfig.Permissions`）与 `/session-tool`（`SessionConfig.Tools`）：
   前者非主流（权限应由 agent/config 规则配置），后者与 `examples/tool` 重复。
@@ -108,10 +108,23 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   且 `Sections` 只作用于 agent system 部分，改不到运行时 `systemcontext` baseline。
 - 可测性：合成后的 prompt 无公开读接口，示例测试只验证命令接线与新建会话。
 
-### 2.8 协议 / variant — 中
+### 2.8 协议 / variant — 中 ✅ 已实现（variant 部分不做）
 
-- API：`ModelInfoProvider`（`util.Client` 的 `ModelInfo`）、`schema.ModelVariant`（`schema/model.go:73`）
-- 备注：`/model` 切换已在 2.4 实现。此处补充：给 catalog 加 variant 后用 `/variant` 切换；catalog 含多 provider 时演示不同 protocol 路由。
+- 协议路由：`examples/internal/util/catalog.go` 的 catalog 里，同一 DeepSeek 模型以三个协议各列一条，基址分别对应该
+  协议的 endpoint，请求模型名统一 `deepseek-flash`（`ModelEntry.Model`，`ID` 只作 catalog 选择器）：
+
+  | catalog id | protocol | base URL | 最终 endpoint |
+  |---|---|---|---|
+  | `deepseek-flash` | `openai-compatible-chat` | `https://api.deepseek.com` | `/chat/completions` |
+  | `deepseek-flash-responses` | `openai-responses` | `https://api.deepseek.com` | `/responses` |
+  | `deepseek-flash-anthropic` | `anthropic-messages` | `https://api.deepseek.com/anthropic` | `/messages` |
+
+  一个有 `DEEPSEEK_API_KEY` 就能演示三种路由（每条用各自的 `BaseURL`，凭据按 provider `deepseek` 取）。
+  `FromCatalogModel`（`core/session/runner/model.go:138`）按 `ModelInfo.API.Protocol` 查协议、按 providerID 取
+  凭据；2.4 的 `/model` 即可切换。本项并补**可见性**：`/model` 列表显示 `id (provider · protocol)`。
+- variant：**刻意不做**。`schema.ModelVariant` + `ModelRef.Variant` 机制存在（`runnerModelWithVariant`，
+  `core/session/runner/model.go:83`），但只改请求 body/header，chat UI 不可见；`temperature` 类演示单薄，
+  reasoning 类依赖 provider 支持且易 400。故不在示例中演示，仅此说明。
 
 ### 2.9 MCP 远程 server / prompts / resources — 中
 

@@ -48,9 +48,9 @@ func run() error {
 
 	statePath := filepath.Join(util.ExampleDir(), ".data", "state.json")
 	state := loadState(statePath)
-	model := resolveDefaultModel(state.Model)
-	if model == "" {
-		return fmt.Errorf("no model available: set an API key (AGENT_API_KEY or a provider key such as OPENAI_API_KEY)")
+	model, err := resolveDefaultModel(state.Model)
+	if err != nil {
+		return err
 	}
 
 	client, err := util.Client(util.ExampleDir(), clientOptions(console, yolo, model)...)
@@ -272,8 +272,8 @@ func clientOptions(console *console, yolo bool, model string) []util.Option {
 	docsDescription := "go-agent-sdk design and porting documentation"
 	titleEnabled := true
 	options := []util.Option{
-		withCatalog(models),
-		withDefaultModel(model),
+		models.Option(),
+		util.WithModel(model),
 		util.WithQuestion(interactiveQuestion(console)),
 		util.WithMCP(weatherMCP()...),
 		// Generate a session title from the first user message, so /sessions
@@ -347,10 +347,10 @@ func parseAnswer(input string, options []schema.QuestionOption) []string {
 }
 
 // weatherMCP configures an optional local weather MCP server (stdio). It is
-// enabled only when AGENT_WEATHER_MCP points at the server entry script;
-// AMAP_API_KEY is passed through to the server. No path or key is hardcoded.
+// enabled only when WEATHER_MCP points at the server entry script; AMAP_API_KEY
+// is passed through to the server. No path or key is hardcoded.
 func weatherMCP() []agent.MCPConfig {
-	server := expandPath(os.Getenv("AGENT_WEATHER_MCP"))
+	server := expandPath(os.Getenv("WEATHER_MCP"))
 	if server == "" {
 		return nil
 	}

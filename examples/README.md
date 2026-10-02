@@ -4,30 +4,24 @@ Runnable examples for the go-agent-sdk high-level `agent` package.
 
 ## Environment variables
 
+The examples read provider API keys from the environment (or a `.env`, loaded by
+`util.LoadDotEnv`). A model is offered only when its provider key is set; the
+shared model catalog (`examples/internal/util/catalog.go`) lists the selectable
+models and their provider, protocol and endpoint.
+
 | Variable | Description | Default |
 |---|---|---|
-| `AGENT_MODEL` | Model id (required; provider-specific, so there is no default) | — |
-| `AGENT_PROVIDER` | Provider type: `openai`, `anthropic`, `openai-compatible`, or `gemini` | `openai` |
-| `AGENT_PROVIDER_ID` | Provider id for `openai-compatible` (e.g. `deepseek`) | `openai-compatible` |
-| `AGENT_BASE_URL` | Provider base URL | provider default |
-| `AGENT_API_KEY` | Provider API key (falls back to `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) | — |
+| `OPENAI_API_KEY` | OpenAI API key | — |
+| `ANTHROPIC_API_KEY` | Anthropic API key | — |
+| `DEEPSEEK_API_KEY` | DeepSeek API key | — |
+| `WEATHER_MCP` | chat: path to the weather MCP server entry script | — |
+| `AMAP_API_KEY` | chat: AMap key used by the weather MCP server | — |
 
 Example:
 
 ```sh
-export AGENT_PROVIDER=openai
-export AGENT_API_KEY=sk-...
-export AGENT_MODEL=gpt-4o
-```
-
-For an OpenAI-compatible endpoint:
-
-```sh
-export AGENT_PROVIDER=openai-compatible
-export AGENT_PROVIDER_ID=deepseek
-export AGENT_BASE_URL=https://api.deepseek.com/v1
-export AGENT_API_KEY=...
-export AGENT_MODEL=deepseek-chat
+export DEEPSEEK_API_KEY=sk-...
+go run ./examples/chat
 ```
 
 ## chat
@@ -42,9 +36,8 @@ go run ./examples/chat
 ```
 
 Flags: `-C <dir>` runs as if started there and `-yolo` skips permission
-prompts. Model token limits and pricing come from the demo's model catalog
-(`examples/chat/model.go`), keyed by `AGENT_MODEL`; the limits enable automatic
-compaction.
+prompts. Model token limits and pricing come from the shared model catalog
+(`examples/internal/util/catalog.go`); the limits enable automatic compaction.
 
 Commands: `/skills`, `/agents`, `/mcps`, `/task [<#n>]`, `/compact` (summarizes
 the session history on demand, demonstrating `Session.Compact`), `/tool` (adds
