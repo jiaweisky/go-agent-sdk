@@ -378,6 +378,43 @@ func TestAsterisksAreNotEmphasis(t *testing.T) {
 	}
 }
 
+// TestEventRendering guards the event-rendering additions: title, step
+// separation, abnormal step finish, step failure, retry, and shell.
+func TestEventRendering(t *testing.T) {
+	var out strings.Builder
+	c := newChat(&console{out: &out}, nil, "ses_parent", "")
+
+	c.handle(agent.TitleUpdated{SessionID: "ses_parent", Title: "My Title"})
+	c.handle(agent.StepStarted{SessionID: "ses_parent"})               // step 1
+	c.handle(agent.StepEnded{SessionID: "ses_parent", Finish: "stop"}) // normal: silent
+	c.handle(agent.StepStarted{SessionID: "ses_parent"})               // step 2
+	c.handle(agent.StepStarted{SessionID: "ses_parent"})               // step 3
+	c.handle(agent.StepEnded{SessionID: "ses_parent", Finish: "length"})
+	c.handle(agent.StepFailed{SessionID: "ses_parent", Error: map[string]any{"message": "boom"}})
+	c.handle(agent.Retried{SessionID: "ses_parent", Attempt: 2, Error: "timeout"})
+	c.handle(agent.ShellStarted{SessionID: "ses_parent", Command: "ls"})
+	c.handle(agent.ShellEnded{SessionID: "ses_parent", Output: "out"})
+
+	got := out.String()
+	for _, want := range []string{
+		"[title] My Title",
+		"[step 2]",
+		"[step 3]",
+		"[step 3: length]",
+		"[step 3 failed] boom",
+		"[retry 2] timeout",
+		"[shell] $ ls",
+		"out",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("out = %q, missing %q", got, want)
+		}
+	}
+	if strings.Contains(got, "[step 1") {
+		t.Fatalf("the first step should not be labeled: %q", got)
+	}
+}
+
 // TestUsageLineOmitsUnpricedCost guards the status line for a model without a
 // known price: the tokens stand alone instead of being reported as ¥0.
 func TestUsageLineOmitsUnpricedCost(t *testing.T) {

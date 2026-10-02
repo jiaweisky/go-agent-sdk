@@ -42,6 +42,9 @@ type chat struct {
 	// "Assistant:" prefix was printed for this turn.
 	stream  *markdownStream
 	labeled bool
+	// step counts the parent turn's provider attempts, so a multi-step turn is
+	// shown as separated steps.
+	step int
 	// interruptArmed is set after a first Esc, so the status line prompts for a
 	// second press to interrupt the running turn.
 	interruptArmed bool
@@ -71,6 +74,7 @@ func (c *chat) beginTurn() {
 	c.flushStream()
 	c.stream = nil
 	c.labeled = false
+	c.step = 0
 }
 
 func (c *chat) handle(event agent.Event) {
@@ -137,10 +141,13 @@ func (c *chat) flushStream() {
 }
 
 func (c *chat) handleParent(event agent.Event) {
-	// A tool or task line must not appear before text that streamed earlier.
+	// A status line must not appear before text that streamed earlier.
 	switch event.(type) {
 	case agent.ToolProgress, agent.ToolCalled, agent.ToolSuccess, agent.ToolFailed,
-		agent.CompactionStarted, agent.CompactionEnded:
+		agent.CompactionStarted, agent.CompactionEnded,
+		agent.TitleUpdated, agent.Retried,
+		agent.ShellStarted, agent.ShellEnded,
+		agent.StepStarted, agent.StepEnded, agent.StepFailed:
 		c.flushStream()
 	}
 	switch e := event.(type) {
@@ -157,6 +164,22 @@ func (c *chat) handleParent(event agent.Event) {
 		c.finishTool(e.CallID, errorMessage(e.Error))
 	case agent.SessionStatus:
 		c.parentBusy = e.Status == "busy"
+	case agent.TitleUpdated:
+		c.writeTitle(e.Title)
+	case agent.StepStarted:
+		c.beginStep()
+	case agent.StepEnded:
+		c.endStep(e.Finish)
+	case agent.StepFailed:
+		c.failStep(e.Error)
+	case agent.Retried:
+		c.console.write(fmt.Sprintf("%s[retry %v] %s%s\n", dim, e.Attempt, errorMessage(e.Error), reset))
+	case agent.ShellStarted:
+		c.console.write(fmt.Sprintf("%s[shell] $ %s%s\n", dim, e.Command, reset))
+	case agent.ShellEnded:
+		if output := shellOutput(e.Output); output != "" {
+			c.console.write(dim + output + reset + "\n")
+		}
 	case agent.CompactionStarted:
 		c.console.write(fmt.Sprintf("%s[compact] summarizing history...%s\n", dim, reset))
 	case agent.CompactionEnded:
@@ -172,6 +195,52 @@ func (c *chat) handleParent(event agent.Event) {
 		c.writeText(e.Delta)
 	case agent.TextEnded:
 		c.endText()
+	}
+}
+
+// writeTitle surfaces the generated session title.
+func (c *chat) writeTitle(title string) {
+	if title != "" {
+		c.console.write(fmt.Sprintf("%s[title] %s%s\n", cyan, title, reset))
+	}
+}
+
+// beginStep separates a turn's provider attempts. The first step is the turn
+// start, so it is not labeled; later steps mark the loop's continuation after
+// tool results.
+func (c *chat) beginStep() {
+	c.step++
+	if c.step == 1 {
+		return
+	}
+	c.console.write(fmt.Sprintf("%s[step %d]%s\n", dim, c.step, reset))
+}
+
+// endStep reports a provider attempt's finish only when it is abnormal (not a
+// normal stop or a tool-call handoff), so truncation and filtering are visible.
+func (c *chat) endStep(finish any) {
+	reason := fmt.Sprint(finish)
+	switch reason {
+	case "", "stop", "tool-calls", "unknown":
+		return
+	}
+	c.console.write(fmt.Sprintf("%s[step %d: %s]%s\n", dim, c.step, reason, reset))
+}
+
+// failStep reports a provider attempt that failed; the turn's error follows.
+func (c *chat) failStep(err any) {
+	c.console.write(fmt.Sprintf("%s[step %d failed] %s%s\n", yellow, c.step, errorMessage(err), reset))
+}
+
+// shellOutput renders a shell.ended output payload as text.
+func shellOutput(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	default:
+		return fmt.Sprint(value)
 	}
 }
 

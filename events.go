@@ -165,6 +165,9 @@ type ReasoningStarted struct {
 func (e ReasoningStarted) sessionID() string { return e.SessionID }
 
 // Retried reports a provider retry.
+//
+// It has no producer: nothing publishes session.next.retried (V2 core does not
+// emit it either), so subscribers never receive it. Kept for parity.
 type Retried struct {
 	SessionID string
 	Attempt   any
@@ -201,6 +204,9 @@ type CompactionStarted struct {
 func (e CompactionStarted) sessionID() string { return e.SessionID }
 
 // ShellStarted reports a shell command started.
+//
+// It has no producer: nothing publishes session.next.shell.started (V2 core
+// does not emit it either), so subscribers never receive it. Kept for parity.
 type ShellStarted struct {
 	SessionID string
 	MessageID string
@@ -211,6 +217,9 @@ type ShellStarted struct {
 func (e ShellStarted) sessionID() string { return e.SessionID }
 
 // ShellEnded reports a shell command finished.
+//
+// It has no producer: nothing publishes session.next.shell.ended (V2 core does
+// not emit it either), so subscribers never receive it. Kept for parity.
 type ShellEnded struct {
 	SessionID string
 	CallID    string

@@ -79,6 +79,9 @@ var SessionEventSynthetic = Define(DefineInput{
 	},
 })
 
+// SessionEventShellStarted is defined and projected for parity, but has no
+// producer: nothing publishes it (V2 core defines and projects it too, yet does
+// not emit it).
 var SessionEventShellStarted = Define(DefineInput{
 	Type:    "session.next.shell.started",
 	Durable: sessionEventDurable,
@@ -87,6 +90,9 @@ var SessionEventShellStarted = Define(DefineInput{
 	},
 })
 
+// SessionEventShellEnded is defined and projected for parity, but has no
+// producer: nothing publishes it (V2 core defines and projects it too, yet does
+// not emit it).
 var SessionEventShellEnded = Define(DefineInput{
 	Type:    "session.next.shell.ended",
 	Durable: sessionEventDurable,
@@ -226,6 +232,9 @@ var SessionEventToolFailed = Define(DefineInput{
 	},
 })
 
+// SessionEventRetried is defined for parity, but has no producer: nothing
+// publishes it (V2 core does not emit it either, and its projector is commented
+// out there).
 var SessionEventRetried = Define(DefineInput{
 	Type:    "session.next.retried",
 	Durable: sessionEventDurable,

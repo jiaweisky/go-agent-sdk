@@ -75,11 +75,16 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   前者非主流（权限应由 agent/config 规则配置），后者与 `examples/tool` 重复。
 - 备注：`/persona` 已演示 `SessionConfig.SystemPrompt`。
 
-### 2.5 事件渲染补齐 — 高（成本最低）
+### 2.5 事件渲染补齐 — 高 ✅ 已实现
 
-- 现状：`Retried` / `StepStarted` / `StepEnded` / `StepFailed` / `ShellStarted` / `ShellEnded`
-  已在 `events.go` 映射，但 `render.go` 不渲染。
-- 切入点：重试提示、step 分隔、bash 命令块与输出。纯 UI。
+- 实现（`examples/chat/render.go`）：
+  - `TitleUpdated` → `[title] <title>`。
+  - `StepStarted / StepEnded / StepFailed` → 多步回合打印 `[step N]` 分隔；异常 finish（非 `stop`/`tool-calls`）
+    单独提示；失败打印 `[step N failed] ...`。
+  - `Retried` → `[retry N] ...`；`ShellStarted / ShellEnded` → `[shell] $ <cmd>` + 输出。
+- 注意：`Retried` 与 `ShellStarted / ShellEnded` 在 Go SDK 与 V2 core 里**都没有生产者**（无处 `Publish`），
+  所以这几条渲染分支目前不会触发；补生产者属 SDK 侧改动、且与"对齐 V2"相悖，已在
+  `events.go` / `schema/session_event.go` 注释说明。
 
 ### 2.6 运行时注册 agent — 中
 
