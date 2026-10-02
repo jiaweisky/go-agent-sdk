@@ -153,7 +153,8 @@ var helpCommands = []helpEntry{
 	{"/compact", "summarize the history now"},
 	{"/tool [add|remove <name>]", "list or manage runtime tools"},
 	{"/reference [add <name> <path> | remove <name>]", "list or manage reference sources"},
-	{"/persona <text>", "start a session with an appended system prompt"},
+	{"/persona [--replace] <text>", "start a session with an appended or replaced system prompt"},
+	{"/prompt add|replace|remove <section> [<text>]", "start a session with a customized prompt section"},
 	{"/history", "show the session's stored messages"},
 	{"/help", "show this help"},
 }

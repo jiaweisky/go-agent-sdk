@@ -95,11 +95,18 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 保护：若名字已存在则拒绝（`RegisterAgent` 的 `draft.Update` 会**原地覆盖**已有 agent，含内置 build）。
 - 备注：`AgentConfig.Model` 未在命令里暴露（聚焦 Mode/Hidden/Steps/Description/System）。
 
-### 2.7 SystemPrompt 模式与 section — 中
+### 2.7 SystemPrompt 模式与 section — 中 ✅ 已实现
 
-- API：`SystemPromptConfig.Mode`（Replace/Customize）、`SectionOverride`（`systemprompt.go:11`、`:50`）
-- 现状：只演示了 append。
-- 切入点：`/persona --replace`、`/prompt add|replace|remove <section> <text>`。
+- API：`SystemPromptConfig.{Mode,Content,Sections}`、`SectionOverride`（`systemprompt.go:11`、`:50`）
+- 实现：
+  - `/persona [--replace] <text>`（`examples/chat/persona.go`）：`append`（默认）或 `replace`。
+  - `/prompt add|replace|remove <section> [<text>]`（`examples/chat/systemprompt.go`）：`customize` + 单个
+    `SectionOverride`；内置 id `agent_system`/`instructions`，其它名称为自定义 section（渲染在 agent_system 与
+    instructions 之间，按 id 排序）。
+  - 二者共用 `startSystemPromptSession`，均**新建会话**并 `replaceSession`。
+- 限制：`SystemPrompt` 仅创建期生效、不持久化（`session.go:27`、`client_session.go:46`），故每次改动都是新会话；
+  且 `Sections` 只作用于 agent system 部分，改不到运行时 `systemcontext` baseline。
+- 可测性：合成后的 prompt 无公开读接口，示例测试只验证命令接线与新建会话。
 
 ### 2.8 协议 / variant — 中
 

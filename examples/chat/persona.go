@@ -1,31 +1,30 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"strings"
 
 	"github.com/user/go-agent-sdk"
 )
 
 // personaCommand starts a new session whose system prompt is the build agent's
-// plus the given text, using SessionConfig.SystemPrompt. The chat switches to
-// the new session and closes the previous one.
+// plus the given text, or (with --replace) the text alone, using
+// SessionConfig.SystemPrompt. It switches the chat to the new session.
 func (c *chat) personaCommand(input string) {
-	persona := strings.TrimSpace(strings.TrimPrefix(input, "/persona"))
-	if persona == "" {
-		c.console.write("usage: /persona <text>  (start a new session with an appended system prompt)\n")
+	text := commandArgument(input, "/persona")
+	replace := false
+	if text == "--replace" || strings.HasPrefix(text, "--replace ") {
+		replace = true
+		text = strings.TrimSpace(strings.TrimPrefix(text, "--replace"))
+	}
+	if text == "" {
+		c.console.write("usage: /persona [--replace] <text>  (start a new session with a system prompt)\n")
 		return
 	}
-	config := c.sessionConfig()
-	config.SystemPrompt = &agent.SystemPromptConfig{Mode: agent.SystemPromptAppend, Content: persona}
-	session, err := c.client.CreateSession(context.Background(), config)
-	if err != nil {
-		c.console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))
-		return
+	mode := agent.SystemPromptAppend
+	if replace {
+		mode = agent.SystemPromptReplace
 	}
-	c.replaceSession(session)
-	c.console.write(fmt.Sprintf("new persona session %s%s%s\n", cyan, session.ID(), reset))
+	c.startSystemPromptSession(&agent.SystemPromptConfig{Mode: mode, Content: text}, "persona")
 }
 
 // switchSession points the renderer at a new session and resets the per-session
