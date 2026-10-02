@@ -141,18 +141,67 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 	return result, rows.Err()
 }
 
-// DeleteSession permanently removes a session, closing its live handle first
-// when one is attached. The context is accepted for API symmetry; the delete is
-// synchronous.
+// DeleteSession permanently removes a session, its subagent (child) sessions and
+// their durable event logs, closing any attached live handles first. The context
+// is accepted for API symmetry; the delete is synchronous.
 func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
-	if _, err := c.rt.db.DB.Exec("DELETE FROM `session` WHERE `id` = ?", sessionID); err != nil {
+	ids, err := c.sessionSubtree(sessionID)
+	if err != nil {
 		return err
 	}
-	if session := c.sessionByID(sessionID); session != nil {
-		_ = session.Close()
+	for _, id := range ids {
+		if session := c.sessionByID(id); session != nil {
+			_ = session.Close()
+		}
+		c.rt.detach(id)
+		// The event log has no foreign key to the session, so it survives the
+		// row delete (and would leak the whole conversation) unless removed.
+		if err := c.rt.events.Remove(id); err != nil {
+			return err
+		}
 	}
-	c.rt.detach(sessionID)
-	return nil
+	return deleteSessions(c.rt.db.DB, ids)
+}
+
+// sessionSubtree returns sessionID and every descendant session id (the task
+// subagent sessions it started), so a delete covers the whole tree.
+func (c *Client) sessionSubtree(sessionID string) ([]string, error) {
+	rows, err := c.rt.db.DB.Query(
+		"WITH RECURSIVE subtree(`id`) AS ("+
+			"SELECT `id` FROM `session` WHERE `id` = ? "+
+			"UNION ALL "+
+			"SELECT `s`.`id` FROM `session` `s` JOIN subtree `t` ON `s`.`parent_id` = `t`.`id`"+
+			") SELECT `id` FROM subtree",
+		sessionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// deleteSessions removes the rows, cascading to each session's messages, inputs,
+// context epochs and todos.
+func deleteSessions(db *sql.DB, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	_, err := db.Exec("DELETE FROM `session` WHERE `id` IN ("+placeholders+")", args...)
+	return err
 }
 
 // sessionRow is the durable field set a new session row is written with.
