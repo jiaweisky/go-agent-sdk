@@ -43,11 +43,16 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 实现：turn 进行中键入文本会在状态栏显示 `steer: <draft>`，Enter 通过 `Session.Steer` 送进当前轮
   （`watchInterrupt` 新增 steer 回调与转义序列处理，见 `examples/chat/turn.go`）；Esc/Ctrl+C 中断行为不变。
 
-### 2.3 权限 Always / 持久化 — 高
+### 2.3 权限 Always / 持久化 — 高 ✅ 已实现
 
-- API：`PermissionDecision.Always`、`PermissionRequest.Save`（`permission.go:27`）
-- 现状：交互只返回 `Allow`。
-- 切入点：`[y]es/[a]lways/[n]o`，`Always` 后同一 action 不再询问，演示记住规则。
+- API：`PermissionDecision.Always`、`PermissionRequest.Save`
+- 实现：`examples/chat/permission.go` 三阶段交互——`Allow once / Allow always / Reject`，
+  always 先弹确认（列出将记住的 patterns），reject 收集可选原因；对齐 opencode 的交互与文案。
+  **默认选中 `Allow always`**（`Choice [2]`，便于演示；上游默认是 `Allow once`）。
+- 持久化：`Always` 规则由 SDK 写入 project 的 `permission` 表（对齐 V2 core 的 `PermissionSaved`），
+  **跨重启保留**；确认文案据此写成「until the rule is removed (saved for this project)」。
+  （注：TS 的 TUI 文案「until OpenCode is restarted」对应的是 V1 权限的**内存**实现——`InstanceState.approved`，
+  与 Go 走 DB 的行为不同，故此处不照搬。）
 
 ### 2.4 会话级配置 — 高
 

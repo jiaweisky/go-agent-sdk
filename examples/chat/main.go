@@ -276,25 +276,6 @@ func clientOptions(console *console, yolo bool) []util.Option {
 	return options
 }
 
-// interactivePermission prompts for each "ask" permission request.
-func interactivePermission(console *console) agent.PermissionHandlerFunc {
-	return func(request agent.PermissionRequest) (agent.PermissionDecision, error) {
-		console.write(fmt.Sprintf("\n%s[permission] %s: %s%s\n",
-			yellow, request.Action, strings.Join(request.Resources, ", "), reset))
-		answer, err := console.prompt("Allow? [Y/n] ")
-		if err != nil {
-			// EOF (e.g. Ctrl+D): fail safe rather than allow.
-			return agent.PermissionDecision{Allow: false, Message: "User denied this action."}, nil
-		}
-		switch strings.ToLower(strings.TrimSpace(answer)) {
-		case "n", "no":
-			return agent.PermissionDecision{Allow: false, Message: "User denied this action."}, nil
-		default:
-			return agent.PermissionDecision{Allow: true}, nil
-		}
-	}
-}
-
 // interactiveQuestion prompts for each "question" the model asks.
 func interactiveQuestion(console *console) agent.QuestionHandlerFunc {
 	return func(request agent.QuestionRequest) ([]schema.QuestionAnswer, error) {
