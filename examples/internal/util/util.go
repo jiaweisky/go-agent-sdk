@@ -116,45 +116,35 @@ func WithSubagentDepth(depth int) Option {
 //	AGENT_API_KEY      provider API key (falls back to OPENAI_API_KEY for
 //	                      openai, ANTHROPIC_API_KEY for anthropic; none for
 //	                      openai-compatible)
-//	AGENT_MODEL        model id (required; provider-specific, so no default)
+//	AGENT_MODEL        default model id (optional; an option may supply one)
 //
 // Credentials are passed in explicitly; the SDK does not read them from a
 // config file. Call LoadDotEnv from main to read a .env file in the working
 // directory (without overriding variables already set in the environment).
 //
-// Note on openai-compatible: unlike openai/anthropic it has no env fallback, so
-// AGENT_API_KEY is required — without it the request fails with "Missing auth
-// credential: value". (A keyless local endpoint would instead need the
-// ClientOptions.ModelInfo path, where a missing key maps to route.None() and no
-// auth header is sent.)
+// When no API key is resolved, the credential is left unset, so requests carry
+// no auth header (route.None): a keyless local endpoint works, while a hosted
+// provider fails to authenticate. An option may also supply credentials (for
+// example a multi-provider catalog).
 //
 // The default permission handler is agent.ApproveAll; override it with
 // WithPermission.
 func Client(dir string, options ...Option) (*agent.Client, error) {
 	providerType := envOr("AGENT_PROVIDER", "openai")
-	// The model id is provider-specific, so require it explicitly rather than
-	// silently defaulting to another provider's model.
-	model := os.Getenv("AGENT_MODEL")
-	if model == "" {
-		return nil, fmt.Errorf("AGENT_MODEL is required (the model id is provider-specific)")
-	}
 	protocol, err := protocolFor(providerType)
 	if err != nil {
 		return nil, err
 	}
 	apiKey := resolveAPIKey(providerType)
-	if apiKey == "" {
-		fmt.Fprintf(os.Stderr,
-			"warning: no API key set for provider %q (%s); "+
-				"requests will fail with 'Missing auth credential: value'\r\n",
-			providerType, apiKeyHint(providerType))
-	}
 	baseURL := os.Getenv("AGENT_BASE_URL")
 	opts := &agent.ClientOptions{
 		// The SDK never picks a state directory, so the example keeps its state
 		// next to itself (git-ignored) instead of in the user's home.
-		Root:     filepath.Join(dir, ".data"),
-		Model:    model,
+		Root: filepath.Join(dir, ".data"),
+		// The model is provider-specific. AGENT_MODEL is the default, but an
+		// option (for example a model catalog default) may supply one, so the
+		// value is checked after options are applied.
+		Model:    os.Getenv("AGENT_MODEL"),
 		Protocol: protocol,
 		ModelInfo: func(id string) (schema.ModelInfo, error) {
 			info, err := agent.NewModelInfo(protocol, id, baseURL, schema.ModelLimit{})
@@ -166,14 +156,24 @@ func Client(dir string, options ...Option) (*agent.Client, error) {
 			}
 			return info, nil
 		},
-		Credentials: agent.APIKey(apiKey),
-		Permission:  agent.ApproveAll,
+		Permission: agent.ApproveAll,
 		// The example's sample agents/skills, then .config in the working
 		// directory (-C pins it) so a project can override them.
 		ConfigDirs: []string{filepath.Join(dir, ".config"), ".config"},
 	}
+	if apiKey != "" {
+		opts.Credentials = agent.APIKey(apiKey)
+	}
 	for _, option := range options {
 		option(opts)
+	}
+	if opts.Model == "" {
+		return nil, fmt.Errorf("no model configured: set AGENT_MODEL or provide one through an option")
+	}
+	if opts.Credentials == nil {
+		fmt.Fprintf(os.Stderr,
+			"warning: no API key set for provider %q (%s); requests will fail to authenticate\r\n",
+			providerType, apiKeyHint(providerType))
 	}
 	client, err := agent.NewClient(opts)
 	if err != nil {

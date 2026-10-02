@@ -379,7 +379,7 @@ func TestYoloSkipsInteractivePermission(t *testing.T) {
 	}
 	for _, tc := range cases {
 		var opts agent.ClientOptions
-		for _, option := range clientOptions(&console{out: io.Discard}, tc.yolo) {
+		for _, option := range clientOptions(&console{out: io.Discard}, tc.yolo, "deepseek-v4-flash") {
 			option(&opts)
 		}
 		if got := opts.Permission != nil; got != tc.wantPermission {

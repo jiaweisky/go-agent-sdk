@@ -46,7 +46,14 @@ func run() error {
 	}
 	defer restore()
 
-	client, err := util.Client(util.ExampleDir(), clientOptions(console, yolo)...)
+	statePath := filepath.Join(util.ExampleDir(), ".data", "state.json")
+	state := loadState(statePath)
+	model := resolveDefaultModel(state.Model)
+	if model == "" {
+		return fmt.Errorf("no model available: set an API key (AGENT_API_KEY or a provider key such as OPENAI_API_KEY)")
+	}
+
+	client, err := util.Client(util.ExampleDir(), clientOptions(console, yolo, model)...)
 	if err != nil {
 		return err
 	}
@@ -58,10 +65,13 @@ func run() error {
 		}
 	}
 
+	// Reuse the persisted agent when it is still selectable.
+	state.Agent = resolveDefaultAgent(client, state.Agent)
+
 	writeBanner(console, yolo)
 
 	session, err := client.CreateSession(ctx, &agent.SessionConfig{
-		Agent: agentName,
+		Agent: state.Agent,
 		Hooks: newSessionHooks(console),
 	})
 	if err != nil {
@@ -71,8 +81,10 @@ func run() error {
 
 	// Client.On sees every session, so subagent (task) sessions are rendered
 	// nested under their task.
-	renderer := newChat(console, client, session.ID(), os.Getenv("AGENT_MODEL"))
+	renderer := newChat(console, client, session.ID(), model)
 	renderer.session = session
+	renderer.state = state
+	renderer.statePath = statePath
 	client.On(renderer.handle)
 
 	return chatLoop(ctx, console, renderer)
@@ -116,7 +128,7 @@ func writeBanner(console *console, yolo bool) {
 	}
 	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts; type during a turn to steer it)\n")
 	console.write(dim + "SessionHooks: lifecycle logged as [hook]; \"?<text>\" asks for a concise answer; rm -rf is denied" + reset + "\n")
-	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /history" + reset + "\n\n")
+	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /history" + reset + "\n\n")
 }
 
 // chatLoop prompts until stdin closes or the user interrupts a turn. The active
@@ -177,6 +189,10 @@ func handleCommand(c *chat, input string) bool {
 		c.sessionsCommand(command)
 	case command == "/delete" || strings.HasPrefix(command, "/delete "):
 		c.deleteCommand(command)
+	case command == "/model" || strings.HasPrefix(command, "/model "):
+		c.modelCommand(command)
+	case command == "/agent" || strings.HasPrefix(command, "/agent "):
+		c.agentCommand(command)
 	case command == "/skills":
 		c.skillsCommand()
 	case command == "/agents":
@@ -247,16 +263,17 @@ func (c *chat) steer(text string) {
 // and every "ask" is approved without a prompt. Questions stay interactive.
 // Model limits come from the example's model catalog, which is what lets
 // automatic compaction run.
-func clientOptions(console *console, yolo bool) []util.Option {
+func clientOptions(console *console, yolo bool, model string) []util.Option {
 	// A local reference to the SDK docs, advertised in the model's system
 	// context so it can read them when relevant.
 	docsDir := filepath.Join(filepath.Dir(filepath.Dir(util.ExampleDir())), "docs")
 	docsDescription := "go-agent-sdk design and porting documentation"
 	titleEnabled := true
 	options := []util.Option{
+		withCatalog(models),
+		withDefaultModel(model),
 		util.WithQuestion(interactiveQuestion(console)),
 		util.WithMCP(weatherMCP()...),
-		util.WithModelLimits(modelLimits),
 		// Generate a session title from the first user message, so /sessions
 		// lists something more useful than the placeholder.
 		util.WithTitle(agent.TitleConfig{Auto: &titleEnabled}),

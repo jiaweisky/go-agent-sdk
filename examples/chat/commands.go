@@ -144,6 +144,8 @@ var helpCommands = []helpEntry{
 	{"/new, /clear", "start a new session"},
 	{"/sessions [<#n|id>]", "list sessions, or switch to one (/resume, /continue)"},
 	{"/delete <#n|id>", "delete a session"},
+	{"/model [<id>]", "list models, or switch the current session's model"},
+	{"/agent [<id>]", "list agents, or switch the current session's agent"},
 	{"/skills", "list discovered skills"},
 	{"/agents", "list subagents"},
 	{"/mcps", "list MCP servers"},

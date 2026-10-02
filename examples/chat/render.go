@@ -14,11 +14,15 @@ import (
 // answer is available via /task. Every session other than the parent's is a
 // subagent's, including the sessions of the tasks a subagent starts.
 type chat struct {
-	console    *console
-	client     *agent.Client
-	mu         sync.Mutex
-	parent     string
-	model      string
+	console *console
+	client  *agent.Client
+	mu      sync.Mutex
+	parent  string
+	model   string
+	// state is the persisted selection (model/agent); statePath is where it is
+	// stored, empty when the chat is not persisting (tests).
+	state      chatState
+	statePath  string
 	usage      chatUsage
 	busy       map[string]bool
 	parentBusy bool

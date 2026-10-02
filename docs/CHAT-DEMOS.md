@@ -54,14 +54,26 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   （注：TS 的 TUI 文案「until OpenCode is restarted」对应的是 V1 权限的**内存**实现——`InstanceState.approved`，
   与 Go 走 DB 的行为不同，故此处不照搬。）
 
-### 2.4 会话级配置 — 高
+### 2.4 会话级 agent / 模型切换 — 高 ✅ 已实现
 
-- API：`SessionConfig.{Permissions,Tools,OnPermissionRequest,OnQuestion,Model}`（`session.go:17`）
-- 切入点：
-  - `/sandbox` — 新建一个 deny `bash`/`edit` 的会话（session 级权限）
-  - `/model <id>` — 新建会话并切换模型
-  - `/session-tool` — 只在当前会话注册一个工具
-- 备注：`/persona` 已演示 `SystemPrompt`。
+- API：新增 `Session.SetModel` 与 `Session.SetAgent`（`session.go`），对齐 V2 core 的
+  `V2Session.switchModel` / `switchAgent`（`packages/core/src/session.ts:402`、`:393`）：
+  发布已有的 `session.next.model.switched` / `session.next.agent.switched`，更新 session 行，下一轮生效。
+- 实现：
+  - `/model [<id>]` —— 无参列出**可用**模型；`/model <id>` 在**当前会话**切换模型。
+  - `/agent [<id>]` —— 无参列出可切换的主 agent；`/agent <id>` 在**当前会话**切换 agent。
+  两者都**不新建会话**。
+- **模型目录（in-code manifest）**：`examples/chat/model.go` 用一份条目清单描述每个模型的
+  provider/protocol/baseURL/apiKeyEnv/limits/pricing，派生 `ModelInfoProvider` + `CredentialProvider`
+  注入 client。协议取自 `ModelInfo.API.Protocol`、凭据按 providerID，所以**一个 client 可路由多家 provider**；
+  仅列出 API key 已设置的模型。匹配 `AGENT_PROVIDER`/`AGENT_PROVIDER_ID` 的条目用 `AGENT_API_KEY`/`AGENT_BASE_URL`
+  （与原有 env 配置兼容），其余条目用各自的 provider env。`util.Client` 的默认模型现在可由 option 提供。
+- **持久化上次选择**：`examples/chat/state.go` 把上次选的 model/agent 写入 `{ExampleDir}/.data/state.json`；
+  启动优先级 **上次选择 > `AGENT_MODEL` > catalog 默认**（`Default: true`，不可用则第一个可用）——
+  上次选择优先，这样切换会跨重启保留（TUI 的 `model.json` 是 `config.model > recent`，此处刻意让持久化优先）。
+- 已删除原拟的 `/sandbox`（`SessionConfig.Permissions`）与 `/session-tool`（`SessionConfig.Tools`）：
+  前者非主流（权限应由 agent/config 规则配置），后者与 `examples/tool` 重复。
+- 备注：`/persona` 已演示 `SessionConfig.SystemPrompt`。
 
 ### 2.5 事件渲染补齐 — 高（成本最低）
 
@@ -80,10 +92,10 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 现状：只演示了 append。
 - 切入点：`/persona --replace`、`/prompt add|replace|remove <section> <text>`。
 
-### 2.8 多模型 / 协议 / variant — 中
+### 2.8 协议 / variant — 中
 
-- API：`SessionConfig.Model`、`ModelInfoProvider`（`util.Client` 的 `ModelInfo`）、`schema.ModelVariant`（`schema/model.go:73`）
-- 切入点：`/model` 列出/切换，演示不同 provider/protocol 路由；给 catalog 加 variant 后用 `/variant` 切换。
+- API：`ModelInfoProvider`（`util.Client` 的 `ModelInfo`）、`schema.ModelVariant`（`schema/model.go:73`）
+- 备注：`/model` 切换已在 2.4 实现。此处补充：给 catalog 加 variant 后用 `/variant` 切换；catalog 含多 provider 时演示不同 protocol 路由。
 
 ### 2.9 MCP 远程 server / prompts / resources — 中
 
@@ -144,6 +156,6 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 
 | 优先级 | 选题 |
 |---|---|
-| 高 | SessionHooks、Steer、权限 Always、会话级配置、事件渲染补齐 |
+| 高 | SessionHooks、Steer、权限 Always、会话级模型切换、事件渲染补齐 |
 | 中 | 运行时注册 agent、SystemPrompt 模式、MCP prompts/resources、git reference、类型化工具 |
 | 低 | CleanupToolOutput、ToolOutput 限长、modes、Locale、model variants |

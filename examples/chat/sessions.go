@@ -97,7 +97,7 @@ func (c *chat) resumeCommand(id string) {
 // sessionConfig is the base config for sessions the chat creates or resumes: the
 // build agent plus the session hooks.
 func (c *chat) sessionConfig() *agent.SessionConfig {
-	return &agent.SessionConfig{Agent: agentName, Hooks: newSessionHooks(c.console)}
+	return &agent.SessionConfig{Agent: c.defaultAgentName(), Hooks: newSessionHooks(c.console)}
 }
 
 // replaceSession points the renderer at next and closes the previous live
