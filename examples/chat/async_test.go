@@ -49,6 +49,35 @@ func TestPermissionAskedRendersAndLists(t *testing.T) {
 	}
 }
 
+// TestHandlePermissionEventSync guards that a permission event in sync mode
+// neither renders nor deadlocks: chat.handle already holds c.mu, so the event
+// handler must not lock it again.
+func TestHandlePermissionEventSync(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		c.handle(agent.PermissionAsked{
+			SessionID: "ses_1", Request: agent.PermissionRequest{ID: "per_1", Action: "bash", Resources: []string{"ls"}},
+		})
+	})
+	if strings.Contains(out, "[permission]") {
+		t.Fatalf("out = %q, want no render in sync mode", out)
+	}
+}
+
+// TestHandlePermissionEventAsync guards the event path renders and clears a held
+// permission without deadlocking.
+func TestHandlePermissionEventAsync(t *testing.T) {
+	out := runCommand(t, nil, func(c *chat) {
+		c.setAsync(true)
+		c.handle(agent.PermissionAsked{
+			SessionID: "ses_1", Request: agent.PermissionRequest{ID: "per_1", Action: "bash", Resources: []string{"ls"}},
+		})
+		c.handle(agent.PermissionReplied{SessionID: "ses_1", RequestID: "per_1"})
+	})
+	if !strings.Contains(out, "[permission] #1 bash ls") {
+		t.Fatalf("out = %q, want the permission render", out)
+	}
+}
+
 // TestQuestionAskedRendersAndLists guards that a held question is rendered and
 // listed, and that /answer needs a body.
 func TestQuestionAskedRendersAndLists(t *testing.T) {

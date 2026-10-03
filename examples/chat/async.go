@@ -25,8 +25,9 @@ func (c *chat) asyncCommand(input string) {
 	}
 }
 
-// isAsync reports whether out-of-band interaction handling is on. Only then are
-// held requests rendered, so the sync handlers are not double-shown.
+// isAsync reports whether out-of-band interaction handling is on. It takes
+// c.mu, so it is for the command path; the event path reads c.async directly
+// because chat.handle already holds c.mu.
 func (c *chat) isAsync() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -45,23 +46,21 @@ func (c *chat) setAsync(on bool) {
 	}
 }
 
-// writePermissionAsked caches and renders a held permission request.
+// writePermissionAsked caches and renders a held permission request. The caller
+// must hold c.mu (it runs on the event path), like the other render helpers.
 func (c *chat) writePermissionAsked(request agent.PermissionRequest) {
-	c.mu.Lock()
 	c.permissions = append(c.permissions, request)
 	index := len(c.permissions)
-	c.mu.Unlock()
 	c.console.write(fmt.Sprintf("%s[permission] #%d %s %s%s\n",
 		yellow, index, request.Action, strings.Join(request.Resources, ", "), reset))
 	c.console.write(fmt.Sprintf("%s  /allow %d | /always %d | /deny %d%s\n", dim, index, index, index, reset))
 }
 
-// writeQuestionAsked caches and renders a held question request.
+// writeQuestionAsked caches and renders a held question request. The caller must
+// hold c.mu.
 func (c *chat) writeQuestionAsked(request agent.QuestionRequest) {
-	c.mu.Lock()
 	c.questions = append(c.questions, request)
 	index := len(c.questions)
-	c.mu.Unlock()
 	c.console.write(fmt.Sprintf("%s[question] #%d%s\n", yellow, index, reset))
 	for _, question := range request.Questions {
 		c.console.write(fmt.Sprintf("  %s\n", question.Question))
@@ -72,15 +71,13 @@ func (c *chat) writeQuestionAsked(request agent.QuestionRequest) {
 	c.console.write(fmt.Sprintf("%s  /answer %d <text> | /reject %d%s\n", dim, index, index, reset))
 }
 
+// removePermission drops a settled request. The caller must hold c.mu.
 func (c *chat) removePermission(requestID string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.permissions = removeRequestByID(c.permissions, requestID, func(r agent.PermissionRequest) string { return r.ID })
 }
 
+// removeQuestion drops a settled question. The caller must hold c.mu.
 func (c *chat) removeQuestion(requestID string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.questions = removeRequestByID(c.questions, requestID, func(r agent.QuestionRequest) string { return r.ID })
 }
 

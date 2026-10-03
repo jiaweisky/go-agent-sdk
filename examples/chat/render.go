@@ -202,13 +202,13 @@ func (c *chat) handleParent(event agent.Event) {
 		c.todos[e.SessionID] = e.Todos
 		c.writeTodos(e.Todos)
 	case agent.PermissionAsked:
-		if c.isAsync() {
+		if c.async {
 			c.writePermissionAsked(e.Request)
 		}
 	case agent.PermissionReplied:
 		c.removePermission(e.RequestID)
 	case agent.QuestionAsked:
-		if c.isAsync() {
+		if c.async {
 			c.writeQuestionAsked(e.Request)
 		}
 	case agent.QuestionReplied:
