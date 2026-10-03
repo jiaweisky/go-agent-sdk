@@ -259,13 +259,21 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 测试：`TestUndoCommandNothingToUndo`、`TestRedoCommandWithoutSession`、`TestRedoCommandNothingToRevert`、
   `TestUserMessageStepping`、`TestRevertDiffFiles`（端到端 undo/redo 临时验证通过）。
 
+### 2.19 rename / 改标题 — 中 ✅ 已实现（含小幅 SDK 改动）
+
+- SDK：新增 `Session.SetTitle(title) error`。实现发布 `session.next.title.updated` 事件（投影器把 `session.title` 落库），
+  与内部自动标题生成（`core/session/runner/llm.go` 的 `publishTitle`）走同一机制；创建时另可用 `SessionConfig.Title`。
+- 示例（`examples/chat/rename.go`）：`/rename <title>` 调 `Session.SetTitle`；新标题由 `TitleUpdated` 事件渲染
+  （`render.go` 的 `writeTitle`，`[title] ...`），命令本身不重复回显。
+- 测试：`TestRenameCommandSetsTitle`（`ListSessions` 反映新标题）、`TestRenameCommandRequiresTitle`、
+  `TestSessionSetTitle`（SDK：落库 + 发 `TitleUpdated`）。
+
 ---
 
 ## 3. 需先补 SDK 接口（当前无法演示）
 
 | 能力 | 缺口 |
 |---|---|
-| rename（SetTitle） | `DeleteSession` 之外没有改 title 的接口 |
 | share / unshare | 无公开 API |
 | fork session | 无公开 API |
 | 异步权限/问题（List/Reply/Reject） | `Client` 没有 `Permission()` / `Question()` getter |

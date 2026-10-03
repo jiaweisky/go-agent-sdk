@@ -120,12 +120,9 @@ func (s *Session) RevertCommit() error {
 // the session is kept rather than replaced. Setting the current model is a
 // no-op. An empty model ref provider keeps the one the session routes through.
 func (s *Session) SetModel(model schema.ModelRef) error {
-	stored, err := s.client.rt.store.Get(s.id)
+	stored, err := s.requireSession()
 	if err != nil {
 		return err
-	}
-	if stored == nil {
-		return fmt.Errorf("session not found: %s", s.id)
 	}
 	if model.ProviderID == "" && stored.Model != nil {
 		model.ProviderID = stored.Model.ProviderID
@@ -133,13 +130,10 @@ func (s *Session) SetModel(model schema.ModelRef) error {
 	if sameModelRef(stored.Model, model) {
 		return nil
 	}
-	_, err = s.client.rt.events.Publish(schema.SessionEventModelSwitched, map[string]any{
-		"sessionID": string(s.id),
+	return s.publishSession(schema.SessionEventModelSwitched, map[string]any{
 		"messageID": schema.NewMessageID(),
-		"timestamp": time.Now().UnixMilli(),
 		"model":     model,
-	}, nil)
-	return err
+	})
 }
 
 // SetAgent switches the session's agent. The change takes effect on the next
@@ -147,19 +141,43 @@ func (s *Session) SetModel(model schema.ModelRef) error {
 // the session is kept rather than replaced. Unlike SetModel it always records
 // the switch, matching the upstream operation.
 func (s *Session) SetAgent(agentID string) error {
-	stored, err := s.client.rt.store.Get(s.id)
-	if err != nil {
+	if _, err := s.requireSession(); err != nil {
 		return err
 	}
-	if stored == nil {
-		return fmt.Errorf("session not found: %s", s.id)
-	}
-	_, err = s.client.rt.events.Publish(schema.SessionEventAgentSwitched, map[string]any{
-		"sessionID": string(s.id),
+	return s.publishSession(schema.SessionEventAgentSwitched, map[string]any{
 		"messageID": schema.NewMessageID(),
-		"timestamp": time.Now().UnixMilli(),
 		"agent":     agentID,
-	}, nil)
+	})
+}
+
+// SetTitle renames the session by recording a title-updated event, so the
+// session is kept rather than replaced. The new title is visible immediately,
+// including to ListSessions.
+func (s *Session) SetTitle(title string) error {
+	if _, err := s.requireSession(); err != nil {
+		return err
+	}
+	return s.publishSession(schema.SessionEventTitleUpdated, map[string]any{"title": title})
+}
+
+// requireSession returns the stored session, or an error when it is missing.
+func (s *Session) requireSession() (*schema.SessionInfo, error) {
+	stored, err := s.client.rt.store.Get(s.id)
+	if err != nil {
+		return nil, err
+	}
+	if stored == nil {
+		return nil, fmt.Errorf("session not found: %s", s.id)
+	}
+	return stored, nil
+}
+
+// publishSession records a session event, filling the shared envelope fields
+// (sessionID and timestamp).
+func (s *Session) publishSession(def schema.EventDefinition, fields map[string]any) error {
+	fields["sessionID"] = string(s.id)
+	fields["timestamp"] = time.Now().UnixMilli()
+	_, err := s.client.rt.events.Publish(def, fields, nil)
 	return err
 }
 

@@ -220,6 +220,62 @@ func TestSessionTitlePreservesUserTitle(t *testing.T) {
 	}
 }
 
+// TestSessionSetTitle guards renaming a session after creation: the title is
+// persisted and a TitleUpdated event is published, which the chat renders.
+func TestSessionSetTitle(t *testing.T) {
+	client := newTestClient(t)
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	titles := make(chan TitleUpdated, 8)
+	client.On(func(event Event) {
+		if updated, ok := event.(TitleUpdated); ok {
+			titles <- updated
+		}
+	})
+
+	if err := session.SetTitle("Renamed"); err != nil {
+		t.Fatalf("set title: %v", err)
+	}
+
+	infos, err := client.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(infos) != 1 || infos[0].Title != "Renamed" {
+		t.Fatalf("title = %+v, want %q", infos, "Renamed")
+	}
+
+	select {
+	case updated := <-titles:
+		if updated.SessionID != session.ID() || updated.Title != "Renamed" {
+			t.Fatalf("event = %+v", updated)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no TitleUpdated event")
+	}
+}
+
+// TestSessionSetTitleMissing guards that renaming a deleted session fails
+// instead of silently succeeding.
+func TestSessionSetTitleMissing(t *testing.T) {
+	client := newTestClient(t)
+	session, err := client.CreateSession(context.Background(), &SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+	if err := client.DeleteSession(context.Background(), session.ID()); err != nil {
+		t.Fatalf("delete session: %v", err)
+	}
+	if err := session.SetTitle("x"); err == nil {
+		t.Fatal("SetTitle on a deleted session should fail")
+	}
+}
+
 // TestSessionTitleDisabledByDefault guards that no title is generated without
 // the opt-in config, leaving the placeholder title.
 func TestSessionTitleDisabledByDefault(t *testing.T) {
