@@ -321,11 +321,11 @@ func (r *runtime) publishSessionStatus(id schema.SessionID, status schema.Sessio
 }
 
 // admit enqueues a prompt for a session's next turn.
-func (r *runtime) admit(sessionID schema.SessionID, prompt string, delivery schema.SessionDelivery) error {
+func (r *runtime) admit(sessionID schema.SessionID, prompt schema.Prompt, delivery schema.SessionDelivery) error {
 	_, err := session.Admit(r.db.DB, appEvents{events: r.events}, session.AdmitInput{
 		ID:        schema.NewMessageID(),
 		SessionID: sessionID,
-		Prompt:    schema.Prompt{Text: prompt},
+		Prompt:    prompt,
 		Delivery:  delivery,
 	})
 	return err

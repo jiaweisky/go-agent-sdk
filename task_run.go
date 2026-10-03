@@ -111,7 +111,7 @@ func (r *runtime) publishTaskProgress(input TaskRunInput, childID schema.Session
 
 // runChildSession admits the prompt and drains the child session's turn.
 func (r *runtime) runChildSession(ctx context.Context, childID schema.SessionID, prompt string) error {
-	if err := r.admit(childID, prompt, schema.SessionDeliveryQueue); err != nil {
+	if err := r.admit(childID, schema.Prompt{Text: prompt}, schema.SessionDeliveryQueue); err != nil {
 		return err
 	}
 	runErr := r.coord.Run(ctx, childID)

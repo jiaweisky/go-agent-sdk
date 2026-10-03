@@ -47,6 +47,10 @@ type MessageOptions struct {
 	Prompt string
 	// Mode is "queue" (default) or "steer".
 	Mode string
+	// Files are attached to the message and sent to the model as media. Each
+	// URI must be a base64 payload or a data URL, since the SDK does not read
+	// from a path or URL.
+	Files []schema.PromptFileAttachment
 }
 
 // Session is a durable conversation bound to an agent.
@@ -204,7 +208,7 @@ func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event,
 // turn already in flight without starting a new turn or duplicating its event
 // stream.
 func (s *Session) Steer(prompt string) error {
-	return s.client.rt.admit(s.id, prompt, schema.SessionDeliverySteer)
+	return s.client.rt.admit(s.id, schema.Prompt{Text: prompt}, schema.SessionDeliverySteer)
 }
 
 // turnEvents hands a turn's events to the caller with backpressure: the offer
@@ -255,7 +259,7 @@ func (s *Session) run(ctx context.Context, msg MessageOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := s.client.rt.admit(s.id, prompt, deliveryForMode(msg.Mode)); err != nil {
+	if err := s.client.rt.admit(s.id, schema.Prompt{Text: prompt, Files: msg.Files}, deliveryForMode(msg.Mode)); err != nil {
 		return err
 	}
 	if err := s.client.rt.coord.Run(ctx, s.id); err != nil {
