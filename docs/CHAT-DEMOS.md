@@ -186,10 +186,15 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   **只删 7 天前的文件且不返回数量**，示例自行统计目录文件数，报告 `scanned N, removed M`（新文件不会被删）。
 - 说明：命令名为 `/tool-output`（不是泛化的 `/cleanup`）；目录路径由示例按 `core.Global` 布局推导（SDK 无 accessor）。
 
-### 2.14 配置 modes 文件 / Locale — 低
+### 2.14 配置 modes 文件 / Locale — 低 ✅ 已实现（Locale 仅 env）
 
-- API：`{mode,modes}/*.md`（`defs/config/agent.go:32`）、`ClientOptions.Locale`（`client.go:96`）
-- 切入点：加一个 `.config/mode/*.md` 并在 `/agents` 展示；用中英混合名对比 locale 排序。
+- modes：新增 `examples/chat/.config/mode/planner.md` → **primary agent**（`{mode,modes}/*.md` 由 `defs/config` 加载，
+  `Mode` 强制为 `primary`），在 **`/agent`**（不是 `/agents`）列出并可切换；`{agent,agents}/**/*.md` 才是 subagent、进 `/agents`。
+- Locale：不设 `ClientOptions.Locale`，沿用 env（`util.LocaleTag` 由 `LC_ALL`/`LC_COLLATE`/`LANG` 解析）。它做 locale 感知
+  排序，影响模型侧引导（advertised subagent types、skills/reference guidance）与 chat 的 `/agents`、`/mcps`。另加两个中文名
+  subagent（`.config/agent/翻译.md`、`摘要.md`）：`LC_ALL=zh_CN.UTF-8` 按拼音、`en_US.UTF-8` 按码点，`/agents` 顺序不同
+  （`TestSubagentLocaleOrdering` 锁定）。
+- 说明：`/agent`（primary 列表）用 `sort.Strings`，不吃 locale；示例未暴露 `ClientOptions.Locale`（仅 env）。
 
 ---
 

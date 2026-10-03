@@ -28,8 +28,10 @@ go run ./examples/chat
 
 Interactive multi-turn chat. Streams reasoning/tool notifications and prints the
 assistant reply. State goes to `examples/chat/.data` (git-ignored) and the
-sample agents and skills come from the committed `examples/chat/.config`; a
-`.config` in the working directory is scanned after it and overrides them.
+sample agents and skills come from the committed `examples/chat/.config`
+(`agent/*.md` are subagents, `mode/*.md` are primary agents); a `.config` in the
+working directory is scanned after it and overrides them. Locale-aware ordering
+(nil `Locale` uses `LC_ALL`/`LC_COLLATE`/`LANG`) affects lists like `/agents`.
 
 ```sh
 go run ./examples/chat
