@@ -119,6 +119,9 @@ type ToolSuccess struct {
 	CallID    string
 	Result    any
 	Content   any
+	// Structured is the tool's structured output, e.g. the file diffs an
+	// edit/write/apply_patch tool produced.
+	Structured any
 }
 
 func (e ToolSuccess) sessionID() string { return e.SessionID }
@@ -251,6 +254,8 @@ type StepEnded struct {
 	SessionID string
 	MessageID string
 	Finish    any
+	// Files lists the project-relative files the step changed.
+	Files []schema.RelativePath
 }
 
 func (e StepEnded) sessionID() string { return e.SessionID }
@@ -373,7 +378,7 @@ func mapToolEvent(eventType string, data map[string]any, sessionID, messageID st
 	case schema.SessionEventToolSuccess.Type:
 		return ToolSuccess{
 			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
-			Result: data["result"], Content: data["content"],
+			Result: data["result"], Content: data["content"], Structured: data["structured"],
 		}, true
 	case schema.SessionEventToolFailed.Type:
 		return ToolFailed{
@@ -419,7 +424,7 @@ func mapRunEvent(eventType string, data map[string]any, sessionID, messageID str
 	case schema.SessionEventStepEnded.Type:
 		return StepEnded{
 			SessionID: sessionID, MessageID: messageID,
-			Finish: data["finish"],
+			Finish: data["finish"], Files: relativePathsFrom(data["files"]),
 		}, true
 	case schema.SessionEventStepFailed.Type:
 		return StepFailed{
@@ -475,6 +480,23 @@ func usageProviderMetadataFrom(value any) map[string]map[string]any {
 
 // fieldString reads a string-ish field from a decoded event payload, rendering
 // non-strings with fmt.
+// relativePathsFrom decodes a files list that is []RelativePath for a live
+// event or []any of strings when replayed from JSON.
+func relativePathsFrom(value any) []schema.RelativePath {
+	if paths, ok := value.([]schema.RelativePath); ok {
+		return paths
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var paths []schema.RelativePath
+	if err := json.Unmarshal(encoded, &paths); err != nil {
+		return nil
+	}
+	return paths
+}
+
 func fieldString(data map[string]any, key string) string {
 	if data == nil {
 		return ""

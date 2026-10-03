@@ -44,6 +44,7 @@ type runtime struct {
 	question      *questionHandler
 	runner        *runner.LLMRunner
 	coord         *session.Coordinator[schema.SessionID]
+	snapshot      *core.Snapshot
 	location      core.Location
 	projectID     schema.ProjectID
 	models        runner.ModelResolver
@@ -340,6 +341,66 @@ func (r *runtime) compact(ctx context.Context, sessionID schema.SessionID) (bool
 	return r.runner.Compact(ctx, sessionID)
 }
 
+// revertSnapshot adapts the runtime snapshot service to session.RevertSnapshot.
+func (r *runtime) revertSnapshot() (session.RevertSnapshot, error) {
+	if r.snapshot == nil {
+		return nil, fmt.Errorf("snapshots are unavailable for this project")
+	}
+	return core.NewSessionRevertSnapshot(r.snapshot), nil
+}
+
+// revertSession returns the stored session a revert operates on.
+func (r *runtime) revertSession(sessionID schema.SessionID) (*schema.SessionInfo, error) {
+	stored, err := r.store.Get(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if stored == nil {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+	return stored, nil
+}
+
+// revertInputs resolves the snapshot service and stored session a revert needs.
+func (r *runtime) revertInputs(sessionID schema.SessionID) (session.RevertSnapshot, schema.SessionInfo, error) {
+	snapshot, err := r.revertSnapshot()
+	if err != nil {
+		return nil, schema.SessionInfo{}, err
+	}
+	stored, err := r.revertSession(sessionID)
+	if err != nil {
+		return nil, schema.SessionInfo{}, err
+	}
+	return snapshot, *stored, nil
+}
+
+// revertStage reverts the file changes made after messageID.
+func (r *runtime) revertStage(sessionID schema.SessionID, messageID schema.MessageID) (*schema.RevertState, error) {
+	snapshot, stored, err := r.revertInputs(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return session.RevertStage(r.db.DB, appEvents{events: r.events}, snapshot, stored, messageID, nil)
+}
+
+// revertClear restores the files a staged revert changed.
+func (r *runtime) revertClear(sessionID schema.SessionID) error {
+	snapshot, stored, err := r.revertInputs(sessionID)
+	if err != nil {
+		return err
+	}
+	return session.RevertClear(appEvents{events: r.events}, snapshot, stored)
+}
+
+// revertCommit finalizes a staged revert.
+func (r *runtime) revertCommit(sessionID schema.SessionID) error {
+	stored, err := r.revertSession(sessionID)
+	if err != nil {
+		return err
+	}
+	return session.RevertCommit(appEvents{events: r.events}, *stored)
+}
+
 func (r *runtime) setHooks(sessionID string, hooks *SessionHooks) {
 	r.hooksMu.Lock()
 	defer r.hooksMu.Unlock()
@@ -509,6 +570,7 @@ func (r *runtime) buildBuiltins(opts *ClientOptions, global core.Global, locale 
 
 // buildRunner wires the LLM runner and the coordinator that drains sessions.
 func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Global, locale language.Tag) {
+	r.snapshot = newSnapshot(git, global, &r.location)
 	r.runner = runner.NewLLMRunner(runner.LLMRunner{
 		Events:            appEvents{events: r.events},
 		LLM:               chooseLLM(opts),
@@ -522,7 +584,7 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: r.reference}, locale),
 		Compaction:        compactionSettings(opts),
 		Title:             titleSettings(opts),
-		Snapshots:         buildSnapshots(git, global, &r.location),
+		Snapshots:         snapshotterFor(r.snapshot),
 		DB:                r.db,
 	})
 	r.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
@@ -685,11 +747,20 @@ func subagentDepth(configured int) int {
 	return configured
 }
 
-// buildSnapshots uses the git-backed snapshotter when the project supports it,
-// and a no-op one otherwise.
-func buildSnapshots(git core.Git, global core.Global, location *core.Location) runner.Snapshotter {
+// newSnapshot builds the git-backed snapshot service, or nil when the project
+// has no git backing.
+func newSnapshot(git core.Git, global core.Global, location *core.Location) *core.Snapshot {
 	snapshot, err := core.NewSnapshot(git, global, location)
 	if err != nil {
+		return nil
+	}
+	return snapshot
+}
+
+// snapshotterFor adapts a possibly-nil snapshot service to the runner's
+// snapshotter.
+func snapshotterFor(snapshot *core.Snapshot) runner.Snapshotter {
+	if snapshot == nil {
 		return noopSnapshots{}
 	}
 	return snapshot

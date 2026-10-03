@@ -217,14 +217,54 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 说明：只加**事件**、未加读接口（`Session.Todos()`）；`/todos` 读的是事件缓存的副本，未收到过 `todo.updated` 时为空。
 - 测试：`TestClientOnReceivesTodoUpdated`（todowrite→事件全链路）、`TestMapTodoEventStructPayload`、`TestTodosCommand`。
 
+### 2.17 快照 / diff — 中 ✅ 已实现（含 SDK 改动）
+
+- SDK：
+  - `Client.Capture() (string, bool)`（当前快照 id；无快照支持/失败返回 false）与
+    `Client.Diff(from, to string) ([]core.FileDiff, error)`（runtime 保留 `*core.Snapshot`；空 id/无支持返回 nil）。
+  - 高层 `agent.StepEnded` 加 `Files []schema.RelativePath`；`agent.ToolSuccess` 加 `Structured any`（工具结构化输出，
+    含 `files[].patch`）。
+- 示例（`examples/chat/diff.go`）：
+  - 每步结束打印 `[files] N changed: ...`（`StepEnded.Files`）。
+  - `edit`/`apply_patch` 工具成功时打印 `[diff] path (+A -D)` 与上色 patch（`ToolSuccess.Structured`；`write` 的输出无 patch，
+    新建文件只在 `/diff` 里出现）。
+  - `/diff` 在**本轮开始/结束各 `Client.Capture()` 一次**再调 `Client.Diff`。**不从 step 事件取快照**：v2 core 在 provider
+    失败/中断时不发 `step.ended`（TS 同样有 `if (stepSettlement && !hasProviderError())` 守卫），那样会漏掉本轮改动。
+- 机制（与 v2 core 一致，不是自造格式，底层就是 **git index + tree 对象**）：
+  1. 在 `<global.data>/snapshot/<projectID>/<hash(worktree)>` 建**影子 git 仓库**，`repo.create` 时把**源仓库的 `index`
+     复制过去**；
+  2. `capture` 对 scope 执行 `git add --all --sparse`（刷新**影子 index**；忽略项用**源仓库** `git check-ignore --no-index`
+     过滤，>2MiB 的 untracked 跳过）后 `git write-tree` 得到内容寻址的 tree id；
+  3. `files`/`diff` 即 `git diff --name-only` / `git diff` 两个 tree id；`preview`/`restore` 用临时 `GIT_INDEX_FILE` +
+     `read-tree`/`update-index`/`checkout-index`。
+  全程**不改用户的工作区/暂存区**；因此 diff 只覆盖被 refresh 的 scope 内的改动。Go 的 `core/snapshot.go`/`core/git.go` 与
+  TS 的 `snapshot.ts`/`git.ts` 逐行对应。
+- 局限：快照 scope 是 **location 目录**（`-C examples/chat` → 只覆盖该目录下的改动）；非 git 项目无 diff。
+- 测试：`TestMapStepEndedFiles`、`TestMapToolSuccessStructured`、`TestClientCapture`、`TestClientDiffNoSnapshot`、
+  `TestToolDiffFiles`、`TestWriteDiffs`、`TestDiffCommandNoSnapshot`。
+
+### 2.18 revert / undo / redo — 中 ✅ 已实现（含小幅 SDK 改动）
+
+- SDK：新增 `Session.RevertStage(messageID) (*schema.RevertState, error)`、`Session.Revert() *schema.RevertState`、
+  `Session.RevertClear() error`、`Session.RevertCommit() error`，对齐 v2 core 的 `Session.Interface.revert.{stage,clear,commit}`。
+  底层复用已有的 `core/session/revert.go`（按 assistant 消息里的 `Snapshot{Start,End,Files}` 做分阶段回滚 +
+  `session.revert.*` 事件）与 `core.Snapshot`。
+- 示例（`examples/chat/revert.go`）：与 TUI 一致，边界**从会话状态读取**（`Session.Revert()`，因此跨 resume 保留），
+  而非本地跟踪：
+  - `/undo` → 取**边界之前的上一个 user 消息**为界调 `RevertStage`（无边界时取最后一个 user 消息），把其后的文件改动
+    恢复到编辑前、打印 diff，并回显被回退消息的文本（TUI 是回填到输入框）；**可连续回退**。
+  - `/redo` → 边界**前移到下一个 user 消息**（`RevertStage(next)`）；已是最新时 `RevertClear` 整体复原。**可逐步前进**。
+  - `RevertCommit` 已暴露但示例未接线（与 TUI 一致，TUI 也不调 `commit`）。
+- 局限：只回滚**文件**；不会从模型上下文剔除已 revert 的消息（TUI 靠 `session.revert.messageID` 隐藏消息）。
+- 测试：`TestUndoCommandNothingToUndo`、`TestRedoCommandWithoutSession`、`TestRedoCommandNothingToRevert`、
+  `TestUserMessageStepping`、`TestRevertDiffFiles`（端到端 undo/redo 临时验证通过）。
+
 ---
 
 ## 3. 需先补 SDK 接口（当前无法演示）
 
 | 能力 | 缺口 |
 |---|---|
-| 快照/diff | 高层 `StepEnded` 不带 files（底层 `session.next.step.ended` 有） |
-| revert / undo / redo | 无公开 API |
 | rename（SetTitle） | `DeleteSession` 之外没有改 title 的接口 |
 | share / unshare | 无公开 API |
 | fork session | 无公开 API |

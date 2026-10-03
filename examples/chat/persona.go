@@ -39,5 +39,7 @@ func (c *chat) switchSession(session *agent.Session) {
 	c.running = nil
 	c.tasks = newTaskSet()
 	c.interruptArmed = false
+	c.turnStartSnapshot = ""
+	c.lastSnapshot = ""
 	c.mu.Unlock()
 }

@@ -122,7 +122,7 @@ func writeBanner(console *console, yolo bool) {
 	}
 	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts; type during a turn to steer it)\n")
 	console.write(dim + "SessionHooks: lifecycle logged as [hook]; \"?<text>\" asks for a concise answer; rm -rf is denied" + reset + "\n")
-	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /mcp  /task [<#n>]  /compact  /tool  /tool-output  /attach  /todos  /plugin  /reference  /persona  /prompt  /history" + reset + "\n\n")
+	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /mcp  /task [<#n>]  /compact  /tool  /tool-output  /attach  /todos  /diff  /undo  /redo  /plugin  /reference  /persona  /prompt  /history" + reset + "\n\n")
 }
 
 // chatLoop prompts until stdin closes or the user interrupts a turn. The active
@@ -151,6 +151,7 @@ func chatLoop(ctx context.Context, console *console, renderer *chat) error {
 // exits. It returns whether the chat should exit.
 func runTurn(ctx context.Context, console *console, renderer *chat, input string) bool {
 	renderer.beginTurn()
+	renderer.captureTurnStart()
 	files := renderer.takeAttachments()
 	turnDone := make(chan struct{})
 	go func() {
@@ -162,6 +163,7 @@ func runTurn(ctx context.Context, console *console, renderer *chat, input string
 	// Typing during the turn steers it (Enter sends); Esc/Ctrl+C interrupt.
 	action := console.watchInterrupt(turnDone, renderer.session.Abort, renderer.steer, renderer.updateStatus, renderer.setInterruptArmed)
 	<-turnDone
+	renderer.captureTurnEnd()
 	if action == interruptNone {
 		console.setStatus("")
 	} else {
@@ -210,6 +212,12 @@ func handleCommand(c *chat, input string) bool {
 		c.attachCommand(command)
 	case command == "/todos":
 		c.todosCommand()
+	case command == "/diff":
+		c.diffCommand()
+	case command == "/undo":
+		c.undoCommand()
+	case command == "/redo":
+		c.redoCommand()
 	case command == "/reference" || strings.HasPrefix(command, "/reference "):
 		c.referenceCommand(command)
 	case command == "/persona" || strings.HasPrefix(command, "/persona "):

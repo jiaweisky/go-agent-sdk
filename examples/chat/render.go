@@ -64,6 +64,11 @@ type chat struct {
 	// todos caches the parent session's task list, from todo.updated events, so
 	// /todos can show it on demand.
 	todos map[string][]schema.SessionTodoInfo
+	// turnStartSnapshot and lastSnapshot are the current turn's snapshot ids,
+	// captured by the chat around the turn. They are not taken from step events
+	// because a failed or interrupted turn emits no final step.ended.
+	turnStartSnapshot string
+	lastSnapshot      string
 }
 
 func newChat(console *console, client *agent.Client, parent, model string) *chat {
@@ -90,6 +95,8 @@ func (c *chat) beginTurn() {
 	c.stream = nil
 	c.labeled = false
 	c.step = 0
+	c.turnStartSnapshot = ""
+	c.lastSnapshot = ""
 }
 
 func (c *chat) handle(event agent.Event) {
@@ -176,6 +183,7 @@ func (c *chat) handleParent(event agent.Event) {
 		}
 	case agent.ToolSuccess:
 		c.finishTool(e.CallID, "")
+		c.writeToolDiff(e.Structured)
 	case agent.ToolFailed:
 		c.finishTool(e.CallID, errorMessage(e.Error))
 	case agent.SessionStatus:
@@ -189,6 +197,7 @@ func (c *chat) handleParent(event agent.Event) {
 		c.beginStep()
 	case agent.StepEnded:
 		c.endStep(e.Finish)
+		c.writeStepFiles(e.Files)
 	case agent.StepFailed:
 		c.failStep(e.Error)
 	case agent.Retried:

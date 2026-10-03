@@ -84,6 +84,37 @@ func (s *Session) Compact(ctx context.Context) (bool, error) {
 	return s.client.rt.compact(ctx, s.id)
 }
 
+// RevertStage reverts the file changes made after messageID: each file a later
+// assistant message changed is restored to its pre-edit snapshot. The returned
+// state describes the reverted files. Pair it with RevertClear (bring the
+// changes back) or RevertCommit (finalize the revert).
+func (s *Session) RevertStage(messageID string) (*schema.RevertState, error) {
+	if messageID == "" {
+		return nil, fmt.Errorf("revert needs a message id")
+	}
+	return s.client.rt.revertStage(s.id, schema.MessageID(messageID))
+}
+
+// Revert returns the session's staged revert, or nil when none is staged. Read
+// it (rather than tracking the boundary separately) so it survives a resume.
+func (s *Session) Revert() *schema.RevertState {
+	stored, err := s.client.rt.store.Get(s.id)
+	if err != nil || stored == nil {
+		return nil
+	}
+	return stored.Revert
+}
+
+// RevertClear restores the files a staged revert changed and drops the revert.
+func (s *Session) RevertClear() error {
+	return s.client.rt.revertClear(s.id)
+}
+
+// RevertCommit finalizes a staged revert.
+func (s *Session) RevertCommit() error {
+	return s.client.rt.revertCommit(s.id)
+}
+
 // SetModel switches the session's model. The change takes effect on the next
 // turn: it records a model-switched event that updates the stored session, so
 // the session is kept rather than replaced. Setting the current model is a

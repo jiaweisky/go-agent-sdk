@@ -435,6 +435,31 @@ func (c *Client) CleanupToolOutput() error {
 	return c.rt.toolOutput.Cleanup()
 }
 
+// Capture returns the current snapshot id for the project, or false when the
+// project has no snapshot support or the best-effort capture failed. Pair two
+// captures around a turn to diff what it changed, independent of step events.
+func (c *Client) Capture() (string, bool) {
+	if c.rt == nil || c.rt.snapshot == nil {
+		return "", false
+	}
+	id, err := c.rt.snapshot.Capture()
+	if err != nil || id == nil {
+		return "", false
+	}
+	return string(*id), true
+}
+
+// Diff returns the per-file diffs between two snapshot ids. It returns nil when
+// the project has no snapshot support or either id is empty.
+func (c *Client) Diff(from, to string) ([]core.FileDiff, error) {
+	if c.rt == nil || c.rt.snapshot == nil || from == "" || to == "" {
+		return nil, nil
+	}
+	return c.rt.snapshot.Diff(core.SnapshotDiffInput{
+		SnapshotCompareInput: core.SnapshotCompareInput{From: core.SnapshotID(from), To: core.SnapshotID(to)},
+	})
+}
+
 // Close closes active sessions and releases the runtime and its database.
 func (c *Client) Close() error {
 	c.mu.Lock()
