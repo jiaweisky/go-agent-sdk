@@ -53,7 +53,14 @@ func run() error {
 		return err
 	}
 
-	client, err := util.Client(util.ExampleDir(), clientOptions(console, yolo, model)...)
+	notesURL, stopNotes, err := startNotesMCP()
+	if err != nil {
+		console.write(fmt.Sprintf("%snotes MCP unavailable: %v%s\n", yellow, err, reset))
+	} else {
+		defer stopNotes()
+	}
+
+	client, err := util.Client(util.ExampleDir(), clientOptions(console, yolo, model, notesURL)...)
 	if err != nil {
 		return err
 	}
@@ -128,7 +135,7 @@ func writeBanner(console *console, yolo bool) {
 	}
 	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts; type during a turn to steer it)\n")
 	console.write(dim + "SessionHooks: lifecycle logged as [hook]; \"?<text>\" asks for a concise answer; rm -rf is denied" + reset + "\n")
-	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /task [<#n>]  /compact  /tool  /reference  /persona  /prompt  /history" + reset + "\n\n")
+	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /mcp  /task [<#n>]  /compact  /tool  /reference  /persona  /prompt  /history" + reset + "\n\n")
 }
 
 // chatLoop prompts until stdin closes or the user interrupts a turn. The active
@@ -199,6 +206,8 @@ func handleCommand(c *chat, input string) bool {
 		c.agentsCommand()
 	case command == "/mcps":
 		c.mcpsCommand()
+	case command == "/mcp" || strings.HasPrefix(command, "/mcp "):
+		c.mcpCommand(command)
 	case command == "/task" || strings.HasPrefix(command, "/task "):
 		c.taskCommand(command)
 	case command == "/compact":
@@ -265,7 +274,7 @@ func (c *chat) steer(text string) {
 // and every "ask" is approved without a prompt. Questions stay interactive.
 // Model limits come from the example's model catalog, which is what lets
 // automatic compaction run.
-func clientOptions(console *console, yolo bool, model string) []util.Option {
+func clientOptions(console *console, yolo bool, model, notesURL string) []util.Option {
 	// A local reference to the SDK docs, advertised in the model's system
 	// context so it can read them when relevant.
 	docsDir := filepath.Join(filepath.Dir(filepath.Dir(util.ExampleDir())), "docs")
@@ -275,7 +284,7 @@ func clientOptions(console *console, yolo bool, model string) []util.Option {
 		models.Option(),
 		util.WithModel(model),
 		util.WithQuestion(interactiveQuestion(console)),
-		util.WithMCP(weatherMCP()...),
+		util.WithMCP(append(weatherMCP(), notesMCP(notesURL)...)...),
 		// Generate a session title from the first user message, so /sessions
 		// lists something more useful than the placeholder.
 		util.WithTitle(agent.TitleConfig{Auto: &titleEnabled}),

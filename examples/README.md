@@ -39,7 +39,11 @@ Flags: `-C <dir>` runs as if started there and `-yolo` skips permission
 prompts. Model token limits and pricing come from the shared model catalog
 (`examples/internal/util/catalog.go`); the limits enable automatic compaction.
 
-Commands: `/skills`, `/agents`, `/mcps`, `/task [<#n>]`, `/compact` (summarizes
+The chat starts a small notes MCP server (`examples/notesmcp`) over streamable
+HTTP (spawned with `go run` and killed on exit); `/mcp` lists and fetches its
+prompts and resources, and `/mcps` shows each server's instructions.
+
+Commands: `/skills`, `/agents`, `/mcps`, `/mcp`, `/task [<#n>]`, `/compact` (summarizes
 the session history on demand, demonstrating `Session.Compact`), `/tool` (adds
 or removes a demo tool at runtime via `Client.RegisterTools`), `/reference`
 (lists or adds named reference sources injected into the model's system

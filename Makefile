@@ -10,7 +10,7 @@ else
 EXE :=
 endif
 
-EXAMPLES := chat tool
+EXAMPLES := chat tool notesmcp
 BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(EXAMPLES)))
 GO_SOURCES := $(shell find . -name '*.go' -not -path './bin/*')
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/user/go-agent-sdk"
 	"github.com/user/go-agent-sdk/core/util"
@@ -70,10 +71,14 @@ func (c *chat) mcpsCommand() {
 		c.console.write("(no MCP servers connected)\n")
 		return
 	}
+	instructions := map[string]string{}
+	for _, block := range client.Instructions() {
+		instructions[block.Name] = block.Instructions
+	}
 	names := sortedServerNames(statuses)
 	c.console.write(fmt.Sprintf("%sMCP servers (%d):%s\n", bold, len(names), reset))
 	for _, name := range names {
-		c.writeMCPServer(client, name, statuses[name])
+		c.writeMCPServer(client, name, statuses[name], instructions[name])
 	}
 }
 
@@ -87,23 +92,26 @@ func sortedServerNames(statuses map[string]mcp.Status) []string {
 	return names
 }
 
-// writeMCPServer prints one server: its status line, then its metadata.
-func (c *chat) writeMCPServer(client *mcp.Client, name string, status mcp.Status) {
+// writeMCPServer prints one server: its status line, metadata and instructions.
+func (c *chat) writeMCPServer(client *mcp.Client, name string, status mcp.Status, instructions string) {
 	line := fmt.Sprintf("  %s%s%s — %s", cyan, name, reset, status.Status)
 	if status.Error != "" {
 		line += fmt.Sprintf(" %s(%s)%s", dim, status.Error, reset)
 	}
 	c.console.write(line + "\n")
 
-	info, ok := client.ServerInfo(name)
-	if !ok {
-		return
+	if info, ok := client.ServerInfo(name); ok {
+		if meta := serverMeta(info); meta != "" {
+			c.console.write(fmt.Sprintf("    %s%s%s\n", dim, meta, reset))
+		}
+		if info.Description != "" {
+			c.console.write(fmt.Sprintf("    %s\n", info.Description))
+		}
 	}
-	if meta := serverMeta(info); meta != "" {
-		c.console.write(fmt.Sprintf("    %s%s%s\n", dim, meta, reset))
-	}
-	if info.Description != "" {
-		c.console.write(fmt.Sprintf("    %s\n", info.Description))
+	for _, line := range strings.Split(strings.TrimSpace(instructions), "\n") {
+		if line != "" {
+			c.console.write(fmt.Sprintf("    %s%s%s\n", dim, line, reset))
+		}
 	}
 }
 
@@ -149,6 +157,7 @@ var helpCommands = []helpEntry{
 	{"/skills", "list discovered skills"},
 	{"/agents", "list subagents"},
 	{"/mcps", "list MCP servers"},
+	{"/mcp prompts|prompt|resources|resource", "list or fetch MCP prompts and resources"},
 	{"/task [<#n>]", "list subagent tasks, or show one's output"},
 	{"/compact", "summarize the history now"},
 	{"/tool [add|remove <name>]", "list or manage runtime tools"},

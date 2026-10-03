@@ -126,13 +126,18 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   `core/session/runner/model.go:83`），但只改请求 body/header，chat UI 不可见；`temperature` 类演示单薄，
   reasoning 类依赖 provider 支持且易 400。故不在示例中演示，仅此说明。
 
-### 2.9 MCP 远程 server / prompts / resources — 中
+### 2.9 MCP 远程 server / prompts / resources — 中 ✅ 已实现
 
-- API：`ServerConfig.Type="remote"` + `Headers`（`mcp/config.go:28`）、
-  `MCP().{Connect,Disconnect,Prompts,Resources,ResourceTemplates,ServerInfo}`（`mcp/client.go:347` 起）
-- 现状：只配了本地 stdio weather，`/mcps` 只显示状态。
-- 注意：无 MCP 配置时 `rt.mcp == nil`（`runtime.go:730`），需固定配一个远程 MCP（或占位 config）才能演示。
-- 切入点：`/mcp prompts`、`/mcp resources`、`/mcps` 展示 instructions。
+- 新增 `examples/notesmcp`：可独立运行的小 MCP server（默认 stdio；`--http <addr>` 走 streamable HTTP）。
+  提供 4 个工具（`note_save`/`note_get`/`note_delete`/`note_list`）、2 个 prompt（`notes_digest`/`action_items`）、
+  资源 `notes://index`、模板 `notes://note/{id}` 和 instructions；笔记持久化到一个 JSON 文件。
+- chat 默认以 **remote(HTTP)** 使用它：`run()` 用 `go run ./examples/notesmcp --http 127.0.0.1:<free>` spawn
+  子进程，轮询就绪后注册 `ServerConfig{Type:"remote"}`，退出时按**进程组** kill（`examples/chat/notesmcp.go`
+  及 `_unix`/`_windows` 变体）。stdio 由 SDK 的 `CommandTransport` 自行托管、chat 无需管，故暂未接入。
+- 命令：`/mcp prompts | prompt <name> [k=v ...] | resources | resource <uri>` 列出/读取；`/mcps` 现在也显示
+  各 server 的 instructions。
+- 说明：`ServerConfig` 的静态鉴权用 `Headers`（无 OAuth）；「无 MCP 配置时 `rt.mcp == nil`」因 notes server
+  默认在而不再出现。
 
 ### 2.10 Reference git 源 / hidden — 中
 
