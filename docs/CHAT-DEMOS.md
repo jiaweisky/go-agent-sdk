@@ -139,11 +139,15 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 说明：`ServerConfig` 的静态鉴权用 `Headers`（无 OAuth）；「无 MCP 配置时 `rt.mcp == nil`」因 notes server
   默认在而不再出现。
 
-### 2.10 Reference git 源 / hidden — 中
+### 2.10 Reference git 源 / hidden — 中 ✅ 已实现（hidden 部分不做）
 
-- API：`core.ReferenceGitSource`（`schema/reference.go:14`）、`ReferenceInfo.Hidden`
-- 现状：只演示 local。
-- 切入点：`/reference add-git <name> <repo> [branch]`，演示 clone 缓存预热。
+- 实现：`/reference add-git <name> <repo> [<branch>]`（`examples/chat/references.go`）注册 `ReferenceGitSource`；
+  SDK 立即算出缓存路径并**后台 shallow clone**（git `--depth 100`）到 `<Root>/repos/...`，模型下一轮即可读该目录。
+- `/reference` 列表对 git 源显示 `[git] cloning...` / `[git] ready`（按缓存目录是否已存在判断），local 显示 `[local]`。
+- 因 `materialize` 对「非 remote / branch 非法」**静默跳过**，命令加完会核对物化列表，失败时报 `was not accepted`。
+- **hidden 不做**：`ReferenceInfo.Hidden` 在 Go 与 TS 的 guidance 里都**未被消费**（可见性判据是 `Description != nil`，
+  `adapters.go` 还把 Hidden 丢了），无行为可演示，故不纳入。
+- 备注：`file://` 源被 `RepositoryIsRemote` 判为非 remote 而跳过，所以 git 演示必须是真正的远程仓库。
 
 ### 2.11 Plugin 的事件 / Options / Tools — 中
 

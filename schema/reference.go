@@ -5,7 +5,8 @@ type ReferenceLocalSource struct {
 	Type        string       `json:"type"`
 	Path        AbsolutePath `json:"path"`
 	Description *string      `json:"description,omitempty"`
-	Hidden      *bool        `json:"hidden,omitempty"`
+	// Hidden is carried into ReferenceInfo; see ReferenceInfo.Hidden.
+	Hidden *bool `json:"hidden,omitempty"`
 }
 
 func (ReferenceLocalSource) ReferenceSourceType() string { return "local" }
@@ -16,7 +17,8 @@ type ReferenceGitSource struct {
 	Repository  string  `json:"repository"`
 	Branch      *string `json:"branch,omitempty"`
 	Description *string `json:"description,omitempty"`
-	Hidden      *bool   `json:"hidden,omitempty"`
+	// Hidden is carried into ReferenceInfo; see ReferenceInfo.Hidden.
+	Hidden *bool `json:"hidden,omitempty"`
 }
 
 func (ReferenceGitSource) ReferenceSourceType() string { return "git" }
@@ -29,11 +31,14 @@ type ReferenceSource interface {
 
 // ReferenceInfo is a materialized reference.
 type ReferenceInfo struct {
-	Name        string          `json:"name"`
-	Path        AbsolutePath    `json:"path"`
-	Description *string         `json:"description,omitempty"`
-	Hidden      *bool           `json:"hidden,omitempty"`
-	Source      ReferenceSource `json:"source"`
+	Name        string       `json:"name"`
+	Path        AbsolutePath `json:"path"`
+	Description *string      `json:"description,omitempty"`
+	// Hidden is informational: the SDK carries it through but does not act on
+	// it. Reference guidance advertises a reference when it has a Description,
+	// regardless of Hidden.
+	Hidden *bool           `json:"hidden,omitempty"`
+	Source ReferenceSource `json:"source"`
 }
 
 // ReferenceEventUpdated is published when the reference set changes.
