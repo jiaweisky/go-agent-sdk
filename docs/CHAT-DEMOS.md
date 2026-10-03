@@ -196,13 +196,24 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   （`TestSubagentLocaleOrdering` 锁定）。
 - 说明：`/agent`（primary 列表）用 `sort.Strings`，不吃 locale；示例未暴露 `ClientOptions.Locale`（仅 env）。
 
+### 2.15 文件/图片附件 — 高 ✅ 已实现（含小幅 SDK 改动）
+
+- SDK：`MessageOptions` 新增 `Files []schema.PromptFileAttachment`（**消息级**附件）；`Session.run` → `runtime.admit`
+  透传 `schema.Prompt{Text, Files}` → user 消息的 `Files` → `llmMedia` → `MediaPart`（协议层已支持 anthropic image /
+  openai `image_url` / `input_image`）。底层管线原本就有，缺口只在 `MessageOptions` 与 `admit` 两处。
+- 示例（`examples/chat/attach.go`）：`/attach <path>` 读图 → 推 MIME（仅 png/jpeg/gif/webp）→ 编
+  `data:<mime>;base64,...`（SDK 的 `ValidateMedia` 只吃 base64/data URL、**不读路径**）→ 随**下一句**发送后清空；
+  `/attach` 列出、`/attach clear` 清空。
+- 限制：仅图片；decoded ≤20MB / encoded ≤28MB。`deepseek-flash` 即支持视觉（OpenAI 兼容 `image_url` 的 data URL，
+  与 `openai-compatible-chat` 协议产出的载荷一致），实测通过。
+- 测试：`TestSessionSendAttachesFiles`（文件→媒体 part）、`TestAttachCommand`/`TestAttachRejectsUnsupportedType`。
+
 ---
 
 ## 3. 需先补 SDK 接口（当前无法演示）
 
 | 能力 | 缺口 |
 |---|---|
-| 文件/图片附件 | `MessageOptions` 只有 `Prompt`/`Mode`，无 Files（`session.go:44`） |
 | Todo 列表 | 无公开读接口，只有内置 `todowrite` 工具 |
 | 快照/diff | 高层 `StepEnded` 不带 files（底层 `session.next.step.ended` 有） |
 | revert / undo / redo | 无公开 API |

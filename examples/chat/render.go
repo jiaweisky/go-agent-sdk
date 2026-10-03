@@ -7,6 +7,7 @@ import (
 
 	"github.com/user/go-agent-sdk"
 	coretool "github.com/user/go-agent-sdk/core/tool"
+	"github.com/user/go-agent-sdk/schema"
 )
 
 // chat renders client-wide events. Subagent internals are not streamed inline;
@@ -57,6 +58,9 @@ type chat struct {
 	// dataRoot is the client's state root (root/.data), so /tool-output can find
 	// the SDK's spilled-output directory.
 	dataRoot string
+	// attachments are images queued with /attach; they are sent with the next
+	// message and then cleared.
+	attachments []schema.PromptFileAttachment
 }
 
 func newChat(console *console, client *agent.Client, parent, model string) *chat {
