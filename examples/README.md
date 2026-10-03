@@ -44,11 +44,13 @@ HTTP (spawned with `go run` and killed on exit); `/mcp` lists and fetches its
 prompts and resources, and `/mcps` shows each server's instructions.
 
 Commands: `/skills`, `/agents`, `/mcps`, `/mcp`, `/task [<#n>]`, `/compact` (summarizes
-the session history on demand, demonstrating `Session.Compact`), `/tool` (adds
-or removes a demo tool at runtime via `Client.RegisterTools`), `/reference`
-(lists or adds named reference sources injected into the model's system
-context), `/persona <text>` (starts a new session with an appended system prompt
-via `SessionConfig.SystemPrompt`), and `/history` (prints the projected session
+the session history on demand, via `Session.Compact`), `/tool` (adds
+or removes a runtime tool via `Client.RegisterTools`, including the typed
+`convert_length`), `/plugin` (unloads
+a plugin, running its cleanup), `/reference` (lists or adds local and git
+reference sources injected into the model's system context), `/persona <text>`
+(starts a new session with an appended system prompt via
+`SessionConfig.SystemPrompt`), and `/history` (prints the projected session
 history via `Session.Messages`).
 
 Subagents may nest: the example sets `SubagentDepth: 2`, so a task can start

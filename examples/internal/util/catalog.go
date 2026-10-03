@@ -171,7 +171,7 @@ var DefaultCatalog = NewCatalog([]ModelEntry{
 		Pricing: &Pricing{CacheHit: 0.30, CacheMiss: 9.0, Output: 27.0},
 	},
 	// The same DeepSeek model over each protocol it exposes, so one
-	// DEEPSEEK_API_KEY demonstrates the three routes the SDK can speak.
+	// DEEPSEEK_API_KEY reaches the three routes the SDK can speak.
 	{
 		ID: "deepseek-flash", ProviderID: "deepseek",
 		Protocol: "openai-compatible-chat", BaseURL: "https://api.deepseek.com",

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/user/go-agent-sdk/core"
 	"github.com/user/go-agent-sdk/schema"
@@ -17,7 +16,7 @@ import (
 // reference is advertised, with the checkout's eventual path, from the next
 // turn.
 func (c *chat) referenceCommand(input string) {
-	args := strings.Fields(strings.TrimSpace(strings.TrimPrefix(input, "/reference")))
+	args := commandFields(input, "/reference")
 	references := c.client.Reference()
 	switch {
 	case len(args) == 0:

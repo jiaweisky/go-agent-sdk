@@ -37,7 +37,7 @@ func TestResolveDefaultAgent(t *testing.T) {
 func TestAgentAddCommand(t *testing.T) {
 	out := runCommand(t, nil, func(c *chat) {
 		activeSession(t, c)
-		if !handleCommand(c, "/agent add helper a demo helper") {
+		if !handleCommand(c, "/agent add helper a sample helper") {
 			t.Error("/agent add was not recognised")
 		}
 		c.console.write("--list--\n")
@@ -47,7 +47,7 @@ func TestAgentAddCommand(t *testing.T) {
 	})
 	for _, want := range []string{
 		"registered agent helper (subagent, hidden, steps=2)",
-		"helper — a demo helper",
+		"helper — a sample helper",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("out = %q, missing %q", out, want)

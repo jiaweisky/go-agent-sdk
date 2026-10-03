@@ -84,6 +84,13 @@ func WithSubagentDepth(depth int) Option {
 	}
 }
 
+// WithPlugins registers plugins loaded at client startup.
+func WithPlugins(configs []agent.PluginConfig) Option {
+	return func(opts *agent.ClientOptions) {
+		opts.Plugins = append(opts.Plugins, configs...)
+	}
+}
+
 // Client builds a client from the caller's options. The model, its metadata and
 // its credentials come from an option (for example a Catalog option), so there
 // is nothing provider-specific to configure through the environment.

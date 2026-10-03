@@ -161,6 +161,7 @@ var helpCommands = []helpEntry{
 	{"/task [<#n>]", "list subagent tasks, or show one's output"},
 	{"/compact", "summarize the history now"},
 	{"/tool [add|remove <name>]", "list or manage runtime tools"},
+	{"/plugin remove <id>", "unload a plugin (runs its cleanup)"},
 	{"/reference [add <name> <path> | add-git <name> <repo> [<branch>] | remove <name>]", "list or manage reference sources"},
 	{"/persona [--replace] <text>", "start a session with an appended or replaced system prompt"},
 	{"/prompt add|replace|remove <section> [<text>]", "start a session with a customized prompt section"},

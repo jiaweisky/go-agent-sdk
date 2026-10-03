@@ -172,6 +172,12 @@ func resolveSession(sessions []agent.SessionInfo, arg string) (string, bool) {
 	return "", false
 }
 
+// commandFields splits a command's arguments into whitespace-separated fields,
+// so "/tool add now" yields ["add", "now"].
+func commandFields(input, name string) []string {
+	return strings.Fields(strings.TrimSpace(strings.TrimPrefix(input, name)))
+}
+
 // commandArgument returns the text after a command name, accepting any of the
 // given aliases, and "" when the input is the bare command.
 func commandArgument(input string, names ...string) string {

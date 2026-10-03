@@ -51,6 +51,9 @@ type chat struct {
 	// tools holds the unregister functions of the runtime tools added with
 	// /tool, keyed by name.
 	tools map[string]func()
+	// plugins tracks the plugins the chat loaded, so /plugin remove can tell an
+	// unknown or already-removed id from an active one.
+	plugins *pluginRegistry
 }
 
 func newChat(console *console, client *agent.Client, parent, model string) *chat {
@@ -63,6 +66,7 @@ func newChat(console *console, client *agent.Client, parent, model string) *chat
 		tasks:   newTaskSet(),
 		calls:   map[string]string{},
 		tools:   map[string]func(){},
+		plugins: newPluginRegistry(nil),
 	}
 }
 

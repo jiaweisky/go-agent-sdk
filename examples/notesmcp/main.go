@@ -1,6 +1,6 @@
 // Command notesmcp runs a small MCP server for persistent notes. With no flags
 // it speaks MCP over stdio; with --http it serves streamable HTTP. It backs the
-// chat example's MCP demo: the agent reads and writes notes through the tools,
+// chat example's MCP support: the agent reads and writes notes through the tools,
 // while prompts and resources expose the same store to the client.
 package main
 

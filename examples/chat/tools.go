@@ -10,29 +10,42 @@ import (
 	"github.com/user/go-agent-sdk"
 )
 
-// runtimeTool returns one of the tools /tool can register at runtime, and
-// reports whether the name is known.
+// runtimeTools are the tools /tool can register at runtime, keyed by name.
+var runtimeTools = map[string]agent.Tool{
+	"now": agent.DefineTool("now", "Return the current date and time in RFC3339.",
+		func(_ struct{}, _ agent.ToolContext) (string, error) {
+			return time.Now().Format(time.RFC3339), nil
+		}),
+	"dice": agent.DefineTool("dice", "Roll a six-sided die and return 1-6.",
+		func(_ struct{}, _ agent.ToolContext) (int, error) {
+			return rand.IntN(6) + 1, nil
+		}),
+	convertLengthName:   convertLengthTool(),
+	"list_length_units": listUnitsTool(),
+}
+
+// runtimeTool returns one of the tools /tool can register, and reports whether
+// the name is known.
 func runtimeTool(name string) (agent.Tool, bool) {
-	switch name {
-	case "now":
-		return agent.DefineTool("now", "Return the current date and time in RFC3339.",
-			func(_ struct{}, _ agent.ToolContext) (string, error) {
-				return time.Now().Format(time.RFC3339), nil
-			}), true
-	case "dice":
-		return agent.DefineTool("dice", "Roll a six-sided die and return 1-6.",
-			func(_ struct{}, _ agent.ToolContext) (int, error) {
-				return rand.IntN(6) + 1, nil
-			}), true
+	tool, ok := runtimeTools[name]
+	return tool, ok
+}
+
+// runtimeToolNames lists the runtime tool names, sorted.
+func runtimeToolNames() []string {
+	names := make([]string, 0, len(runtimeTools))
+	for name := range runtimeTools {
+		names = append(names, name)
 	}
-	return agent.Tool{}, false
+	sort.Strings(names)
+	return names
 }
 
 // toolsCommand handles "/tool" (list), "/tool add <name>" and
 // "/tool remove <name>". It uses Client.RegisterTools: tools added here become
 // available to the live session on the next turn, without restarting.
 func (c *chat) toolsCommand(input string) {
-	args := strings.Fields(strings.TrimSpace(strings.TrimPrefix(input, "/tool")))
+	args := commandFields(input, "/tool")
 	if len(args) == 0 {
 		c.listRuntimeTools()
 		return
@@ -60,7 +73,7 @@ func (c *chat) listRuntimeTools() {
 	}
 	c.mu.Unlock()
 	if len(names) == 0 {
-		c.console.write("(no runtime tools; /tool add now | dice)\n")
+		c.console.write(fmt.Sprintf("(no runtime tools; /tool add %s)\n", strings.Join(runtimeToolNames(), " | ")))
 		return
 	}
 	sort.Strings(names)
@@ -73,7 +86,7 @@ func (c *chat) listRuntimeTools() {
 func (c *chat) addRuntimeTool(name string) {
 	tool, ok := runtimeTool(name)
 	if !ok {
-		c.console.write(fmt.Sprintf("unknown tool: %s (try: now, dice)\n", name))
+		c.console.write(fmt.Sprintf("unknown tool: %s (try: %s)\n", name, strings.Join(runtimeToolNames(), ", ")))
 		return
 	}
 	c.mu.Lock()

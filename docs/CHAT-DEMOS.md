@@ -149,17 +149,33 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   `adapters.go` 还把 Hidden 丢了），无行为可演示，故不纳入。
 - 备注：`file://` 源被 `RepositoryIsRemote` 判为非 remote 而跳过，所以 git 演示必须是真正的远程仓库。
 
-### 2.11 Plugin 的事件 / Options / Tools — 中
+### 2.11 Plugin 的事件 / Options / Tools — 中 ✅ 已实现
 
-- API：`PluginContext.On`、`Options`、`Tools`（`plugin.go:12`）、`ClientOptions.Plugins`（`client.go:75`）
-- 现状：只用插件做 permission 的 `Agents.Transform`。
-- 切入点：一个订阅事件并运行时注册工具的插件，配置里带 `Options`。
+- 实现（`examples/chat/plugin.go`）：通过 `ClientOptions.Plugins`（`util.WithPlugin`）注册两个插件：
+  - `chat-greeter`：`Options` 提供 greeting；`PluginContext.On` 订阅 `ToolCalled` 计数；`PluginContext.Tools.Register`
+    注册工具 `plugin_greet`（读 `Options` 并汇报计数）；cleanup 退订 + 注销。
+  - `chat-permission`：把原 `addBashAskRule` 从底层 `client.Plugin().Add` 迁到高层 `Plugins`（`Agents.Transform`）。
+- 命令：`/plugin remove <id>` 用 `client.Plugin().Remove` 卸载并触发 cleanup（`[plugin] ... unloaded`，工具随即消失）。
+  因 `core.Plugin` 无查询接口、`Remove` 对未知 id 也不报错，示例自持一份已加载 id（`pluginRegistry`），未知或已移除的
+  id 报 `not active`。
+- 说明：**事件订阅 / 运行时工具 / agent 变换本身已被其它 API 演示**（`Client.On`、`/tool`→`Client.RegisterTools`、
+  permission 插件）；2.11 补的是**高层 `ClientOptions.Plugins` 注册路径 + `PluginConfig.Options` 声明式配置 +
+  cleanup 生命周期**。
+- 限制：高层 `Options`/`Tools`/`On` 仅在**启动期 `ClientOptions.Plugins`** 可用（由 `adaptPlugin` 注入）；
+  `client.Plugin().Add` 是低层 `core.PluginContext`（无 `Options`/`Tools`/`On`），故运行时只能 Remove，不能再 Add
+  一个高层插件。
 
-### 2.12 类型化工具 + 权限动作 — 中
+### 2.12 类型化工具 + 权限动作 — 中 ✅ 已实现
 
-- API：`DefineTool` struct 参数与 `jsonschema` tag（`tool.go:44`）、`Tool.Permission` / `SkipPermission`（`tool.go:22`）
-- 现状：`/tool now|dice` 太简单。
-- 切入点：加一个带枚举/必填字段的 `weather` 工具；给某工具自定义 permission action 触发交互审批。
+- 实现（`examples/chat/convert.go`）：`/tool add convert_length` 注册类型化工具 `convert_length`：
+  - 参数用**手写 schema AST**（`jsonschema.Object` + `Required` + `Enum`）而非反射，故 `from`/`to` 为枚举
+    （mm/cm/m/km/in/ft/yd/mi）、`value` 必填；handler 仍用 `DefineTool` 的类型化结构体（注册时覆盖 `Parameters`）。
+  - `Permission: "convert_length"`，`permissionPlugin` 加规则 `{convert_length,*,ask}`，非 `--yolo` 时调用走
+    `Allow once/always/reject` 交互审批。
+  - 对照工具 `list_length_units`：同一 action 但 `SkipPermission: true`，永不经审批。
+- `/tool` 的空列表提示改为**从注册表派生**可用工具名（`runtimeToolNames`），不再写死 `now | dice`。
+- 备注：`convert_length` 取代原拟的 `weather`（chat 已有一个天气 MCP，避免命名/功能冲突）；enum 无法由 `DefineTool`
+  反射生成，故覆盖 `Parameters`（内置工具同样是手写 AST，参考 `core/tool/webfetch.go` 的 `jsonschema.Enum`）。
 
 ### 2.13 工具输出限长 + 清理 — 低
 

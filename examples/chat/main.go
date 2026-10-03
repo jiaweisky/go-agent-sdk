@@ -60,17 +60,13 @@ func run() error {
 		defer stopNotes()
 	}
 
-	client, err := util.Client(util.ExampleDir(), clientOptions(console, yolo, model, notesURL)...)
+	plugins := examplePlugins(console, yolo)
+	options := append(clientOptions(console, yolo, model, notesURL), util.WithPlugins(plugins))
+	client, err := util.Client(util.ExampleDir(), options...)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
-
-	if !yolo {
-		if err := addBashAskRule(client); err != nil {
-			return err
-		}
-	}
 
 	// Reuse the persisted agent when it is still selectable.
 	state.Agent = resolveDefaultAgent(client, state.Agent)
@@ -92,6 +88,7 @@ func run() error {
 	renderer.session = session
 	renderer.state = state
 	renderer.statePath = statePath
+	renderer.plugins = newPluginRegistry(plugins)
 	client.On(renderer.handle)
 
 	return chatLoop(ctx, console, renderer)
@@ -108,23 +105,6 @@ func parseFlags() (dir string, yolo bool) {
 	return *flagDir, *flagYolo
 }
 
-// addBashAskRule appends an "ask" rule for bash to the build agent, which
-// otherwise allows every tool, so interactive approval has something to ask
-// about.
-func addBashAskRule(client *agent.Client) error {
-	return client.Plugin().Add("chat-permission", func(pluginCtx *core.PluginContext) (func(), error) {
-		_, err := pluginCtx.Agents.Transform(func(draft core.AgentDraft) error {
-			draft.Update(schema.AgentID(agentName), func(info *schema.AgentInfo) {
-				info.Permissions = append(info.Permissions, schema.PermissionRule{
-					Action: "bash", Resource: "*", Effect: schema.PermissionEffectAsk,
-				})
-			})
-			return nil
-		})
-		return func() {}, err
-	})
-}
-
 // writeBanner prints the startup banner.
 func writeBanner(console *console, yolo bool) {
 	if wd, err := os.Getwd(); err == nil {
@@ -135,7 +115,7 @@ func writeBanner(console *console, yolo bool) {
 	}
 	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts; type during a turn to steer it)\n")
 	console.write(dim + "SessionHooks: lifecycle logged as [hook]; \"?<text>\" asks for a concise answer; rm -rf is denied" + reset + "\n")
-	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /mcp  /task [<#n>]  /compact  /tool  /reference  /persona  /prompt  /history" + reset + "\n\n")
+	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /mcp  /task [<#n>]  /compact  /tool  /plugin  /reference  /persona  /prompt  /history" + reset + "\n\n")
 }
 
 // chatLoop prompts until stdin closes or the user interrupts a turn. The active
@@ -214,6 +194,8 @@ func handleCommand(c *chat, input string) bool {
 		compactCommand(c)
 	case command == "/tool" || strings.HasPrefix(command, "/tool "):
 		c.toolsCommand(command)
+	case command == "/plugin" || strings.HasPrefix(command, "/plugin "):
+		c.pluginCommand(command)
 	case command == "/reference" || strings.HasPrefix(command, "/reference "):
 		c.referenceCommand(command)
 	case command == "/persona" || strings.HasPrefix(command, "/persona "):

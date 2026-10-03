@@ -30,7 +30,7 @@ const (
 func askPermission(console *console, request agent.PermissionRequest) (agent.PermissionDecision, error) {
 	for {
 		writePermissionRequest(console, request)
-		// Allow always is the default, so a demo only has to confirm it.
+		// Allow always is the default, so a run only has to confirm it.
 		answer, err := console.prompt("Choice [2]: ")
 		if err != nil {
 			// EOF: fail safe rather than allow.
