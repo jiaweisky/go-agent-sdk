@@ -112,6 +112,54 @@ func TestAnthropicCanUseNativeSystemUpdate(t *testing.T) {
 	}
 }
 
+// TestAnthropicMergesParallelToolResults guards that the results of parallel
+// tool calls land in one user message right after the tool_use blocks: Anthropic
+// rejects a tool_use whose tool_result is not in the immediately following
+// message.
+func TestAnthropicMergesParallelToolResults(t *testing.T) {
+	model := AnthropicMessagesHTTPRoute.Model(route.RouteModelInput{ID: "claude"})
+	result := func(id string) schema.ToolResultPart {
+		return schema.ToolResultPart{
+			Type: "tool-result", ID: id, Name: "tool",
+			Result: schema.ToolResultValue{Type: "content", Value: []schema.ToolContent{
+				schema.ToolTextContent{Type: "text", Text: "ok"},
+			}},
+		}
+	}
+	body, err := anthropicMessagesFromRequest(&schema.LLMRequest{
+		Model: model,
+		Messages: []schema.Message{
+			schema.MessageUser("hi"),
+			schema.NewMessage(schema.MessageInput{Role: schema.RoleAssistant, Content: []schema.ContentPart{
+				schema.ToolCallPart{Type: "tool-call", ID: "a", Name: "bash"},
+				schema.ToolCallPart{Type: "tool-call", ID: "b", Name: "tool"},
+			}}),
+			schema.MessageTool(result("a")),
+			schema.MessageTool(result("b")),
+		},
+	})
+	if err != nil {
+		t.Fatalf("fromRequest: %v", err)
+	}
+	messages := body.(anthropicMessagesBody).Messages
+	if len(messages) != 3 {
+		t.Fatalf("messages = %d, want 3 (user, assistant, merged tool)", len(messages))
+	}
+	last := messages[2]
+	if last.Role != "user" {
+		t.Fatalf("last role = %q, want user", last.Role)
+	}
+	var ids []string
+	for _, block := range last.Content {
+		if tr, ok := block.(anthropicMessagesToolResultBlock); ok {
+			ids = append(ids, tr.ToolUseID)
+		}
+	}
+	if len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
+		t.Fatalf("tool_result ids = %v, want [a b]", ids)
+	}
+}
+
 func TestAnthropicToolResultEmptyContentIsArray(t *testing.T) {
 	got, err := anthropicMessagesLowerToolResultContent(schema.ToolResultPart{
 		Type: "tool-result",

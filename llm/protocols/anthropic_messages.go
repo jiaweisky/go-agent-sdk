@@ -511,6 +511,13 @@ func anthropicMessagesLowerMessages(request *schema.LLMRequest, bp *anthropicMes
 			if err != nil {
 				return nil, err
 			}
+			// Anthropic requires every tool_result for a tool_use turn in the
+			// single user message right after it, so merge the results of
+			// parallel tool calls into one message.
+			if i > 0 && request.Messages[i-1].Role == "tool" && len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
+				msgs[len(msgs)-1].Content = append(msgs[len(msgs)-1].Content, content...)
+				continue
+			}
 			msgs = append(msgs, anthropicMessagesMessage{Role: "user", Content: content})
 		}
 	}
