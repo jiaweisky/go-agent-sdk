@@ -564,10 +564,17 @@ func (a *projectorAdapter) AppendMessage(message schema.SessionMessage) error {
 		return err
 	}
 	created := sessionMessageCreated(message)
-	_, err = a.tx.Exec(
+	return insertMessageRow(
+		a.tx, string(sessionMessageID(message)), string(eventSessionID(a.event)), message.SessionMessageType(),
+		int64(durable.Seq), created, created, data,
+	)
+}
+
+// insertMessageRow writes one session_message row.
+func insertMessageRow(tx DB, id, sessionID, messageType string, seq, created, updated int64, data string) error {
+	_, err := tx.Exec(
 		"INSERT INTO `session_message` (`id`,`session_id`,`type`,`seq`,`time_created`,`time_updated`,`data`) VALUES (?,?,?,?,?,?,?)",
-		string(sessionMessageID(message)), string(eventSessionID(a.event)), message.SessionMessageType(),
-		durable.Seq, created, created, data,
+		id, sessionID, messageType, seq, created, updated, data,
 	)
 	return err
 }

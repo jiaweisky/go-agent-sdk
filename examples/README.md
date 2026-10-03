@@ -58,8 +58,9 @@ a plugin, running its cleanup), `/reference` (lists or adds local and git
 reference sources injected into the model's system context), `/persona <text>`
 (starts a new session with an appended system prompt via
 `SessionConfig.SystemPrompt`), `/rename <title>` (renames the current session
-via `Session.SetTitle`), and `/history` (prints the projected session history
-via `Session.Messages`).
+via `Session.SetTitle`), `/fork [#n]` (forks the session into a new one via
+`Client.ForkSession`, optionally before user message `#n`), and `/history`
+(prints the projected session history via `Session.Messages`).
 
 Subagents may nest: the example sets `SubagentDepth: 2`, so a task can start
 another task and both appear in the `/task` list.

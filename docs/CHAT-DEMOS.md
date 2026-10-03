@@ -268,13 +268,28 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 测试：`TestRenameCommandSetsTitle`（`ListSessions` 反映新标题）、`TestRenameCommandRequiresTitle`、
   `TestSessionSetTitle`（SDK：落库 + 发 `TitleUpdated`）。
 
+### 2.20 fork session — 中 ✅ 已实现（含 SDK 改动）
+
+- SDK：新增 `Client.ForkSession(ctx, sessionID, messageID) (*Session, error)`。新建一个顶层会话（保留源会话的
+  agent/model，标题 `<原标题> (fork #N)`，已有后缀则 N+1），再把源会话的消息复制过去。
+- 底层 `core/session/fork.go` 的 `Fork(db, source, target, messageID)`：按 `seq` 读源消息，逐个用
+  `schema.NewMessageID()` 生成新 id、`seq` 重排，事务内写进目标会话的 `session_message`；`messageID` 非空时只复制
+  该消息**之前**的历史（分支/重试用），未知 id 则整段复制。v2 消息是「一条消息一行 JSON」且**无 `parentID`/
+  `tail_start_id` 交叉引用**（v1 的这两个字段在 v2 已移除），故复制无需重映射引用，只需对 synthetic 消息改写内嵌
+  `sessionID`。
+- 与 V1 的差异：V1 `fork` 只传 directory/path/workspace/title/metadata，新会话的 agent/model 落回默认；本实现
+  **保留源会话的 agent/model**（更实用）。
+- 示例（`examples/chat/fork.go`）：`/fork` 整段复制并切到新会话；`/fork #n` 在**第 n 条 user 消息之前**分叉
+  （丢弃该消息及其后），用 `Client.ForkSession` + `userMessageIDs` 解析边界。
+- 测试：`TestForkedTitle`、`TestForkSessionCopiesHistory`（内容一致、id 全新、源不变、标题后缀）、
+  `TestForkSessionBoundary`（边界截断）、`TestForkSessionMissing`；`examples/chat` 的 `/fork` 切换/选择器/无会话。
+
 ---
 
 ## 3. 需先补 SDK 接口（当前无法演示）
 
 | 能力 | 缺口 |
 |---|---|
-| fork session | 无公开 API |
 | 异步权限/问题（List/Reply/Reject） | `Client` 没有 `Permission()` / `Question()` getter |
 | 用户工具进度 | `ToolContext` 只有 `SessionID`/`ToolCallID`，无 Progress（`tool.go:16`） |
 | A2A | 仅 `docs/DESIGN-A2A.md` 设计稿 |

@@ -192,6 +192,8 @@ func handleCommand(c *chat, input string) bool {
 		c.agentCommand(command)
 	case command == "/rename" || strings.HasPrefix(command, "/rename "):
 		c.renameCommand(command)
+	case command == "/fork" || strings.HasPrefix(command, "/fork "):
+		c.forkCommand(command)
 	case command == "/skills":
 		c.skillsCommand()
 	case command == "/agents":
