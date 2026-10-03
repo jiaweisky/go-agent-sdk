@@ -61,6 +61,9 @@ type chat struct {
 	// attachments are images queued with /attach; they are sent with the next
 	// message and then cleared.
 	attachments []schema.PromptFileAttachment
+	// todos caches the parent session's task list, from todo.updated events, so
+	// /todos can show it on demand.
+	todos map[string][]schema.SessionTodoInfo
 }
 
 func newChat(console *console, client *agent.Client, parent, model string) *chat {
@@ -74,6 +77,7 @@ func newChat(console *console, client *agent.Client, parent, model string) *chat
 		calls:   map[string]string{},
 		tools:   map[string]func(){},
 		plugins: newPluginRegistry(nil),
+		todos:   map[string][]schema.SessionTodoInfo{},
 	}
 }
 
@@ -158,7 +162,8 @@ func (c *chat) handleParent(event agent.Event) {
 		agent.CompactionStarted, agent.CompactionEnded,
 		agent.TitleUpdated, agent.Retried,
 		agent.ShellStarted, agent.ShellEnded,
-		agent.StepStarted, agent.StepEnded, agent.StepFailed:
+		agent.StepStarted, agent.StepEnded, agent.StepFailed,
+		agent.TodoUpdated:
 		c.flushStream()
 	}
 	switch e := event.(type) {
@@ -177,6 +182,9 @@ func (c *chat) handleParent(event agent.Event) {
 		c.parentBusy = e.Status == "busy"
 	case agent.TitleUpdated:
 		c.writeTitle(e.Title)
+	case agent.TodoUpdated:
+		c.todos[e.SessionID] = e.Todos
+		c.writeTodos(e.Todos)
 	case agent.StepStarted:
 		c.beginStep()
 	case agent.StepEnded:
@@ -213,6 +221,31 @@ func (c *chat) handleParent(event agent.Event) {
 func (c *chat) writeTitle(title string) {
 	if title != "" {
 		c.console.write(fmt.Sprintf("%s[title] %s%s\n", cyan, title, reset))
+	}
+}
+
+// writeTodos prints the task list the model maintains with the todowrite tool.
+func (c *chat) writeTodos(todos []schema.SessionTodoInfo) {
+	if len(todos) == 0 {
+		c.console.write(fmt.Sprintf("%s[todo]%s (cleared)\n", dim, reset))
+		return
+	}
+	for _, todo := range todos {
+		c.console.write(fmt.Sprintf("%s[todo]%s %s %s\n", dim, reset, todoMark(todo.Status), todo.Content))
+	}
+}
+
+// todoMark is the status marker for a todo item.
+func todoMark(status string) string {
+	switch status {
+	case "completed":
+		return "☑"
+	case "in_progress":
+		return "▶"
+	case "cancelled":
+		return "✕"
+	default:
+		return "☐"
 	}
 }
 

@@ -163,6 +163,7 @@ var helpCommands = []helpEntry{
 	{"/tool [add|remove <name>]", "list or manage runtime tools"},
 	{"/tool-output [cleanup]", "report or prune spilled tool output"},
 	{"/attach <path> | clear", "attach an image to the next message"},
+	{"/todos", "show the model's current task list"},
 	{"/plugin remove <id>", "unload a plugin (runs its cleanup)"},
 	{"/reference [add <name> <path> | add-git <name> <repo> [<branch>] | remove <name>]", "list or manage reference sources"},
 	{"/persona [--replace] <text>", "start a session with an appended or replaced system prompt"},

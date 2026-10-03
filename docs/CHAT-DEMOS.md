@@ -208,13 +208,21 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
   与 `openai-compatible-chat` 协议产出的载荷一致），实测通过。
 - 测试：`TestSessionSendAttachesFiles`（文件→媒体 part）、`TestAttachCommand`/`TestAttachRejectsUnsupportedType`。
 
+### 2.16 Todo 列表（事件）— 中 ✅ 已实现（含小幅 SDK 改动）
+
+- SDK：新增高层事件 `agent.TodoUpdated{SessionID, Todos}`（`events.go`），把 `todo.updated` 映射进来。该事件的发布方
+  发的是**结构体而非 map**，故映射时用 JSON 往返解码。对齐 v2 core 的 TUI —— TUI 也是订阅 `todo.updated`。
+- 示例：`render.go` 收到 `TodoUpdated` 时打印 `[todo] <status-mark> <content>`（☐/▶/☑/✕）；`/todos` 打印事件缓存的
+  当前列表。
+- 说明：只加**事件**、未加读接口（`Session.Todos()`）；`/todos` 读的是事件缓存的副本，未收到过 `todo.updated` 时为空。
+- 测试：`TestClientOnReceivesTodoUpdated`（todowrite→事件全链路）、`TestMapTodoEventStructPayload`、`TestTodosCommand`。
+
 ---
 
 ## 3. 需先补 SDK 接口（当前无法演示）
 
 | 能力 | 缺口 |
 |---|---|
-| Todo 列表 | 无公开读接口，只有内置 `todowrite` 工具 |
 | 快照/diff | 高层 `StepEnded` 不带 files（底层 `session.next.step.ended` 有） |
 | revert / undo / redo | 无公开 API |
 | rename（SetTitle） | `DeleteSession` 之外没有改 title 的接口 |

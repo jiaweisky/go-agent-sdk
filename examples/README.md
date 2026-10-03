@@ -50,7 +50,8 @@ the session history on demand, via `Session.Compact`), `/tool` (adds
 or removes a runtime tool via `Client.RegisterTools`, including the typed
 `convert_length` and the large `emit_lines`), `/tool-output` (reports or prunes
 the SDK's spilled tool-output files), `/attach` (attaches an image to the next
-message via `MessageOptions.Files`), `/plugin` (unloads
+message via `MessageOptions.Files`), `/todos` (shows the model's task list from
+`todo.updated` events), `/plugin` (unloads
 a plugin, running its cleanup), `/reference` (lists or adds local and git
 reference sources injected into the model's system context), `/persona <text>`
 (starts a new session with an appended system prompt via
