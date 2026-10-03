@@ -812,6 +812,7 @@ TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR`
 - 排序 locale：`util.CompareLocale(left, right, tag)` 显式接收 tag，`ClientOptions.Locale` 一路传到 read 工具的目录列表、skill/reference guidance 与 task 的 subagent 列表；`util.ResolveLocale(name)` 负责解析，空值回退到 env 推断出的 `util.LocaleTag`（对齐 JS `localeCompare` 的默认行为）。
 - `core/flag` **不移植**：`flag.ts` 是 CLI 的 env 模块（import 时把 ~25 个 `OPENCODE_*` / `OTEL_*` 快照进 `Flag` 表），SDK 没有消费者，唯一用到它的 websearch 工具已按下面的理由删除。
 - **`websearch` 工具不移植**：它硬编码 Exa / Parallel 两家商业后端的 MCP 端点，且必须靠宿主 env 传 provider key —— TS 自己注明这是「retained in V2 core for launch parity」的妥协。宿主想要搜索能力可以用 `agent.DefineTool` 自行接入；通用的 `webfetch`（HTTP + HTML→markdown）保留。
+- **`share` / `unshare` 不移植**：会话分享是**托管服务 + OAuth 账号 + 网络同步**（V1 `packages/opencode/src/share/` 依赖 `Account`/`EventV2Bridge`/`InstanceState`，用 `HttpClient` 打 `${baseUrl}/api/share|shares/{create,sync,remove}`，并带 `secret` 上传 session/message/part/diff 队列）。v2 core 只有数据模型（`session_share` 表、`share_url` 列、projector 里 `share_url: info.share?.url`），**没有 service / `setShare` / 事件**，属 CLI 基础设施，不在 SDK 范围。数据库仍保留 `share_url` 列并原样投影 `V1SessionShare`，以对齐 v2 core 的 `info.share?.url`。
 
 文件只承载**内容**（agent / mode / skill 的 markdown），且来源必须**显式**声明：`ClientOptions.ConfigDirs`。每个目录按以下模式扫描：
 

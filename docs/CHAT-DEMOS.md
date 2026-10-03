@@ -274,11 +274,14 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 
 | 能力 | 缺口 |
 |---|---|
-| share / unshare | 无公开 API |
 | fork session | 无公开 API |
 | 异步权限/问题（List/Reply/Reject） | `Client` 没有 `Permission()` / `Question()` getter |
 | 用户工具进度 | `ToolContext` 只有 `SessionID`/`ToolCallID`，无 Progress（`tool.go:16`） |
 | A2A | 仅 `docs/DESIGN-A2A.md` 设计稿 |
+
+> **非目标（不做）**：`share` / `unshare` —— 会话分享是托管服务 + OAuth 账号 + 网络同步（V1 `share/`，依赖
+> `Account`/`EventV2Bridge`/`InstanceState`），v2 core 只有数据模型（`session_share` 表、`share_url` 列），无
+> service / 事件，属 CLI 基础设施，不在 SDK 范围（理由见 `docs/DESIGN.md`）。
 
 ---
 
