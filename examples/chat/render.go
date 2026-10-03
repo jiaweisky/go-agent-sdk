@@ -54,6 +54,9 @@ type chat struct {
 	// plugins tracks the plugins the chat loaded, so /plugin remove can tell an
 	// unknown or already-removed id from an active one.
 	plugins *pluginRegistry
+	// dataRoot is the client's state root (root/.data), so /tool-output can find
+	// the SDK's spilled-output directory.
+	dataRoot string
 }
 
 func newChat(console *console, client *agent.Client, parent, model string) *chat {

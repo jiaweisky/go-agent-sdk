@@ -21,6 +21,7 @@ var runtimeTools = map[string]agent.Tool{
 			return rand.IntN(6) + 1, nil
 		}),
 	convertLengthName:   convertLengthTool(),
+	"emit_lines":        emitLinesTool(),
 	"list_length_units": listUnitsTool(),
 }
 

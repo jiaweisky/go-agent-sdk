@@ -19,7 +19,7 @@ import (
 // the whole process tree is killed as a group on stop. The chat owns the remote
 // server's lifecycle; a local (stdio) server would be spawned by the SDK itself.
 func startNotesMCP() (string, func(), error) {
-	return startNotesMCPAt(filepath.Join(util.ExampleDir(), ".data", "notes.json"))
+	return startNotesMCPAt(filepath.Join(dataDir(), "notes.json"))
 }
 
 // startNotesMCPAt is startNotesMCP with an explicit notes file, so tests can

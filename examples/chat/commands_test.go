@@ -20,11 +20,12 @@ var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func runCommand(t *testing.T, configDirs []string, fn func(*chat)) string {
 	t.Helper()
+	root := t.TempDir()
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
 		Model:      "test-model",
 		ConfigDirs: configDirs,
-		Root:       t.TempDir(),
+		Root:       root,
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -33,7 +34,9 @@ func runCommand(t *testing.T, configDirs []string, fn func(*chat)) string {
 
 	var out strings.Builder
 	console := &console{out: &out, lineStart: true}
-	fn(newChat(console, client, "ses_1", "test-model"))
+	c := newChat(console, client, "ses_1", "test-model")
+	c.dataRoot = root
+	fn(c)
 	return ansiPattern.ReplaceAllString(out.String(), "")
 }
 

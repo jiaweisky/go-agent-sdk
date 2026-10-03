@@ -177,10 +177,14 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 备注：`convert_length` 取代原拟的 `weather`（chat 已有一个天气 MCP，避免命名/功能冲突）；enum 无法由 `DefineTool`
   反射生成，故覆盖 `Parameters`（内置工具同样是手写 AST，参考 `core/tool/webfetch.go` 的 `jsonschema.Enum`）。
 
-### 2.13 工具输出限长 + 清理 — 低
+### 2.13 工具输出限长 + 清理 — 低 ✅ 已实现
 
-- API：`ClientOptions.ToolOutput`（`client.go:120`）、`Client.CleanupToolOutput`（`client.go:431`）
-- 切入点：设小 MaxLines/MaxBytes 演示截断提示；`/cleanup` 清理并报告数量。
+- 限长：保持 SDK 默认（2000 行 / 50KiB）；新增运行时工具 `emit_lines{count}`（`examples/chat/tooloutput.go`）。
+  `/tool add emit_lines` 后用大 count（如 5000）触发截断——超限内容落盘到 `<Root>/data/tool-output/tool_*`，
+  模型看到 head + `... output truncated; full content saved to <path> ...` + tail 的预览。不改全局限，避免影响其它工具。
+- 清理：`/tool-output` 显示托管目录与文件数；`/tool-output cleanup` 调 `Client.CleanupToolOutput()`。因该 API
+  **只删 7 天前的文件且不返回数量**，示例自行统计目录文件数，报告 `scanned N, removed M`（新文件不会被删）。
+- 说明：命令名为 `/tool-output`（不是泛化的 `/cleanup`）；目录路径由示例按 `core.Global` 布局推导（SDK 无 accessor）。
 
 ### 2.14 配置 modes 文件 / Locale — 低
 

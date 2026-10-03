@@ -28,6 +28,12 @@ func main() {
 	}
 }
 
+// dataDir is the client's state root: the ".data" directory next to the example,
+// matching util.Client's Root.
+func dataDir() string {
+	return filepath.Join(util.ExampleDir(), ".data")
+}
+
 func run() error {
 	dir, yolo := parseFlags()
 	if dir != "" {
@@ -46,7 +52,7 @@ func run() error {
 	}
 	defer restore()
 
-	statePath := filepath.Join(util.ExampleDir(), ".data", "state.json")
+	statePath := filepath.Join(dataDir(), "state.json")
 	state := loadState(statePath)
 	model, err := resolveDefaultModel(state.Model)
 	if err != nil {
@@ -89,6 +95,7 @@ func run() error {
 	renderer.state = state
 	renderer.statePath = statePath
 	renderer.plugins = newPluginRegistry(plugins)
+	renderer.dataRoot = dataDir()
 	client.On(renderer.handle)
 
 	return chatLoop(ctx, console, renderer)
@@ -115,7 +122,7 @@ func writeBanner(console *console, yolo bool) {
 	}
 	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts; type during a turn to steer it)\n")
 	console.write(dim + "SessionHooks: lifecycle logged as [hook]; \"?<text>\" asks for a concise answer; rm -rf is denied" + reset + "\n")
-	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /mcp  /task [<#n>]  /compact  /tool  /plugin  /reference  /persona  /prompt  /history" + reset + "\n\n")
+	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /mcp  /task [<#n>]  /compact  /tool  /tool-output  /plugin  /reference  /persona  /prompt  /history" + reset + "\n\n")
 }
 
 // chatLoop prompts until stdin closes or the user interrupts a turn. The active
@@ -196,6 +203,8 @@ func handleCommand(c *chat, input string) bool {
 		c.toolsCommand(command)
 	case command == "/plugin" || strings.HasPrefix(command, "/plugin "):
 		c.pluginCommand(command)
+	case command == "/tool-output" || strings.HasPrefix(command, "/tool-output "):
+		c.toolOutputCommand(command)
 	case command == "/reference" || strings.HasPrefix(command, "/reference "):
 		c.referenceCommand(command)
 	case command == "/persona" || strings.HasPrefix(command, "/persona "):

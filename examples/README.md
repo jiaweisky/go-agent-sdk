@@ -46,7 +46,8 @@ prompts and resources, and `/mcps` shows each server's instructions.
 Commands: `/skills`, `/agents`, `/mcps`, `/mcp`, `/task [<#n>]`, `/compact` (summarizes
 the session history on demand, via `Session.Compact`), `/tool` (adds
 or removes a runtime tool via `Client.RegisterTools`, including the typed
-`convert_length`), `/plugin` (unloads
+`convert_length` and the large `emit_lines`), `/tool-output` (reports or prunes
+the SDK's spilled tool-output files), `/plugin` (unloads
 a plugin, running its cleanup), `/reference` (lists or adds local and git
 reference sources injected into the model's system context), `/persona <text>`
 (starts a new session with an appended system prompt via

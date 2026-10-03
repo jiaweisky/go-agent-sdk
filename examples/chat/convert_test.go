@@ -72,7 +72,7 @@ func TestListUnitsToolSkipsPermission(t *testing.T) {
 // TestRuntimeToolNames guards that every runtime tool is listed.
 func TestRuntimeToolNames(t *testing.T) {
 	names := strings.Join(runtimeToolNames(), ",")
-	for _, want := range []string{"convert_length", "dice", "list_length_units", "now"} {
+	for _, want := range []string{"convert_length", "dice", "emit_lines", "list_length_units", "now"} {
 		if !strings.Contains(names, want) {
 			t.Fatalf("names = %q, missing %q", names, want)
 		}
