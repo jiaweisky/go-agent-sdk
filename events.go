@@ -206,6 +206,52 @@ type TodoUpdated struct {
 
 func (e TodoUpdated) sessionID() string { return e.SessionID }
 
+// PermissionAsked reports a tool asking for permission. When the client holds
+// interactions, the turn blocks until PermissionReplied or
+// Client.Permission().Reply resolves the request.
+type PermissionAsked struct {
+	SessionID string
+	Request   PermissionRequest
+}
+
+func (e PermissionAsked) sessionID() string { return e.SessionID }
+
+// PermissionReplied reports that a permission request was resolved.
+type PermissionReplied struct {
+	SessionID string
+	RequestID string
+	Reply     string
+}
+
+func (e PermissionReplied) sessionID() string { return e.SessionID }
+
+// QuestionAsked reports the "question" tool asking the user. When the client
+// holds interactions, the turn blocks until QuestionReplied or
+// Client.Question().Reply/Reject resolves the request.
+type QuestionAsked struct {
+	SessionID string
+	Request   QuestionRequest
+}
+
+func (e QuestionAsked) sessionID() string { return e.SessionID }
+
+// QuestionReplied reports that a question was answered.
+type QuestionReplied struct {
+	SessionID string
+	RequestID string
+	Answers   []schema.QuestionAnswer
+}
+
+func (e QuestionReplied) sessionID() string { return e.SessionID }
+
+// QuestionRejected reports that a question was dismissed.
+type QuestionRejected struct {
+	SessionID string
+	RequestID string
+}
+
+func (e QuestionRejected) sessionID() string { return e.SessionID }
+
 // CompactionStarted reports that context compaction started.
 type CompactionStarted struct {
 	SessionID string
@@ -310,6 +356,9 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 	if payload.Type == schema.SessionTodoEventUpdated.Type {
 		return mapTodoEvent(payload.Data), true
 	}
+	if event, ok := mapInteractionEvent(payload); ok {
+		return event, true
+	}
 	data, _ := payload.Data.(map[string]any)
 	sessionID := fieldString(data, "sessionID")
 	messageID := fieldString(data, "assistantMessageID")
@@ -334,6 +383,97 @@ func mapTodoEvent(data any) TodoUpdated {
 		_ = json.Unmarshal(encoded, &decoded)
 	}
 	return TodoUpdated{SessionID: decoded.SessionID, Todos: decoded.Todos}
+}
+
+// mapInteractionEvent maps permission and question lifecycle events. Their data
+// is a published struct or a decoded map, so each is JSON round-tripped.
+func mapInteractionEvent(payload schema.EventPayload) (Event, bool) {
+	if event, ok := mapPermissionEvent(payload); ok {
+		return event, true
+	}
+	return mapQuestionEvent(payload)
+}
+
+// permissionRepliedData is the permission.v2.replied payload.
+type permissionRepliedData struct {
+	SessionID string `json:"sessionID"`
+	RequestID string `json:"requestID"`
+	Reply     string `json:"reply"`
+}
+
+// mapPermissionEvent maps permission.v2.asked and .replied.
+func mapPermissionEvent(payload schema.EventPayload) (Event, bool) {
+	switch payload.Type {
+	case schema.PermissionEventAsked.Type:
+		request, ok := decodeEvent[schema.PermissionRequest](payload)
+		if !ok {
+			return nil, false
+		}
+		return PermissionAsked{
+			SessionID: request.SessionID, Request: permissionRequestsFrom([]core.PermissionRequest{request})[0],
+		}, true
+	case schema.PermissionEventReplied.Type:
+		data, ok := decodeEvent[permissionRepliedData](payload)
+		if !ok {
+			return nil, false
+		}
+		return PermissionReplied{SessionID: data.SessionID, RequestID: data.RequestID, Reply: data.Reply}, true
+	}
+	return nil, false
+}
+
+// questionRepliedData is the question.v2.replied payload.
+type questionRepliedData struct {
+	SessionID string                  `json:"sessionID"`
+	RequestID string                  `json:"requestID"`
+	Answers   []schema.QuestionAnswer `json:"answers"`
+}
+
+// questionRejectedData is the question.v2.rejected payload.
+type questionRejectedData struct {
+	SessionID string `json:"sessionID"`
+	RequestID string `json:"requestID"`
+}
+
+// mapQuestionEvent maps question.v2.asked, .replied and .rejected.
+func mapQuestionEvent(payload schema.EventPayload) (Event, bool) {
+	switch payload.Type {
+	case schema.QuestionEventAsked.Type:
+		request, ok := decodeEvent[schema.QuestionRequest](payload)
+		if !ok {
+			return nil, false
+		}
+		return QuestionAsked{
+			SessionID: request.SessionID, Request: questionRequestsFrom([]core.QuestionRequest{request})[0],
+		}, true
+	case schema.QuestionEventReplied.Type:
+		data, ok := decodeEvent[questionRepliedData](payload)
+		if !ok {
+			return nil, false
+		}
+		return QuestionReplied{SessionID: data.SessionID, RequestID: data.RequestID, Answers: data.Answers}, true
+	case schema.QuestionEventRejected.Type:
+		data, ok := decodeEvent[questionRejectedData](payload)
+		if !ok {
+			return nil, false
+		}
+		return QuestionRejected{SessionID: data.SessionID, RequestID: data.RequestID}, true
+	}
+	return nil, false
+}
+
+// decodeEvent JSON-round-trips a payload's data into T, since a publisher sends
+// either a typed struct or a decoded map.
+func decodeEvent[T any](payload schema.EventPayload) (T, bool) {
+	var data T
+	encoded, err := json.Marshal(payload.Data)
+	if err != nil {
+		return data, false
+	}
+	if err := json.Unmarshal(encoded, &data); err != nil {
+		return data, false
+	}
+	return data, true
 }
 
 // mapContentEvent maps assistant text and reasoning streaming events.

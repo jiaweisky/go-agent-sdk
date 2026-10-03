@@ -53,7 +53,10 @@ the SDK's spilled tool-output files), `/attach` (attaches an image to the next
 message via `MessageOptions.Files`), `/todos` (shows the model's task list from
 `todo.updated` events), `/diff` (shows the last turn's file diffs from snapshot
 comparison), `/undo` and `/redo` (revert and restore the last turn's file
-changes via `Session.RevertStage`/`RevertClear`), `/plugin` (unloads
+changes via `Session.RevertStage`/`RevertClear`), `/async` (holds
+permission/question requests for an out-of-band reply via `Client.Permission`/
+`Client.Question`, resolved with `/permissions`/`/allow`/`/deny` and
+`/questions`/`/answer`/`/reject`), `/plugin` (unloads
 a plugin, running its cleanup), `/reference` (lists or adds local and git
 reference sources injected into the model's system context), `/persona <text>`
 (starts a new session with an appended system prompt via

@@ -69,6 +69,12 @@ type chat struct {
 	// because a failed or interrupted turn emits no final step.ended.
 	turnStartSnapshot string
 	lastSnapshot      string
+	// permissions and questions cache pending out-of-band requests (hold mode)
+	// in arrival order, so /permissions and /allow can resolve them.
+	permissions []agent.PermissionRequest
+	questions   []agent.QuestionRequest
+	// async is the current /async setting (out-of-band interaction handling).
+	async bool
 }
 
 func newChat(console *console, client *agent.Client, parent, model string) *chat {
@@ -170,7 +176,9 @@ func (c *chat) handleParent(event agent.Event) {
 		agent.TitleUpdated, agent.Retried,
 		agent.ShellStarted, agent.ShellEnded,
 		agent.StepStarted, agent.StepEnded, agent.StepFailed,
-		agent.TodoUpdated:
+		agent.TodoUpdated,
+		agent.PermissionAsked, agent.PermissionReplied,
+		agent.QuestionAsked, agent.QuestionReplied, agent.QuestionRejected:
 		c.flushStream()
 	}
 	switch e := event.(type) {
@@ -193,6 +201,20 @@ func (c *chat) handleParent(event agent.Event) {
 	case agent.TodoUpdated:
 		c.todos[e.SessionID] = e.Todos
 		c.writeTodos(e.Todos)
+	case agent.PermissionAsked:
+		if c.isAsync() {
+			c.writePermissionAsked(e.Request)
+		}
+	case agent.PermissionReplied:
+		c.removePermission(e.RequestID)
+	case agent.QuestionAsked:
+		if c.isAsync() {
+			c.writeQuestionAsked(e.Request)
+		}
+	case agent.QuestionReplied:
+		c.removeQuestion(e.RequestID)
+	case agent.QuestionRejected:
+		c.removeQuestion(e.RequestID)
 	case agent.StepStarted:
 		c.beginStep()
 	case agent.StepEnded:

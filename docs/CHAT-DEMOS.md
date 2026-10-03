@@ -284,13 +284,29 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 测试：`TestForkedTitle`、`TestForkSessionCopiesHistory`（内容一致、id 全新、源不变、标题后缀）、
   `TestForkSessionBoundary`（边界截断）、`TestForkSessionMissing`；`examples/chat` 的 `/fork` 切换/选择器/无会话。
 
+### 2.21 异步权限 / 问题（List/Reply/Reject）— 中 ✅ 已实现（含 SDK 改动）
+
+- 背景：v2 core 的 `Permission`/`Question` 是**事件驱动 + pending/Deferred** 模型（`ask`/`assert`/`reply`/`reject`/
+  `list`）。此前高层只提供同步回调（`OnPermissionRequest`/`OnQuestion`）；问题路径甚至**没走** `core.Question.Ask`
+  （`question.go` 直接调 handler），pending 与事件被完全旁路。
+- SDK：
+  - `Client.Permission()` / `Client.Question()` 暴露 pending 面（`List`/`ForSession`/`Get`/`Reply`/`Reject`）。
+  - `Client.HoldInteractions(on)` 切换 **hold 模式**：`permissionHandler.Assert` / `questionHandler.Ask` 改为调用 core 的
+    阻塞 `Assert`/`Ask`，请求进入 pending 并发布事件，直到外部 reply/reject 才解除（handler 仍保留，用于关掉 hold 时）。
+  - 新事件：`PermissionAsked`/`PermissionReplied`、`QuestionAsked`/`QuestionReplied`/`QuestionRejected`（payload 是
+    结构体或 map，映射时 JSON 往返）。
+- 示例（`examples/chat/async.go`）：`/async [on|off]` 开关；hold 模式下事件渲染为 `[permission] #n ...` /
+  `[question] #n ...`，用 `/permissions`、`/allow|/always|/deny <#n>`、`/questions`、`/answer <#n> <text>`、
+  `/reject <#n>` 解除。turn 中键入的回复命令由 watcher 路由（本会当 steering），其余仍为 steering。
+- 测试：SDK 的 `TestHoldPermissionRoundTrip`、`TestHoldQuestionRoundTrip`、`TestHoldQuestionReject`；chat 的
+  `/async` 开关、`/permissions`/`/questions` 渲染与选择器错误。
+
 ---
 
 ## 3. 需先补 SDK 接口（当前无法演示）
 
 | 能力 | 缺口 |
 |---|---|
-| 异步权限/问题（List/Reply/Reject） | `Client` 没有 `Permission()` / `Question()` getter |
 | 用户工具进度 | `ToolContext` 只有 `SessionID`/`ToolCallID`，无 Progress（`tool.go:16`） |
 | A2A | 仅 `docs/DESIGN-A2A.md` 设计稿 |
 

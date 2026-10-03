@@ -410,6 +410,27 @@ func (c *Client) Agents() *core.Agent {
 	return c.rt.agents
 }
 
+// Permission returns the pending-permission surface. Requests are pending only
+// while their turn is held; see HoldInteractions.
+func (c *Client) Permission() PermissionClient {
+	return permissionClient{inner: c.rt.permission}
+}
+
+// Question returns the pending-question surface. Requests are pending only while
+// their turn is held; see HoldInteractions.
+func (c *Client) Question() QuestionClient {
+	return questionClient{inner: c.rt.question}
+}
+
+// HoldInteractions switches permission and question prompts to out-of-band mode:
+// instead of calling the registered handlers, the loop blocks on each "ask"
+// until the caller resolves it through Permission()/Question(). It takes effect
+// from the next request onward. Without a reply, a held turn stays blocked.
+func (c *Client) HoldInteractions(hold bool) {
+	c.rt.permission.setHold(hold)
+	c.rt.question.setHold(hold)
+}
+
 // Skills returns the skill service.
 func (c *Client) Skills() *core.Skill {
 	return c.rt.skills

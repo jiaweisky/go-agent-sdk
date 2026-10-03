@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/user/go-agent-sdk/core"
@@ -13,6 +14,9 @@ import (
 
 // PermissionRequest describes an approval request raised before a tool runs.
 type PermissionRequest struct {
+	// ID identifies the request; pass it to Client.Permission().Reply to resolve
+	// a held request.
+	ID        string
 	SessionID string
 	Agent     string
 	Action    string
@@ -21,6 +25,76 @@ type PermissionRequest struct {
 	// approves with Always. Empty when the request cannot be remembered.
 	Save     []string
 	Metadata map[string]any
+}
+
+// PermissionReply is how a permission request is resolved.
+type PermissionReply = core.PermissionReply
+
+const (
+	PermissionReplyOnce   = core.PermissionReplyOnce
+	PermissionReplyAlways = core.PermissionReplyAlways
+	PermissionReplyReject = core.PermissionReplyReject
+)
+
+// PermissionReplyInput resolves a pending permission request.
+type PermissionReplyInput struct {
+	RequestID string
+	Reply     PermissionReply
+	// Message is optional feedback returned to the model on rejection.
+	Message string
+}
+
+// PermissionClient lists and resolves pending permission requests. Obtain one
+// with Client.Permission; requests are pending only while their turn is held
+// (see Client.HoldInteractions).
+type PermissionClient interface {
+	List() []PermissionRequest
+	ForSession(sessionID string) []PermissionRequest
+	Get(id string) *PermissionRequest
+	Reply(input PermissionReplyInput) error
+}
+
+type permissionClient struct{ inner *permissionHandler }
+
+func (p permissionClient) List() []PermissionRequest {
+	return permissionRequestsFrom(p.inner.List())
+}
+
+func (p permissionClient) ForSession(sessionID string) []PermissionRequest {
+	return permissionRequestsFrom(p.inner.ForSession(sessionID))
+}
+
+func (p permissionClient) Get(id string) *PermissionRequest {
+	request := p.inner.Get(core.PermissionID(id))
+	if request == nil {
+		return nil
+	}
+	converted := permissionRequestsFrom([]core.PermissionRequest{*request})[0]
+	return &converted
+}
+
+func (p permissionClient) Reply(input PermissionReplyInput) error {
+	reply := core.PermissionReplyInput{
+		RequestID: core.PermissionID(input.RequestID),
+		Reply:     input.Reply,
+	}
+	if input.Message != "" {
+		message := input.Message
+		reply.Message = &message
+	}
+	return p.inner.Reply(reply)
+}
+
+// permissionRequestsFrom flattens core requests for the high-level surface.
+func permissionRequestsFrom(requests []core.PermissionRequest) []PermissionRequest {
+	result := make([]PermissionRequest, len(requests))
+	for i, request := range requests {
+		result[i] = PermissionRequest{
+			ID: string(request.ID), SessionID: request.SessionID, Action: request.Action,
+			Resources: request.Resources, Save: request.Save, Metadata: request.Metadata,
+		}
+	}
+	return result
 }
 
 // PermissionDecision is the handler's answer.
@@ -83,10 +157,14 @@ func (h *sessionHandlers[H]) resolve(sessionID string) H {
 
 // permissionHandler decorates a core Permission service so that "ask" decisions
 // are answered by a PermissionHandlerFunc instead of blocking for an external
-// reply. A per-session handler overrides the client default.
+// reply. In hold mode it instead defers to the core service, which blocks until
+// Client.Permission().Reply. A per-session handler overrides the client default.
 type permissionHandler struct {
 	inner    core.Permission
 	handlers *sessionHandlers[PermissionHandlerFunc]
+	// hold defers "ask" requests to an external reply (core.Assert blocks)
+	// instead of calling a handler.
+	hold atomic.Bool
 }
 
 func newPermissionHandler(inner core.Permission, def PermissionHandlerFunc) *permissionHandler {
@@ -95,6 +173,9 @@ func newPermissionHandler(inner core.Permission, def PermissionHandlerFunc) *per
 	}
 	return &permissionHandler{inner: inner, handlers: newSessionHandlers(def)}
 }
+
+// setHold toggles out-of-band mode for subsequent asserts.
+func (p *permissionHandler) setHold(hold bool) { p.hold.Store(hold) }
 
 func (p *permissionHandler) setHandler(sessionID string, handler PermissionHandlerFunc) {
 	if handler == nil {
@@ -118,6 +199,9 @@ func (p *permissionHandler) Ask(input core.PermissionAssertInput) (*core.Permiss
 }
 
 func (p *permissionHandler) Assert(input core.PermissionAssertInput) error {
+	if p.hold.Load() {
+		return p.inner.Assert(input)
+	}
 	result, err := p.inner.Ask(input)
 	if err != nil {
 		return err
@@ -130,7 +214,7 @@ func (p *permissionHandler) Assert(input core.PermissionAssertInput) error {
 		// halt the turn, unlike a user decline.
 		return &core.PermissionBlockedError{}
 	}
-	decision, err := p.handlers.resolve(input.SessionID)(newPermissionRequest(input))
+	decision, err := p.handlers.resolve(input.SessionID)(newPermissionRequest(result.ID, input))
 	if err != nil {
 		return err
 	}
@@ -158,12 +242,13 @@ func (p *permissionHandler) applyDecision(requestID core.PermissionID, save []st
 }
 
 // newPermissionRequest flattens a core assert input into the handler request.
-func newPermissionRequest(input core.PermissionAssertInput) PermissionRequest {
+func newPermissionRequest(id core.PermissionID, input core.PermissionAssertInput) PermissionRequest {
 	agent := ""
 	if input.Agent != nil {
 		agent = *input.Agent
 	}
 	return PermissionRequest{
+		ID:        string(id),
 		SessionID: input.SessionID,
 		Agent:     agent,
 		Action:    input.Action,

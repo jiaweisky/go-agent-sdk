@@ -41,5 +41,7 @@ func (c *chat) switchSession(session *agent.Session) {
 	c.interruptArmed = false
 	c.turnStartSnapshot = ""
 	c.lastSnapshot = ""
+	c.permissions = nil
+	c.questions = nil
 	c.mu.Unlock()
 }
