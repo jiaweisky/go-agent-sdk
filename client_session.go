@@ -259,8 +259,8 @@ func (c *Client) insertSession(cfg *SessionConfig, sessionID schema.SessionID, a
 }
 
 // defaultSessionTitle is the placeholder title a fresh session carries until
-// the title agent replaces it. The shape matches opencode (an ISO-8601 UTC
-// timestamp), so IsDefaultTitle can recognize it.
+// the title agent replaces it. Its shape (an ISO-8601 UTC timestamp with
+// millisecond precision) lets IsDefaultTitle recognize it.
 func defaultSessionTitle(now time.Time) string {
 	return "New session - " + now.UTC().Format("2006-01-02T15:04:05.000Z")
 }

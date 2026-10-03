@@ -1,7 +1,7 @@
 // Package mcp adapts Model Context Protocol servers to the SDK's core tool
 // framework. It covers server discovery plus the client and transport
-// lifecycle; OAuth, credential storage and TUI events are narrowed away, so
-// callers pass a plain ServerConfig.
+// lifecycle; OAuth, credential storage and interactive events are narrowed
+// away, so callers pass a plain ServerConfig.
 package mcp
 
 import (

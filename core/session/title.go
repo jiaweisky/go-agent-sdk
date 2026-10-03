@@ -21,10 +21,11 @@ func DefaultTitleSettings() TitleSettings {
 }
 
 // TitlePromptPrefix precedes the first user message when asking the model for a
-// title, matching opencode's title prompt.
+// title.
 const TitlePromptPrefix = "Generate a title for this conversation:\n"
 
-// titleMaxLength caps the stored title, matching opencode (97 runes + "...").
+// titleMaxLength caps the stored title; longer ones keep titleMaxLength-3 runes
+// plus a trailing "...".
 const titleMaxLength = 100
 
 var (
@@ -53,7 +54,7 @@ func CleanTitle(text string) string {
 		}
 		runes := []rune(line)
 		if len(runes) > titleMaxLength {
-			return string(runes[:97]) + "..."
+			return string(runes[:titleMaxLength-3]) + "..."
 		}
 		return line
 	}
