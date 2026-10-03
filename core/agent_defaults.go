@@ -92,22 +92,13 @@ Rules:
 
 // ApplyDefaultAgents registers the built-in agents (build, plan, general,
 // explore, compaction, title, summary) and their default permission rulesets.
-func ApplyDefaultAgents(agents *Agent, location *Location, global Global) error {
-	worktree := string(location.Directory)
-	truncationGlob := filepath.Join(global.Data, "tool-output", "*")
-
-	readonlyExternalDirectory := PermissionRuleset{
-		{Action: "external_directory", Resource: "*", Effect: PermissionEffectAsk},
-	}
-	for _, resource := range []string{truncationGlob, filepath.Join(global.Tmp, "*")} {
-		readonlyExternalDirectory = append(readonlyExternalDirectory, PermissionRule{
-			Action: "external_directory", Resource: resource, Effect: PermissionEffectAllow,
-		})
-	}
-
+// DefaultAgentPermissions is the base ruleset every agent inherits. Config
+// agents are merged over it, so one with no rules of its own still allows the
+// defaults instead of asking for everything.
+func DefaultAgentPermissions(global Global) PermissionRuleset {
 	defaults := PermissionRuleset{{Action: "*", Resource: "*", Effect: PermissionEffectAllow}}
-	defaults = append(defaults, readonlyExternalDirectory...)
-	defaults = append(defaults,
+	defaults = append(defaults, readonlyExternalDirectoryRules(global)...)
+	return append(defaults,
 		PermissionRule{Action: "question", Resource: "*", Effect: PermissionEffectDeny},
 		PermissionRule{Action: "plan_enter", Resource: "*", Effect: PermissionEffectDeny},
 		PermissionRule{Action: "plan_exit", Resource: "*", Effect: PermissionEffectDeny},
@@ -116,6 +107,24 @@ func ApplyDefaultAgents(agents *Agent, location *Location, global Global) error 
 		PermissionRule{Action: "read", Resource: "*.env.*", Effect: PermissionEffectAsk},
 		PermissionRule{Action: "read", Resource: "*.env.example", Effect: PermissionEffectAllow},
 	)
+}
+
+// readonlyExternalDirectoryRules is shared by the default ruleset and the
+// explore agent: external reads ask, except the tool-output and temp directories.
+func readonlyExternalDirectoryRules(global Global) PermissionRuleset {
+	rules := PermissionRuleset{{Action: "external_directory", Resource: "*", Effect: PermissionEffectAsk}}
+	for _, resource := range []string{filepath.Join(global.Data, "tool-output", "*"), filepath.Join(global.Tmp, "*")} {
+		rules = append(rules, PermissionRule{
+			Action: "external_directory", Resource: resource, Effect: PermissionEffectAllow,
+		})
+	}
+	return rules
+}
+
+func ApplyDefaultAgents(agents *Agent, location *Location, global Global) error {
+	worktree := string(location.Directory)
+	readonlyExternalDirectory := readonlyExternalDirectoryRules(global)
+	defaults := DefaultAgentPermissions(global)
 
 	planRelative, err := filepath.Rel(worktree, filepath.Join(global.Data, "plans", "*.md"))
 	if err != nil {

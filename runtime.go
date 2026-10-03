@@ -677,7 +677,9 @@ func buildAgents(opts *ClientOptions, location *core.Location, global core.Globa
 	if err := core.ApplyDefaultAgents(agents, location, global); err != nil {
 		return nil, err
 	}
-	if err := defsconfig.ApplyDirAgents(agents, opts.ConfigDirs, global); err != nil {
+	// Config agents inherit the default ruleset (a configured agent never
+	// inherits a built-in's permissions), so merge it in as the base.
+	if err := defsconfig.ApplyDirAgents(agents, opts.ConfigDirs, global, core.DefaultAgentPermissions(global)); err != nil {
 		return nil, err
 	}
 	return agents, nil

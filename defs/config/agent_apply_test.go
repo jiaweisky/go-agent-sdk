@@ -14,7 +14,7 @@ func TestApplyDirAgents(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "mode", "plan.md"), "---\ndescription: planner\n---\nPlan.\n")
 
 	agents := core.NewAgent()
-	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}); err != nil {
+	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}, core.PermissionRuleset{}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -35,13 +35,34 @@ func TestApplyDirAgents(t *testing.T) {
 	}
 }
 
+// TestApplyDirAgentsMergesBase guards that a configured agent with no rules of
+// its own inherits the base ruleset instead of asking for everything.
+func TestApplyDirAgentsMergesBase(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "mode", "planner.md"), "---\ndescription: planner\n---\nPlan.\n")
+
+	base := core.PermissionRuleset{{Action: "*", Resource: "*", Effect: schema.PermissionEffectAllow}}
+	agents := core.NewAgent()
+	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}, base); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	planner := agents.Get(schema.AgentID("planner"))
+	if planner == nil {
+		t.Fatal("planner agent missing")
+	}
+	if got := core.PermissionEvaluate("count_to", "*", planner.Permissions).Effect; got != schema.PermissionEffectAllow {
+		t.Fatalf("count_to permission = %v, want allow from the base", got)
+	}
+}
+
 func TestApplyDirAgentsV2Markdown(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "agent", "build.md"),
 		"---\ndescription: v2 agent\nmode: primary\npermissions:\n  - action: edit\n    resource: \"*\"\n    effect: deny\n---\nV2 body.\n")
 
 	agents := core.NewAgent()
-	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}); err != nil {
+	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}, core.PermissionRuleset{}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -63,7 +84,7 @@ func TestApplyDirAgentsExpandsHome(t *testing.T) {
 		"---\ndescription: a\npermissions:\n  - action: read\n    resource: \"~/secret\"\n    effect: ask\n---\nA.\n")
 
 	agents := core.NewAgent()
-	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}); err != nil {
+	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}, core.PermissionRuleset{}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	a := agents.Get(schema.AgentID("a"))
@@ -79,7 +100,7 @@ func TestApplyDirAgentsDisabled(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "agent", "temp.md"), "---\ndescription: temporary\n---\nTemp.\n")
 	agents := core.NewAgent()
-	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}); err != nil {
+	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}, core.PermissionRuleset{}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	if agents.Get(schema.AgentID("temp")) == nil {
@@ -88,7 +109,7 @@ func TestApplyDirAgentsDisabled(t *testing.T) {
 
 	remove := t.TempDir()
 	writeFile(t, filepath.Join(remove, "agent", "temp.md"), "---\ndescription: temporary\ndisabled: true\n---\nTemp.\n")
-	if err := ApplyDirAgents(agents, []string{remove}, core.Global{Home: "/home/u"}); err != nil {
+	if err := ApplyDirAgents(agents, []string{remove}, core.Global{Home: "/home/u"}, core.PermissionRuleset{}); err != nil {
 		t.Fatalf("apply remove: %v", err)
 	}
 	if agents.Get(schema.AgentID("temp")) != nil {

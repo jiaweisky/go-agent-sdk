@@ -10,7 +10,9 @@ import (
 
 // ApplyDirAgents merges agents from each directory's {agent,agents}/**/*.md and
 // {mode,modes}/*.md into the agent service. Later directories and files win.
-func ApplyDirAgents(agents *core.Agent, dirs []string, global core.Global) error {
+// base is merged under each agent's own rules (see core.DefaultAgentPermissions),
+// so a configured agent inherits the defaults like a built-in one.
+func ApplyDirAgents(agents *core.Agent, dirs []string, global core.Global, base core.PermissionRuleset) error {
 	_, err := agents.Transform(func(draft core.AgentDraft) error {
 		for _, dir := range dirs {
 			entries, err := LoadAgentEntries(dir)
@@ -28,7 +30,7 @@ func ApplyDirAgents(agents *core.Agent, dirs []string, global core.Global) error
 					continue
 				}
 				draft.Update(id, func(agent *schema.AgentInfo) {
-					applyAgentInfo(agent, info, global.Home)
+					applyAgentInfo(agent, info, global.Home, base)
 				})
 			}
 		}
@@ -60,7 +62,7 @@ func decodeAgentDocument(entry AgentEntry) (AgentInfo, bool) {
 	return info, true
 }
 
-func applyAgentInfo(target *schema.AgentInfo, item AgentInfo, home string) {
+func applyAgentInfo(target *schema.AgentInfo, item AgentInfo, home string, base core.PermissionRuleset) {
 	if item.Model != nil {
 		parts := core.ParseModel(*item.Model)
 		var variant *schema.ModelVariantID
@@ -109,6 +111,8 @@ func applyAgentInfo(target *schema.AgentInfo, item AgentInfo, home string) {
 	if item.Permissions != nil {
 		target.Permissions = append(target.Permissions, expandPermissions(*item.Permissions, home)...)
 	}
+	// The base goes first so the agent's own rules win on conflicts.
+	target.Permissions = core.PermissionMerge(base, target.Permissions)
 }
 
 var agentPathActions = map[string]bool{

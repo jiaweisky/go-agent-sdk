@@ -39,6 +39,23 @@ func TestModeFileRegistersPrimaryAgent(t *testing.T) {
 	}
 }
 
+// TestModeAgentInheritsDefaultPermissions guards that a configured primary agent
+// gets the default ruleset, so its tools don't ask for everything (TS merges the
+// defaults into every agent).
+func TestModeAgentInheritsDefaultPermissions(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentFile(t, dir, "mode", "planner", "description: Plan work.\n", "You plan.")
+	runCommand(t, []string{dir}, func(c *chat) {
+		planner := c.client.Agents().Get(schema.AgentID("planner"))
+		if planner == nil {
+			t.Fatal("planner agent missing")
+		}
+		if got := core.PermissionEvaluate("count_to", "*", planner.Permissions).Effect; got != schema.PermissionEffectAllow {
+			t.Fatalf("count_to permission = %v, want allow from the default ruleset", got)
+		}
+	})
+}
+
 // TestSubagentLocaleOrdering guards the Locale option's effect: locale-aware
 // collation reorders mixed-script subagent names.
 func TestSubagentLocaleOrdering(t *testing.T) {
@@ -47,7 +64,7 @@ func TestSubagentLocaleOrdering(t *testing.T) {
 		writeAgentFile(t, dir, "agent", name, "description: helper\nmode: subagent\n", "help")
 	}
 	agents := core.NewAgent()
-	if err := defsconfig.ApplyDirAgents(agents, []string{dir}, core.Global{Home: t.TempDir()}); err != nil {
+	if err := defsconfig.ApplyDirAgents(agents, []string{dir}, core.Global{Home: t.TempDir()}, nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	allowAll := schema.PermissionRuleset{{Action: "*", Resource: "*", Effect: schema.PermissionEffectAllow}}
