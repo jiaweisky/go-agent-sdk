@@ -23,6 +23,7 @@ var runtimeTools = map[string]agent.Tool{
 	convertLengthName:   convertLengthTool(),
 	"emit_lines":        emitLinesTool(),
 	"list_length_units": listUnitsTool(),
+	"count_to":          countToTool(),
 }
 
 // runtimeTool returns one of the tools /tool can register, and reports whether

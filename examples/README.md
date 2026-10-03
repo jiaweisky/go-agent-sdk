@@ -48,7 +48,8 @@ prompts and resources, and `/mcps` shows each server's instructions.
 Commands: `/skills`, `/agents`, `/mcps`, `/mcp`, `/task [<#n>]`, `/compact` (summarizes
 the session history on demand, via `Session.Compact`), `/tool` (adds
 or removes a runtime tool via `Client.RegisterTools`, including the typed
-`convert_length` and the large `emit_lines`), `/tool-output` (reports or prunes
+`convert_length`, the large `emit_lines` and the progress-reporting `count_to`),
+`/tool-output` (reports or prunes
 the SDK's spilled tool-output files), `/attach` (attaches an image to the next
 message via `MessageOptions.Files`), `/todos` (shows the model's task list from
 `todo.updated` events), `/diff` (shows the last turn's file diffs from snapshot

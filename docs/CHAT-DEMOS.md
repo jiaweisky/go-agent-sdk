@@ -301,13 +301,23 @@ usage/cost、reasoning 流、subagent 嵌套、SessionHooks（见 2.1）、`-C`/
 - 测试：SDK 的 `TestHoldPermissionRoundTrip`、`TestHoldQuestionRoundTrip`、`TestHoldQuestionReject`；chat 的
   `/async` 开关、`/permissions`/`/questions` 渲染与选择器错误。
 
+### 2.22 用户工具进度（ToolContext.Progress）— 低 ✅ 已实现（含小幅 SDK 改动）
+
+- 背景：低层 `core/tool.Context` 早有 `Progress(structured, content)`，runner 据此发布 `session.next.tool.progress`，
+  投影到 assistant 的 running 工具状态，映射为 `agent.ToolProgress`；内置 task（子 agent）工具已在用。但高层
+  `agent.ToolContext` 只有 `SessionID`/`ToolCallID`，`Tool.coreTool` 丢掉 `tctx.Progress`，用户工具无法上报进度。
+- SDK：`ToolContext` 新增 `Progress func(structured map[string]any, content []tool.Content) error`，`coreTool` 原样透传。
+- 示例（`examples/chat/progress.go`）：新用户工具 `count_to`（`/tool add count_to`）每步 `ctx.Progress({current,total})`；
+  `handleProgress` 拆出 `registerTask`（task 元数据）与 `writeToolProgress`（通用进度 `[progress] k=v ...`）。
+- 测试：`TestUserToolProgressPassthrough`（scripted LLM 驱动工具调用并断言事件）、`TestCountToToolEmitsProgress`、
+  `TestClampSteps`、`TestFormatProgress`、`TestHandleProgressRendersUserTool`。
+
 ---
 
 ## 3. 需先补 SDK 接口（当前无法演示）
 
 | 能力 | 缺口 |
 |---|---|
-| 用户工具进度 | `ToolContext` 只有 `SessionID`/`ToolCallID`，无 Progress（`tool.go:16`） |
 | A2A | 仅 `docs/DESIGN-A2A.md` 设计稿 |
 
 > **非目标（不做）**：`share` / `unshare` —— 会话分享是托管服务 + OAuth 账号 + 网络同步（V1 `share/`，依赖

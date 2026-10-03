@@ -16,6 +16,11 @@ import (
 type ToolContext struct {
 	SessionID  string
 	ToolCallID string
+	// Progress reports running-tool state from the handler. structured is
+	// surfaced to subscribers as ToolProgress.Structured; content replaces the
+	// running tool's content parts. It is nil when the tool has no publication
+	// context.
+	Progress func(structured map[string]any, content []tool.Content) error
 }
 
 // Tool is a user-defined tool exposed to the model.
@@ -166,7 +171,11 @@ func (t Tool) coreTool(permission core.Permission) tool.Tool {
 					return nil, err
 				}
 			}
-			return t.Handler(ctx, input, ToolContext{SessionID: tctx.SessionID, ToolCallID: tctx.ToolCallID})
+			return t.Handler(ctx, input, ToolContext{
+				SessionID:  tctx.SessionID,
+				ToolCallID: tctx.ToolCallID,
+				Progress:   tctx.Progress,
+			})
 		},
 		ToModelOutput: func(input map[string]any, output any) []tool.Content {
 			return []tool.Content{tool.TextContent{Text: ToolOutputText(output)}}

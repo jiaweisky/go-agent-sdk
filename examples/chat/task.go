@@ -95,29 +95,35 @@ func (c *chat) records() iter.Seq2[string, *taskRecord] {
 	}
 }
 
-// handleProgress registers a task (from the tool's progress metadata) and prints
-// its start line.
+// handleProgress routes a tool's progress metadata: subagent tasks register and
+// print their start line; every other user tool renders as a progress line.
 func (c *chat) handleProgress(event agent.ToolProgress) {
 	structured, ok := event.Structured.(map[string]any)
 	if !ok {
 		return
 	}
-	childID := stringField(structured, "sessionId")
-	subagent := stringField(structured, "subagentType")
+	childID, subagent := stringField(structured, "sessionId"), stringField(structured, "subagentType")
 	if childID == "" || subagent == "" {
+		c.writeToolProgress(structured)
 		return
 	}
-	description := stringField(structured, "description")
+	c.registerTask(event, childID, subagent, stringField(structured, "description"))
+}
+
+// registerTask records a subagent task from its progress metadata and prints its
+// start line once.
+func (c *chat) registerTask(event agent.ToolProgress, childID, subagent, description string) {
 	c.tasks.byCall[event.CallID] = childID
-	if _, seen := c.tasks.byID[childID]; !seen {
-		record := &taskRecord{
-			index: len(c.tasks.order) + 1, subagent: subagent,
-			description: description, started: time.Now(),
-		}
-		c.tasks.byID[childID] = record
-		c.tasks.order = append(c.tasks.order, childID)
-		c.console.write(taskOpenLine(record))
+	if _, seen := c.tasks.byID[childID]; seen {
+		return
 	}
+	record := &taskRecord{
+		index: len(c.tasks.order) + 1, subagent: subagent,
+		description: description, started: time.Now(),
+	}
+	c.tasks.byID[childID] = record
+	c.tasks.order = append(c.tasks.order, childID)
+	c.console.write(taskOpenLine(record))
 }
 
 // finishTool closes a tool call. Non-task tools print nothing (the status line
