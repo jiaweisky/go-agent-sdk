@@ -194,6 +194,15 @@ type TitleUpdated struct {
 
 func (e TitleUpdated) sessionID() string { return e.SessionID }
 
+// TodoUpdated reports the session's full task list after the model calls the
+// built-in todowrite tool. Each call replaces the whole list.
+type TodoUpdated struct {
+	SessionID string
+	Todos     []schema.SessionTodoInfo
+}
+
+func (e TodoUpdated) sessionID() string { return e.SessionID }
+
 // CompactionStarted reports that context compaction started.
 type CompactionStarted struct {
 	SessionID string
@@ -293,6 +302,9 @@ func (e Idle) sessionID() string { return e.SessionID }
 // mapEvent converts a core session event payload into a high-level Event.
 // The bool is false for event types the high-level API does not surface.
 func mapEvent(payload schema.EventPayload) (Event, bool) {
+	if payload.Type == schema.SessionTodoEventUpdated.Type {
+		return mapTodoEvent(payload.Data), true
+	}
 	data, _ := payload.Data.(map[string]any)
 	sessionID := fieldString(data, "sessionID")
 	messageID := fieldString(data, "assistantMessageID")
@@ -303,6 +315,20 @@ func mapEvent(payload schema.EventPayload) (Event, bool) {
 		return event, true
 	}
 	return mapRunEvent(payload.Type, data, sessionID, messageID)
+}
+
+// mapTodoEvent decodes a todo.updated payload. Its publisher sends a struct
+// rather than a map, so this round-trips through JSON instead of reading map
+// fields like the other events.
+func mapTodoEvent(data any) TodoUpdated {
+	var decoded struct {
+		SessionID string                   `json:"sessionID"`
+		Todos     []schema.SessionTodoInfo `json:"todos"`
+	}
+	if encoded, err := json.Marshal(data); err == nil {
+		_ = json.Unmarshal(encoded, &decoded)
+	}
+	return TodoUpdated{SessionID: decoded.SessionID, Todos: decoded.Todos}
 }
 
 // mapContentEvent maps assistant text and reasoning streaming events.
