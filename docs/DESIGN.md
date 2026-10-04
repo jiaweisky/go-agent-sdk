@@ -695,7 +695,7 @@ type ClientOptions struct {
     // 工具与扩展
     Tools            []Tool                    // 应用级工具
     MCP              []MCPConfig               // MCP servers（工具注册为应用级）
-    Plugins          []PluginConfig            // 启动时加载的插件（ID/Options/Tools/Effect）
+    Plugins          []PluginConfig            // 启动时加载的插件（ID/Options/Tools/Func）
     References       map[string]core.ReferenceSource // 命名 reference 源
     ToolOutput       *ToolOutputConfig         // 工具输出落盘上限（MaxLines / MaxBytes）
 

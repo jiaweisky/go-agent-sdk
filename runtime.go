@@ -607,11 +607,11 @@ func (r *runtime) loadPlugins(opts *ClientOptions) error {
 	return nil
 }
 
-// adaptPlugin bridges a PluginEffect to the core lifecycle manager, extending
+// adaptPlugin bridges a PluginFunc to the core lifecycle manager, extending
 // the core context with per-plugin options and the runtime tool registrar.
-func (r *runtime) adaptPlugin(config PluginConfig) core.PluginEffect {
+func (r *runtime) adaptPlugin(config PluginConfig) core.PluginFunc {
 	return func(ctx *core.PluginContext) (func(), error) {
-		return config.Effect(&PluginContext{
+		return config.Func(&PluginContext{
 			PluginContext: *ctx,
 			Options:       config.Options,
 			Tools:         r.toolRegistrar(),

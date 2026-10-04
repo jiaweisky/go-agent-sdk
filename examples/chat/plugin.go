@@ -62,7 +62,7 @@ func greeterPlugin(console *console) agent.PluginConfig {
 	return agent.PluginConfig{
 		ID:      greeterPluginID,
 		Options: map[string]any{"greeting": "Hello from the plugin"},
-		Effect: func(ctx *agent.PluginContext) (func(), error) {
+		Func: func(ctx *agent.PluginContext) (func(), error) {
 			greeting, _ := ctx.Options["greeting"].(string)
 			var calls atomic.Int64
 			unsubscribe := ctx.On(func(event agent.Event) {
@@ -95,7 +95,7 @@ func greeterPlugin(console *console) agent.PluginConfig {
 func permissionPlugin() agent.PluginConfig {
 	return agent.PluginConfig{
 		ID: permissionPluginID,
-		Effect: func(pluginCtx *agent.PluginContext) (func(), error) {
+		Func: func(pluginCtx *agent.PluginContext) (func(), error) {
 			_, err := pluginCtx.Agents.Transform(func(draft core.AgentDraft) error {
 				draft.Update(schema.AgentID(agentName), func(info *schema.AgentInfo) {
 					info.Permissions = append(info.Permissions,

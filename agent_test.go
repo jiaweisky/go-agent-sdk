@@ -936,7 +936,7 @@ func TestClientPlugin(t *testing.T) {
 		LLM:   fakeLLM{reply: "x"},
 		Plugins: []PluginConfig{{
 			ID: "test",
-			Effect: func(ctx *PluginContext) (func(), error) {
+			Func: func(ctx *PluginContext) (func(), error) {
 				loaded = true
 				_, err := ctx.Agents.Transform(func(draft core.AgentDraft) error {
 					draft.Update(schema.AgentID("build"), func(info *schema.AgentInfo) {
@@ -2268,7 +2268,7 @@ func TestPluginOptionsAndTools(t *testing.T) {
 			Options: map[string]any{"greeting": "hi"},
 			Tools: []Tool{DefineTool("greet", "greet the user",
 				func(struct{}, ToolContext) (string, error) { return "hi", nil })},
-			Effect: func(ctx *PluginContext) (func(), error) {
+			Func: func(ctx *PluginContext) (func(), error) {
 				if ctx.Options["greeting"] != "hi" {
 					return nil, errors.New("options not exposed")
 				}
@@ -2304,7 +2304,7 @@ func TestPluginEvents(t *testing.T) {
 		LLM: fakeLLM{reply: "ok"},
 		Plugins: []PluginConfig{{
 			ID: "listener",
-			Effect: func(ctx *PluginContext) (func(), error) {
+			Func: func(ctx *PluginContext) (func(), error) {
 				if ctx.Events == nil {
 					return nil, errors.New("events not exposed")
 				}
@@ -2452,7 +2452,7 @@ func TestPluginContextRegistersTools(t *testing.T) {
 		LLM: fakeLLM{reply: "ok"},
 		Plugins: []PluginConfig{{
 			ID: "toolsmith",
-			Effect: func(ctx *PluginContext) (func(), error) {
+			Func: func(ctx *PluginContext) (func(), error) {
 				return ctx.Tools.Register(DefineTool("from-plugin", "p",
 					func(struct{}, ToolContext) (string, error) { return "p", nil }))
 			},
@@ -2486,7 +2486,7 @@ func TestPluginContextOn(t *testing.T) {
 		LLM: fakeLLM{reply: "ok"},
 		Plugins: []PluginConfig{{
 			ID: "on",
-			Effect: func(ctx *PluginContext) (func(), error) {
+			Func: func(ctx *PluginContext) (func(), error) {
 				return ctx.On(func(event Event) { received <- event }), nil
 			},
 		}},

@@ -25,9 +25,9 @@ type PluginContext struct {
 	Plugin    *Plugin
 }
 
-// PluginEffect loads a plugin. It returns an optional cleanup function invoked
+// PluginFunc loads a plugin. It returns an optional cleanup function invoked
 // when the plugin is removed or reloaded.
-type PluginEffect func(ctx *PluginContext) (cleanup func(), err error)
+type PluginFunc func(ctx *PluginContext) (cleanup func(), err error)
 
 // Plugin is a per-id lifecycle manager for plugins.
 type Plugin struct {
@@ -57,7 +57,7 @@ func NewPlugin(events Event, agents *Agent, skills *Skill, reference *Reference)
 }
 
 // Add loads (or reloads) a plugin, mirroring Plugin.add.
-func (p *Plugin) Add(id schema.PluginID, effect PluginEffect) error {
+func (p *Plugin) Add(id schema.PluginID, plugin PluginFunc) error {
 	var result error
 	p.locks.WithLock(id, func() {
 		p.mu.Lock()
@@ -76,7 +76,7 @@ func (p *Plugin) Add(id schema.PluginID, effect PluginEffect) error {
 			existing()
 		}
 
-		cleanup, err := effect(p.context)
+		cleanup, err := plugin(p.context)
 
 		p.mu.Lock()
 		delete(p.loading, id)

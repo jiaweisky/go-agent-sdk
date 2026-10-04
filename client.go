@@ -164,8 +164,8 @@ type PluginConfig struct {
 	// Tools are application tools contributed by this plugin. They are
 	// registered for every session created after startup, like
 	// ClientOptions.Tools.
-	Tools  []Tool
-	Effect PluginEffect
+	Tools []Tool
+	Func  PluginFunc
 }
 
 // AgentConfig defines a named agent.

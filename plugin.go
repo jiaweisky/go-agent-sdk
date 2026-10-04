@@ -5,7 +5,7 @@ import (
 	"github.com/user/go-agent-sdk/core/tool"
 )
 
-// PluginContext is the capability surface a plugin's Effect receives. It
+// PluginContext is the capability surface a plugin receives. It
 // extends the low-level core.PluginContext (agents, skills, references, the
 // plugin manager and the raw event log) with per-plugin options and runtime
 // tool registration.
@@ -19,9 +19,9 @@ type PluginContext struct {
 	onPanic func(PanicInfo)
 }
 
-// PluginEffect loads a plugin. It returns an optional cleanup function invoked
+// PluginFunc loads a plugin. It returns an optional cleanup function invoked
 // when the plugin is removed or reloaded.
-type PluginEffect func(ctx *PluginContext) (cleanup func(), err error)
+type PluginFunc func(ctx *PluginContext) (cleanup func(), err error)
 
 // On subscribes to high-level events across every session, including subagent
 // child sessions. The returned function unsubscribes.
