@@ -30,8 +30,10 @@ func buildCard(info schema.AgentInfo, endpoint string) *a2a.AgentCard {
 		Capabilities: a2a.AgentCapabilities{
 			Streaming: true,
 		},
-		DefaultInputModes:  []string{"text/plain"},
-		DefaultOutputModes: []string{"text/plain"},
+		// Input: text prompts, structured data parts, and the image types the read
+		// tool can ingest. Output: assistant text and structured (data) parts.
+		DefaultInputModes:  []string{"text/plain", "application/json", "image/png", "image/jpeg", "image/gif", "image/webp"},
+		DefaultOutputModes: []string{"text/plain", "application/json"},
 		Skills: []a2a.AgentSkill{{
 			ID:          string(info.ID),
 			Name:        name,
