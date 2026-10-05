@@ -39,6 +39,9 @@ type Options struct {
 	Workspaces WorkspaceResolver
 	// Artifacts optionally externalizes or rewrites emitted artifacts.
 	Artifacts ArtifactExternalizer
+	// Security, when set, requires authentication on the JSON-RPC endpoints
+	// (cards stay public). Nil disables authentication.
+	Security *Security
 	// NativeOptions are passed to the underlying A2A server for capabilities the
 	// SDK does not model: authentication interceptors, concurrency limits, push
 	// notifications, and so on. Each value must be an
@@ -58,6 +61,9 @@ type Server struct {
 func New(opts Options) (*Server, error) {
 	if opts.Factory == nil {
 		return nil, fmt.Errorf("a2a/server: Factory is required")
+	}
+	if opts.Security != nil && opts.Security.Bearer == "" {
+		return nil, fmt.Errorf("a2a/server: Security.Bearer is required")
 	}
 	store := opts.TaskStore
 	if store == nil {
@@ -86,7 +92,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	for _, info := range s.exposed {
 		mux.Handle(s.cardPath(info), s.cardHandler(info))
-		mux.Handle(s.endpointPath(info), s.rpcHandler(info))
+		mux.Handle(s.endpointPath(info), s.secure(s.rpcHandler(info)))
 	}
 	// The default well-known path serves the first exposed agent so a client
 	// that only knows the host can discover it.
@@ -107,7 +113,7 @@ func (s *Server) cardPath(info schema.AgentInfo) string {
 
 func (s *Server) cardHandler(info schema.AgentInfo) http.Handler {
 	producer := a2asrv.AgentCardProducerFn(func(ctx context.Context) (*a2a.AgentCard, error) {
-		return buildCard(info, s.cardEndpoint(ctx, info)), nil
+		return buildCard(info, s.cardEndpoint(ctx, info), s.opts.Security), nil
 	})
 	inner := a2asrv.NewAgentCardHandler(producer)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

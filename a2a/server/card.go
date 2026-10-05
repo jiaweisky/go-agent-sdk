@@ -8,8 +8,8 @@ import (
 
 // buildCard builds the AgentCard for one exposed agent. A card describes a
 // single agent (one card = one agent); its URL is where the JSON-RPC endpoint
-// is mounted.
-func buildCard(info schema.AgentInfo, endpoint string) *a2a.AgentCard {
+// is mounted. When security is set, the card declares the bearer scheme.
+func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.AgentCard {
 	name := string(info.ID)
 	description := ""
 	if info.Description != nil {
@@ -44,6 +44,15 @@ func buildCard(info schema.AgentInfo, endpoint string) *a2a.AgentCard {
 	if endpoint != "" {
 		card.SupportedInterfaces = []*a2a.AgentInterface{
 			a2a.NewAgentInterface(endpoint, a2a.TransportProtocolJSONRPC),
+		}
+	}
+	if security != nil {
+		name := a2a.SecuritySchemeName(security.securitySchemeName())
+		card.SecuritySchemes = a2a.NamedSecuritySchemes{
+			name: a2a.HTTPAuthSecurityScheme{Scheme: "Bearer"},
+		}
+		card.SecurityRequirements = a2a.SecurityRequirementsOptions{
+			{name: a2a.SecuritySchemeScopes{}},
 		}
 	}
 	return card

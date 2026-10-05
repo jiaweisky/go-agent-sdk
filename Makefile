@@ -16,13 +16,24 @@ endif
 
 EXAMPLES := chat tool notesmcp a2aserver
 BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(EXAMPLES)))
+CMDS := a2aserve
+CMD_BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(CMDS)))
 GO_SOURCES := $(shell find . -name '*.go' -not -path './bin/*')
 
-.PHONY: all examples chat a2aserver fmt fmt-check vet test lint golangci clean
+.PHONY: all examples cmds chat a2aserver a2aserve fmt fmt-check vet test lint golangci clean
 
-all: examples
+all: examples cmds
 
 examples: $(BINARIES)
+
+cmds: $(CMD_BINARIES)
+
+# Build the A2A server command.
+$(BIN)/a2aserve$(EXE): $(GO_SOURCES) go.mod go.sum
+	@mkdir -p $(BIN)
+	$(GO) build -o $@ ./cmd/a2aserve
+
+a2aserve: $(BIN)/a2aserve$(EXE)
 
 $(BIN)/%$(EXE): $(GO_SOURCES) go.mod go.sum
 	@mkdir -p $(BIN)

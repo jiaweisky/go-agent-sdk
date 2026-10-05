@@ -54,6 +54,11 @@ func (s stubLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmsc
 
 func newServer(t *testing.T) (*httptest.Server, *agent.Client) {
 	t.Helper()
+	return newServerWithSecurity(t, nil)
+}
+
+func newServerWithSecurity(t *testing.T, security *server.Security) (*httptest.Server, *agent.Client) {
+	t.Helper()
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Protocol:    "openai-responses",
 		Credentials: agent.APIKey("test"),
@@ -81,9 +86,10 @@ func newServer(t *testing.T) (*httptest.Server, *agent.Client) {
 	}))
 	t.Cleanup(ts.Close)
 	srv, err := server.New(server.Options{
-		Factory: agent.NewA2AFactory(client),
-		Agents:  client.Agents().All(),
-		BaseURL: ts.URL,
+		Factory:  agent.NewA2AFactory(client),
+		Agents:   client.Agents().All(),
+		BaseURL:  ts.URL,
+		Security: security,
 	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
@@ -107,6 +113,42 @@ func fetchCard(t *testing.T, baseURL string) *a2a.AgentCard {
 		t.Fatalf("decode card: %v", err)
 	}
 	return &card
+}
+
+// TestServerRequiresBearerToken guards that the RPC endpoint is gated while the
+// discovery card stays public and declares the scheme.
+func TestServerRequiresBearerToken(t *testing.T) {
+	ts, _ := newServerWithSecurity(t, &server.Security{Bearer: "t0ken"})
+
+	card := fetchCard(t, ts.URL)
+	if _, ok := card.SecuritySchemes["bearer"]; !ok {
+		t.Fatalf("card securitySchemes = %v, want bearer", card.SecuritySchemes)
+	}
+
+	endpoint := ts.URL + "/agents/build/"
+
+	response, err := http.Post(endpoint, "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no-token status = %d, want 401", response.StatusCode)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	request.Header.Set("Authorization", "Bearer t0ken")
+	authorized, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("authorized post: %v", err)
+	}
+	authorized.Body.Close()
+	if authorized.StatusCode == http.StatusUnauthorized {
+		t.Fatalf("authorized status = %d, want not 401", authorized.StatusCode)
+	}
 }
 
 func TestServerSendStreamingMessage(t *testing.T) {

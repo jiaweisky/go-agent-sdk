@@ -8,7 +8,7 @@ import (
 
 func TestBuildCardDeclaresMediaModes(t *testing.T) {
 	description := "an agent"
-	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build"), Description: &description}, "http://example.com/")
+	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build"), Description: &description}, "http://example.com/", nil)
 
 	if !containsMode(card.DefaultInputModes, "text/plain") ||
 		!containsMode(card.DefaultInputModes, "image/png") {
@@ -26,4 +26,18 @@ func containsMode(modes []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestBuildCardDeclaresSecurityScheme(t *testing.T) {
+	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "http://example.com/", &Security{Bearer: "s3cret"})
+	if _, ok := card.SecuritySchemes["bearer"]; !ok {
+		t.Fatalf("securitySchemes = %v, want a bearer scheme", card.SecuritySchemes)
+	}
+	if len(card.SecurityRequirements) != 1 {
+		t.Fatalf("securityRequirements = %v, want one requirement", card.SecurityRequirements)
+	}
+	card = buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "http://example.com/", nil)
+	if len(card.SecuritySchemes) != 0 {
+		t.Fatalf("securitySchemes = %v, want none without security", card.SecuritySchemes)
+	}
 }
