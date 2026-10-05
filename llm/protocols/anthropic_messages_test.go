@@ -13,7 +13,7 @@ func TestAnthropicMessagesOutputLimitFallsBackToRouteDefaults(t *testing.T) {
 		Provider: "test",
 		Defaults: &route.RouteDefaultsInput{Limits: &schema.ModelLimits{Context: 100, Output: 12345}},
 	})
-	model := r.Model(route.RouteModelInput{ID: "claude"})
+	model := mustBindModel(t, r, route.RouteModelInput{ID: "claude"})
 
 	body, err := r.Body.From(&schema.LLMRequest{Model: model})
 	if err != nil {
@@ -33,7 +33,7 @@ func TestAnthropicMessagesOutputLimitPrefersModelDefaults(t *testing.T) {
 		Provider: "test",
 		Defaults: &route.RouteDefaultsInput{Limits: &schema.ModelLimits{Context: 100, Output: 12345}},
 	})
-	model := r.Model(route.RouteModelInput{
+	model := mustBindModel(t, r, route.RouteModelInput{
 		ID:       "claude",
 		Defaults: &schema.ModelDefaults{Limits: &schema.ModelLimits{Output: 7}},
 	})
@@ -59,7 +59,7 @@ func TestAnthropicMergeUsageMergesProviderMetadata(t *testing.T) {
 }
 
 func TestAnthropicThinkingRequiresBudget(t *testing.T) {
-	model := AnthropicMessagesHTTPRoute.Model(route.RouteModelInput{ID: "claude"})
+	model := mustBindModel(t, AnthropicMessagesHTTPRoute, route.RouteModelInput{ID: "claude"})
 	for _, thinking := range []map[string]any{
 		{"type": "enabled"},
 		{"type": "enabled", "budgetTokens": "lots"},
@@ -117,7 +117,7 @@ func TestAnthropicCanUseNativeSystemUpdate(t *testing.T) {
 // rejects a tool_use whose tool_result is not in the immediately following
 // message.
 func TestAnthropicMergesParallelToolResults(t *testing.T) {
-	model := AnthropicMessagesHTTPRoute.Model(route.RouteModelInput{ID: "claude"})
+	model := mustBindModel(t, AnthropicMessagesHTTPRoute, route.RouteModelInput{ID: "claude"})
 	result := func(id string) schema.ToolResultPart {
 		return schema.ToolResultPart{
 			Type: "tool-result", ID: id, Name: "tool",

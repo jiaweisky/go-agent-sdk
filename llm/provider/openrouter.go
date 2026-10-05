@@ -19,7 +19,7 @@ type OpenRouterConfig struct {
 // its model factory.
 type OpenRouterProvider struct {
 	ID    schema.ProviderID
-	Model func(id string, opts ...llm.ModelOptions) route.Model
+	Model func(id string, opts ...llm.ModelOptions) (route.Model, error)
 }
 
 func openRouterDefaultBaseURL() string {
@@ -107,7 +107,7 @@ func NewOpenRouter(openAIChatProtocol route.Protocol, input OpenRouterConfig) Op
 	r = r.With(route.RoutePatch{Defaults: &defaults})
 	return OpenRouterProvider{
 		ID: OpenRouterProviderID,
-		Model: func(id string, opts ...llm.ModelOptions) route.Model {
+		Model: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
 	}

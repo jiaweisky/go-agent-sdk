@@ -19,7 +19,7 @@ type OpenAICompatibleGenericOptions struct {
 // OpenAICompatibleProvider is a configured OpenAI-compatible facade.
 type OpenAICompatibleProvider struct {
 	ID    schema.ProviderID
-	Model func(id string, opts ...llm.ModelOptions) route.Model
+	Model func(id string, opts ...llm.ModelOptions) (route.Model, error)
 	// Configure rebuilds the facade with
 	// new options. For profile facades the provider id is fixed to the profile
 	// and BaseURL falls back to the profile default.
@@ -50,7 +50,7 @@ func configureOpenAICompatible(
 	})
 	return OpenAICompatibleProvider{
 		ID: schema.ProviderID(prov),
-		Model: func(id string, opts ...llm.ModelOptions) route.Model {
+		Model: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return bindModel(r, route.RouteModelInput{ID: id, Provider: prov}, opts...)
 		},
 		Configure: func(next OpenAICompatibleGenericOptions) OpenAICompatibleProvider {

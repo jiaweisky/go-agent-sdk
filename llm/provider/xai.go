@@ -19,9 +19,9 @@ type XAIConfig struct {
 type XAIProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
-	Model     func(id string, opts ...llm.ModelOptions) route.Model
-	Responses func(id string, opts ...llm.ModelOptions) route.Model
-	Chat      func(id string, opts ...llm.ModelOptions) route.Model
+	Model     func(id string, opts ...llm.ModelOptions) (route.Model, error)
+	Responses func(id string, opts ...llm.ModelOptions) (route.Model, error)
+	Chat      func(id string, opts ...llm.ModelOptions) (route.Model, error)
 }
 
 func xaiDefaultBaseURL() string {
@@ -56,13 +56,13 @@ func NewXAI(responsesRoute, chatRoute route.Route, input XAIConfig) XAIProvider 
 	return XAIProvider{
 		ID:     XAIProviderID,
 		Routes: []route.Route{respCfg, chatCfg},
-		Model: func(id string, opts ...llm.ModelOptions) route.Model {
+		Model: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(respCfg, id, input.defaults(), nil, opts...)
 		},
-		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
+		Responses: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(respCfg, id, input.defaults(), nil, opts...)
 		},
-		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
+		Chat: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(chatCfg, id, input.defaults(), nil, opts...)
 		},
 	}

@@ -31,7 +31,7 @@ func (c CommonConfig) defaults() route.RouteDefaultsInput {
 }
 
 // bindModel binds a model id to a route, applying the caller's overrides.
-func bindModel(r route.Route, input route.RouteModelInput, opts ...llm.ModelOptions) route.Model {
+func bindModel(r route.Route, input route.RouteModelInput, opts ...llm.ModelOptions) (route.Model, error) {
 	if len(opts) > 0 {
 		input.Defaults = opts[0].Defaults
 		input.Compatibility = opts[0].Compatibility

@@ -122,7 +122,7 @@ func newRunnerTestRunner(t *testing.T, db *database.Database, llm route.LLMClien
 		Provider: "test",
 		Defaults: &route.RouteDefaultsInput{Limits: &llmschema.ModelLimits{Context: 100_000, Output: 1_000}},
 	})
-	resolved := configured.Model(route.RouteModelInput{ID: "test-model"})
+	resolved := mustBindModel(t, configured, route.RouteModelInput{ID: "test-model"})
 	models := func(schema.SessionInfo) (route.Model, error) { return resolved, nil }
 
 	registry := tool.NewRegistry()

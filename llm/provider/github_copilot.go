@@ -26,9 +26,9 @@ type GitHubCopilotConfig struct {
 type GitHubCopilotProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
-	Model     func(id string, opts ...llm.ModelOptions) route.Model
-	Responses func(id string, opts ...llm.ModelOptions) route.Model
-	Chat      func(id string, opts ...llm.ModelOptions) route.Model
+	Model     func(id string, opts ...llm.ModelOptions) (route.Model, error)
+	Responses func(id string, opts ...llm.ModelOptions) (route.Model, error)
+	Chat      func(id string, opts ...llm.ModelOptions) (route.Model, error)
 }
 
 // shouldUseResponsesAPI reports whether a Copilot model should use the Responses
@@ -70,16 +70,16 @@ func NewGitHubCopilot(responsesRoute, chatRoute route.Route, options GitHubCopil
 	return GitHubCopilotProvider{
 		ID:     GitHubCopilotProviderID,
 		Routes: []route.Route{responsesCfg, chatCfg},
-		Model: func(id string, opts ...llm.ModelOptions) route.Model {
+		Model: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			if shouldUseResponsesAPI(id, options.Endpoint) {
 				return openAIModelFactory(responsesCfg, id, base, nil, opts...)
 			}
 			return openAIModelFactory(chatCfg, id, base, nil, opts...)
 		},
-		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
+		Responses: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(responsesCfg, id, base, nil, opts...)
 		},
-		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
+		Chat: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(chatCfg, id, base, nil, opts...)
 		},
 	}

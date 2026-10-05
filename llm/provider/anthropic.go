@@ -21,7 +21,7 @@ type AnthropicConfig struct {
 type AnthropicProvider struct {
 	ID     schema.ProviderID
 	Routes []route.Route
-	Model  func(id string, opts ...llm.ModelOptions) route.Model
+	Model  func(id string, opts ...llm.ModelOptions) (route.Model, error)
 }
 
 func anthropicAuth(input AnthropicConfig) *route.Auth {
@@ -58,7 +58,7 @@ func NewAnthropic(anthropicMessagesRoute route.Route, input AnthropicConfig) Ant
 	return AnthropicProvider{
 		ID:     AnthropicProviderID,
 		Routes: []route.Route{r},
-		Model: func(id string, opts ...llm.ModelOptions) route.Model {
+		Model: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
 	}

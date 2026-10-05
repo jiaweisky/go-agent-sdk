@@ -20,9 +20,9 @@ type OpenAIConfig struct {
 type OpenAIProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
-	Model     func(id string, opts ...llm.ModelOptions) route.Model
-	Responses func(id string, opts ...llm.ModelOptions) route.Model
-	Chat      func(id string, opts ...llm.ModelOptions) route.Model
+	Model     func(id string, opts ...llm.ModelOptions) (route.Model, error)
+	Responses func(id string, opts ...llm.ModelOptions) (route.Model, error)
+	Chat      func(id string, opts ...llm.ModelOptions) (route.Model, error)
 }
 
 func openAIAuth(input OpenAIConfig) *route.Auth {
@@ -50,7 +50,7 @@ func openAIModelFactory(
 	baseOpts route.RouteDefaultsInput,
 	textVerbosity *bool,
 	modelOpts ...llm.ModelOptions,
-) route.Model {
+) (route.Model, error) {
 	merged := baseOpts
 	merged.ProviderOptions = withOpenAIOptions(modelID, baseOpts.ProviderOptions, textVerbosity)
 	return bindModel(r.With(route.RoutePatch{Defaults: &merged}), route.RouteModelInput{ID: modelID}, modelOpts...)
@@ -65,13 +65,13 @@ func NewOpenAI(responsesRoute, chatRoute route.Route, input OpenAIConfig) OpenAI
 	return OpenAIProvider{
 		ID:     OpenAIProviderID,
 		Routes: []route.Route{responsesRoute, chatRoute},
-		Model: func(id string, opts ...llm.ModelOptions) route.Model {
+		Model: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(responsesRoute, id, base, ptr(true), opts...)
 		},
-		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
+		Responses: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(responsesRoute, id, base, ptr(true), opts...)
 		},
-		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
+		Chat: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(chatRoute, id, base, nil, opts...)
 		},
 	}

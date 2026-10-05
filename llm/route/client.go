@@ -60,7 +60,7 @@ type Route struct {
 	Body             RouteBody
 	Transport        Transport
 	With             func(patch RoutePatch) Route
-	Model            func(input RouteModelInput) Model
+	Model            func(input RouteModelInput) (Model, error)
 	PrepareTransport func(body any, request *schema.LLMRequest) (any, error)
 	StreamPrepared   func(
 		ctx context.Context,
@@ -100,7 +100,7 @@ func MakeFromTransport(input MakeTransportInput) Route {
 			},
 		}
 		r.With = func(patch RoutePatch) Route { return routeWith(ri, patch, build) }
-		r.Model = func(input RouteModelInput) Model { return routeModel(ri, r, input) }
+		r.Model = func(input RouteModelInput) (Model, error) { return routeModel(ri, r, input) }
 		r.PrepareTransport = func(body any, request *schema.LLMRequest) (any, error) {
 			return routePrepareTransport(ri, body, request)
 		}
@@ -157,16 +157,16 @@ func routeWith(ri makeTransportInput, patch RoutePatch, build func(makeTransport
 
 // routeModel binds a model to the route, rejecting the calls that cannot produce
 // a request.
-func routeModel(ri makeTransportInput, r Route, input RouteModelInput) Model {
+func routeModel(ri makeTransportInput, r Route, input RouteModelInput) (Model, error) {
 	prov := input.Provider
 	if prov == "" {
 		prov = ri.Provider
 	}
 	if prov == "" {
-		panic(fmt.Sprintf("Route.Model(%s) requires a provider", ri.ID))
+		return Model{}, fmt.Errorf("Route.Model(%s) requires a provider", ri.ID)
 	}
 	if ri.Endpoint.BaseURL == "" {
-		panic(fmt.Sprintf("Route.Model(%s) requires an endpoint baseURL — configure it on the route first", ri.ID))
+		return Model{}, fmt.Errorf("Route.Model(%s) requires an endpoint baseURL — configure it on the route first", ri.ID)
 	}
 	return Model{
 		Model: schema.NewModel(schema.ModelInput{
@@ -176,7 +176,7 @@ func routeModel(ri makeTransportInput, r Route, input RouteModelInput) Model {
 			Compatibility: input.Compatibility,
 		}),
 		Route: r,
-	}
+	}, nil
 }
 
 // routePrepareTransport runs the transport's preparation step for a body.

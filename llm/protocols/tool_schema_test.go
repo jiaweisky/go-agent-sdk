@@ -44,7 +44,7 @@ func TestProjectToolSchema(t *testing.T) {
 func TestOpenAIChatProjectsToolSchemaForCompatibleModel(t *testing.T) {
 	r := OpenAIChatHTTPRoute.With(route.RoutePatch{Provider: "test"})
 	request := &schema.LLMRequest{
-		Model: r.Model(route.RouteModelInput{
+		Model: mustBindModel(t, r, route.RouteModelInput{
 			ID:            "moonshot-model",
 			Compatibility: schema.NewModelCompatibility(schema.ModelToolSchemaMoonshot),
 		}),
@@ -118,7 +118,7 @@ func TestToolSchemaIsSentForEveryProtocol(t *testing.T) {
 	for _, tc := range cases {
 		r := tc.route
 		body, err := r.Body.From(&schema.LLMRequest{
-			Model: r.Model(route.RouteModelInput{ID: "test-model"}),
+			Model: mustBindModel(t, r, route.RouteModelInput{ID: "test-model"}),
 			Tools: []schema.ToolDefinition{{Name: "lookup", Description: "Look up", InputSchema: inputSchema}},
 		})
 		if err != nil {
@@ -144,7 +144,7 @@ func TestOpenAIReasoningEffortValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		r := tc.route.With(route.RoutePatch{Provider: "test"})
-		model := r.Model(route.RouteModelInput{ID: "test-model"})
+		model := mustBindModel(t, r, route.RouteModelInput{ID: "test-model"})
 
 		if _, err := r.Body.From(&schema.LLMRequest{
 			Model:           model,
@@ -172,7 +172,7 @@ func TestOpenAIReasoningEffortValidation(t *testing.T) {
 
 func TestOpenAIResponsesRejectsUnsupportedContent(t *testing.T) {
 	r := OpenAIResponsesHTTPRoute.With(route.RoutePatch{Provider: "test"})
-	model := r.Model(route.RouteModelInput{ID: "test-model"})
+	model := mustBindModel(t, r, route.RouteModelInput{ID: "test-model"})
 
 	cases := []struct {
 		name    string

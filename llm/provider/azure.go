@@ -27,9 +27,9 @@ type AzureConfig struct {
 type AzureProvider struct {
 	ID        schema.ProviderID
 	Routes    []route.Route
-	Model     func(id string, opts ...llm.ModelOptions) route.Model
-	Responses func(id string, opts ...llm.ModelOptions) route.Model
-	Chat      func(id string, opts ...llm.ModelOptions) route.Model
+	Model     func(id string, opts ...llm.ModelOptions) (route.Model, error)
+	Responses func(id string, opts ...llm.ModelOptions) (route.Model, error)
+	Chat      func(id string, opts ...llm.ModelOptions) (route.Model, error)
 }
 
 func resourceBaseURL(resourceName string) string {
@@ -90,16 +90,16 @@ func NewAzure(responsesRoute, chatRoute route.Route, input AzureConfig) AzurePro
 	return AzureProvider{
 		ID:     AzureProviderID,
 		Routes: []route.Route{respCfg, chatCfg},
-		Model: func(id string, opts ...llm.ModelOptions) route.Model {
+		Model: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			if input.UseCompletionURLs {
 				return openAIModelFactory(chatCfg, id, base, nil, opts...)
 			}
 			return openAIModelFactory(respCfg, id, base, nil, opts...)
 		},
-		Responses: func(id string, opts ...llm.ModelOptions) route.Model {
+		Responses: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(respCfg, id, base, nil, opts...)
 		},
-		Chat: func(id string, opts ...llm.ModelOptions) route.Model {
+		Chat: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return openAIModelFactory(chatCfg, id, base, nil, opts...)
 		},
 	}

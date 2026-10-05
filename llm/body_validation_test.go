@@ -27,7 +27,7 @@ func TestPrepareValidatesProtocolBody(t *testing.T) {
 	for _, tc := range cases {
 		r := tc.route.With(route.RoutePatch{Provider: "test"})
 		request := &schema.LLMRequest{
-			Model: r.Model(route.RouteModelInput{ID: "test-model"}),
+			Model: mustBindModel(t, r, route.RouteModelInput{ID: "test-model"}),
 			Messages: []schema.Message{{Role: schema.RoleUser, Content: []schema.ContentPart{
 				schema.TextPart{Type: "text", Text: "hello"},
 			}}},
@@ -56,7 +56,7 @@ func TestPrepareRejectsBodyFailingItsSchema(t *testing.T) {
 
 	client := llm.NewClient(route.TransportRuntime{})
 	_, err := client.Prepare(context.Background(), &schema.LLMRequest{
-		Model: r.Model(route.RouteModelInput{ID: "test-model"}),
+		Model: mustBindModel(t, r, route.RouteModelInput{ID: "test-model"}),
 	})
 	if err == nil || !strings.Contains(err.Error(), "model") {
 		t.Fatalf("err = %v, want a body validation error", err)

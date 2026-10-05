@@ -149,7 +149,10 @@ func TestProvider_OpenAI_Chat(t *testing.T) {
 	prov := provider.NewOpenAI(protocols.OpenAIChatHTTPRoute, protocols.OpenAIChatHTTPRoute, provider.OpenAIConfig{
 		CommonConfig: provider.CommonConfig{APIKey: &apiKey, BaseURL: "https://api.deepseek.com/v1"},
 	})
-	model := prov.Model("deepseek-flash")
+	model, err := prov.Model("deepseek-flash")
+	if err != nil {
+		t.Fatalf("model: %v", err)
+	}
 	req := llm.NewRequest(llm.RequestInput{
 		Model:  model,
 		Prompt: "Hello",

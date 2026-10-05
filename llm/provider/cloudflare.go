@@ -32,41 +32,41 @@ type CloudflareWorkersAIConfig struct {
 // CloudflareAIGatewayProvider is a configured AI Gateway facade.
 type CloudflareAIGatewayProvider struct {
 	ID    schema.ProviderID
-	Model func(id string, opts ...llm.ModelOptions) route.Model
+	Model func(id string, opts ...llm.ModelOptions) (route.Model, error)
 }
 
 // CloudflareWorkersAIProvider is a configured Workers AI facade.
 type CloudflareWorkersAIProvider struct {
 	ID    schema.ProviderID
-	Model func(id string, opts ...llm.ModelOptions) route.Model
+	Model func(id string, opts ...llm.ModelOptions) (route.Model, error)
 }
 
 // AIGatewayBaseURL renders the AI Gateway base URL for a config.
-func AIGatewayBaseURL(input CloudflareAIGatewayConfig) string {
+func AIGatewayBaseURL(input CloudflareAIGatewayConfig) (string, error) {
 	if input.BaseURL != "" {
-		return input.BaseURL
+		return input.BaseURL, nil
 	}
 	if input.AccountID == "" {
-		panic("CloudflareAIGateway requires accountId unless baseURL is supplied")
+		return "", fmt.Errorf("CloudflareAIGateway requires accountId unless baseURL is supplied")
 	}
 	gwID := input.GatewayID
 	if gwID == "" {
 		gwID = "default"
 	}
 	return fmt.Sprintf("https://gateway.ai.cloudflare.com/v1/%s/%s/compat",
-		url.PathEscape(input.AccountID), url.PathEscape(gwID))
+		url.PathEscape(input.AccountID), url.PathEscape(gwID)), nil
 }
 
 // WorkersAIBaseURL renders the Workers AI base URL for a config.
-func WorkersAIBaseURL(input CloudflareWorkersAIConfig) string {
+func WorkersAIBaseURL(input CloudflareWorkersAIConfig) (string, error) {
 	if input.BaseURL != "" {
-		return input.BaseURL
+		return input.BaseURL, nil
 	}
 	if input.AccountID == "" {
-		panic("CloudflareWorkersAI requires accountId unless baseURL is supplied")
+		return "", fmt.Errorf("CloudflareWorkersAI requires accountId unless baseURL is supplied")
 	}
 	return fmt.Sprintf("https://api.cloudflare.com/client/v4/accounts/%s/ai/v1",
-		url.PathEscape(input.AccountID))
+		url.PathEscape(input.AccountID)), nil
 }
 
 func cloudflareAIGatewayAuth(input CloudflareAIGatewayConfig) *route.Auth {
@@ -105,23 +105,27 @@ func cloudflareWorkersAIAuth(input CloudflareWorkersAIConfig) *route.Auth {
 func NewCloudflareAIGateway(
 	openAICompatibleChatRoute route.Route,
 	input CloudflareAIGatewayConfig,
-) CloudflareAIGatewayProvider {
+) (CloudflareAIGatewayProvider, error) {
+	baseURL, err := AIGatewayBaseURL(input)
+	if err != nil {
+		return CloudflareAIGatewayProvider{}, err
+	}
 	preconfigured := openAICompatibleChatRoute.With(route.RoutePatch{
 		ID:       string(CloudflareAIGatewayProviderID),
 		Provider: string(CloudflareAIGatewayProviderID),
 	})
 	defaults := input.defaults()
 	r := preconfigured.With(route.RoutePatch{
-		Endpoint: &route.EndpointPatch{BaseURL: ptr(AIGatewayBaseURL(input))},
+		Endpoint: &route.EndpointPatch{BaseURL: &baseURL},
 		Auth:     cloudflareAIGatewayAuth(input),
 		Defaults: &defaults,
 	})
 	return CloudflareAIGatewayProvider{
 		ID: CloudflareAIGatewayProviderID,
-		Model: func(id string, opts ...llm.ModelOptions) route.Model {
+		Model: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
-	}
+	}, nil
 }
 
 // NewCloudflareWorkersAI builds the Workers AI facade over the OpenAI-compatible
@@ -129,21 +133,25 @@ func NewCloudflareAIGateway(
 func NewCloudflareWorkersAI(
 	openAICompatibleChatRoute route.Route,
 	input CloudflareWorkersAIConfig,
-) CloudflareWorkersAIProvider {
+) (CloudflareWorkersAIProvider, error) {
+	baseURL, err := WorkersAIBaseURL(input)
+	if err != nil {
+		return CloudflareWorkersAIProvider{}, err
+	}
 	preconfigured := openAICompatibleChatRoute.With(route.RoutePatch{
 		ID:       string(CloudflareWorkersAIProviderID),
 		Provider: string(CloudflareWorkersAIProviderID),
 	})
 	defaults := input.defaults()
 	r := preconfigured.With(route.RoutePatch{
-		Endpoint: &route.EndpointPatch{BaseURL: ptr(WorkersAIBaseURL(input))},
+		Endpoint: &route.EndpointPatch{BaseURL: &baseURL},
 		Auth:     cloudflareWorkersAIAuth(input),
 		Defaults: &defaults,
 	})
 	return CloudflareWorkersAIProvider{
 		ID: CloudflareWorkersAIProviderID,
-		Model: func(id string, opts ...llm.ModelOptions) route.Model {
+		Model: func(id string, opts ...llm.ModelOptions) (route.Model, error) {
 			return bindModel(r, route.RouteModelInput{ID: id}, opts...)
 		},
-	}
+	}, nil
 }

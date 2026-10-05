@@ -18,7 +18,7 @@ func TestSystemUpdatePartsExtractsText(t *testing.T) {
 }
 
 func TestGeminiBodyAllowsNilGeneration(t *testing.T) {
-	model := GeminiHTTPRoute.Model(route.RouteModelInput{ID: "gemini-2.0-flash"})
+	model := mustBindModel(t, GeminiHTTPRoute, route.RouteModelInput{ID: "gemini-2.0-flash"})
 	// A nil Generation must not panic.
 	if _, err := GeminiHTTPRoute.Body.From(&schema.LLMRequest{Model: model}); err != nil {
 		t.Fatalf("body: %v", err)
