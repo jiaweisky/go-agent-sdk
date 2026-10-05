@@ -84,25 +84,38 @@ func TestFlagsOverrideFile(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	valid := config{Root: "/r", Model: "m", Protocol: "openai-responses", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}}
+	valid := config{Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "openai-responses", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}}
 	if err := valid.validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
-	awsValid := config{Root: "/r", Model: "m", Protocol: "bedrock-converse", Agents: []string{"build"},
+	awsValid := config{Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "bedrock-converse", Agents: []string{"build"},
 		Credentials: credentialsConfig{AWS: &awsCredentials{Region: "us-east-1", AccessKeyID: "AK", SecretAccessKey: "SK"}}}
 	if err := awsValid.validate(); err != nil {
 		t.Fatalf("valid aws config rejected: %v", err)
 	}
+	// A non-loopback bind is allowed with auth or an explicit opt-out.
+	exposed := config{Listen: "0.0.0.0:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"},
+		Credentials: credentialsConfig{APIKey: "k"}, Auth: &authConfig{Bearer: "t"}}
+	if err := exposed.validate(); err != nil {
+		t.Fatalf("non-loopback with auth rejected: %v", err)
+	}
+	exposed.AllowInsecure = true
+	exposed.Auth = nil
+	if err := exposed.validate(); err != nil {
+		t.Fatalf("non-loopback with allowInsecure rejected: %v", err)
+	}
 
 	cases := map[string]config{
-		"missing root":       {Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"missing model":      {Root: "/r", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"missing protocol":   {Root: "/r", Model: "m", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"no agents":          {Root: "/r", Model: "m", Protocol: "p", Credentials: credentialsConfig{APIKey: "k"}},
-		"no credentials":     {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}},
-		"aws missing fields": {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{AWS: &awsCredentials{Region: "us-east-1"}}},
-		"empty bearer":       {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, Auth: &authConfig{}},
-		"negative keepAlive": {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, KeepAlive: "-1s"},
+		"missing root":         {Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"missing model":        {Root: "/r", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"missing protocol":     {Root: "/r", Model: "m", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"no agents":            {Root: "/r", Model: "m", Protocol: "p", Credentials: credentialsConfig{APIKey: "k"}},
+		"no credentials":       {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}},
+		"aws missing fields":   {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{AWS: &awsCredentials{Region: "us-east-1"}}},
+		"empty bearer":         {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, Auth: &authConfig{}},
+		"negative keepAlive":   {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, KeepAlive: "-1s"},
+		"non-loopback no auth": {Listen: "0.0.0.0:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"all-interfaces host":  {Listen: ":9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
 	}
 	for name, cfg := range cases {
 		if err := cfg.validate(); err == nil {

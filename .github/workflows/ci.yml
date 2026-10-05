@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./... -count=1
+      # Run golangci-lint through `go run` (see the Makefile): a prebuilt binary
+      # compiled with an older Go refuses this module.
+      - run: make golangci
+
+  adka2a:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/adka2a
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: examples/adka2a/go.mod
+          cache-dependency-path: examples/adka2a/go.sum
+      - run: go build ./...
+      - run: go vet ./...

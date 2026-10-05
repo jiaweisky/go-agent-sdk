@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"time"
 
@@ -29,6 +30,9 @@ type config struct {
 	InboundPermissions []permissionRule  `yaml:"inboundPermissions"`
 	KeepAlive          string            `yaml:"keepAlive"`
 	Auth               *authConfig       `yaml:"auth"`
+	// AllowInsecure permits binding a non-loopback address without auth. It is
+	// an explicit opt-out of the safe default.
+	AllowInsecure bool `yaml:"allowInsecure"`
 }
 
 // credentialsConfig holds the credential for the configured protocol: an API
@@ -82,6 +86,22 @@ func loadConfig(path string, cfg *config) error {
 	return nil
 }
 
+// isLoopback reports whether Listen binds only the loopback interface.
+func (c config) isLoopback() bool {
+	host, _, err := net.SplitHostPort(c.Listen)
+	if err != nil {
+		return false
+	}
+	if host == "" {
+		return false // empty host binds all interfaces
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // validate reports configuration that cannot produce a running server.
 func (c config) validate() error {
 	switch {
@@ -97,6 +117,10 @@ func (c config) validate() error {
 		return errors.New("credentials must set apiKey or aws")
 	case c.Auth != nil && c.Auth.Bearer == "":
 		return errors.New("auth.bearer is required when auth is set")
+	case !c.isLoopback() && !c.AllowInsecure && c.Auth == nil:
+		return errors.New(
+			"refusing to bind a non-loopback address without auth; set auth.bearer, bind loopback, or allowInsecure",
+		)
 	}
 	if aws := c.Credentials.AWS; aws != nil {
 		if aws.Region == "" || aws.AccessKeyID == "" || aws.SecretAccessKey == "" {

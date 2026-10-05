@@ -8,17 +8,18 @@ import (
 // flags holds the CLI options. Values are zero by default; only flags the user
 // actually set are applied over the config file (see apply).
 type flags struct {
-	fs         *flag.FlagSet
-	config     string
-	listen     string
-	baseURL    string
-	root       string
-	workingDir string
-	model      string
-	protocol   string
-	keepAlive  string
-	configDirs stringList
-	agents     stringList
+	fs            *flag.FlagSet
+	config        string
+	listen        string
+	baseURL       string
+	root          string
+	workingDir    string
+	model         string
+	protocol      string
+	keepAlive     string
+	configDirs    stringList
+	agents        stringList
+	allowInsecure bool
 }
 
 func newFlags() *flags {
@@ -33,6 +34,7 @@ func newFlags() *flags {
 	f.fs.StringVar(&f.keepAlive, "keep-alive", "", "SSE keep-alive interval, e.g. 15s")
 	f.fs.Var(&f.configDirs, "config-dir", "agent/skill config directory (repeatable)")
 	f.fs.Var(&f.agents, "agent", "agent name to expose (repeatable)")
+	f.fs.BoolVar(&f.allowInsecure, "allow-insecure", false, "allow binding a non-loopback address without auth")
 	return f
 }
 
@@ -70,6 +72,9 @@ func (f *flags) apply(cfg *config) {
 	}
 	if set["agent"] {
 		cfg.Agents = f.agents
+	}
+	if set["allow-insecure"] {
+		cfg.AllowInsecure = f.allowInsecure
 	}
 }
 

@@ -27,6 +27,7 @@ Flags (each overrides the config file; a repeatable flag replaces the file's lis
 | `--keep-alive <dur>` | SSE keep-alive interval, e.g. `15s` |
 | `--config-dir <dir>` | agent/skill config directory (repeatable) |
 | `--agent <name>` | agent to expose (repeatable, default `build`) |
+| `--allow-insecure` | allow a non-loopback bind without auth |
 
 ## Config file
 
@@ -52,6 +53,7 @@ inboundPermissions:                 # default: SDK deny-by-default ruleset
 keepAlive: 15s
 # auth:                             # optional; when set, RPC requires a bearer token
 #   bearer: <token>
+# allowInsecure: false              # required to bind non-loopback without auth
 ```
 
 Configuration precedence is **defaults < file < flags**. Unknown file keys are
@@ -73,6 +75,8 @@ card at `/agents/<name>/.well-known/agent-card.json` (the first is also served a
 ## Security
 
 - Binds loopback by default and requires no authentication.
+- **Binding a non-loopback address without `auth.bearer` is refused** unless
+  `allowInsecure: true` (or `--allow-insecure`) is set explicitly.
 - Inbound sessions run under the SDK deny-by-default ruleset unless overridden
   with `inboundPermissions`.
 - When `auth.bearer` is set, the card declares an HTTP bearer scheme and every
