@@ -1,6 +1,8 @@
 package runner
 
 import (
+	"fmt"
+
 	"github.com/jiaweisky/go-agent-sdk/llm/protocols"
 	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
 	"github.com/jiaweisky/go-agent-sdk/llm/route"
@@ -144,7 +146,17 @@ func FromCatalogModel(model schema.ModelInfo, credential schema.Credential) (rou
 			API:        string(model.API.Protocol),
 		}
 	}
-	return runnerModelWithDefaults(model, entry.Route).
+	// Resolve defaults and reject a route that cannot produce a request with an
+	// error, rather than letting Route.Model panic (for example a Bedrock model
+	// with no region-derived endpoint).
+	withDefaults := runnerModelWithDefaults(model, entry.Route)
+	if withDefaults.Provider == "" {
+		return route.Model{}, fmt.Errorf("model %q has no provider", model.ID)
+	}
+	if withDefaults.Endpoint.BaseURL == "" {
+		return route.Model{}, fmt.Errorf("model %q (%s) has no endpoint base URL", model.ID, model.API.Protocol)
+	}
+	return withDefaults.
 		With(route.RoutePatch{Auth: runnerProtocolAuth(entry, credential)}).
 		Model(route.RouteModelInput{ID: runnerModelAPIID(model)}), nil
 }

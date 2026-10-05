@@ -251,3 +251,24 @@ func TestResolveModelAnthropicVariant(t *testing.T) {
 		t.Fatalf("body = %+v", body)
 	}
 }
+
+func TestFromCatalogModelRejectsRouteWithoutEndpoint(t *testing.T) {
+	// Bedrock has no default endpoint (it is region-specific), so a model with no
+	// URL must yield an error rather than panicking in Route.Model.
+	model := runnerModelInfo(schema.ModelAPI{Protocol: "bedrock-converse"}, nil)
+	if _, err := FromCatalogModel(model, schema.Credential{}); err == nil {
+		t.Fatal("expected an error for a Bedrock model without an endpoint")
+	}
+
+	url := "https://bedrock-runtime.us-east-1.amazonaws.com"
+	model = runnerModelInfo(schema.ModelAPI{Protocol: "bedrock-converse", URL: &url}, nil)
+	if _, err := FromCatalogModel(model, schema.Credential{}); err != nil {
+		t.Fatalf("bedrock with endpoint rejected: %v", err)
+	}
+
+	// Protocols with a built-in default endpoint need no URL.
+	model = runnerModelInfo(schema.ModelAPI{Protocol: "openai-responses"}, nil)
+	if _, err := FromCatalogModel(model, schema.Credential{APIKey: "k"}); err != nil {
+		t.Fatalf("openai-responses rejected: %v", err)
+	}
+}
