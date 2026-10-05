@@ -132,12 +132,12 @@ func credentialProvider(cfg config) agent.CredentialProvider {
 	}
 }
 
-// modelInfoProvider supplies model metadata. Bedrock has no default endpoint
-// (it is region-specific), so its base URL is derived from the AWS region; every
-// other protocol uses its route's built-in endpoint.
+// modelInfoProvider supplies model metadata. The endpoint is modelBaseURL when
+// set; otherwise Bedrock derives it from the AWS region (its route has no
+// default) and every other protocol uses its route's built-in endpoint.
 func modelInfoProvider(cfg config) agent.ModelInfoProvider {
-	baseURL := ""
-	if cfg.Protocol == "bedrock-converse" && cfg.Credentials.AWS != nil {
+	baseURL := cfg.ModelBaseURL
+	if baseURL == "" && cfg.Protocol == "bedrock-converse" && cfg.Credentials.AWS != nil {
 		baseURL = fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", cfg.Credentials.AWS.Region)
 	}
 	return func(id string) (schema.ModelInfo, error) {

@@ -25,6 +25,7 @@ type config struct {
 	ConfigDirs         []string              `yaml:"configDirs"`
 	Model              string                `yaml:"model"`
 	Protocol           string                `yaml:"protocol"`
+	ModelBaseURL       string                `yaml:"modelBaseURL"`
 	Credentials        credentialsConfig     `yaml:"credentials"`
 	Agents             []string              `yaml:"agents"`
 	Cards              map[string]cardConfig `yaml:"cards"`

@@ -125,6 +125,19 @@ func TestModelInfoProviderBedrockEndpoint(t *testing.T) {
 	}
 }
 
+func TestModelInfoProviderExplicitBaseURL(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Protocol = "openai-compatible-chat"
+	cfg.ModelBaseURL = "https://api.deepseek.com"
+	info, err := modelInfoProvider(cfg)("deepseek-flash")
+	if err != nil {
+		t.Fatalf("modelInfoProvider: %v", err)
+	}
+	if info.API.URL == nil || *info.API.URL != "https://api.deepseek.com" {
+		t.Fatalf("endpoint = %v, want modelBaseURL", info.API.URL)
+	}
+}
+
 func freeAddr(t *testing.T) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

@@ -8,8 +8,9 @@ flags; **no environment variables are read**.
 
 ```sh
 a2aserve --config a2aserve.yaml
-# or flags only
-a2aserve --root ~/.go-agent-sdk --model gpt-4o-mini --protocol openai-responses \
+# or flags only (credentials still need the file)
+a2aserve --root ~/.go-agent-sdk --model deepseek-flash \
+  --protocol openai-compatible-chat --model-base-url https://api.deepseek.com \
   --config-dir ./agents
 ```
 
@@ -19,11 +20,12 @@ Flags (each overrides the config file; a repeatable flag replaces the file's lis
 |---|---|
 | `--config <path>` | YAML config file |
 | `--listen <host:port>` | listen address (default `127.0.0.1:9099`) |
-| `--base-url <url>` | public base URL advertised in cards |
+| `--base-url <url>` | the A2A server's public base URL advertised in cards |
 | `--root <dir>` | SDK state directory (required) |
 | `--working-dir <dir>` | project root (default: process cwd) |
 | `--model <id>` | default model (required) |
 | `--protocol <id>` | wire protocol, e.g. `openai-responses` (required) |
+| `--model-base-url <url>` | model API base URL (protocol default when empty) |
 | `--keep-alive <dur>` | SSE keep-alive interval, e.g. `15s` |
 | `--config-dir <dir>` | agent/skill config directory (repeatable) |
 | `--agent <name>` | agent to expose (repeatable, default `build`) |
@@ -33,15 +35,16 @@ Flags (each overrides the config file; a repeatable flag replaces the file's lis
 
 ```yaml
 listen: 127.0.0.1:9099
-baseURL: ""                         # optional; cards fall back to the request origin
+baseURL: ""                         # optional; the A2A server's public base URL (cards)
 root: ~/.go-agent-sdk               # required
 workingDirectory: /srv/project      # optional
 configDirs:
   - /srv/project/.agents            # agents/skills loaded from files
-model: gpt-4o-mini                  # required
-protocol: openai-responses          # required
+model: deepseek-flash               # required; the model id sent to the provider
+protocol: openai-compatible-chat    # required
+modelBaseURL: https://api.deepseek.com   # model API base URL (see below)
 credentials:                        # required; the only secret source (no env)
-  apiKey: sk-...                    # bearer/header protocols
+  apiKey: sk-...                    # the provider API key (bearer/header protocols)
   # aws:                            # Amazon Bedrock (SigV4)
   #   region: us-east-1
   #   accessKeyId: ...
@@ -66,6 +69,26 @@ keepAlive: 15s
 Configuration precedence is **defaults < file < flags**. Unknown file keys are
 rejected. Credentials and the auth token live only in the file (flags would leak
 into the process list).
+
+## Model endpoint and key
+
+- **Key** — `credentials.apiKey` (bearer/header protocols) or `credentials.aws`
+  (Amazon Bedrock SigV4). This is the only place a secret is read; no
+  environment variables are consulted.
+- **URL** — `modelBaseURL` (flag `--model-base-url`):
+  - set it for a provider that is not the protocol's default host (DeepSeek,
+    a self-hosted OpenAI-compatible gateway, ...);
+  - leave it empty to use the protocol's built-in endpoint (OpenAI
+    `https://api.openai.com/v1`, Anthropic, Gemini);
+  - for `bedrock-converse` it is derived from `credentials.aws.region` when empty.
+
+DeepSeek `deepseek-flash` over each protocol it exposes:
+
+| `model` | `protocol` | `modelBaseURL` |
+|---|---|---|
+| `deepseek-flash` | `openai-compatible-chat` | `https://api.deepseek.com` |
+| `deepseek-flash` | `openai-responses` | `https://api.deepseek.com` |
+| `deepseek-flash` | `anthropic-messages` | `https://api.deepseek.com/anthropic` |
 
 ## Agents
 

@@ -16,6 +16,7 @@ type flags struct {
 	workingDir    string
 	model         string
 	protocol      string
+	modelBase     string
 	keepAlive     string
 	configDirs    stringList
 	agents        stringList
@@ -31,6 +32,7 @@ func newFlags() *flags {
 	f.fs.StringVar(&f.workingDir, "working-dir", "", "project/worktree root (default: process cwd)")
 	f.fs.StringVar(&f.model, "model", "", "default model id (required)")
 	f.fs.StringVar(&f.protocol, "protocol", "", "wire protocol id, e.g. openai-responses (required)")
+	f.fs.StringVar(&f.modelBase, "model-base-url", "", "model API base URL (protocol default when empty)")
 	f.fs.StringVar(&f.keepAlive, "keep-alive", "", "SSE keep-alive interval, e.g. 15s")
 	f.fs.Var(&f.configDirs, "config-dir", "agent/skill config directory (repeatable)")
 	f.fs.Var(&f.agents, "agent", "agent name to expose (repeatable)")
@@ -63,6 +65,9 @@ func (f *flags) apply(cfg *config) {
 	}
 	if set["protocol"] {
 		cfg.Protocol = f.protocol
+	}
+	if set["model-base-url"] {
+		cfg.ModelBaseURL = f.modelBase
 	}
 	if set["keep-alive"] {
 		cfg.KeepAlive = f.keepAlive
