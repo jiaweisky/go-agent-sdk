@@ -218,6 +218,10 @@ go-agent-sdk/                            opencode TS
 │   │   └── bash.go                  bash.ts
 │   └── util/                        通用工具 (util/wildcard.ts, util/hash.ts, util/markdown.ts)
 │       └── markdown.go              ConfigMarkdown（frontmatter 解析，config/markdown.ts）
+├── a2a/            A2A（Agent2Agent）协议支持（无 TS 对应物，Go 专属能力；见 DESIGN-A2A.md）
+│   ├── client/     出向薄接口（SDK 自有类型，不泄漏 a2a-go）
+│   ├── a2ago/      出向 a2a-go 适配（唯一 import a2a-go 的出向层）
+│   └── server/     入向：AgentExecutor + taskstore.Store + AgentCard + http.Handler
 ├── opencode/       ← packages/opencode/src/      (opencode CLI)
 │   ├── config/                      内容型配置加载（agent/mode markdown）
 │   │   ├── agent.go                 config/agent.ts（LoadAgentEntries）
@@ -241,6 +245,8 @@ go-agent-sdk/                            opencode TS
 > 上面只是**代表性**目录，非完整清单（`schema/` 约 42 个文件、`core/` 模块更多）。
 
 > 已实现：模块根包 `agent` 公开 API、core/session 主循环、12 个内置工具 + `task`、Skill、MCP、Plugin（窄化）、Reference 服务。尚未移植：`lsp` 工具。
+
+> **A2A（Agent2Agent）**：Go 专属能力（无 TS 对应物），设计与实现见 `docs/DESIGN-A2A.md`；入向/出向、HITL、`turn` 一等实体、Phase 5 生产化组件均已落地。
 
 > **数据库**：`core/database` 用 `database/sql` + modernc SQLite。连接池 `MaxOpenConns=4`，per-connection pragma（`journal_mode=WAL`/`synchronous`/`busy_timeout`/`cache_size`/`foreign_keys`）经 DSN 注入，`_txlock=immediate` 让每个事务以 BEGIN IMMEDIATE 串行写；WAL 允许读并发，从而提升多会话吞吐（写仍串行，超 `busy_timeout` 报忙）。
 

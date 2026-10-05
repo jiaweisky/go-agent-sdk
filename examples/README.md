@@ -45,6 +45,13 @@ The chat starts a small notes MCP server (`examples/notesmcp`) over streamable
 HTTP (spawned with `go run` and killed on exit); `/mcp` lists and fetches its
 prompts and resources, and `/mcps` shows each server's instructions.
 
+It also starts a Google ADK (adk-go) agent served over A2A (`examples/adka2a`,
+a **separate Go module** so the SDK never depends on adk-go) and registers it as
+the `echo` agent. Select it with `/agent echo` (or delegate to it with the `task`
+tool): the SDK reaches it through the same A2A wire protocol, exercising
+cross-implementation interoperability. `go test ./examples/chat -run
+TestAdkA2AInterop` is the interop test (skipped under `-short`).
+
 Commands: `/skills`, `/agents`, `/mcps`, `/mcp`, `/task [<#n>]`, `/compact` (summarizes
 the session history on demand, via `Session.Compact`), `/tool` (adds
 or removes a runtime tool via `Client.RegisterTools`, including the typed
@@ -80,6 +87,45 @@ one prompt, and prints the streamed reply.
 ```sh
 go run ./examples/tool
 ```
+
+## adka2a
+
+A Google ADK (`google.golang.org/adk`) agent served over A2A. It is its own Go
+module so the SDK's dependency graph never includes adk-go; the chat example
+spawns it as a child process and connects to it through the SDK's A2A client.
+Its model is a deterministic stub, so it needs no provider credentials.
+
+```sh
+cd examples/adka2a && go run . --http 127.0.0.1:9999
+```
+
+The agent card is served at `/.well-known/agent-card.json` and the JSON-RPC
+endpoint at `/invoke`. This example is the cross-implementation peer used to
+verify the wire conventions in `docs/DESIGN-A2A.md`.
+
+## a2aserver
+
+A standalone example of the SDK as an A2A **server**. `examples/a2aserver` exposes
+a local agent (via `a2a/server` + `NewA2AFactory` + `Server.Handler`) and then
+calls it with the SDK's own A2A client, all in one process, showing the half the
+chat example only shows from the client side:
+
+- **multi-turn context** — successive prompts share one A2A context, so the
+  exposed agent sees the earlier turns;
+- **human-in-the-loop** — the agent asks a question, the caller answers, and the
+  turn resumes (A2A `input-required`).
+
+The agent uses a deterministic, credential-free stub model.
+
+```sh
+go run ./examples/a2aserver    # or: make a2aserver
+```
+
+It is interactive: it starts the A2A server, then reads prompts from stdin and
+prints the replies. Successive prompts share one context, so context persists
+across turns; type a prompt containing "ask" to make the agent ask you a
+question and answer it. Ctrl+D exits (the server also keeps listening for
+external A2A clients). `go test ./examples/a2aserver` drives the same flow.
 
 ## Not ported
 

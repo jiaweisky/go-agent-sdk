@@ -18,6 +18,9 @@ func TestParseIDRejectsMismatchedPrefix(t *testing.T) {
 	if _, err := ParseQuestionID("per_1"); err == nil {
 		t.Fatalf("expected error for a question id without the que prefix")
 	}
+	if _, err := ParseTurnID("ses_1"); err == nil {
+		t.Fatalf("expected error for a turn id without the trn prefix")
+	}
 }
 
 func TestParseIDAcceptsMatchingPrefix(t *testing.T) {
@@ -33,6 +36,9 @@ func TestParseIDAcceptsMatchingPrefix(t *testing.T) {
 	if got, err := ParseQuestionID("que_custom"); err != nil || got != "que_custom" {
 		t.Fatalf("question id = %q, err = %v", got, err)
 	}
+	if got, err := ParseTurnID("trn_custom"); err != nil || got != "trn_custom" {
+		t.Fatalf("turn id = %q, err = %v", got, err)
+	}
 }
 
 func TestIDConstructorsGeneratePrefix(t *testing.T) {
@@ -45,6 +51,7 @@ func TestIDConstructorsGeneratePrefix(t *testing.T) {
 		{"workspace", "wrk_", string(NewWorkspaceID())},
 		{"permission", "per_", string(NewPermissionID())},
 		{"question", "que_", string(NewQuestionID())},
+		{"turn", "trn_", string(NewTurnID())},
 	}
 	for _, test := range cases {
 		if !strings.HasPrefix(test.id, test.prefix) {

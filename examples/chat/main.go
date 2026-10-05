@@ -66,6 +66,16 @@ func run() error {
 		defer stopNotes()
 	}
 
+	// A cross-implementation peer: a Google ADK (adk-go) agent served over A2A.
+	// The SDK talks to it through the same wire protocol it exposes, proving
+	// interoperability with a different A2A implementation.
+	adkURL, stopAdk, err := startAdkA2A()
+	if err != nil {
+		console.write(fmt.Sprintf("%sadk A2A unavailable: %v%s\n", yellow, err, reset))
+	} else {
+		defer stopAdk()
+	}
+
 	plugins := examplePlugins(console, yolo)
 	options := append(clientOptions(console, yolo, model, notesURL), util.WithPlugins(plugins))
 	client, err := util.Client(util.ExampleDir(), options...)
@@ -73,6 +83,10 @@ func run() error {
 		return err
 	}
 	defer client.Close()
+
+	if err := registerRemoteAgent(client, adkURL); err != nil {
+		console.write(fmt.Sprintf("%sregister echo agent: %v%s\n", yellow, err, reset))
+	}
 
 	// Reuse the persisted agent when it is still selectable.
 	state.Agent = resolveDefaultAgent(client, state.Agent)

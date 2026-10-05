@@ -1,6 +1,6 @@
 # go-agent-sdk A2A 支持设计文档
 
-> 状态：**草案（决策已收敛），待评审**
+> 状态：**已实现（Phase 0–5 全部落地；含与 ADK-go 的跨实现互操作测试）**
 > 范围：为 go-agent-sdk 增加 A2A（Agent2Agent）协议支持（入向 + 出向）
 > 关系：本文是 `docs/DESIGN.md` 的分册，只覆盖 A2A 能力；通用架构、公开 API、移植规则仍以 `docs/DESIGN.md` 与 `AGENTS.md` 为准
 > 约定：本文中的 Go 代码片段**仅为示意**，用于表达类型边界与契约，不代表最终签名
@@ -20,6 +20,9 @@
 | 2026-10-04 | 入向 §5 重构：新增 §5.0 职责边界（继承 a2a-go；我们实现 `AgentExecutor` + `taskstore.Store`）；认证继承 / 授权自定义（§5.5）；HITL 唯一设计 = 挂起 + resume（D1），重启降级重建；心跳继承 `WithTransportKeepAlive`（§5.4 / §5.7） |
 | 2026-10-04 | 出向 §6 重构：新增 §6.0 职责边界（继承 `a2aclient`）；`GetTask` / `ListTasks` / `SubscribeToTask` 归 a2a-go；HITL 映射为本地 `QuestionRequest`（D2） |
 | 2026-10-04 | §7-§10 与附录收敛：Phase 0 = `turn` 实体 / backend 字段 + drain 分派 / 暴露标记；§9 结论「无架构级风险」；§10 全部决策收敛（A1–A8 / D1–D5）；允许直接改 `core/database/migration.go`、不做版本化迁移；附录 A 补 HITL 编码 / task 持久化对照 |
+| 2026-10-04 | 落地实现（Go）：`turn` 实体/store、backend 分派（复用 `runner.SessionRunner` + provider-executed 工具）、出向 `a2ago` + HITL 闭环 + ADK `function_response` 编码、入向 `Executor`/`turnTaskStore`/card/handler、park+resume 与重启降级重建、usage/file_diff/tool trace；Phase 5：`WorkspaceResolver`、`ArtifactExternalizer`、`Options.NativeOptions` 透传。§5.1 补「实现」列、§5.5 补认证/工作区落地、§8 补状态（§5.1 / §5.5 / §8） |
+| 2026-10-04 | 跨实现互操作测试：`examples/adka2a`（adk-go 服务端，独立 Go module，SDK 不依赖 adk-go）+ `examples/chat` 的 `TestAdkA2AInterop`（SDK 客户端 ↔ ADK 服务端）；chat 注册远端 `echo` agent（名字描述其作用；「经 A2A 访问」由 agent 定义里的 backend 记录），`/agent echo` 或 `task` 委派（§8 Phase 4） |
+| 2026-10-04 | 收口此前未落地项：入向附件落盘（raw/URL part → 工作区 + prompt 路径，§4.2/§5.3）；出向取消/清理（Abort → 远端 `CancelTask`，仅非终态且非 input-required，§6.2）；`turn` 补齐（本地轮次也落 turn，`parent_turn_id`/`anchor_seq`/`end_seq`/`input_id` 均写入，A2A 入向 turn 由 task store 独占，§5.6/A8）；入向 steer（working 任务追加消息 → `SessionDeliverySteer`，§5.3）；出向远端 `taskId`/`contextId` 持久化到 turn metadata 并在下轮续跑（§4.7 第 2 条） |
 
 ---
 
@@ -221,7 +224,7 @@ a2a/a2ago/              出向薄接口的 a2a-go 实现（唯一 import a2a-go 
 | 依赖库 | **只支持 `github.com/a2aproject/a2a-go/v2`**（v2），单一版本；不兼容 `a2a-go` v0.x，也不同时引入两个版本 | adk-go 当前同时依赖 `a2a-go v0.3.15` 与 `a2a-go/v2 v2.2.1`，双版本共存对依赖图不友好，属于明确要避免的坑 |
 | 类型隔离 | 对外 API 使用 SDK 自己的类型 + `iter.Seq2`，不泄漏 a2a-go 类型 | 对齐 `mcp/` 包装官方 SDK 的思路 |
 | 适配层 | 薄接口定义在 `a2a/client`（模式参考 ADK 的 `internal/agent/remoteagent.A2AClient`），由 `a2a/a2ago/` 用 a2a-go 实现 | 协议仍在演进，升级只需改一处 |
-| 逃生通道 | `a2a.WithNativeOptions(...)` 透传被打包库（a2a-go）的原生配置 | 不因封装而失去协议全部能力；名字不把 `a2a-go` 写进公开 API，契合「类型隔离」 |
+| 逃生通道 | `server.Options.NativeOptions []any` 透传被打包库（a2a-go）的原生配置 | 不因封装而失去协议全部能力；签名用 `any`，不把 `a2a-go` 类型写进公开 API，契合「类型隔离」 |
 
 > **依赖边界**：本 SDK **不依赖 adk-go**——adk-go 仅在 §1 / 附录 A 作为参照实现。`a2a/a2ago/` 是出向唯一 import `github.com/a2aproject/a2a-go/v2` 的适配层；a2a-go 类型不越过 `a2a/a2ago/` 与 `a2a/server/` 的边界进入 `a2a/` 核心与公开 API（见上「类型隔离」）。
 
@@ -444,7 +447,7 @@ A2A 没有标准 metadata 键空间。为互操作，**共享键沿用 ADK 的�
 3. **Part**：§4.2（text + `adk_thought`；data + `adk_type=function_call/function_response`、`adk_is_long_running`；file → URL/raw）。未知 data 在 ADK 侧会退化为 `<a2a_datapart_json>` 内联文本，不会报错。
 4. **Artifact**：用 `TaskArtifactUpdateEvent` 的 `append` / `lastChunk`。**不要**设 `adk_partial`（那是 ADK 的 legacy 模式：客户端会跳过自己的聚合，期望服务端已聚合）。ADK 客户端在非 legacy 下按 `ArtifactID` 聚合，服务端发 `lastChunk=true` 收口。
 5. **状态**：`submitted → working →` 终态（`completed`/`failed`/`canceled`）；`input-required` 表达 HITL。**非终态的 status message 会被 ADK 客户端当成 thought（推理）显示**；`failed` 且仅一段文本时会被当作 error message。
-6. **HITL**：ADK 用 **long-running function call** 做 HITL——`input-required` 的 status message 里放 `adk_type=function_call` 的 data part（`adk_is_long_running=true`）；客户端下一轮把用户应答作为 `function_response` 发回（带 `taskId` / `contextId`），服务端按 call ID 匹配（ADK: `HandleInputRequired`）。要与 ADK 客户端互通，我们承载 permission/question 时**必须用这套 function_call/response 编码**。
+6. **HITL**：ADK 用 **long-running function call** 做 HITL——`input-required` 的 status message 里放 `adk_type=function_call` 的 data part（`adk_is_long_running=true`）；客户端下一轮把用户应答作为 `function_response` 发回（带 `taskId` / `contextId`），服务端按 call ID 匹配（ADK: `HandleInputRequired`）。要与 ADK 客户端互通，我们承载 permission/question 时**必须用这套 function_call/response 编码**。SDK 侧为让调用端能展示题目，把 question 的 `QuestionInfo`（题目/选项）放进该 function_call 的 `args.questions`（ADK 会当作该长任务的调用参数；这是**保真增强**，不强制对端理解）。
 7. **客户端增量同步**：ADK 客户端只发「自上一个远端响应以来」的事件，并把本地其它 agent 的事件渲染成 user 文本（`presentAsUserMessage`），不重发全量；我们出向时同样只发增量。
 8. **简单交互**：A2A 允许对简单请求直接返回 `Message`（无 `Task`）；ADK 客户端把 `Message` 视为 `TurnComplete=true` 的一轮。
 
@@ -473,14 +476,19 @@ A2A 没有标准 metadata 键空间。为互操作，**共享键沿用 ADK 的�
 
 ### 5.1 我们实现的组件
 
-| 组件 | 职责 |
-|---|---|
-| `CardBuilder` | 为**每个显式暴露的 agent** 生成一张 AgentCard（**一 card = 一 agent**，各自 URL/端点）；其 `skills` 描述该 agent 的能力（条目可为工具 / subagent / 其它，默认不铺工具）；`capabilities` 据实声明（§3.4 / §6.2） |
-| `Executor` | 实现 `a2asrv.AgentExecutor`（Execute / Cancel / Cleanup）：把 `session.Send` 的事件流映射为 A2A 事件（§4） |
-| `TaskStore` | 实现 `a2asrv/taskstore.Store`（Create / Update / Get / List），映射到 core `turn`（§5.6） |
-| `PendingRegistry` | 挂起的 turn 迭代器 + 待回复的 requestID |
-| `WorkspaceResolver` | 调用方身份 → 工作区 / Root / 权限规则集 |
-| `Handler()` | 返回 `http.Handler`：用标准库 `http.ServeMux` 组合 `a2a-go/v2/a2asrv` 的 `NewStaticAgentCardHandler`（well-known card）与 `NewJSONRPCHandler`（JSON-RPC 绑定）；多暴露 agent 时按各自 card URL/端点分别提供 |
+| 组件 | 职责 | 实现（Go） |
+|---|---|---|
+| `CardBuilder` | 为**每个显式暴露的 agent** 生成一张 AgentCard（**一 card = 一 agent**，各自 URL/端点）；其 `skills` 描述该 agent 的能力（条目可为工具 / subagent / 其它，默认不铺工具）；`capabilities` 据实声明（§3.4 / §6.2） | `a2a/server.buildCard` |
+| `Executor` | 实现 `a2asrv.AgentExecutor`（Execute / Cancel）：把 `session.Send` 的事件流映射为 A2A 事件（§4） | `a2a/server.executor`（经 `executorConfig` 注入依赖） |
+| `TaskStore` | 实现 `a2asrv/taskstore.Store`（Create / Update / Get / List），映射到 core `turn`（§5.6） | `a2a/server.turnTaskStore`（version/pending 落在 turn metadata） |
+| Pending（原 `PendingRegistry`） | 挂起的 turn + 待回复的 requestID | `executor.pending` + `a2aSession.turns`（按 `turnID` 的 channel，`OnTurnEnd` 统一释放） |
+| `WorkspaceResolver` | 调用方身份 → 工作区 / Root / 权限规则集 | `a2a/server.WorkspaceResolver`（`WorkspaceResolverFunc`），每次入向调用解析并交给 `Factory` |
+| `ArtifactExternalizer` | artifact 外置 / 改写钩子（§8） | `a2a/server.ArtifactExternalizer`，于每个 artifact 事件发出前调用 |
+| `Handler()` | 返回 `http.Handler`：用标准库 `http.ServeMux` 组合 `a2asrv` 的 card handler 与 `NewJSONRPCHandler`（JSON-RPC 绑定）；多暴露 agent 时按各自 card URL/端点分别提供 | `a2a/server.Server.Handler`；`BaseURL` 为空时按请求 Host 推导 card 端点 |
+
+- `Factory`：宿主提供 `server.Factory`；SDK 自带 `agent.NewA2AFactory(client)` 适配单 project 的 `Client`（应用入向默认 deny 规则集与 `Workspace.Permissions`）。多工作区由宿主按 `Workspace` 自行实现 `Factory`。
+- 逃生通道：`server.Options.NativeOptions []any` 透传 `a2asrv.RequestHandlerOption` / `TransportOption`（认证、限流、push 等），签名用 `any` 以免 a2a-go 类型进入公开 API（§3.1）。
+- 出向：`agent` 侧经 `a2aBackend`（`route.LLMClient` 接缝）驱动远端；`a2a/a2ago` 是唯一 import a2a-go 的出向适配层。
 
 ### 5.2 接线方式与 HTTP 依赖
 
@@ -544,15 +552,15 @@ A2A 的消息语义比 SDK 丰富，需要明确映射：
 
 agent 能做什么（工具 / 子 agent / 技能）是**定义 agent 时定的**，card 的 `skills` 只是对外**描述**——协议不参与、调用方也改不了；本节只谈**由外部调用触发的那次 session 的信任边界**。
 
-**认证（authentication）**：A2A 协议已定义，**直接继承 `a2a-go/v2/a2asrv`**，不自行决策——card 的 `securitySchemes` 声明方案，服务端据此校验调用方请求头；我们从 `CallContext.User` 取身份。
+**认证（authentication）**：A2A 协议已定义，**直接继承 `a2a-go/v2/a2asrv`**，不自行决策——card 的 `securitySchemes` 声明方案，服务端据此校验调用方请求头；我们从 `CallContext.User` 取身份。宿主经 `server.Options.NativeOptions` 挂载 a2a-go 的认证拦截器等（§3.1 逃生通道）。
 
 **授权（authorization）**：协议**明确留给实现**（spec §7.5：授权「based on the authenticated identity and its own policies」，是 implementation-specific，MAY 参考 requested skills / actions attempted / data access policies）。a2a-go 只给身份、不给策略，因此这部分仍要我们定：
 
 | 规则 | 内容 |
 |---|---|
 | 暴露范围 | 调用只能落在**已暴露的 card/agent 集合**内（§3.4） |
-| 权限策略 | 外部触发的 session 用**显式传入**的权限规则集（**可配置**：程序生成 / 配置文件 / 用户输入皆可），默认对危险工具 `deny`，**不用** client 级 `ApproveAll`；`ask` 走 §5.4 的 HITL（**已定，见 A4**） |
-| 工作区隔离 | `WorkspaceResolver` 把 (调用方身份, contextId) 映射到工作区；复用既有 `Project` / `Directory` / `Location` / `Sandboxes` |
+| 权限策略 | 外部触发的 session 用**显式传入**的权限规则集（**可配置**：程序生成 / 配置文件 / 用户输入皆可），默认对危险工具 `deny`（`agent.DefaultInboundPermissions`，可用 `WithInboundPermissions` 放宽），**不用** client 级 `ApproveAll`；`ask` 走 §5.4 的 HITL（**已定，见 A4**） |
+| 工作区隔离 | `WorkspaceResolver` 把 (调用方身份, contextId) 映射到工作区（`Directory` / `Root` / `Permissions`）；复用既有 `Project` / `Directory` / `Location` / `Sandboxes`。`Factory` 按 `Workspace` 落会话；`turn` 复用按 `agentID + contextID` 作用域 |
 | 禁止隐式提权 | A2A metadata **不允许**覆盖 agent / model / permission |
 
 ### 5.6 Turn：A2A task 的持久化载体（core 一等实体）
@@ -709,14 +717,18 @@ A2A 落地前必须先做的 **SDK 侧改造**（`turn`、backend 分派偏通�
 
 ## 8. 路线图与验收
 
-| Phase | 内容 | 验收 |
-|---|---|---|
-| 0 | §7 的三项前置改造（permission/question 事件映射已就绪，不在其中） | 现有测试全绿；新增 turn 状态测试 |
-| 1 | `a2a/` 类型 + `a2a/client`（card 解析、`SendMessage` / `SendStreamingMessage`、取消）+ `A2ARunner` + drain 分派（子 agent 形态） | 远端 agent 能经 `task` 被本地模型委派；超时 / 取消 / 错误路径全测 |
-| 2 | `a2a/server` 入向 MVP（`Executor` + `taskstore.Store` + card + `http.Handler`，输入输出全文本） | SDK↔SDK 端到端：A2A 客户端发消息拿到 completed task + artifact |
-| 3 | HITL 闭环（挂起 + resume）、多轮 context、重启恢复（降级重建，§5.4） | permission / question 往返测试；重启后降级恢复测试 |
-| 4 | part 级保真（tool trace、thought、usage、file diff） | **与 ADK-go 对打**的互操作测试（跨实现验证协议保真度） |
-| 5 | 生产化：`WorkspaceResolver`、认证（配置 a2a-go）、keep-alive（配置 a2a-go）、限流（配置 a2a-go 的 limiter）、artifact 外置钩子 | 多租户隔离测试；`go test -race` 全绿 |
+| Phase | 内容 | 验收 | 状态 |
+|---|---|---|---|
+| 0 | §7 的三项前置改造（permission/question 事件映射已就绪，不在其中） | 现有测试全绿；新增 turn 状态测试 | ✅ `turn` schema + 表 + `TurnStore`；`AgentInfo.Backend`/`Expose`；backend 分派（`runner.Backends`） |
+| 1 | `a2a/` 类型 + `a2a/client`（card 解析、`SendMessage` / `SendStreamingMessage`、取消）+ 后端适配 + drain 分派（子 agent 形态） | 远端 agent 能经 `task` 被本地模型委派；超时 / 取消 / 错误路径全测 | ✅ `a2a/client` + `a2a/a2ago` + `a2aBackend`；`TestRemoteA2AAgentAsMainAgent` / `AsSubagent` / `ReusesRemoteSessionAcrossTurns` |
+| 2 | `a2a/server` 入向 MVP（`Executor` + `taskstore.Store` + card + `http.Handler`，输入输出全文本） | SDK↔SDK 端到端：A2A 客户端发消息拿到 completed task + artifact | ✅ `a2a/server`；`TestServerSendStreamingMessage` / `GetTask` / `DerivesCardEndpointFromRequest` |
+| 3 | HITL 闭环（挂起 + resume）、多轮 context、重启恢复（降级重建，§5.4） | permission / question 往返测试；重启后降级恢复测试 | ✅ `TestServerInputRequiredRoundTrip` / `TestExecutorRebuildsAfterRestart` / `TestServerRestartRebuildsParkedTurn` |
+| 4 | part 级保真（tool trace、thought、usage、file diff） | **与 ADK-go 对打**的互操作测试（跨实现验证协议保真度） | ✅ 入向 thought/`function_call`/`function_response`/`file_diff`/`usage`；出向 provider-executed tool trace、HITL `function_response`。**跨实现测试：`examples/adka2a`（独立模块，adk-go 服务端）+ `examples/chat` 的 `TestAdkA2AInterop`（SDK 客户端 ↔ ADK 服务端）** |
+| 5 | 生产化：`WorkspaceResolver`、认证（配置 a2a-go）、keep-alive（配置 a2a-go）、限流（配置 a2a-go 的 limiter）、artifact 外置钩子 | 多租户隔离测试；`go test -race` 全绿 | ✅ `WorkspaceResolver`、`ArtifactExternalizer`、`Options.NativeOptions`（认证/限流/push 透传）、`Options.KeepAlive`；`TestExecutorResolvesWorkspace` / `ExternalizesArtifact` / `ServerAcceptsNativeOptions`；`-race` 全绿 |
+
+> 说明：Phase 1 未新增独立 `A2ARunner` 抽象，而是复用 `runner.SessionRunner` 的 LLM 接缝（`route.LLMClient`）——见 §3.3。Phase 4 的「与 ADK-go 对打」跨实现测试已落地：`examples/adka2a`（adk-go 服务端，独立 Go module）由 `examples/chat` 的 `TestAdkA2AInterop` 经 SDK 的 A2A 客户端访问。
+>
+> 收口：§4.2/§5.3 入向附件落盘、§6.2 出向取消/清理、§5.6/A8 `turn` 全字段（含本地轮次与 `parent_turn_id`）、§5.3 入向 steer、§4.7 出向远端 `taskId` 续跑均已在实现中补齐。
 
 **测试矩阵**参考 adk-go 的 A2A 测试（`a2a_e2e_test.go` + `*_compat_test.go` 场景命名），覆盖：
 
@@ -726,7 +738,7 @@ A2A 落地前必须先做的 **SDK 侧改造**（`turn`、backend 分派偏通�
 
 ## 9. 风险
 
-**无架构级风险。** A2A 是标准协议，互操作由协议正确性保证；安全由 §5.5 消解；语义损失是 §4.6 的已知降级；文档更新是 TODO；`turn` 一等化是已定成本（A8）。
+**无架构级风险。** A2A 是标准协议，互操作由协议正确性保证；安全由 §5.5 消解；语义损失是 §4.6 的已知降级；文档已同步（`AGENTS.md` 包架构表、`docs/DESIGN.md` §4 包结构与 A2A 说明）；`turn` 一等化是已定成本（A8）。
 
 唯一要靠测试兜底的是**并发正确性**（挂起 + 落库 + 事件分发）——这属于**实现质量**问题（任何并发代码都存在），不是设计风险：用 `go test -race` + `testing/synctest` 覆盖，Phase 0 先建 turn 状态模型，恢复路径参考 ADK `HandleInputRequired`。
 
@@ -735,7 +747,7 @@ A2A 落地前必须先做的 **SDK 侧改造**（`turn`、backend 分派偏通�
 - **互操作**：由协议正确性保证。§4.2 采用 `adk_*` 约定只是**保真增强**（让 tool trace / thought 在对端可还原），不在协议内；即便漂移，未知 data part 会被 ADK 优雅降级为文本，**不影响核心互操作**。
 - **安全**（远端触发本机代码执行）：由 §5.5 消解——认证继承 a2a-go、授权默认对危险工具 `deny`、工作区隔离、禁止 metadata 提权。是**配置面**。
 - **语义损失**：§4.6 的**已知降级**。
-- **文档一致性 / `DESIGN.md` 清单更新**：落地 **TODO**。
+- **文档一致性**：已同步 `AGENTS.md` 与 `docs/DESIGN.md`（包架构表 / 包结构 / A2A 说明）。
 - **`turn` 一等化**：已定方案 C 的**成本**（A8）。
 
 ---

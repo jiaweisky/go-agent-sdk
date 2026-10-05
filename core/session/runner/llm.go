@@ -37,6 +37,14 @@ type AgentSelector interface {
 	Select(sessionID schema.SessionID, id *string) core.AgentSelection
 }
 
+// Metadata keys the runner puts on the provider request. An execution backend
+// (for example a remote A2A agent) reads them to find the session it mirrors.
+const (
+	RequestMetaSessionID = "sessionID"
+	RequestMetaAgentID   = "agentID"
+	RequestMetaTurnID    = "turnID"
+)
+
 // Snapshotter is the narrow Snapshot surface the runner needs.
 type Snapshotter interface {
 	Capture() (*core.SnapshotID, error)
@@ -51,10 +59,16 @@ type ToolRegistry interface {
 	MaterializeFor(sessionID string, permissions []core.PermissionRule) (*tool.Materialization, error)
 }
 
+// BackendSelector returns a per-agent LLM client for agents with a non-local
+// execution backend (for example a remote A2A agent). Returning nil uses the
+// default LLM client.
+type BackendSelector func(info *schema.AgentInfo) route.LLMClient
+
 // LLMRunner runs one durable coding-agent session until it settles.
 type LLMRunner struct {
 	Events            RunnerEvents
 	LLM               route.LLMClient
+	Backends          BackendSelector
 	Agents            AgentSelector
 	Tools             ToolRegistry
 	Models            ModelResolver
@@ -67,8 +81,34 @@ type LLMRunner struct {
 	Title             session.TitleSettings
 	Snapshots         Snapshotter
 	DB                *database.Database
+	// InboundSessions reports whether a session's turn is owned by an inbound
+	// server (for example an A2A task store); the runner then records no turn
+	// of its own. Nil means every session is local.
+	InboundSessions func(sessionID schema.SessionID) bool
 
 	compaction *session.Compaction
+	turns      *session.TurnStore
+	tracker    *turnTracker
+}
+
+// turnTracker records the turn the runner currently owns per session, so a
+// subagent's turn can link its parent. It is a pointer so LLMRunner stays
+// copyable (go vet forbids copying a struct that embeds a mutex).
+type turnTracker struct {
+	mu     sync.Mutex
+	active map[schema.SessionID]schema.TurnID
+}
+
+func newTurnTracker() *turnTracker {
+	return &turnTracker{active: map[schema.SessionID]schema.TurnID{}}
+}
+
+// currentTurn returns the turn the runner is running for a session.
+func (r *LLMRunner) currentTurn(sessionID schema.SessionID) (schema.TurnID, bool) {
+	r.tracker.mu.Lock()
+	defer r.tracker.mu.Unlock()
+	id, ok := r.tracker.active[sessionID]
+	return id, ok
 }
 
 var _ SessionRunner = (*LLMRunner)(nil)
@@ -80,6 +120,10 @@ func NewLLMRunner(runner LLMRunner) *LLMRunner {
 		LLM:      runner.compactionStream,
 		Settings: runner.Compaction,
 	})
+	result.tracker = newTurnTracker()
+	if runner.DB != nil {
+		result.turns = session.NewTurnStore(runner.DB)
+	}
 	return result
 }
 
@@ -357,7 +401,9 @@ func queuePromotion(hasQueue bool) *schema.SessionDelivery {
 }
 
 // drainTurns runs consecutive turns until none requests continuation.
-func (r *LLMRunner) drainTurns(ctx context.Context, sessionID schema.SessionID, promotion *schema.SessionDelivery) error {
+func (r *LLMRunner) drainTurns(ctx context.Context, sessionID schema.SessionID, promotion *schema.SessionDelivery) (err error) {
+	handle := r.beginTurn(sessionID)
+	defer r.finishTurn(handle, &err)
 	needsContinuation := true
 	step := 1
 	for needsContinuation {
@@ -377,6 +423,120 @@ func (r *LLMRunner) drainTurns(ctx context.Context, sessionID schema.SessionID, 
 		}
 	}
 	return nil
+}
+
+// turnHandle tracks the durable turn the runner opened for a drain, so it can
+// be closed with the right terminal state and sequence boundaries.
+type turnHandle struct {
+	info schema.TurnInfo
+}
+
+// beginTurn opens a turn for a local drain. An inbound A2A task owns its
+// session's turn (the task store maintains it), so nothing is opened then.
+func (r *LLMRunner) beginTurn(sessionID schema.SessionID) *turnHandle {
+	if r.turns == nil {
+		return nil
+	}
+	// A session served by an inbound executor owns its own turn (the executor's
+	// task store maintains it); the runner records nothing.
+	if r.InboundSessions != nil && r.InboundSessions(sessionID) {
+		return nil
+	}
+	existing, err := r.turns.ActiveForSession(sessionID)
+	if err != nil {
+		return nil
+	}
+	if existing != nil && existing.Metadata[schema.TurnMetaOwner] == schema.TurnOwnerA2A {
+		return nil
+	}
+
+	now := time.Now().UnixMilli()
+	anchor, _ := session.LatestMessageSeq(r.DB, sessionID)
+	inputID, _ := session.LatestInputID(r.DB, sessionID)
+	info := schema.TurnInfo{
+		SessionID:   sessionID,
+		State:       schema.TurnStateRunning,
+		InputID:     inputID,
+		AnchorSeq:   &anchor,
+		Metadata:    map[string]any{schema.TurnMetaOwner: schema.TurnOwnerLocal},
+		TimeCreated: now,
+		TimeUpdated: now,
+	}
+	if stored, err := r.Store.Get(sessionID); err == nil && stored != nil {
+		info.Agent = stored.Agent
+		info.Model = stored.Model
+	}
+
+	if existing != nil {
+		// Take over a local turn a crash left running.
+		info.ID = existing.ID
+		info.TimeCreated = existing.TimeCreated
+		if err := r.turns.Update(info); err != nil {
+			return nil
+		}
+	} else {
+		info.ID = schema.NewTurnID()
+		info.ParentTurnID = r.parentTurn(sessionID)
+		if err := r.turns.Create(info); err != nil {
+			return nil
+		}
+	}
+
+	r.tracker.mu.Lock()
+	r.tracker.active[sessionID] = info.ID
+	r.tracker.mu.Unlock()
+	return &turnHandle{info: info}
+}
+
+// parentTurn returns the turn the delegating (parent) session is running, so a
+// subagent's turn links back to it. It falls back to the database for a parent
+// whose turn the runner does not own (an inbound A2A session's task-store turn).
+func (r *LLMRunner) parentTurn(sessionID schema.SessionID) *schema.TurnID {
+	stored, err := r.Store.Get(sessionID)
+	if err != nil || stored == nil || stored.ParentID == nil {
+		return nil
+	}
+	parentID := schema.SessionID(*stored.ParentID)
+	r.tracker.mu.Lock()
+	id, ok := r.tracker.active[parentID]
+	r.tracker.mu.Unlock()
+	if ok {
+		return &id
+	}
+	if active, err := r.turns.ActiveForSession(parentID); err == nil && active != nil {
+		return &active.ID
+	}
+	return nil
+}
+
+// finishTurn closes the runner's turn with its terminal state and end sequence.
+// It re-reads the turn first so metadata an execution backend added during the
+// stream (for example a remote A2A task id) is preserved.
+func (r *LLMRunner) finishTurn(handle *turnHandle, runErr *error) {
+	if handle == nil {
+		return
+	}
+	state := schema.TurnStateCompleted
+	if err := *runErr; err != nil {
+		if isInterrupt(err) {
+			state = schema.TurnStateCanceled
+		} else {
+			state = schema.TurnStateFailed
+		}
+	}
+	info := handle.info
+	if current, err := r.turns.Get(handle.info.ID); err == nil && current != nil {
+		info.Metadata = current.Metadata
+	}
+	end, _ := session.LatestMessageSeq(r.DB, handle.info.SessionID)
+	info.State = state
+	info.EndSeq = &end
+	info.TimeUpdated = time.Now().UnixMilli()
+	_ = r.turns.Update(info)
+
+	r.tracker.mu.Lock()
+	delete(r.tracker.active, handle.info.SessionID)
+	r.tracker.mu.Unlock()
 }
 
 func (r *LLMRunner) failInterruptedTools(sessionID schema.SessionID) error {
@@ -575,6 +735,9 @@ func (r *LLMRunner) prepareTurnAttempt(
 		return nil, err
 	}
 	request := buildTurnRequest(sessionID, agent, stored, system, contextMessagesOf(entries), model, isLastStep, toolMaterialization)
+	if turnID, ok := r.currentTurn(sessionID); ok {
+		request.Metadata[RequestMetaTurnID] = string(turnID)
+	}
 
 	if compacted, err := r.compaction.CompactIfNeeded(session.CompactionInput{
 		SessionID: sessionID, Entries: compactionEntries(entries), Model: model, Request: *request, Context: ctx,
@@ -733,6 +896,7 @@ func buildTurnRequest(
 		Messages:        messages,
 		Tools:           tools,
 		ToolChoice:      toolChoice(isLastStep),
+		Metadata:        map[string]any{RequestMetaSessionID: string(sessionID), RequestMetaAgentID: string(agent.ID)},
 	})
 }
 
@@ -749,10 +913,21 @@ func sessionHeaders(sessionID schema.SessionID, stored *schema.SessionInfo) map[
 	return headers
 }
 
+// llmClient returns the LLM client for this turn's agent. Remote-backend agents
+// (for example A2A) can supply their own client; the default is used otherwise.
+func (a *turnAttempt) llmClient() route.LLMClient {
+	if a.runner.Backends != nil && a.agent.Info != nil {
+		if client := a.runner.Backends(a.agent.Info); client != nil {
+			return client
+		}
+	}
+	return a.runner.LLM
+}
+
 // consumeStream publishes the provider stream and settles each tool call.
 func (a *turnAttempt) consumeStream() {
 	var toolWait sync.WaitGroup
-	stream, streamErr := a.runner.LLM.Stream(a.ctx, a.request)
+	stream, streamErr := a.llmClient().Stream(a.ctx, a.request)
 	if streamErr == nil {
 		for event, err := range stream {
 			if err != nil {

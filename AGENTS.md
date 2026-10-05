@@ -133,6 +133,10 @@ go-agent-sdk/                       opencode TS
 │   ├── tool/       工具框架 (tool, registry, write, ...)
 │   └── util/       通用工具 (wildcard, hash)
 ├── mcp/          ← packages/opencode/src/mcp/  (MCP client + 适配)
+├── a2a/          A2A（Agent2Agent）协议支持（无 TS 对应物，Go 专属能力）
+│   ├── client/     出向薄接口（SDK 自有类型，不泄漏 a2a-go）
+│   ├── a2ago/      出向的 a2a-go 适配实现（唯一 import a2a-go 的出向层）
+│   └── server/     入向：AgentExecutor + taskstore.Store + AgentCard + http.Handler
 ├── defs/         从显式 ConfigDirs 加载 agent/skill 定义（无 CLI 发现）
 │   ├── config/     {agent,agents}/**/*.md、{mode,modes}/*.md 解析
 │   └── skill/      {skill,skills}/**/SKILL.md 扫描
@@ -140,6 +144,7 @@ go-agent-sdk/                       opencode TS
 ```
 
 - `jsonschema/` 是 Go 专属的类型化 JSON Schema AST（对标 Effect `Schema`），供 `core/tool` 定义工具 schema，无 TS 对应目录
+- `a2a/` 同属 Go 专属能力（**无 TS 对应目录**），不适用「只移植 v2 core」规则；设计与决策见 `docs/DESIGN-A2A.md`。只依赖 `github.com/a2aproject/a2a-go/v2` 单版本，a2a-go 类型不越过 `a2a/a2ago/` 与 `a2a/server/` 边界进入公开 API
 - 全部为公开包，无需 `internal/`
 - `packages/<pkg>/src/` 下的平铺文件进入 `<pkg>/` 包根目录；子目录成为子包
 - Effect 的 `Context.Tag` + `Layer`（DI）不移植，改用构造器注入

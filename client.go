@@ -181,6 +181,12 @@ type AgentConfig struct {
 	Steps       int
 	Model       string
 	Permissions schema.PermissionRuleset
+	// Backend selects how the agent executes. Nil keeps the current backend
+	// (a local LLM loop for a newly created agent).
+	Backend *schema.AgentBackend
+	// Expose declares that this agent is exposed over A2A. Nil keeps the
+	// current exposure.
+	Expose *schema.AgentExpose
 }
 
 // Client owns the process-wide services shared by sessions.
@@ -246,6 +252,12 @@ func applyAgentConfig(info *schema.AgentInfo, cfg AgentConfig) {
 	}
 	if cfg.Permissions != nil {
 		info.Permissions = core.PermissionMerge(info.Permissions, cfg.Permissions)
+	}
+	if cfg.Backend != nil {
+		info.Backend = cfg.Backend
+	}
+	if cfg.Expose != nil {
+		info.Expose = cfg.Expose
 	}
 }
 

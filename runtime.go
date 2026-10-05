@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,27 +33,34 @@ import (
 
 // runtime holds the process-wide services shared by all sessions.
 type runtime struct {
-	db            *database.Database
-	events        core.Event
-	store         *session.Store
-	agents        *core.Agent
-	agentSelector *sessionAgents
-	skills        *core.Skill
-	outputStore   tool.OutputStore
-	toolOutput    *core.ToolOutputStore
-	permission    *permissionHandler
-	question      *questionHandler
-	runner        *runner.LLMRunner
-	coord         *session.Coordinator[schema.SessionID]
-	snapshot      *core.Snapshot
-	location      core.Location
-	projectID     schema.ProjectID
-	models        runner.ModelResolver
-	subagentDepth int
-	name          string
+	db             *database.Database
+	events         core.Event
+	store          *session.Store
+	agents         *core.Agent
+	agentSelector  *sessionAgents
+	skills         *core.Skill
+	outputStore    tool.OutputStore
+	toolOutput     *core.ToolOutputStore
+	permission     *permissionHandler
+	question       *questionHandler
+	runner         *runner.LLMRunner
+	a2aBackendPool *a2aBackendPool
+	coord          *session.Coordinator[schema.SessionID]
+	snapshot       *core.Snapshot
+	location       core.Location
+	projectID      schema.ProjectID
+	models         runner.ModelResolver
+	subagentDepth  int
+	name           string
 
 	hooksMu sync.RWMutex
 	hooks   map[string]*SessionHooks
+
+	// inbound marks sessions served by the A2A inbound executor, which owns
+	// their turn records (the task store maintains them), so the runner does
+	// not create a competing local turn.
+	inboundMu sync.Mutex
+	inbound   map[schema.SessionID]struct{}
 
 	builtin     builtinDeps
 	clientTools []Tool
@@ -421,6 +429,28 @@ func (r *runtime) hooksFor(sessionID string) *SessionHooks {
 	return r.hooks[sessionID]
 }
 
+// markInbound records a session whose turn is owned by the A2A task store.
+func (r *runtime) markInbound(sessionID schema.SessionID) {
+	r.inboundMu.Lock()
+	r.inbound[sessionID] = struct{}{}
+	r.inboundMu.Unlock()
+}
+
+// unmarkInbound drops the inbound marker when a session is released.
+func (r *runtime) unmarkInbound(sessionID schema.SessionID) {
+	r.inboundMu.Lock()
+	delete(r.inbound, sessionID)
+	r.inboundMu.Unlock()
+}
+
+// isInbound reports whether a session is served by the A2A inbound executor.
+func (r *runtime) isInbound(sessionID schema.SessionID) bool {
+	r.inboundMu.Lock()
+	defer r.inboundMu.Unlock()
+	_, ok := r.inbound[sessionID]
+	return ok
+}
+
 // detach drops the per-session runtime state registered by attachSession: the
 // tool registry, hooks, permission/question handlers and the derived agent
 // override. The event listener and the Client.sessions entry belong to
@@ -540,6 +570,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		subagentDepth: subagentDepth(opts.SubagentDepth),
 		name:          applicationName(opts.Name),
 		hooks:         map[string]*SessionHooks{}, clientTools: opts.Tools,
+		inbound:       map[schema.SessionID]struct{}{},
 		dispatcher:    &toolDispatcher{sessions: map[string]*tool.Registry{}},
 		agentSelector: newSessionAgents(agents),
 		reference:     references,
@@ -571,9 +602,13 @@ func (r *runtime) buildBuiltins(opts *ClientOptions, global core.Global, locale 
 // buildRunner wires the LLM runner and the coordinator that drains sessions.
 func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Global, locale language.Tag) {
 	r.snapshot = newSnapshot(git, global, &r.location)
+	r.a2aBackendPool = newA2ABackendPool(r.askBackendQuestion)
+	r.a2aBackendPool.persistTask = r.persistRemoteTask
+	r.a2aBackendPool.loadTask = r.loadRemoteTask
 	r.runner = runner.NewLLMRunner(runner.LLMRunner{
 		Events:            appEvents{events: r.events},
 		LLM:               chooseLLM(opts),
+		Backends:          r.a2aBackendPool.forAgent,
 		Agents:            r.agentSelector,
 		Tools:             hookedRegistry{inner: r.dispatcher, hooksFor: r.hooksFor},
 		Models:            r.models,
@@ -586,12 +621,28 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		Title:             titleSettings(opts),
 		Snapshots:         snapshotterFor(r.snapshot),
 		DB:                r.db,
+		InboundSessions:   r.isInbound,
 	})
 	r.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
 		r.publishSessionStatus(id, schema.SessionStatusBusy{Type: "busy"})
 		defer r.publishSessionStatus(id, schema.SessionStatusIdle{Type: "idle"})
 		return r.runner.Run(ctx, runner.RunInput{SessionID: id, Force: force})
 	})
+}
+
+// askBackendQuestion asks the local user for input a remote agent requested and
+// joins the answers into one relay string. It runs while the calling turn is
+// parked, so a held turn blocks until the user replies.
+func (r *runtime) askBackendQuestion(ctx context.Context, sessionID string, questions []schema.QuestionInfo) (string, error) {
+	answers, err := r.question.Ask(ctx, core.QuestionAskInput{SessionID: sessionID, Questions: questions})
+	if err != nil {
+		return "", err
+	}
+	parts := make([]string, 0, len(answers))
+	for _, answer := range answers {
+		parts = append(parts, strings.Join(answer, ", "))
+	}
+	return strings.Join(parts, "\n"), nil
 }
 
 // loadPlugins registers the configured plugins. A plugin that cannot start
@@ -924,6 +975,9 @@ func (r *runtime) close() error {
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		r.reference.WaitContext(ctx)
 		cancel()
+	}
+	if r.a2aBackendPool != nil {
+		r.a2aBackendPool.close()
 	}
 	return r.db.Close()
 }

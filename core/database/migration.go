@@ -154,6 +154,24 @@ func migrate(db *sql.DB) error {
 			")",
 		"CREATE INDEX IF NOT EXISTS `part_message_id_id_idx` ON `part` (`message_id`, `id`)",
 		"CREATE INDEX IF NOT EXISTS `part_session_idx` ON `part` (`session_id`)",
+		"CREATE TABLE IF NOT EXISTS `turn` (" +
+			"`id` text PRIMARY KEY," +
+			"`session_id` text NOT NULL," +
+			"`parent_turn_id` text," +
+			"`input_id` text," +
+			"`state` text NOT NULL," +
+			"`pending_request_id` text," +
+			"`agent` text," +
+			"`model` text," +
+			"`anchor_seq` integer," +
+			"`end_seq` integer," +
+			"`metadata` text," +
+			"`time_created` integer NOT NULL," +
+			"`time_updated` integer NOT NULL," +
+			"CONSTRAINT `fk_turn_session_id_session_id_fk` FOREIGN KEY (`session_id`) REFERENCES `session`(`id`) ON DELETE CASCADE" +
+			")",
+		"CREATE INDEX IF NOT EXISTS `turn_session_time_created_idx` ON `turn` (`session_id`, `time_created`)",
+		"CREATE INDEX IF NOT EXISTS `turn_state_idx` ON `turn` (`state`)",
 		"CREATE TABLE IF NOT EXISTS `permission` (" +
 			"`id` text PRIMARY KEY," +
 			"`project_id` text NOT NULL," +
