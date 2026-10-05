@@ -1,0 +1,201 @@
+# go-agent-sdk
+
+An embeddable Go SDK for building LLM agents — a Go port of
+[opencode](https://github.com/anomalyco/opencode).
+
+`go-agent-sdk` packages a complete agent runtime behind a small public API: a
+multi-protocol LLM layer, the tool-calling agent loop, a permission system,
+subagents, MCP, and A2A. State lives in SQLite and everything is driven from Go
+iterators, so it embeds cleanly in a CLI, a service, or a test.
+
+## Features
+
+- **Multi-protocol LLM layer** — OpenAI Chat, OpenAI Responses, OpenAI-compatible
+  Chat, Anthropic Messages, Gemini, and Bedrock Converse, selected by protocol id.
+- **Agent loop** — streaming tool-calling loop with step management, context
+  overflow recovery, and steer/queue input.
+- **Built-in tools** — `read`, `write`, `edit`, `apply_patch`, `bash`, `glob`,
+  `grep`, `webfetch`, `question`, `skill`, `todowrite`.
+- **Permissions** — rule-based allow/deny/ask with per-session and per-agent rules.
+- **Subagents** — nested `task` delegation into independent child sessions.
+- **Agents & skills from markdown** — loaded from explicit config directories.
+- **MCP integration** — native Model Context Protocol client (local and remote).
+- **A2A protocol** — expose agents over A2A (`a2a/server`) and call remote agents
+  (`a2a/client`), including human-in-the-loop resume.
+- **Durable sessions** — snapshots, revert/redo, automatic compaction, optional
+  automatic titles.
+
+## Requirements
+
+Go 1.27 or newer.
+
+## Install
+
+```sh
+go get github.com/jiaweisky/go-agent-sdk
+```
+
+## Quick start
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	agent "github.com/jiaweisky/go-agent-sdk"
+)
+
+func main() {
+	ctx := context.Background()
+
+	client, err := agent.NewClient(&agent.ClientOptions{
+		// Root is required: the SDK never picks a state location for you.
+		Root:        filepath.Join(os.TempDir(), "go-agent-sdk"),
+		Model:       "gpt-4o-mini",
+		Protocol:    "openai-responses",
+		Credentials: agent.APIKey(os.Getenv("OPENAI_API_KEY")),
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+
+	session, err := client.CreateSession(ctx, &agent.SessionConfig{Agent: "build"})
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	for event, err := range session.Send(ctx, agent.MessageOptions{
+		Prompt: "List the Go files in this directory and summarize them.",
+	}) {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			break
+		}
+		switch e := event.(type) {
+		case agent.TextDelta:
+			fmt.Print(e.Delta)
+		case agent.ToolCalled:
+			fmt.Printf("\n[tool: %s]\n", e.Name)
+		}
+	}
+}
+```
+
+`Root` is mandatory by design: the SDK does not read `XDG_*` or other host
+environment to locate state, so every instance is explicit and isolated.
+
+## Public API
+
+The root package is `agent` (`import "github.com/jiaweisky/go-agent-sdk"`).
+
+| Type / function | Purpose |
+|---|---|
+| `agent.NewClient(*ClientOptions)` | Build a client and its backing runtime |
+| `Client.CreateSession` / `ResumeSession` | Start or resume a durable session |
+| `Client.RegisterAgent` | Register a named agent |
+| `Client.RegisterTools` | Add application tools at runtime |
+| `Session.Send(ctx, MessageOptions)` | Run a turn, streaming `agent.Event`s |
+| `Session.On(func(Event))` | Observe events out of band |
+| `Session.Steer` / `Abort` / `Compact` | Interrupt, steer, or compact a turn |
+| `agent.DefineTool(name, desc, handler)` | Define a typed tool from a Go function |
+| `SessionConfig.Hooks` | Intercept tool and session lifecycle |
+| `SessionConfig.Permissions` / `OnPermissionRequest` | Permission rules and prompts |
+
+`ClientOptions` is where you set the state `Root`, working directory, config
+directories, the default `Model`/`Protocol`/`Credentials`, MCP servers, plugins,
+references, and compaction/title behavior.
+
+## Protocols and providers
+
+Select a wire protocol with `ClientOptions.Protocol`:
+
+| Protocol id | Auth |
+|---|---|
+| `openai-responses` | bearer |
+| `openai-chat` | bearer |
+| `openai-compatible-chat` | bearer |
+| `anthropic-messages` | `x-api-key` |
+| `gemini` | `x-goog-api-key` |
+| `bedrock-converse` | SigV4 |
+
+To supply catalog metadata (endpoint, context/output limits, headers, variants),
+set `ClientOptions.ModelInfo` — the SDK's narrow replacement for a models.dev
+catalog — built with `agent.NewModelInfo`. Context/output limits enable automatic
+compaction. `llm/provider` also offers convenience facades (openai, anthropic,
+openrouter, xai, azure, cloudflare, github_copilot, google, amazon_bedrock) for
+callers that use the `llm` package directly.
+
+## Custom tools
+
+```go
+type statusInput struct {
+	ID string `json:"id" jsonschema:"Identifier to look up"`
+}
+
+status := agent.DefineTool("status_lookup", "Look up a status value",
+	func(in statusInput, _ agent.ToolContext) (string, error) {
+		return fmt.Sprintf("status for %s: READY", in.ID), nil
+	})
+
+session, _ := client.CreateSession(ctx, &agent.SessionConfig{
+	Agent: "build",
+	Tools: []agent.Tool{status},
+})
+```
+
+The input struct's JSON Schema is derived from its fields and `jsonschema` tags,
+and is validated before the handler runs.
+
+## MCP and A2A
+
+- **MCP** — declare servers in `ClientOptions.MCP`; their tools are exposed to
+  every session (`mcp` package).
+- **A2A (server)** — register an agent with `Expose`, build a handler with
+  `agent.NewA2AFactory`, and serve it with `a2a/server`.
+- **A2A (client)** — set an agent's `Backend` to the A2A backend to delegate to a
+  remote agent; the same path is used by the `task` tool.
+
+## Package layout
+
+```
+go-agent-sdk/     root `agent` package — high-level public API
+├── llm/          LLM protocol layer
+│   ├── schema/     request/event/error types
+│   ├── route/      Route, Protocol, transport, auth
+│   ├── protocols/  openai-chat, openai-responses, anthropic-messages, gemini, bedrock-converse
+│   └── provider/   provider facades
+├── core/         agent core: session, tool framework, database, permission, ...
+├── mcp/          MCP client and tool adapter
+├── a2a/          A2A protocol: client, a2ago (a2a-go adapter), server
+├── defs/         agent and skill definitions loaded from markdown
+├── schema/       shared types
+└── jsonschema/   typed JSON Schema AST for tool schemas
+```
+
+## Examples
+
+Runnable examples live under `examples/` — see [examples/README.md](examples/README.md).
+
+| Example | What it shows |
+|---|---|
+| `examples/tool` | A custom tool plus a permission handler |
+| `examples/chat` | Interactive multi-turn chat, MCP, A2A, skills, subagents |
+| `examples/a2aserver` | The SDK as an A2A server, driven by its own A2A client |
+| `examples/adka2a` | A Google ADK agent over A2A for cross-implementation interop |
+
+```sh
+export OPENAI_API_KEY=sk-...
+go run ./examples/tool
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE). This software is a source port of opencode, whose
+MIT notice is retained in [LICENSE-opencode](LICENSE-opencode). Third-party
+attributions are in [NOTICE](NOTICE).
