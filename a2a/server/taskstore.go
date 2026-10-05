@@ -13,8 +13,8 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/taskstore"
 
-	coresession "github.com/user/go-agent-sdk/core/session"
-	"github.com/user/go-agent-sdk/schema"
+	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // Turn metadata keys used to persist an A2A task and the local session it

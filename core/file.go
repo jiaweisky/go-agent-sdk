@@ -1,6 +1,6 @@
 package core
 
-import "github.com/user/go-agent-sdk/schema"
+import "github.com/jiaweisky/go-agent-sdk/schema"
 
 type FileDiffStatus string
 

@@ -10,17 +10,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/database"
-	"github.com/user/go-agent-sdk/core/reference"
-	"github.com/user/go-agent-sdk/core/session"
-	"github.com/user/go-agent-sdk/core/skill"
-	"github.com/user/go-agent-sdk/core/systemcontext"
-	"github.com/user/go-agent-sdk/core/tool"
-	"github.com/user/go-agent-sdk/llm"
-	"github.com/user/go-agent-sdk/llm/route"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core/database"
+	"github.com/jiaweisky/go-agent-sdk/core/reference"
+	"github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/core/skill"
+	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
+	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/llm"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // RunnerEvents is the event surface the runner needs: publishing plus the

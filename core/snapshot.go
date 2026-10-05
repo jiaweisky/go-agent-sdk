@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/user/go-agent-sdk/core/project"
-	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/project"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // snapshotMaxUntrackedFileBytes bounds the size of a single untracked file that

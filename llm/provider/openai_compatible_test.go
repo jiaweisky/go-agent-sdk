@@ -3,7 +3,7 @@ package provider
 import (
 	"testing"
 
-	"github.com/user/go-agent-sdk/llm/protocols"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols"
 )
 
 func TestNewOpenAICompatible(t *testing.T) {

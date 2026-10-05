@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/user/go-agent-sdk/jsonschema"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
 )
 
 type (

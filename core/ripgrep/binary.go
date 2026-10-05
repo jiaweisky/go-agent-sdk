@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core"
 )
 
 const RipgrepBinaryVersion = "15.1.0"

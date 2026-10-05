@@ -3,7 +3,7 @@ package utils
 import (
 	"fmt"
 
-	llmutils "github.com/user/go-agent-sdk/llm/utils"
+	llmutils "github.com/jiaweisky/go-agent-sdk/llm/utils"
 )
 
 var schemaIntentKeys = []string{

@@ -3,7 +3,7 @@ package core
 import (
 	"strings"
 
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // ModelV2 re-exports the shared model schema.

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 type globRealBinary struct{ path string }

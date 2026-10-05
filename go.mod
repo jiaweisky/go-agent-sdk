@@ -1,4 +1,4 @@
-module github.com/user/go-agent-sdk
+module github.com/jiaweisky/go-agent-sdk
 
 go 1.27.1
 

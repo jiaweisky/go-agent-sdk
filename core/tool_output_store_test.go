@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 func TestToolOutputStoreBoundKeepsSmallOutput(t *testing.T) {

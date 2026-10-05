@@ -1,8 +1,8 @@
 package core
 
 import (
-	"github.com/user/go-agent-sdk/core/session"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // RegisterSessionProjectors wires the session event projectors into the event

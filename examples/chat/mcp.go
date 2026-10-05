@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jiaweisky/go-agent-sdk/mcp"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/user/go-agent-sdk/mcp"
 )
 
 // mcpCommand lists and fetches MCP prompts and resources: "/mcp prompts",

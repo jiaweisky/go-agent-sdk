@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/core"
-	defsconfig "github.com/user/go-agent-sdk/defs/config"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	defsconfig "github.com/jiaweisky/go-agent-sdk/defs/config"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 	"golang.org/x/text/language"
 )
 

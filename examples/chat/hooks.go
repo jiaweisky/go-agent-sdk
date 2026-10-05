@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/user/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk"
 )
 
 // newSessionHooks builds the SessionHooks the chat attaches to every session it

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // ImageBlock is a Bedrock image content block.

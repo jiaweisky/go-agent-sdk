@@ -17,10 +17,10 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
-	agent "github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/a2a/server"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
-	"github.com/user/go-agent-sdk/schema"
+	agent "github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/a2a/server"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // stubLLM returns a fixed assistant reply.

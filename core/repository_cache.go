@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/user/go-agent-sdk/core/effect"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/effect"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // RepositoryCacheResult is a ready checkout.

@@ -1,6 +1,6 @@
 package v1
 
-import "github.com/user/go-agent-sdk/schema"
+import "github.com/jiaweisky/go-agent-sdk/schema"
 
 type MessageID string
 

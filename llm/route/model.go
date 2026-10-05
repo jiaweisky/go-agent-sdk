@@ -3,7 +3,7 @@ package route
 import (
 	"encoding/json"
 
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // Model is a model identity/defaults plus the configured route it was resolved

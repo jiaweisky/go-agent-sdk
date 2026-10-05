@@ -1,6 +1,6 @@
 package utils
 
-import "github.com/user/go-agent-sdk/llm/schema"
+import "github.com/jiaweisky/go-agent-sdk/llm/schema"
 
 // openAIReasoningEffortSet is the efforts IsReasoningEffort accepts.
 var openAIReasoningEffortSet = map[string]struct{}{

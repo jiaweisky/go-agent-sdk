@@ -1,6 +1,6 @@
 package config
 
-import "github.com/user/go-agent-sdk/schema"
+import "github.com/jiaweisky/go-agent-sdk/schema"
 
 // AgentInfo is the agent definition decoded from a markdown file's frontmatter.
 type AgentInfo struct {

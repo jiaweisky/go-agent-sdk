@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // TestSetModelUpdatesSession guards that SetModel switches the stored model of

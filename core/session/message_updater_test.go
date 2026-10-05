@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 func eventPayload(eventType string, data any) schema.EventPayload {

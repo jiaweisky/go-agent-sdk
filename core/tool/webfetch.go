@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/net/html"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
 )
 
 const WebFetchName = "webfetch"

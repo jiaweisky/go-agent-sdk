@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk"
 )
 
 // startSystemPromptSession creates a session with the given system prompt

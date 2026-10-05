@@ -3,7 +3,7 @@ package tool
 import (
 	"errors"
 
-	"github.com/user/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core"
 )
 
 // failure wraps err as a model-facing Failure, unless err is a user decline

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"github.com/user/go-agent-sdk/core/tool"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
 )
 
 func TestHTTPClientHeaders(t *testing.T) {

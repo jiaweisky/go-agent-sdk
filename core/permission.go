@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 type (

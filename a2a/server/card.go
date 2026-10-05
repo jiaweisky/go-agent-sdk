@@ -3,7 +3,7 @@ package server
 import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // buildCard builds the AgentCard for one exposed agent. A card describes a

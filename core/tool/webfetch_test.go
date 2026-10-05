@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 type webFetchTestClient struct {

@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // WorkspaceRequest identifies the inbound call a workspace is resolved for.

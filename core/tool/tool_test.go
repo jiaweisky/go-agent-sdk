@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/user/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
 )
 
 // TestAllToolSchemasCompile guards against a schema that cannot be compiled:

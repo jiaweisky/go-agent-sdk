@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // agentCommand handles "/agent" (list), "/agent <id>" (switch) and

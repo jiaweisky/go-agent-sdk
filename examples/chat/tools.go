@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk"
 )
 
 // runtimeTools are the tools /tool can register at runtime, keyed by name.

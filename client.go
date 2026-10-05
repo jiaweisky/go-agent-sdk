@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/tool"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/mcp"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/mcp"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // ClientOptions configures a Client.

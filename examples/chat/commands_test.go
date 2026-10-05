@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/examples/internal/util"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // ansiPattern matches SGR color sequences, so command tests assert on the

@@ -6,9 +6,9 @@ import (
 
 	"golang.org/x/text/language"
 
-	"github.com/user/go-agent-sdk/core/systemcontext"
-	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // Summary is a skill's name and description, for the system context.

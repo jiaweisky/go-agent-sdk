@@ -4,7 +4,7 @@ import (
 	"context"
 	"iter"
 
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // EventKind classifies a session event the A2A executor maps. The zero value

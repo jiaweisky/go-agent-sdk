@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // mockFrames is a Transport that yields frames (plus an optional trailing error)

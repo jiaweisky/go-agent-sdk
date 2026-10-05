@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk"
 )
 
 func TestInlineMarkdown(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/jsonschema"
-	rootschema "github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
+	rootschema "github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 const TodoWriteName = "todowrite"

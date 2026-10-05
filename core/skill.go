@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	skillsub "github.com/user/go-agent-sdk/core/skill"
-	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/schema"
+	skillsub "github.com/jiaweisky/go-agent-sdk/core/skill"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 type (

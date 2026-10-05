@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // ParseToolInput decodes a tool call's JSON input.

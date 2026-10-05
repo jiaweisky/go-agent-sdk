@@ -3,7 +3,7 @@ package provider
 import (
 	"strings"
 
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // OpenAIOptionsInput is the ergonomic form of the "openai" provider options.

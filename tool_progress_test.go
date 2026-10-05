@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // scriptedLLM replays one script per Stream call, so a test can drive a tool

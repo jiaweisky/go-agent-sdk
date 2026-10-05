@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
 )
 
 const WriteName = "write"

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk"
 )
 
 // TestEditorEscIsIgnored guards that a lone Esc does not end input; exit is

@@ -3,8 +3,8 @@ package session
 import (
 	"encoding/json"
 
-	"github.com/user/go-agent-sdk/core/database"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/database"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // Fork copies the source session's messages into the target session, giving each

@@ -11,8 +11,8 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/taskstore"
 
-	a2acommon "github.com/user/go-agent-sdk/a2a"
-	"github.com/user/go-agent-sdk/schema"
+	a2acommon "github.com/jiaweisky/go-agent-sdk/a2a"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // fakeSession is an in-memory Session that records whether it was closed and

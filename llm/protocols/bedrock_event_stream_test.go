@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk/llm/protocols/utils"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 func bedrockHeaders(fields [][2]string) []byte {

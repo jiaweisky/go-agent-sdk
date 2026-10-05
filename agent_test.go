@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/go-agent-sdk/core"
-	coresession "github.com/user/go-agent-sdk/core/session"
-	"github.com/user/go-agent-sdk/core/tool"
-	"github.com/user/go-agent-sdk/core/util"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 type fakeLLM struct{ reply string }

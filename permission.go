@@ -6,10 +6,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/database"
-	"github.com/user/go-agent-sdk/core/session"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core/database"
+	"github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // PermissionRequest describes an approval request raised before a tool runs.

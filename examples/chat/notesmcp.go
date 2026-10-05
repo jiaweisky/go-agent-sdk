@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/examples/internal/util"
-	"github.com/user/go-agent-sdk/mcp"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
+	"github.com/jiaweisky/go-agent-sdk/mcp"
 )
 
 // startNotesMCP launches the notes MCP server as a child process over

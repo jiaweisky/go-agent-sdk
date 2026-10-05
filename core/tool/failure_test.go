@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/user/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core"
 )
 
 func TestFailurePropagatesUserDecline(t *testing.T) {

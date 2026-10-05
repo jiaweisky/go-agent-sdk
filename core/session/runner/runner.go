@@ -3,7 +3,7 @@ package runner
 import (
 	"context"
 
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // RunInput describes the session to run.

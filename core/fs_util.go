@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/funnyfactor/mimetype"
-	"github.com/user/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
 )
 
 type FileSystemError struct {

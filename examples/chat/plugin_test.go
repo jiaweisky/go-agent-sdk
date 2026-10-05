@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // newPluginClient builds a client with the given plugins, without the catalog.

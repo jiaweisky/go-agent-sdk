@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk/llm/protocols/utils"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // mockFrames is a route.Transport that replays the given SSE frame payloads (the

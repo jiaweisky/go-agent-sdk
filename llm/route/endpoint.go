@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 func trimBaseURL(value string) string {

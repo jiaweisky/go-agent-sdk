@@ -1,4 +1,4 @@
-module github.com/user/go-agent-sdk/examples/adka2a
+module github.com/jiaweisky/go-agent-sdk/examples/adka2a
 
 go 1.26.0
 

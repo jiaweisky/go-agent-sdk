@@ -5,8 +5,8 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 
-	a2acommon "github.com/user/go-agent-sdk/a2a"
-	"github.com/user/go-agent-sdk/a2a/client"
+	a2acommon "github.com/jiaweisky/go-agent-sdk/a2a"
+	"github.com/jiaweisky/go-agent-sdk/a2a/client"
 )
 
 func TestPartEventsMapsDataParts(t *testing.T) {

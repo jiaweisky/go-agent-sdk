@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk"
 )
 
 // newCommand starts a fresh session on the same agent and switches the chat to

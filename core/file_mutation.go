@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/user/go-agent-sdk/core/effect"
+	"github.com/jiaweisky/go-agent-sdk/core/effect"
 )
 
 type FileMutationTarget struct {

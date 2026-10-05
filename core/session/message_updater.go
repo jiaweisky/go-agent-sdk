@@ -3,7 +3,7 @@ package session
 import (
 	"encoding/json"
 
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // MemoryState is the in-memory view of a session's messages.

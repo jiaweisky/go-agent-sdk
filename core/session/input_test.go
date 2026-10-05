@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/user/go-agent-sdk/core/database"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/database"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // inputTestPublisher simulates the event projector for the session-input

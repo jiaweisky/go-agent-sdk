@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"iter"
 
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
 )
 
 // Client runs a request through its model's route: it resolves the defaults,

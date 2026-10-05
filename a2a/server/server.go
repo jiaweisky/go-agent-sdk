@@ -11,8 +11,8 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/taskstore"
 
-	coresession "github.com/user/go-agent-sdk/core/session"
-	"github.com/user/go-agent-sdk/schema"
+	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // Options configures a Server.

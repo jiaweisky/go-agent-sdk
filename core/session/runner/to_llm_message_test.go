@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
-	"github.com/user/go-agent-sdk/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 func runnerTestModel() llmschema.Model {

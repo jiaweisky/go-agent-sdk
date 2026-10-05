@@ -1,6 +1,6 @@
 package llm
 
-import "github.com/user/go-agent-sdk/llm/schema"
+import "github.com/jiaweisky/go-agent-sdk/llm/schema"
 
 // IsContextOverflow reports whether a provider error message indicates the
 // request exceeded the model's context window. The canonical implementation

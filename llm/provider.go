@@ -1,6 +1,6 @@
 package llm
 
-import "github.com/user/go-agent-sdk/llm/schema"
+import "github.com/jiaweisky/go-agent-sdk/llm/schema"
 
 // ModelOptions overrides a model's defaults and compatibility rules.
 type ModelOptions struct {

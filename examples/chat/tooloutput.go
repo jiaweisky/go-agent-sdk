@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/core"
 )
 
 // emitLinesTool returns many lines of text, so a large tool result can be

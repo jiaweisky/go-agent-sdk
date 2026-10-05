@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/user/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk"
 )
 
 // interactivePermission prompts for each "ask" permission request. It follows

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/go-agent-sdk/core/session"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/session"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // LLMEventPublisherInput describes the session a publisher writes for.

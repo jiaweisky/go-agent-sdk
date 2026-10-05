@@ -4,7 +4,7 @@ import (
 	"context"
 	"iter"
 
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // TransportRuntime is what a transport needs from the host: the HTTP client and

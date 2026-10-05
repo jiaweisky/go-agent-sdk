@@ -1,6 +1,6 @@
 package utils
 
-import "github.com/user/go-agent-sdk/llm/schema"
+import "github.com/jiaweisky/go-agent-sdk/llm/schema"
 
 // CachePoint marks where the provider may cache in a Bedrock request.
 type CachePoint struct {

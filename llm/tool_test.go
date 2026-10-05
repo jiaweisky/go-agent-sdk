@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/user/go-agent-sdk/jsonschema"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 func TestToolDefinitionAndValidation(t *testing.T) {

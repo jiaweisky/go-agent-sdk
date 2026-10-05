@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/user/go-agent-sdk/core/effect"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/effect"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // PluginID identifies a plugin.

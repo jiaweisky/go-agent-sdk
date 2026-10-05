@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
-	"github.com/user/go-agent-sdk/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // recordingLLM records every request and always answers with reply, so a test

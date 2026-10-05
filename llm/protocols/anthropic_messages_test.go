@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 func TestAnthropicMessagesOutputLimitFallsBackToRouteDefaults(t *testing.T) {

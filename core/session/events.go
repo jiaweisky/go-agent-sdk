@@ -1,6 +1,6 @@
 package session
 
-import "github.com/user/go-agent-sdk/schema"
+import "github.com/jiaweisky/go-agent-sdk/schema"
 
 // EventPublisher is the narrow event surface the session package needs. It
 // returns the durable pointer (nil for live-only events) so callers can read

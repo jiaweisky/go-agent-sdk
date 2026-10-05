@@ -1,7 +1,7 @@
 package utils
 
 import (
-	llmutils "github.com/user/go-agent-sdk/llm/utils"
+	llmutils "github.com/jiaweisky/go-agent-sdk/llm/utils"
 )
 
 func removeNullSchemas(value any) any {

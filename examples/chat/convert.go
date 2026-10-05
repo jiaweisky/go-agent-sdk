@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
 )
 
 // convertLengthName is the convert_length tool's name; it is also the permission

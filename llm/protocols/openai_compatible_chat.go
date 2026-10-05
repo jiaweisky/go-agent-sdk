@@ -1,8 +1,8 @@
 package protocols
 
 import (
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/route/transport"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/route/transport"
 )
 
 // OpenAICompatibleChatHTTPRoute is the OpenAI Chat protocol under a distinct

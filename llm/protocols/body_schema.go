@@ -1,6 +1,6 @@
 package protocols
 
-import "github.com/user/go-agent-sdk/jsonschema"
+import "github.com/jiaweisky/go-agent-sdk/jsonschema"
 
 // Body schemas describe the JSON each protocol puts on the wire. Route
 // construction compiles them and compile() validates every built body, so a

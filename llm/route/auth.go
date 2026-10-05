@@ -3,7 +3,7 @@ package route
 import (
 	"fmt"
 
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // AuthInput is what an auth scheme sees: the request, its URL and body, and the

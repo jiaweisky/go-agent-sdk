@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/user/go-agent-sdk/llm"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // AzureProviderID is the provider id models.dev uses for Azure OpenAI.

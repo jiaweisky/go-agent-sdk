@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	agent "github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/a2a/a2ago"
-	"github.com/user/go-agent-sdk/a2a/client"
-	"github.com/user/go-agent-sdk/a2a/server"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
-	"github.com/user/go-agent-sdk/schema"
+	agent "github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/a2a/a2ago"
+	"github.com/jiaweisky/go-agent-sdk/a2a/client"
+	"github.com/jiaweisky/go-agent-sdk/a2a/server"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 type stubLLM struct{ reply string }

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
 )
 
 // AgentEntry is an agent markdown file (frontmatter + body) in scan order.

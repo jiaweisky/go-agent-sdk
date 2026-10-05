@@ -5,11 +5,11 @@ import (
 
 	"golang.org/x/text/language"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/database"
-	"github.com/user/go-agent-sdk/core/ripgrep"
-	"github.com/user/go-agent-sdk/core/tool"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core/database"
+	"github.com/jiaweisky/go-agent-sdk/core/ripgrep"
+	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // builtinDeps are the services the built-in tools register with.

@@ -1,6 +1,6 @@
 package utils
 
-import "github.com/user/go-agent-sdk/llm/schema"
+import "github.com/jiaweisky/go-agent-sdk/llm/schema"
 
 // LifecycleState tracks the parts a protocol has already started, so each start
 // and end is emitted once.

@@ -6,8 +6,8 @@ package skill
 import (
 	"path/filepath"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
 )
 
 // SkillPattern matches a SKILL.md anywhere under a container directory.

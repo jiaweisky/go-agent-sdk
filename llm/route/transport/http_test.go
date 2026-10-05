@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // TestJSONRequestPartsAppliesEndpointQuery guards that Endpoint.Query (Azure

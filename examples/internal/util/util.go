@@ -8,8 +8,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/core"
 )
 
 // Option customizes the client built by Client.

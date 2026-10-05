@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/user/go-agent-sdk/core/database"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/database"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // TurnStore persists core turn records. A turn is one terminal-bound unit of

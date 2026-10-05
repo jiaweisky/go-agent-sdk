@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/examples/internal/util"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // echoAgentName is how the remote agent is registered in the chat. The name

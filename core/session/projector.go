@@ -8,8 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/user/go-agent-sdk/schema"
-	v1 "github.com/user/go-agent-sdk/schema/v1"
+	"github.com/jiaweisky/go-agent-sdk/schema"
+	v1 "github.com/jiaweisky/go-agent-sdk/schema/v1"
 )
 
 // ProjectRegistrar is the narrow event-registration surface the projector needs.

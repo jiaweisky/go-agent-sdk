@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jiaweisky/go-agent-sdk/schema"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"github.com/user/go-agent-sdk/schema"
 )
 
 // EventPublisher publishes MCP lifecycle events (for example mcp.tools.changed).

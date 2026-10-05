@@ -1,8 +1,8 @@
 package protocols
 
 import (
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // AuthScheme is the credential convention a protocol expects on the wire.

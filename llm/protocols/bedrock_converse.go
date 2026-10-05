@@ -10,9 +10,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/user/go-agent-sdk/llm/protocols/utils"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 const bedrockConverseAdapter = "bedrock-converse"

@@ -6,8 +6,8 @@ import (
 
 	"golang.org/x/text/language"
 
-	"github.com/user/go-agent-sdk/core/systemcontext"
-	"github.com/user/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
 )
 
 // Info is a reference as the guidance needs it.

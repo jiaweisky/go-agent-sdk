@@ -8,8 +8,8 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
-	a2acommon "github.com/user/go-agent-sdk/a2a"
-	"github.com/user/go-agent-sdk/schema"
+	a2acommon "github.com/jiaweisky/go-agent-sdk/a2a"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // messageText concatenates the text parts of an A2A message and renders any

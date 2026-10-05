@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/user/go-agent-sdk/core/tool"
-	"github.com/user/go-agent-sdk/jsonschema"
 )
 
 // AdaptMCPTool binds an MCP tool definition to its session and returns a core

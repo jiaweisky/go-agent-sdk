@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
 )
 
 const GrepName = "grep"

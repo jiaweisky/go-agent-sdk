@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/tool"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // SessionHooks intercepts session lifecycle and tool execution.

@@ -3,9 +3,9 @@ package provider
 import (
 	"os"
 
-	"github.com/user/go-agent-sdk/llm"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // AnthropicProviderID is the provider id models.dev uses for Anthropic.

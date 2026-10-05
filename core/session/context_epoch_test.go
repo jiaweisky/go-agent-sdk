@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/user/go-agent-sdk/core/database"
-	"github.com/user/go-agent-sdk/core/systemcontext"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/database"
+	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 type contextEpochTestPublisher struct {

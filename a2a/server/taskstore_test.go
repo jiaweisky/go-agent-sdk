@@ -9,8 +9,8 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/taskstore"
 
-	"github.com/user/go-agent-sdk/core/database"
-	coresession "github.com/user/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/core/database"
+	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
 )
 
 func openTurnTestStore(t *testing.T) (*database.Database, *coresession.TurnStore) {

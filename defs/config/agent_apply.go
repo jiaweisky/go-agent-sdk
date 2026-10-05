@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // ApplyDirAgents merges agents from each directory's {agent,agents}/**/*.md and

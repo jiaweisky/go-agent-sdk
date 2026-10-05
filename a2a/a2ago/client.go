@@ -14,9 +14,9 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2aclient/agentcard"
 
-	a2acommon "github.com/user/go-agent-sdk/a2a"
-	"github.com/user/go-agent-sdk/a2a/client"
-	"github.com/user/go-agent-sdk/schema"
+	a2acommon "github.com/jiaweisky/go-agent-sdk/a2a"
+	"github.com/jiaweisky/go-agent-sdk/a2a/client"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 type goClient struct {

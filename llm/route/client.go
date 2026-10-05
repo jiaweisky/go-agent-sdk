@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"iter"
 
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/user/go-agent-sdk/llm/schema"
 )
 
 // RouteBody is how a route turns a request into a wire body, and how it validates

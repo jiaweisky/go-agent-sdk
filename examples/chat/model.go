@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/user/go-agent-sdk/examples/internal/util"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // models is the shared model catalog the chat runs with.

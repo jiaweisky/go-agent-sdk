@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/user/go-agent-sdk/llm/protocols/utils"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/route/transport"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/route/transport"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 const openaiResponsesAdapter = "openai-responses"

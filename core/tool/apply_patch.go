@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/go-agent-sdk/core"
-	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/jsonschema"
-	coreschema "github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
+	coreschema "github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 const ApplyPatchName = "apply_patch"

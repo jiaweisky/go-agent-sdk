@@ -3,10 +3,10 @@ package provider
 import (
 	"fmt"
 
-	"github.com/user/go-agent-sdk/llm"
-	"github.com/user/go-agent-sdk/llm/protocols/utils"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 // AmazonBedrockProviderID is the provider id used for Bedrock.

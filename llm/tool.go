@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/user/go-agent-sdk/jsonschema"
-	"github.com/user/go-agent-sdk/llm/schema"
 )
 
 // ToolExecuteContext identifies the tool call being executed.

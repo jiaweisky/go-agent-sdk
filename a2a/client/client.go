@@ -7,7 +7,7 @@ import (
 	"context"
 	"iter"
 
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // Card is the subset of a remote agent's AgentCard the SDK consumes.

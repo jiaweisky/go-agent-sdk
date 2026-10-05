@@ -3,9 +3,9 @@ package agent
 import (
 	"fmt"
 
-	"github.com/user/go-agent-sdk/llm/protocols"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // NewModelInfo builds a ModelInfo for a registered protocol id, for

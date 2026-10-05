@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/user/go-agent-sdk/mcp"
+	"github.com/jiaweisky/go-agent-sdk/mcp"
 )
 
 // TestStartNotesMCP guards the whole path the chat relies on: spawning the

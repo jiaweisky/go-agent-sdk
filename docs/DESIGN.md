@@ -675,10 +675,10 @@ func NewPermission(cfg PermissionConfig) Permission
 
 ## 11. SDK 层 (高级 API)
 
-公开入口是模块根包 `agent`，导入路径 `github.com/user/go-agent-sdk`。**已实现**，形态参考 `github/copilot-sdk/go`（`Client` → `CreateSession` → `Send`/`On`）。
+公开入口是模块根包 `agent`，导入路径 `github.com/jiaweisky/go-agent-sdk`。**已实现**，形态参考 `github/copilot-sdk/go`（`Client` → `CreateSession` → `Send`/`On`）。
 
 ```go
-import "github.com/user/go-agent-sdk"
+import "github.com/jiaweisky/go-agent-sdk"
 
 // ─── Client ─────────────────────────────────────────────
 type ClientOptions struct {

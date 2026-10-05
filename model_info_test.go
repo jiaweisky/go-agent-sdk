@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 func TestModelInfoProvider(t *testing.T) {

@@ -7,12 +7,12 @@ import (
 	"os"
 	"testing"
 
-	"github.com/user/go-agent-sdk/jsonschema"
-	"github.com/user/go-agent-sdk/llm"
-	"github.com/user/go-agent-sdk/llm/protocols"
-	"github.com/user/go-agent-sdk/llm/provider"
-	"github.com/user/go-agent-sdk/llm/route"
-	"github.com/user/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/llm"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols"
+	"github.com/jiaweisky/go-agent-sdk/llm/provider"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
 type testClient struct {

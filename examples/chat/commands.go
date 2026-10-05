@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/user/go-agent-sdk"
-	"github.com/user/go-agent-sdk/core/util"
-	"github.com/user/go-agent-sdk/mcp"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/mcp"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // skillsCommand lists the skills discovered from the config directories

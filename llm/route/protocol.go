@@ -1,9 +1,9 @@
 package route
 
 import (
+	"github.com/jiaweisky/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/llm/schema"
 	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/user/go-agent-sdk/jsonschema"
-	"github.com/user/go-agent-sdk/llm/schema"
 )
 
 // Protocol is a wire protocol: how to build its body and how to decode its

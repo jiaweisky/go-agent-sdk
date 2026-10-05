@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/user/go-agent-sdk/llm"
-	"github.com/user/go-agent-sdk/llm/route"
-	llmschema "github.com/user/go-agent-sdk/llm/schema"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/llm"
+	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 type compactionTestPublisher struct {

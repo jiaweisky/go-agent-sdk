@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/user/go-agent-sdk/core/session"
-	"github.com/user/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // forkedTitlePattern matches a title that already carries a "(fork #N)" suffix.
