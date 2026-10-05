@@ -160,6 +160,10 @@ and is validated before the handler runs.
   `agent.NewA2AFactory`, and serve it with `a2a/server`.
 - **A2A (client)** — set an agent's `Backend` to the A2A backend to delegate to a
   remote agent; the same path is used by the `task` tool.
+- **A2A server command** — `cmd/a2aserve` runs an A2A server exposing the
+  built-in `build` agent by default. It is configured by a YAML file and CLI
+  flags (no environment variables), with optional bearer auth. See
+  [cmd/a2aserve/README.md](cmd/a2aserve/README.md).
 
 ## Package layout
 
@@ -175,7 +179,8 @@ go-agent-sdk/     root `agent` package — high-level public API
 ├── a2a/          A2A protocol: client, a2ago (a2a-go adapter), server
 ├── defs/         agent and skill definitions loaded from markdown
 ├── schema/       shared types
-└── jsonschema/   typed JSON Schema AST for tool schemas
+├── jsonschema/   typed JSON Schema AST for tool schemas
+└── cmd/          commands (cmd/a2aserve runs an A2A server)
 ```
 
 ## Examples

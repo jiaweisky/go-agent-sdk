@@ -23,6 +23,7 @@
 | 2026-10-04 | Implementation landed (Go): `turn` entity/store, backend dispatch (reusing `runner.SessionRunner` + provider-executed tools), outbound `a2ago` + HITL loop + ADK `function_response` encoding, inbound `Executor`/`turnTaskStore`/card/handler, park+resume and restart fallback rebuild, usage/file_diff/tool trace; Phase 5: `WorkspaceResolver`, `ArtifactExternalizer`, `Options.NativeOptions` pass-through. §5.1 added an "implementation" column, §5.5 added auth/workspace landing, §8 added status (§5.1 / §5.5 / §8) |
 | 2026-10-04 | Cross-implementation interop test: `examples/adka2a` (an adk-go server, a separate Go module; the SDK does not depend on adk-go) + `examples/chat`'s `TestAdkA2AInterop` (SDK client ↔ ADK server); chat registers a remote `echo` agent (the name describes its role; "accessed over A2A" is recorded by the backend in the agent definition), via `/agent echo` or `task` delegation (§8 Phase 4) |
 | 2026-10-04 | Closed out previously unlanded items: inbound attachment spooling (raw/URL part → workspace + prompt path, §4.2/§5.3); outbound cancel/cleanup (Abort → remote `CancelTask`, only non-terminal and not input-required, §6.2); `turn` completion (local turns also persist a turn; `parent_turn_id`/`anchor_seq`/`end_seq`/`input_id` are all written; A2A inbound turns are exclusively owned by the task store, §5.6/A8); inbound steer (append a message to a working task → `SessionDeliverySteer`, §5.3); outbound remote `taskId`/`contextId` persisted to turn metadata and resumed on the next turn (§4.7 item 2) |
+| 2026-10-05 | Media and security landed: outbound user media now sent as A2A file parts (raw/URL, §4.2/§6.2); inbound raw parts spool with an extension derived from `MediaType`; the AgentCard declares truthful `defaultInputModes`/`defaultOutputModes`; new `server.Options.Security` enforces a bearer token on the RPC endpoints and declares `securitySchemes` (§5.1/§5.5); new `cmd/a2aserve` command serves the built-in `build` agent from a YAML config + CLI flags (no env) (§5.2) |
 
 ---
 
@@ -394,7 +395,8 @@ A2A natively has only **text / file / data** part kinds and does not define "too
 | `ToolProgress` | Data part, meta `sdk_type="tool_progress"`; or just send a `working` heartbeat | SDK-specific (§5.7) |
 | `Usage` / `StepEnded` | artifact metadata `adk_usage_metadata` | Cost observability |
 | `FileDiffInfo{File, Patch, Additions, Deletions, Status}` | Data part, meta `sdk_type="file_diff"` | SDK-specific; the code change itself is a consumable artifact |
-| Inbound non-text part (image / raw / file URL) | File **URL part** (`NewFileURLPart`) or **raw part** (`NewRawPart`) | The coding agent spools it to a path (§6.2) |
+| Outbound user media (the last user message's `PromptFileAttachment`/`MediaPart`) | File **raw part** (`NewRawPart` + `MediaType`/`Filename`) when it carries bytes, else **URL part** (`NewFileURLPart`) | `a2aBackend` decodes the media and sends it as file parts through `a2a/a2ago` |
+| Inbound non-text part (raw bytes / file URL) | File part | Raw parts are spooled into the workspace (`<workdir>/.a2a/attachments/<turnID>/`); a missing extension is derived from `MediaType` so the read tool recognizes the kind. URL parts are referenced (not fetched). |
 | Other structured data | Data part; ADK wraps unrecognized data as a `<a2a_datapart_json>…</a2a_datapart_json>` text/plain | Guarantees round-trip fidelity |
 
 ### 4.3 Metadata naming conventions
@@ -463,7 +465,7 @@ We **assemble on top of `a2a-go/v2/a2asrv` and do not reinvent the wheel**. The 
 |---|---|---|
 | JSON-RPC / REST(HTTP+JSON) bindings, SSE streams, keep-alive, panic handling | **a2a-go** (inherited) | `NewJSONRPCHandler` / `NewRESTHandler` / `WithTransportKeepAlive` |
 | Request pipeline: caps validation, concurrency, inactivity, clustering, interceptors, push, `GetTask`·`ListTasks`·`SubscribeToTask` | **a2a-go** (configured) | `NewHandler(executor, opts…)` + `WithTaskStore` / `WithPushNotifications` / … |
-| Authentication (`securitySchemes` / `CallContext`) | **a2a-go** (inherited) | `a2asrv/auth.go` |
+| Authentication declarations (`securitySchemes`) and request metadata (`CallContext`) | **a2a-go** (inherited); enforcement is ours via `Options.Security` | `a2asrv/auth.go`; see §5.5 |
 | AgentCard type + well-known / dynamic card handler | **a2a-go** (inherited) | `NewStaticAgentCardHandler` / `NewAgentCardHandler` |
 | A2A types (Task / Message / Part / Artifact / Event) | **a2a-go** | |
 | **Executor** (Execute / Cancel / Cleanup) | **we implement** | Implement `a2asrv.AgentExecutor`: map the session event stream to A2A events |
@@ -478,15 +480,17 @@ After this section we write only the "we" parts; rows marked **a2a-go** only exp
 
 | Component | Responsibility | Implementation (Go) |
 |---|---|---|
-| `CardBuilder` | Generates one AgentCard for **each explicitly exposed agent** (**one card = one agent**, each with its own URL/endpoint); its `skills` describe that agent's capabilities (entries may be tools / subagents / others; tools are not dumped by default); `capabilities` are declared truthfully (§3.4 / §6.2) | `a2a/server.buildCard` |
+| `CardBuilder` | Generates one AgentCard for **each explicitly exposed agent** (**one card = one agent**, each with its own URL/endpoint); its `skills` describe that agent's capabilities (entries may be tools / subagents / others; tools are not dumped by default); `capabilities`, `defaultInputModes`/`defaultOutputModes` and `securitySchemes` are declared truthfully (§3.4 / §6.2) | `a2a/server.buildCard` |
 | `Executor` | Implements `a2asrv.AgentExecutor` (Execute / Cancel): maps the `session.Send` event stream to A2A events (§4) | `a2a/server.executor` (dependencies injected via `executorConfig`) |
 | `TaskStore` | Implements `a2asrv/taskstore.Store` (Create / Update / Get / List), mapped to core `turn` (§5.6) | `a2a/server.turnTaskStore` (version/pending live in turn metadata) |
 | Pending (formerly `PendingRegistry`) | Parked turns + requestIDs awaiting reply | `executor.pending` + `a2aSession.turns` (a channel per `turnID`, released uniformly by `OnTurnEnd`) |
 | `WorkspaceResolver` | Caller identity → workspace / Root / permission ruleset | `a2a/server.WorkspaceResolver` (`WorkspaceResolverFunc`), resolved on each inbound call and handed to the `Factory` |
 | `ArtifactExternalizer` | Artifact externalization / rewrite hook (§8) | `a2a/server.ArtifactExternalizer`, called before each artifact event is emitted |
 | `Handler()` | Returns an `http.Handler`: composes a2asrv's card handler with `NewJSONRPCHandler` (the JSON-RPC binding) using the standard library `http.ServeMux`; with multiple exposed agents, provides each card URL/endpoint separately | `a2a/server.Server.Handler`; when `BaseURL` is empty, derives the card endpoint from the request Host |
+| `Security` (optional) | Bearer authentication on the RPC endpoints (cards stay public) | `a2a/server.Security`; `Handler` gates only the JSON-RPC endpoints (constant-time compare, 401); `buildCard` declares the matching HTTP bearer scheme |
 
 - `Factory`: the host provides a `server.Factory`; the SDK ships `agent.NewA2AFactory(client)` adapting a single-project `Client` (applying the inbound default deny ruleset and `Workspace.Permissions`). Multi-workspace is up to the host to implement `Factory` per `Workspace`.
+- Security: `server.Options.Security{Bearer, SchemeName}` requires `Authorization: Bearer <token>` without importing a2a-go, and keeps the card truthful. a2a-go ships no authenticator (it only attaches request metadata to `CallContext`), so the SDK enforces the token itself.
 - Escape hatch: `server.Options.NativeOptions []any` passes through `a2asrv.RequestHandlerOption` / `TransportOption` (auth, rate limiting, push, etc.); the signature uses `any` to keep a2a-go types out of the public API (§3.1).
 - Outbound: the `agent` side drives the remote via `a2aBackend` (through the `route.LLMClient` seam); `a2a/a2ago` is the only outbound adapter layer that imports a2a-go.
 
@@ -497,6 +501,7 @@ After this section we write only the "we" parts; rows marked **a2a-go** only exp
 - **HTTP dependencies use only the standard library `net/http`**; protocol bindings use the handlers provided by `a2a-go/v2/a2asrv` (`NewStaticAgentCardHandler` / `NewJSONRPCHandler`, which are themselves `http.Handler`). **Do not introduce a third-party router / server framework** (adk-go's `gorilla/mux` is just its launcher's composition choice).
 - The SDK **does not start a server, bind a port, or read env** itself: the host takes the `http.Handler` and mounts it on its own `http.Server`; tests use `httptest`.
 - Do not do adk-go's `launcher`-style tight coupling of the server with a startup method. Rationale: consistent with the SDK's long-standing philosophy of "narrow input, no env reading, no default location" (`Root` required, `ConfigDirs` explicit), and it makes embedding in an existing HTTP service simple.
+- The repository also ships a command, `cmd/a2aserve`, that serves one workspace: it parses a YAML config file and CLI flags (no environment variables), assembles the client, factory, task store and `Handler()`, and runs an `http.Server` with graceful shutdown. It is an application, not part of the SDK API.
 
 ### 5.3 A turn's lifecycle and message semantics
 
@@ -552,7 +557,7 @@ Conclusion: **the online path is always "park + resume"; "rebuild" is only a fal
 
 What an agent can do (tools / subagents / skills) is **decided when the agent is defined**; the card's `skills` only **describe** it externally — the protocol does not participate, and the caller cannot change it. This section addresses only **the trust boundary of the session triggered by an external call**.
 
-**Authentication**: already defined by A2A and **inherited directly from `a2a-go/v2/a2asrv`**, not decided by us — the card's `securitySchemes` declares the scheme, and the server validates the caller's request headers accordingly; we take the identity from `CallContext.User`. The host mounts a2a-go's auth interceptors etc. via `server.Options.NativeOptions` (§3.1 escape hatch).
+**Authentication**: A2A defines the card's `securitySchemes` and leaves enforcement to the host; a2a-go's `a2asrv` attaches request metadata to `CallContext` but ships **no authenticator**. The SDK therefore exposes a narrow seam, `server.Options.Security{Bearer, SchemeName}`: when set, `Handler` requires `Authorization: Bearer <token>` on the JSON-RPC endpoints (constant-time compare, 401) while the discovery card stays public, and `buildCard` declares the matching HTTP bearer scheme. Hosts needing other schemes (mTLS, OAuth) mount a2a-go options via `server.Options.NativeOptions` (§3.1 escape hatch).
 
 **Authorization**: the protocol **explicitly leaves this to the implementation** (spec §7.5: authorization is "based on the authenticated identity and its own policies", implementation-specific, MAY reference requested skills / actions attempted / data access policies). a2a-go provides only identity, not policy, so this part is still ours to define:
 
@@ -658,7 +663,7 @@ Compressing a stateful peer-agent loop into a synchronous function call necessar
 **What to send** (= A6)
 
 - Delegation (subagent form): send the `task` prompt; primary-agent form: send the first message;
-- When files / structured input are needed, **carry them explicitly as parts** (text / data / file), **never** implicitly stuffing local paths into text; a remote file part is spooled by its inbound adaptation (§4.2);
+- When files / structured input are needed, **carry them explicitly as parts** (text / data / file), **never** implicitly stuffing local paths into text; a remote file part is spooled by its inbound adaptation (§4.2). Implementation: `a2aBackend` turns the last user message's media into raw/URL file parts and sends them through `a2a/a2ago`.
 - When resuming the same task, carry `taskId` / `contextId` (§4.7);
 - The SDK has a durable (mirrored) child session and knows exactly what has been sent, so it sends only **new** input; unlike ADK it need not push back "which events the remote is missing" (§4.7).
 
