@@ -31,7 +31,8 @@ func run(ctx context.Context, cfg config) error {
 		ConfigDirs:       cfg.ConfigDirs,
 		Model:            cfg.Model,
 		Protocol:         schema.ProtocolID(cfg.Protocol),
-		Credentials:      credentialProvider(cfg.Credentials),
+		ModelInfo:        modelInfoProvider(cfg),
+		Credentials:      credentialProvider(cfg),
 	})
 	if err != nil {
 		return err
@@ -99,14 +100,34 @@ func exposeAgents(client *agent.Client, names []string) ([]schema.AgentInfo, err
 	return exposed, nil
 }
 
-// credentialProvider serves the configured per-provider API keys.
-func credentialProvider(credentials map[string]credential) agent.CredentialProvider {
-	return func(provider schema.ProviderID) (schema.Credential, error) {
-		configured, ok := credentials[string(provider)]
-		if !ok {
-			return schema.Credential{}, fmt.Errorf("no credentials configured for provider %q", provider)
+// credentialProvider returns the configured credential. The server runs one
+// fixed protocol, so the provider id (which equals the protocol id on this path)
+// does not select: there is a single credential.
+func credentialProvider(cfg config) agent.CredentialProvider {
+	return func(schema.ProviderID) (schema.Credential, error) {
+		credential := schema.Credential{APIKey: cfg.Credentials.APIKey}
+		if aws := cfg.Credentials.AWS; aws != nil {
+			credential.AWS = &schema.AWSCredentials{
+				Region:          aws.Region,
+				AccessKeyID:     aws.AccessKeyID,
+				SecretAccessKey: aws.SecretAccessKey,
+				SessionToken:    aws.SessionToken,
+			}
 		}
-		return schema.Credential{APIKey: configured.APIKey}, nil
+		return credential, nil
+	}
+}
+
+// modelInfoProvider supplies model metadata. Bedrock has no default endpoint
+// (it is region-specific), so its base URL is derived from the AWS region; every
+// other protocol uses its route's built-in endpoint.
+func modelInfoProvider(cfg config) agent.ModelInfoProvider {
+	baseURL := ""
+	if cfg.Protocol == "bedrock-converse" && cfg.Credentials.AWS != nil {
+		baseURL = fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", cfg.Credentials.AWS.Region)
+	}
+	return func(id string) (schema.ModelInfo, error) {
+		return agent.NewModelInfo(schema.ProtocolID(cfg.Protocol), id, baseURL, schema.ModelLimit{})
 	}
 }
 

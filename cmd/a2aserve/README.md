@@ -40,7 +40,12 @@ configDirs:
 model: gpt-4o-mini                  # required
 protocol: openai-responses          # required
 credentials:                        # required; the only secret source (no env)
-  openai: { apiKey: sk-... }
+  apiKey: sk-...                    # bearer/header protocols
+  # aws:                            # Amazon Bedrock (SigV4)
+  #   region: us-east-1
+  #   accessKeyId: ...
+  #   secretAccessKey: ...
+  #   sessionToken: ...             # optional
 agents: [build]                     # existing agent names to expose
 inboundPermissions:                 # default: SDK deny-by-default ruleset
   - { action: bash, resource: "*", effect: deny }

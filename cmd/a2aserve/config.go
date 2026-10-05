@@ -17,23 +17,33 @@ import (
 // then a YAML file, then CLI flags (flags win). No environment variables are
 // read.
 type config struct {
-	Listen             string                `yaml:"listen"`
-	BaseURL            string                `yaml:"baseURL"`
-	Root               string                `yaml:"root"`
-	WorkingDirectory   string                `yaml:"workingDirectory"`
-	ConfigDirs         []string              `yaml:"configDirs"`
-	Model              string                `yaml:"model"`
-	Protocol           string                `yaml:"protocol"`
-	Credentials        map[string]credential `yaml:"credentials"`
-	Agents             []string              `yaml:"agents"`
-	InboundPermissions []permissionRule      `yaml:"inboundPermissions"`
-	KeepAlive          string                `yaml:"keepAlive"`
-	Auth               *authConfig           `yaml:"auth"`
+	Listen             string            `yaml:"listen"`
+	BaseURL            string            `yaml:"baseURL"`
+	Root               string            `yaml:"root"`
+	WorkingDirectory   string            `yaml:"workingDirectory"`
+	ConfigDirs         []string          `yaml:"configDirs"`
+	Model              string            `yaml:"model"`
+	Protocol           string            `yaml:"protocol"`
+	Credentials        credentialsConfig `yaml:"credentials"`
+	Agents             []string          `yaml:"agents"`
+	InboundPermissions []permissionRule  `yaml:"inboundPermissions"`
+	KeepAlive          string            `yaml:"keepAlive"`
+	Auth               *authConfig       `yaml:"auth"`
 }
 
-// credential is a provider's secret. Only API keys are supported.
-type credential struct {
-	APIKey string `yaml:"apiKey"`
+// credentialsConfig holds the credential for the configured protocol: an API
+// key for bearer/header protocols, or AWS SigV4 for Bedrock.
+type credentialsConfig struct {
+	APIKey string          `yaml:"apiKey"`
+	AWS    *awsCredentials `yaml:"aws"`
+}
+
+// awsCredentials is the SigV4 credential for Amazon Bedrock.
+type awsCredentials struct {
+	Region          string `yaml:"region"`
+	AccessKeyID     string `yaml:"accessKeyId"`
+	SecretAccessKey string `yaml:"secretAccessKey"`
+	SessionToken    string `yaml:"sessionToken"`
 }
 
 // permissionRule is one entry of the inbound permission ruleset.
@@ -83,10 +93,15 @@ func (c config) validate() error {
 		return errors.New("protocol is required")
 	case len(c.Agents) == 0:
 		return errors.New("at least one agent is required")
-	case len(c.Credentials) == 0:
-		return errors.New("credentials are required")
+	case c.Credentials.APIKey == "" && c.Credentials.AWS == nil:
+		return errors.New("credentials must set apiKey or aws")
 	case c.Auth != nil && c.Auth.Bearer == "":
 		return errors.New("auth.bearer is required when auth is set")
+	}
+	if aws := c.Credentials.AWS; aws != nil {
+		if aws.Region == "" || aws.AccessKeyID == "" || aws.SecretAccessKey == "" {
+			return errors.New("aws credentials require region, accessKeyId and secretAccessKey")
+		}
 	}
 	if _, err := c.keepAliveDuration(); err != nil {
 		return err

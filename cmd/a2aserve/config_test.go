@@ -84,19 +84,25 @@ func TestFlagsOverrideFile(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	valid := config{Root: "/r", Model: "m", Protocol: "openai-responses", Agents: []string{"build"}, Credentials: map[string]credential{"openai": {}}}
+	valid := config{Root: "/r", Model: "m", Protocol: "openai-responses", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}}
 	if err := valid.validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
+	awsValid := config{Root: "/r", Model: "m", Protocol: "bedrock-converse", Agents: []string{"build"},
+		Credentials: credentialsConfig{AWS: &awsCredentials{Region: "us-east-1", AccessKeyID: "AK", SecretAccessKey: "SK"}}}
+	if err := awsValid.validate(); err != nil {
+		t.Fatalf("valid aws config rejected: %v", err)
+	}
 
 	cases := map[string]config{
-		"missing root":       {Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: map[string]credential{"openai": {}}},
-		"missing model":      {Root: "/r", Protocol: "p", Agents: []string{"build"}, Credentials: map[string]credential{"openai": {}}},
-		"missing protocol":   {Root: "/r", Model: "m", Agents: []string{"build"}, Credentials: map[string]credential{"openai": {}}},
-		"no agents":          {Root: "/r", Model: "m", Protocol: "p", Credentials: map[string]credential{"openai": {}}},
+		"missing root":       {Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"missing model":      {Root: "/r", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"missing protocol":   {Root: "/r", Model: "m", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"no agents":          {Root: "/r", Model: "m", Protocol: "p", Credentials: credentialsConfig{APIKey: "k"}},
 		"no credentials":     {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}},
-		"empty bearer":       {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: map[string]credential{"openai": {}}, Auth: &authConfig{}},
-		"negative keepAlive": {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: map[string]credential{"openai": {}}, KeepAlive: "-1s"},
+		"aws missing fields": {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{AWS: &awsCredentials{Region: "us-east-1"}}},
+		"empty bearer":       {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, Auth: &authConfig{}},
+		"negative keepAlive": {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, KeepAlive: "-1s"},
 	}
 	for name, cfg := range cases {
 		if err := cfg.validate(); err == nil {

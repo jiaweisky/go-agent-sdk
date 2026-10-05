@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 func newTestClient(t *testing.T) *agent.Client {
@@ -50,7 +51,7 @@ func TestRunServesCard(t *testing.T) {
 	cfg.Root = t.TempDir()
 	cfg.Model = "test-model"
 	cfg.Protocol = "openai-responses"
-	cfg.Credentials = map[string]credential{"openai": {APIKey: "test"}}
+	cfg.Credentials = credentialsConfig{APIKey: "test"}
 	cfg.KeepAlive = ""
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -80,6 +81,34 @@ func TestRunServesCard(t *testing.T) {
 	}
 	if lastErr != nil {
 		t.Fatalf("card not served: %v", lastErr)
+	}
+}
+
+func TestCredentialProviderAWS(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Credentials = credentialsConfig{AWS: &awsCredentials{
+		Region: "us-east-1", AccessKeyID: "AK", SecretAccessKey: "SK", SessionToken: "ST",
+	}}
+	credential, err := credentialProvider(cfg)(schema.ProviderID("bedrock-converse"))
+	if err != nil {
+		t.Fatalf("credentialProvider: %v", err)
+	}
+	if credential.AWS == nil || credential.AWS.Region != "us-east-1" ||
+		credential.AWS.AccessKeyID != "AK" || credential.AWS.SecretAccessKey != "SK" || credential.AWS.SessionToken != "ST" {
+		t.Fatalf("credential = %+v", credential)
+	}
+}
+
+func TestModelInfoProviderBedrockEndpoint(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Protocol = "bedrock-converse"
+	cfg.Credentials = credentialsConfig{AWS: &awsCredentials{Region: "eu-west-1", AccessKeyID: "AK", SecretAccessKey: "SK"}}
+	info, err := modelInfoProvider(cfg)("anthropic.claude-3-5-sonnet")
+	if err != nil {
+		t.Fatalf("modelInfoProvider: %v", err)
+	}
+	if info.API.URL == nil || *info.API.URL != "https://bedrock-runtime.eu-west-1.amazonaws.com" {
+		t.Fatalf("endpoint = %v, want the region-derived Bedrock endpoint", info.API.URL)
 	}
 }
 
