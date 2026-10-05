@@ -30,9 +30,20 @@ var registry = map[schema.ProtocolID]ProtocolEntry{
 	schema.ProtocolID(OpenAIResponsesHTTPRoute.ID):      {Route: OpenAIResponsesHTTPRoute, Scheme: AuthBearer},
 	schema.ProtocolID(OpenAIChatHTTPRoute.ID):           {Route: OpenAIChatHTTPRoute, Scheme: AuthBearer},
 	schema.ProtocolID(OpenAICompatibleChatHTTPRoute.ID): {Route: OpenAICompatibleChatHTTPRoute, Scheme: AuthBearer},
-	schema.ProtocolID(AnthropicMessagesHTTPRoute.ID):    {Route: AnthropicMessagesHTTPRoute, Scheme: AuthHeader, HeaderName: "x-api-key"},
-	schema.ProtocolID(GeminiHTTPRoute.ID):               {Route: GeminiHTTPRoute, Scheme: AuthHeader, HeaderName: "x-goog-api-key"},
-	schema.ProtocolID(BedrockConverseProtocol.ID):       {Route: BedrockConverseRoute(BedrockConverseProtocol), Scheme: AuthSigV4},
+	schema.ProtocolID(AnthropicMessagesHTTPRoute.ID): {
+		Route:      AnthropicMessagesHTTPRoute,
+		Scheme:     AuthHeader,
+		HeaderName: "x-api-key",
+	},
+	schema.ProtocolID(GeminiHTTPRoute.ID): {
+		Route:      GeminiHTTPRoute,
+		Scheme:     AuthHeader,
+		HeaderName: "x-goog-api-key",
+	},
+	schema.ProtocolID(BedrockConverseProtocol.ID): {
+		Route:  BedrockConverseRoute(BedrockConverseProtocol),
+		Scheme: AuthSigV4,
+	},
 }
 
 // LookupProtocol returns the entry for a protocol id.

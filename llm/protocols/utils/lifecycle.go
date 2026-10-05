@@ -43,7 +43,12 @@ func TextDelta(state *LifecycleState, events *[]schema.LLMEvent, id, text string
 }
 
 // ReasoningStart emits the start of a reasoning part.
-func ReasoningStart(state *LifecycleState, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
+func ReasoningStart(
+	state *LifecycleState,
+	events *[]schema.LLMEvent,
+	id string,
+	providerMetadata ...schema.ProviderMetadata,
+) {
 	if _, ok := state.Reasoning[id]; ok {
 		return
 	}
@@ -55,13 +60,23 @@ func ReasoningStart(state *LifecycleState, events *[]schema.LLMEvent, id string,
 
 // ReasoningDelta emits the start of a reasoning part when needed and then the
 // delta.
-func ReasoningDelta(state *LifecycleState, events *[]schema.LLMEvent, id, text string, providerMetadata ...schema.ProviderMetadata) {
+func ReasoningDelta(
+	state *LifecycleState,
+	events *[]schema.LLMEvent,
+	id, text string,
+	providerMetadata ...schema.ProviderMetadata,
+) {
 	ReasoningStart(state, events, id, providerMetadata...)
 	*events = append(*events, schema.NewReasoningDelta(id, text))
 }
 
 // ReasoningEnd emits the end of a reasoning part.
-func ReasoningEnd(state *LifecycleState, events *[]schema.LLMEvent, id string, providerMetadata ...schema.ProviderMetadata) {
+func ReasoningEnd(
+	state *LifecycleState,
+	events *[]schema.LLMEvent,
+	id string,
+	providerMetadata ...schema.ProviderMetadata,
+) {
 	if _, ok := state.Reasoning[id]; !ok {
 		return
 	}

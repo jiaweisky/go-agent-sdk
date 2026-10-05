@@ -136,7 +136,10 @@ func sessionValues(info v1.V1SessionInfo) ([]any, error) {
 	if info.Cost != nil {
 		cost = *info.Cost
 	}
-	var tokensInput, tokensOutput, tokensReasoning, tokensCacheRead, tokensCacheWrite any = float64(0), float64(0), float64(0), float64(0), float64(0)
+	var (
+		tokensInput, tokensOutput, tokensReasoning any = float64(0), float64(0), float64(0)
+		tokensCacheRead, tokensCacheWrite          any = float64(0), float64(0)
+	)
 	if info.Tokens != nil {
 		tokensInput = info.Tokens.Input
 		tokensOutput = info.Tokens.Output
@@ -172,7 +175,9 @@ func insertSession(tx DB, info v1.V1SessionInfo) (bool, error) {
 		}
 		placeholders += "?"
 	}
-	query := "INSERT INTO `session` (`" + joinColumns(sessionColumns) + "`) VALUES (" + placeholders + ") ON CONFLICT DO NOTHING"
+	query := "INSERT INTO `session` (`" + joinColumns(
+		sessionColumns,
+	) + "`) VALUES (" + placeholders + ") ON CONFLICT DO NOTHING"
 	result, err := tx.Exec(query, values...)
 	if err != nil {
 		return false, err
@@ -463,7 +468,15 @@ func (a *projectorAdapter) queryMessages(where string, args ...any) ([]SessionMe
 	var result []SessionMessageRow
 	for rows.Next() {
 		var row SessionMessageRow
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Type, &row.Seq, &row.TimeCreated, &row.TimeUpdated, &row.Data); err != nil {
+		if err := rows.Scan(
+			&row.ID,
+			&row.SessionID,
+			&row.Type,
+			&row.Seq,
+			&row.TimeCreated,
+			&row.TimeUpdated,
+			&row.Data,
+		); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -574,7 +587,13 @@ func (a *projectorAdapter) AppendMessage(message schema.SessionMessage) error {
 func insertMessageRow(tx DB, id, sessionID, messageType string, seq, created, updated int64, data string) error {
 	_, err := tx.Exec(
 		"INSERT INTO `session_message` (`id`,`session_id`,`type`,`seq`,`time_created`,`time_updated`,`data`) VALUES (?,?,?,?,?,?,?)",
-		id, sessionID, messageType, seq, created, updated, data,
+		id,
+		sessionID,
+		messageType,
+		seq,
+		created,
+		updated,
+		data,
 	)
 	return err
 }
@@ -596,7 +615,11 @@ func projectV1Created(event schema.EventPayload, tx DB) error {
 		return &SessionAlreadyProjected{}
 	}
 	if data.Info.WorkspaceID != nil {
-		if _, err := tx.Exec("UPDATE `workspace` SET `time_used` = ? WHERE `id` = ?", time.Now().UnixMilli(), string(*data.Info.WorkspaceID)); err != nil {
+		if _, err := tx.Exec(
+			"UPDATE `workspace` SET `time_used` = ? WHERE `id` = ?",
+			time.Now().UnixMilli(),
+			string(*data.Info.WorkspaceID),
+		); err != nil {
 			return err
 		}
 	}
@@ -651,7 +674,11 @@ func projectV1MessageRemoved(event schema.EventPayload, tx DB) error {
 	if err != nil {
 		return err
 	}
-	rows, err := tx.Query("SELECT `data` FROM `part` WHERE `message_id` = ? AND `session_id` = ?", string(data.MessageID), string(data.SessionID))
+	rows, err := tx.Query(
+		"SELECT `data` FROM `part` WHERE `message_id` = ? AND `session_id` = ?",
+		string(data.MessageID),
+		string(data.SessionID),
+	)
 	if err != nil {
 		return err
 	}
@@ -678,7 +705,11 @@ func projectV1MessageRemoved(event schema.EventPayload, tx DB) error {
 			}
 		}
 	}
-	_, err = tx.Exec("DELETE FROM `message` WHERE `id` = ? AND `session_id` = ?", string(data.MessageID), string(data.SessionID))
+	_, err = tx.Exec(
+		"DELETE FROM `message` WHERE `id` = ? AND `session_id` = ?",
+		string(data.MessageID),
+		string(data.SessionID),
+	)
 	return err
 }
 
@@ -688,7 +719,8 @@ func projectV1PartRemoved(event schema.EventPayload, tx DB) error {
 		return err
 	}
 	var raw string
-	err = tx.QueryRow("SELECT `data` FROM `part` WHERE `id` = ? AND `session_id` = ?", string(data.PartID), string(data.SessionID)).Scan(&raw)
+	err = tx.QueryRow("SELECT `data` FROM `part` WHERE `id` = ? AND `session_id` = ?", string(data.PartID), string(data.SessionID)).
+		Scan(&raw)
 	if err == nil {
 		var part map[string]any
 		if json.Unmarshal([]byte(raw), &part) == nil {
@@ -718,7 +750,8 @@ func projectV1PartUpdated(event schema.EventPayload, tx DB) error {
 	messageID, _ := data.Part["messageID"].(string)
 	sessionID, _ := data.Part["sessionID"].(string)
 	var previousRaw, previousSessionID string
-	previousErr := tx.QueryRow("SELECT `session_id`, `data` FROM `part` WHERE `id` = ?", id).Scan(&previousSessionID, &previousRaw)
+	previousErr := tx.QueryRow("SELECT `session_id`, `data` FROM `part` WHERE `id` = ?", id).
+		Scan(&previousSessionID, &previousRaw)
 	_, err = tx.Exec(
 		"INSERT INTO `part` (`id`,`message_id`,`session_id`,`time_created`,`time_updated`,`data`) VALUES (?,?,?,?,?,?) "+
 			"ON CONFLICT(`id`) DO UPDATE SET `data` = excluded.`data`",

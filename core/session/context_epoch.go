@@ -22,7 +22,11 @@ type ContextEpochPrepared struct {
 // hand it the transaction handle, so the stored snapshot advances atomically
 // with the ContextUpdated event and is not replayed.
 type ContextEpochPublisher interface {
-	PublishWithCommit(def schema.EventDefinition, data any, commit func(tx DB, seq int) error) (*schema.EventPayloadDurable, error)
+	PublishWithCommit(
+		def schema.EventDefinition,
+		data any,
+		commit func(tx DB, seq int) error,
+	) (*schema.EventPayloadDurable, error)
 }
 
 type contextEpochRow struct {
@@ -34,7 +38,11 @@ type contextEpochRow struct {
 
 // ContextEpochInitialize creates the session's epoch; it returns nil when the
 // session already has one.
-func ContextEpochInitialize(db DB, context systemcontext.SystemContext, sessionID schema.SessionID) (*ContextEpochPrepared, error) {
+func ContextEpochInitialize(
+	db DB,
+	context systemcontext.SystemContext,
+	sessionID schema.SessionID,
+) (*ContextEpochPrepared, error) {
 	exists, err := contextEpochExists(db, sessionID)
 	if err != nil {
 		return nil, err
@@ -141,7 +149,8 @@ func ContextEpochReset(db DB, sessionID schema.SessionID) error {
 
 func contextEpochExists(db DB, sessionID schema.SessionID) (bool, error) {
 	var stored string
-	err := db.QueryRow("SELECT `session_id` FROM `session_context_epoch` WHERE `session_id` = ?", string(sessionID)).Scan(&stored)
+	err := db.QueryRow("SELECT `session_id` FROM `session_context_epoch` WHERE `session_id` = ?", string(sessionID)).
+		Scan(&stored)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -185,7 +194,12 @@ func contextEpochInsert(db DB, sessionID schema.SessionID, generation systemcont
 	return baselineSeq, nil
 }
 
-func contextEpochReplace(db DB, sessionID schema.SessionID, baselineSeq int64, generation systemcontext.Generation) error {
+func contextEpochReplace(
+	db DB,
+	sessionID schema.SessionID,
+	baselineSeq int64,
+	generation systemcontext.Generation,
+) error {
 	snapshot, err := json.Marshal(generation.Snapshot)
 	if err != nil {
 		return err

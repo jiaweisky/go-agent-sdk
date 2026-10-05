@@ -54,7 +54,15 @@ func RevertPlan(db DB, sessionID schema.SessionID, messageID schema.MessageID) (
 	files := map[schema.RelativePath]string{}
 	for rows.Next() {
 		var row SessionMessageRow
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Type, &row.Seq, &row.TimeCreated, &row.TimeUpdated, &row.Data); err != nil {
+		if err := rows.Scan(
+			&row.ID,
+			&row.SessionID,
+			&row.Type,
+			&row.Seq,
+			&row.TimeCreated,
+			&row.TimeUpdated,
+			&row.Data,
+		); err != nil {
 			return nil, err
 		}
 		message, err := decodeMessageRow(row)
@@ -132,7 +140,12 @@ func revertOriginalSnapshot(snapshot RevertSnapshot, session schema.SessionInfo)
 }
 
 // revertRestoreFiles maps each file to the tree it should be restored from.
-func revertRestoreFiles(original *string, session schema.SessionInfo, next map[schema.RelativePath]string, files *bool) map[schema.RelativePath]string {
+func revertRestoreFiles(
+	original *string,
+	session schema.SessionInfo,
+	next map[schema.RelativePath]string,
+	files *bool,
+) map[schema.RelativePath]string {
 	restore := map[schema.RelativePath]string{}
 	if original != nil && session.Revert != nil {
 		for _, file := range session.Revert.Files {
@@ -158,7 +171,11 @@ func revertPaths(next map[schema.RelativePath]string, files *bool) []schema.Rela
 }
 
 // revertDiff computes the staged diff and its concatenated, trimmed patch text.
-func revertDiff(snapshot RevertSnapshot, original *string, paths []schema.RelativePath) ([]schema.RevertFileDiff, string, error) {
+func revertDiff(
+	snapshot RevertSnapshot,
+	original *string,
+	paths []schema.RelativePath,
+) ([]schema.RevertFileDiff, string, error) {
 	if original == nil {
 		return []schema.RevertFileDiff{}, "", nil
 	}

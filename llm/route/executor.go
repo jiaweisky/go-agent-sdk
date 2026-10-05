@@ -25,9 +25,14 @@ const baseDelayMs = 500
 const maxDelayMs = 10000
 const redacted = "<redacted>"
 
-var sensitiveNameRE = regexp.MustCompile(`(?i)authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|credential|signature|x-amz-signature`)
+var sensitiveNameRE = regexp.MustCompile(
+	`(?i)authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|` +
+		`id[-_]?token|token|secret|credential|signature|x-amz-signature`,
+)
 var shortQueryNameRE = regexp.MustCompile(`(?i)^(key|sig)$`)
-var sensitiveBodyFieldSource = `authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|credential|signature|x-amz-signature|key`
+
+var sensitiveBodyFieldSource = `authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|` +
+	`id[-_]?token|token|secret|credential|signature|x-amz-signature|key`
 var redactJSONFieldRE = regexp.MustCompile(`("(?:` + sensitiveBodyFieldSource + `)"\s*:\s*)"[^"]*"`)
 var redactQueryFieldRE = regexp.MustCompile(`((?:` + sensitiveBodyFieldSource + `)=)[^&\s"]+`)
 
@@ -71,7 +76,10 @@ func redactURL(value string) string {
 }
 
 func requestID(headers map[string]string) string {
-	for _, k := range []string{"x-request-id", "request-id", "x-amzn-requestid", "x-amz-request-id", "x-goog-request-id", "cf-ray"} {
+	for _, k := range []string{
+		"x-request-id", "request-id", "x-amzn-requestid",
+		"x-amz-request-id", "x-goog-request-id", "cf-ray",
+	} {
 		if v, ok := headers[k]; ok {
 			return v
 		}
@@ -236,7 +244,12 @@ func classifyResponse(req *http.Request, status int, body string, headers map[st
 	}
 }
 
-func classifyStatusReason(status int, body, msg string, retryAfterMs *int, httpCtx *schema.HttpContext) schema.LLMErrorReason {
+func classifyStatusReason(
+	status int,
+	body, msg string,
+	retryAfterMs *int,
+	httpCtx *schema.HttpContext,
+) schema.LLMErrorReason {
 	if contentPolicyRE.MatchString(body) {
 		return schema.NewContentPolicyReason(msg, schema.WithHttpContext(*httpCtx))
 	}
@@ -275,7 +288,12 @@ func classifyInvalidRequestReason(body, msg string, httpCtx *schema.HttpContext)
 	return schema.NewInvalidRequestReason(msg, opts...)
 }
 
-func classifyServerReason(msg string, status int, retryAfterMs *int, httpCtx *schema.HttpContext) schema.LLMErrorReason {
+func classifyServerReason(
+	msg string,
+	status int,
+	retryAfterMs *int,
+	httpCtx *schema.HttpContext,
+) schema.LLMErrorReason {
 	opts := []schema.ReasonOption{schema.WithHttpContext(*httpCtx)}
 	if retryAfterMs != nil {
 		opts = append(opts, schema.WithRetryAfterMs(*retryAfterMs))
@@ -295,7 +313,15 @@ func requestDetails(req *http.Request) schema.HttpRequestDetails {
 	}
 }
 
-func httpContextFrom(req *http.Request, status int, body string, truncated bool, headers map[string]string, reqID string, rateLimit *schema.HttpRateLimitDetails) *schema.HttpContext {
+func httpContextFrom(
+	req *http.Request,
+	status int,
+	body string,
+	truncated bool,
+	headers map[string]string,
+	reqID string,
+	rateLimit *schema.HttpRateLimitDetails,
+) *schema.HttpContext {
 	hc := &schema.HttpContext{
 		Request:   requestDetails(req),
 		Response:  &schema.HttpResponseDetails{Status: status, Headers: redactHeaders(headers)},

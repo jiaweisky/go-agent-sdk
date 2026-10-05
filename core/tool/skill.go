@@ -16,14 +16,20 @@ const SkillName = "skill"
 
 const skillFileLimit = 10
 
-const SkillDescription = "Load a specialized skill when the task at hand matches one of the available skills in the system context.\n" +
+const SkillDescription = "Load a specialized skill when the task at hand matches one of the available skills " +
+	"in the system context.\n" +
 	"\n" +
-	"Use this tool to inject the skill's instructions and resources into the current conversation. The output may contain detailed workflow guidance as well as references to scripts, files, etc. in the same directory as the skill.\n" +
+	"Use this tool to inject the skill's instructions and resources into the current conversation. " +
+	"The output may contain detailed workflow guidance as well as references to scripts, files, etc. " +
+	"in the same directory as the skill.\n" +
 	"\n" +
 	"The skill name must match one of the available skills in the system context."
 
 var SkillInputSchema = jsonschema.Object(
-	jsonschema.Required("name", jsonschema.String(jsonschema.Description("The name of the skill from the available skills list"))),
+	jsonschema.Required(
+		"name",
+		jsonschema.String(jsonschema.Description("The name of the skill from the available skills list")),
+	),
 )
 
 var SkillOutputSchema = jsonschema.Object(

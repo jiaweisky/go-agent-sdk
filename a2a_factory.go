@@ -80,7 +80,10 @@ func NewA2AFactory(client *Client, opts ...A2AFactoryOption) server.Factory {
 // serve multiple workspaces implement server.Factory directly. The workspace's
 // Permissions are applied when set.
 func (f *a2aFactory) CreateSession(ctx context.Context, req server.SessionRequest) (server.Session, error) {
-	session, err := f.client.CreateSession(ctx, &SessionConfig{Agent: req.AgentID, Permissions: f.permissionsFor(req.Workspace)})
+	session, err := f.client.CreateSession(
+		ctx,
+		&SessionConfig{Agent: req.AgentID, Permissions: f.permissionsFor(req.Workspace)},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +92,11 @@ func (f *a2aFactory) CreateSession(ctx context.Context, req server.SessionReques
 }
 
 // ResumeSession implements server.Factory.
-func (f *a2aFactory) ResumeSession(ctx context.Context, sessionID string, workspace server.Workspace) (server.Session, error) {
+func (f *a2aFactory) ResumeSession(
+	ctx context.Context,
+	sessionID string,
+	workspace server.Workspace,
+) (server.Session, error) {
 	session, err := f.client.ResumeSession(ctx, sessionID, &SessionConfig{Permissions: f.permissionsFor(workspace)})
 	if err != nil {
 		return nil, err
@@ -310,7 +317,12 @@ func a2aEventFrom(event Event) (server.Event, bool) {
 	case PermissionAsked:
 		return server.Event{Kind: server.EventAwaitInput, RequestID: e.Request.ID}, true
 	case QuestionAsked:
-		return server.Event{Kind: server.EventAwaitInput, RequestID: e.Request.ID, IsQuestion: true, Questions: e.Request.Questions}, true
+		return server.Event{
+			Kind:       server.EventAwaitInput,
+			RequestID:  e.Request.ID,
+			IsQuestion: true,
+			Questions:  e.Request.Questions,
+		}, true
 	case ErrorEvent:
 		return server.Event{Kind: server.EventError, Err: e.Err}, true
 	case Idle:

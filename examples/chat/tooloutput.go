@@ -62,7 +62,9 @@ func (c *chat) cleanupToolOutput() {
 		return
 	}
 	after := countToolOutputFiles(dir)
-	c.console.write(fmt.Sprintf("tool output: scanned %d, removed %d (only files older than 7 days)\n", before, before-after))
+	c.console.write(
+		fmt.Sprintf("tool output: scanned %d, removed %d (only files older than 7 days)\n", before, before-after),
+	)
 }
 
 // toolOutputDir is where the SDK spills oversized tool output. The SDK exposes no

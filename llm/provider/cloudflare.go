@@ -102,7 +102,10 @@ func cloudflareWorkersAIAuth(input CloudflareWorkersAIConfig) *route.Auth {
 
 // NewCloudflareAIGateway builds the AI Gateway facade over the OpenAI-compatible
 // Chat route.
-func NewCloudflareAIGateway(openAICompatibleChatRoute route.Route, input CloudflareAIGatewayConfig) CloudflareAIGatewayProvider {
+func NewCloudflareAIGateway(
+	openAICompatibleChatRoute route.Route,
+	input CloudflareAIGatewayConfig,
+) CloudflareAIGatewayProvider {
 	preconfigured := openAICompatibleChatRoute.With(route.RoutePatch{
 		ID:       string(CloudflareAIGatewayProviderID),
 		Provider: string(CloudflareAIGatewayProviderID),
@@ -123,7 +126,10 @@ func NewCloudflareAIGateway(openAICompatibleChatRoute route.Route, input Cloudfl
 
 // NewCloudflareWorkersAI builds the Workers AI facade over the OpenAI-compatible
 // Chat route.
-func NewCloudflareWorkersAI(openAICompatibleChatRoute route.Route, input CloudflareWorkersAIConfig) CloudflareWorkersAIProvider {
+func NewCloudflareWorkersAI(
+	openAICompatibleChatRoute route.Route,
+	input CloudflareWorkersAIConfig,
+) CloudflareWorkersAIProvider {
 	preconfigured := openAICompatibleChatRoute.With(route.RoutePatch{
 		ID:       string(CloudflareWorkersAIProviderID),
 		Provider: string(CloudflareWorkersAIProviderID),

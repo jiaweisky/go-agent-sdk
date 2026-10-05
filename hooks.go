@@ -143,7 +143,10 @@ type hookedRegistry struct {
 	hooksFor func(sessionID string) *SessionHooks
 }
 
-func (h hookedRegistry) MaterializeFor(sessionID string, permissions []core.PermissionRule) (*tool.Materialization, error) {
+func (h hookedRegistry) MaterializeFor(
+	sessionID string,
+	permissions []core.PermissionRule,
+) (*tool.Materialization, error) {
 	mat, err := h.inner.MaterializeFor(sessionID, permissions)
 	if err != nil {
 		return nil, err

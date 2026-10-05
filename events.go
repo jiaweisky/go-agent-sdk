@@ -556,7 +556,11 @@ func mapRunEvent(eventType string, data map[string]any, sessionID, messageID str
 	case schema.SessionEventTitleUpdated.Type:
 		return TitleUpdated{SessionID: sessionID, Title: fieldString(data, "title")}, true
 	case schema.SessionEventCompactionStarted.Type:
-		return CompactionStarted{SessionID: sessionID, MessageID: fieldString(data, "messageID"), Reason: data["reason"]}, true
+		return CompactionStarted{
+			SessionID: sessionID,
+			MessageID: fieldString(data, "messageID"),
+			Reason:    data["reason"],
+		}, true
 	case schema.SessionEventStepStarted.Type:
 		return StepStarted{
 			SessionID: sessionID, MessageID: messageID, Agent: fieldString(data, "agent"),

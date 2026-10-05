@@ -78,7 +78,11 @@ func (c *RepositoryCache) Ensure(input RepositoryCacheEnsureInput) (RepositoryCa
 	return result, opErr
 }
 
-func (c *RepositoryCache) ensureLocked(reference, cloneTarget *RepositoryReference, localPath string, input RepositoryCacheEnsureInput) (RepositoryCacheResult, error) {
+func (c *RepositoryCache) ensureLocked(
+	reference, cloneTarget *RepositoryReference,
+	localPath string,
+	input RepositoryCacheEnsureInput,
+) (RepositoryCacheResult, error) {
 	if err := EnsureDir(filepath.Dir(localPath)); err != nil {
 		return RepositoryCacheResult{}, err
 	}
@@ -132,7 +136,11 @@ func (c *RepositoryCache) discoverExisting(localPath string) (*GitRepository, *R
 }
 
 // canReuse reports whether the cached checkout already points at cloneTarget.
-func (c *RepositoryCache) canReuse(existing *GitRepository, origin, cloneTarget *RepositoryReference, localPath string) bool {
+func (c *RepositoryCache) canReuse(
+	existing *GitRepository,
+	origin, cloneTarget *RepositoryReference,
+	localPath string,
+) bool {
 	if existing == nil || origin == nil || !RepositorySame(origin, cloneTarget) {
 		return false
 	}

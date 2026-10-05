@@ -85,7 +85,15 @@ func messageRows(
 	var result []SessionMessageRow
 	for rows.Next() {
 		var row SessionMessageRow
-		if err := rows.Scan(&row.ID, &row.SessionID, &row.Type, &row.Seq, &row.TimeCreated, &row.TimeUpdated, &row.Data); err != nil {
+		if err := rows.Scan(
+			&row.ID,
+			&row.SessionID,
+			&row.Type,
+			&row.Seq,
+			&row.TimeCreated,
+			&row.TimeUpdated,
+			&row.Data,
+		); err != nil {
 			return nil, err
 		}
 		result = append(result, row)
@@ -161,7 +169,11 @@ func EntriesForRunner(db *database.Database, sessionID schema.SessionID, baselin
 }
 
 // LoadForRunner returns the messages the runner should send after a baseline.
-func LoadForRunner(db *database.Database, sessionID schema.SessionID, baselineSeq int64) ([]schema.SessionMessage, error) {
+func LoadForRunner(
+	db *database.Database,
+	sessionID schema.SessionID,
+	baselineSeq int64,
+) ([]schema.SessionMessage, error) {
 	entries, err := EntriesForRunner(db, sessionID, baselineSeq)
 	if err != nil {
 		return nil, err

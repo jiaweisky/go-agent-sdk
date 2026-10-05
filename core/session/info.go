@@ -9,7 +9,8 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
-const sessionSelectColumns = "`id`,`project_id`,`workspace_id`,`parent_id`,`slug`,`directory`,`path`,`title`,`version`,`share_url`," +
+const sessionSelectColumns = "`id`,`project_id`,`workspace_id`,`parent_id`,`slug`,`directory`," +
+	"`path`,`title`,`version`,`share_url`," +
 	"`summary_additions`,`summary_deletions`,`summary_files`,`summary_diffs`,`metadata`,`cost`," +
 	"`tokens_input`,`tokens_output`,`tokens_reasoning`,`tokens_cache_read`,`tokens_cache_write`," +
 	"`revert`,`permission`,`agent`,`model`,`time_created`,`time_updated`,`time_compacting`,`time_archived`"

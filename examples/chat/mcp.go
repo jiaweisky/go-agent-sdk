@@ -84,7 +84,9 @@ func (c *chat) writeMCPPrompt(client *mcp.Client, rest string) {
 		return
 	case 1:
 	default:
-		c.console.write(fmt.Sprintf("ambiguous MCP prompt %s; specify the server: /mcp prompt <server>:<name> [k=v ...]\n", name))
+		c.console.write(
+			fmt.Sprintf("ambiguous MCP prompt %s; specify the server: /mcp prompt <server>:<name> [k=v ...]\n", name),
+		)
 		return
 	}
 	entry := matches[0]
@@ -129,7 +131,10 @@ func (c *chat) writeMCPResources(client *mcp.Client) {
 		items := make([]mcpListItem, 0, len(templates))
 		for _, key := range slices.Sorted(maps.Keys(templates)) {
 			entry := templates[key]
-			items = append(items, mcpListItem{label: entry.URITemplate, description: serverLabel(entry.Client, entry.Description)})
+			items = append(
+				items,
+				mcpListItem{label: entry.URITemplate, description: serverLabel(entry.Client, entry.Description)},
+			)
 		}
 		c.writeMCPList("MCP resource templates", items)
 	}

@@ -10,6 +10,7 @@ import (
 
 const QuestionName = "question"
 
+//nolint:lll // prose prompt
 const QuestionDescription = `Use this tool when you need to ask the user questions during execution. This allows you to:
 1. Gather user preferences or requirements
 2. Clarify ambiguous instructions

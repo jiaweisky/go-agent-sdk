@@ -175,7 +175,10 @@ var helpCommands = []helpEntry{
 	{"/questions", "list pending questions"},
 	{"/answer <#n> <text> | /reject <#n>", "resolve a held question"},
 	{"/plugin remove <id>", "unload a plugin (runs its cleanup)"},
-	{"/reference [add <name> <path> | add-git <name> <repo> [<branch>] | remove <name>]", "list or manage reference sources"},
+	{
+		"/reference [add <name> <path> | add-git <name> <repo> [<branch>] | remove <name>]",
+		"list or manage reference sources",
+	},
 	{"/persona [--replace] <text>", "start a session with an appended or replaced system prompt"},
 	{"/prompt add|replace|remove <section> [<text>]", "start a session with a customized prompt section"},
 	{"/history", "show the session's stored messages"},

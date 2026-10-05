@@ -92,24 +92,27 @@ func NewLLMEventPublisher(events session.EventPublisher, input LLMEventPublisher
 		})
 		return err
 	})
-	p.reasoning = newLLMFragmentSet("reasoning", func(id, value string, providerMetadata llmschema.ProviderMetadata) error {
-		assistantID, err := p.currentAssistantMessageID()
-		if err != nil {
+	p.reasoning = newLLMFragmentSet(
+		"reasoning",
+		func(id, value string, providerMetadata llmschema.ProviderMetadata) error {
+			assistantID, err := p.currentAssistantMessageID()
+			if err != nil {
+				return err
+			}
+			data := map[string]any{
+				"sessionID":          p.input.SessionID,
+				"assistantMessageID": assistantID,
+				"timestamp":          time.Now().UnixMilli(),
+				"reasoningID":        id,
+				"text":               value,
+			}
+			if providerMetadata != nil {
+				data["providerMetadata"] = providerMetadata
+			}
+			_, err = p.events.Publish(schema.SessionEventReasoningEnded, data)
 			return err
-		}
-		data := map[string]any{
-			"sessionID":          p.input.SessionID,
-			"assistantMessageID": assistantID,
-			"timestamp":          time.Now().UnixMilli(),
-			"reasoningID":        id,
-			"text":               value,
-		}
-		if providerMetadata != nil {
-			data["providerMetadata"] = providerMetadata
-		}
-		_, err = p.events.Publish(schema.SessionEventReasoningEnded, data)
-		return err
-	})
+		},
+	)
 	p.toolInput = newLLMFragmentSet("tool input", func(callID, value string, _ llmschema.ProviderMetadata) error {
 		tool := p.tools[callID]
 		if tool == nil {
@@ -626,7 +629,10 @@ type llmFragmentSet struct {
 	ended  func(id, value string, providerMetadata llmschema.ProviderMetadata) error
 }
 
-func newLLMFragmentSet(name string, ended func(id, value string, providerMetadata llmschema.ProviderMetadata) error) *llmFragmentSet {
+func newLLMFragmentSet(
+	name string,
+	ended func(id, value string, providerMetadata llmschema.ProviderMetadata) error,
+) *llmFragmentSet {
 	return &llmFragmentSet{name: name, chunks: map[string][]string{}, ended: ended}
 }
 

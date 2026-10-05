@@ -102,7 +102,9 @@ func (c *chat) permissionsCommand() {
 	}
 	c.console.write(fmt.Sprintf("%sPending permissions (%d):%s\n", bold, len(pending), reset))
 	for i, request := range pending {
-		c.console.write(fmt.Sprintf("  %s#%d%s %s %s\n", cyan, i+1, reset, request.Action, strings.Join(request.Resources, ", ")))
+		c.console.write(
+			fmt.Sprintf("  %s#%d%s %s %s\n", cyan, i+1, reset, request.Action, strings.Join(request.Resources, ", ")),
+		)
 	}
 }
 

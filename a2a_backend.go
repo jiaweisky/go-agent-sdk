@@ -98,7 +98,10 @@ func (l *a2aBackend) Generate(context.Context, *llmschema.LLMRequest) (*llmschem
 	return nil, fmt.Errorf("a2a: Generate is not supported for remote agents; use Stream")
 }
 
-func (l *a2aBackend) Stream(ctx context.Context, req *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+func (l *a2aBackend) Stream(
+	ctx context.Context,
+	req *llmschema.LLMRequest,
+) (iter.Seq2[llmschema.LLMEvent, error], error) {
 	remote, err := l.backends.remote(ctx, l.spec)
 	if err != nil {
 		return func(yield func(llmschema.LLMEvent, error) bool) { yield(llmschema.LLMEvent{}, err) }, nil
@@ -145,7 +148,12 @@ const (
 
 // runLeg consumes one remote streaming leg, forwarding its events. When the
 // remote parks at input-required it returns the request that resumes it.
-func (l *a2aBackend) runLeg(ctx context.Context, remote client.Client, send client.Request, out *a2aStream) (client.Request, legOutcome, error) {
+func (l *a2aBackend) runLeg(
+	ctx context.Context,
+	remote client.Client,
+	send client.Request,
+	out *a2aStream,
+) (client.Request, legOutcome, error) {
 	for event, sendErr := range remote.Send(ctx, send) {
 		if sendErr != nil {
 			if ctx.Err() != nil && !out.settled && out.remoteTaskID != "" {

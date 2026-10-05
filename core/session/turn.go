@@ -32,9 +32,19 @@ func (s *TurnStore) Create(info schema.TurnInfo) error {
 	_, err = s.db.DB.Exec(
 		"INSERT INTO `turn` (`id`,`session_id`,`parent_turn_id`,`input_id`,`state`,`pending_request_id`,`agent`,`model`,`anchor_seq`,`end_seq`,`metadata`,`time_created`,`time_updated`) "+
 			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-		string(info.ID), string(info.SessionID), turnStringPtr(info.ParentTurnID), turnStringPtr(info.InputID),
-		string(info.State), info.PendingRequestID, turnStringPtr(info.Agent), model,
-		info.AnchorSeq, info.EndSeq, metadata, info.TimeCreated, info.TimeUpdated,
+		string(info.ID),
+		string(info.SessionID),
+		turnStringPtr(info.ParentTurnID),
+		turnStringPtr(info.InputID),
+		string(info.State),
+		info.PendingRequestID,
+		turnStringPtr(info.Agent),
+		model,
+		info.AnchorSeq,
+		info.EndSeq,
+		metadata,
+		info.TimeCreated,
+		info.TimeUpdated,
 	)
 	return err
 }
@@ -51,8 +61,15 @@ func (s *TurnStore) Update(info schema.TurnInfo) error {
 	}
 	res, err := s.db.DB.Exec(
 		"UPDATE `turn` SET `state`=?,`pending_request_id`=?,`agent`=?,`model`=?,`anchor_seq`=?,`end_seq`=?,`metadata`=?,`time_updated`=? WHERE `id`=?",
-		string(info.State), info.PendingRequestID, turnStringPtr(info.Agent), model,
-		info.AnchorSeq, info.EndSeq, metadata, info.TimeUpdated, string(info.ID),
+		string(info.State),
+		info.PendingRequestID,
+		turnStringPtr(info.Agent),
+		model,
+		info.AnchorSeq,
+		info.EndSeq,
+		metadata,
+		info.TimeUpdated,
+		string(info.ID),
 	)
 	if err != nil {
 		return err
@@ -144,7 +161,21 @@ func scanTurn(row rowScanner) (schema.TurnInfo, error) {
 		model, metadata *string
 		anchor, end     *int64
 	)
-	if err := row.Scan(&id, &session, &parent, &input, &st, &pending, &agent, &model, &anchor, &end, &metadata, &info.TimeCreated, &info.TimeUpdated); err != nil {
+	if err := row.Scan(
+		&id,
+		&session,
+		&parent,
+		&input,
+		&st,
+		&pending,
+		&agent,
+		&model,
+		&anchor,
+		&end,
+		&metadata,
+		&info.TimeCreated,
+		&info.TimeUpdated,
+	); err != nil {
 		return schema.TurnInfo{}, err
 	}
 	info.ID = schema.TurnID(id)

@@ -308,7 +308,11 @@ func (s *Session) run(ctx context.Context, msg MessageOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := s.client.rt.admit(s.id, schema.Prompt{Text: prompt, Files: msg.Files}, deliveryForMode(msg.Mode)); err != nil {
+	if err := s.client.rt.admit(
+		s.id,
+		schema.Prompt{Text: prompt, Files: msg.Files},
+		deliveryForMode(msg.Mode),
+	); err != nil {
 		return err
 	}
 	if err := s.client.rt.coord.Run(ctx, s.id); err != nil {

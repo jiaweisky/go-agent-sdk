@@ -114,7 +114,9 @@ func (s *diffSolver) solve() []DiffChange {
 }
 
 func (s *diffSolver) execEditLength(editLength int) []DiffChange {
-	for diagonalPath := max(s.minDiagonal, -editLength); diagonalPath <= min(s.maxDiagonal, editLength); diagonalPath += 2 {
+	from := max(s.minDiagonal, -editLength)
+	to := min(s.maxDiagonal, editLength)
+	for diagonalPath := from; diagonalPath <= to; diagonalPath += 2 {
 		removePath := s.bestPath[diagonalPath-1]
 		addPath := s.bestPath[diagonalPath+1]
 		if removePath != nil {

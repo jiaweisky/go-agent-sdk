@@ -179,7 +179,11 @@ func (r *Registry) Materialize(permissions []PermissionRule) *Materialization {
 	}
 }
 
-func (r *Registry) settle(execCtx context.Context, input ExecuteInput, identities map[string]interface{}) (*Settlement, error) {
+func (r *Registry) settle(
+	execCtx context.Context,
+	input ExecuteInput,
+	identities map[string]interface{},
+) (*Settlement, error) {
 	identity, known := identities[input.Call.Name]
 	if !known {
 		return &Settlement{

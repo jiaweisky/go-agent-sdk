@@ -78,7 +78,11 @@ func openAIDefaultOptions(modelID string, textVerbosity *bool) schema.ProviderOp
 	)
 }
 
-func withOpenAIOptions(modelID string, providerOptions schema.ProviderOptions, textVerbosity *bool) schema.ProviderOptions {
+func withOpenAIOptions(
+	modelID string,
+	providerOptions schema.ProviderOptions,
+	textVerbosity *bool,
+) schema.ProviderOptions {
 	return schema.MergeProviderOptions(openAIDefaultOptions(modelID, textVerbosity), providerOptions)
 }
 

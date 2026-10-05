@@ -186,7 +186,11 @@ func bedrockSigV4(aws *schema.AWSCredentials) *route.Auth {
 }
 
 // ResolveModel resolves a session's model, applying its credential and variant.
-func ResolveModel(session schema.SessionInfo, model schema.ModelInfo, credential schema.Credential) (route.Model, error) {
+func ResolveModel(
+	session schema.SessionInfo,
+	model schema.ModelInfo,
+	credential schema.Credential,
+) (route.Model, error) {
 	var variant *schema.ModelVariantID
 	if session.Model != nil {
 		variant = session.Model.Variant

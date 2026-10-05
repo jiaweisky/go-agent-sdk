@@ -144,7 +144,12 @@ func collectOutput(r *bytes.Buffer, max *int) ([]byte, bool) {
 	return data, truncated
 }
 
-func (p *appProcess) Run(ctx context.Context, command string, args []string, options ...RunOptions) (*RunResult, error) {
+func (p *appProcess) Run(
+	ctx context.Context,
+	command string,
+	args []string,
+	options ...RunOptions,
+) (*RunResult, error) {
 	var opts RunOptions
 	if len(options) > 0 {
 		opts = options[0]
@@ -207,7 +212,12 @@ func (p *appProcess) Run(ctx context.Context, command string, args []string, opt
 	}, nil
 }
 
-func (p *appProcess) RunStream(ctx context.Context, command string, args []string, options ...RunStreamOptions) iter.Seq2[string, error] {
+func (p *appProcess) RunStream(
+	ctx context.Context,
+	command string,
+	args []string,
+	options ...RunStreamOptions,
+) iter.Seq2[string, error] {
 	var opts RunStreamOptions
 	if len(options) > 0 {
 		opts = options[0]

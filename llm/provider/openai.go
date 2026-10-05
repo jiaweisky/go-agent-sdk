@@ -44,7 +44,13 @@ func configureOpenAIRoute(r route.Route, input OpenAIConfig) route.Route {
 	})
 }
 
-func openAIModelFactory(r route.Route, modelID string, baseOpts route.RouteDefaultsInput, textVerbosity *bool, modelOpts ...llm.ModelOptions) route.Model {
+func openAIModelFactory(
+	r route.Route,
+	modelID string,
+	baseOpts route.RouteDefaultsInput,
+	textVerbosity *bool,
+	modelOpts ...llm.ModelOptions,
+) route.Model {
 	merged := baseOpts
 	merged.ProviderOptions = withOpenAIOptions(modelID, baseOpts.ProviderOptions, textVerbosity)
 	return bindModel(r.With(route.RoutePatch{Defaults: &merged}), route.RouteModelInput{ID: modelID}, modelOpts...)

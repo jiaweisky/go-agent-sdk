@@ -173,14 +173,29 @@ type openaiResponsesHostedToolDef struct {
 }
 
 var openaiResponsesHostedTools = map[string]openaiResponsesHostedToolDef{
-	"web_search_call":         {Name: "web_search", Input: func(item openaiResponsesStreamItem) any { return item.Action }},
-	"web_search_preview_call": {Name: "web_search_preview", Input: func(item openaiResponsesStreamItem) any { return item.Action }},
-	"file_search_call":        {Name: "file_search", Input: func(item openaiResponsesStreamItem) any { return map[string]any{"queries": item.Queries} }},
+	"web_search_call": {
+		Name:  "web_search",
+		Input: func(item openaiResponsesStreamItem) any { return item.Action },
+	},
+	"web_search_preview_call": {
+		Name:  "web_search_preview",
+		Input: func(item openaiResponsesStreamItem) any { return item.Action },
+	},
+	"file_search_call": {
+		Name:  "file_search",
+		Input: func(item openaiResponsesStreamItem) any { return map[string]any{"queries": item.Queries} },
+	},
 	"code_interpreter_call": {Name: "code_interpreter", Input: func(item openaiResponsesStreamItem) any {
 		return map[string]any{"code": item.Code, "container_id": item.ContainerID}
 	}},
-	"computer_use_call":     {Name: "computer_use", Input: func(item openaiResponsesStreamItem) any { return item.Action }},
-	"image_generation_call": {Name: "image_generation", Input: func(item openaiResponsesStreamItem) any { return map[string]any{} }},
+	"computer_use_call": {
+		Name:  "computer_use",
+		Input: func(item openaiResponsesStreamItem) any { return item.Action },
+	},
+	"image_generation_call": {
+		Name:  "image_generation",
+		Input: func(item openaiResponsesStreamItem) any { return map[string]any{} },
+	},
 	"mcp_call": {Name: "mcp", Input: func(item openaiResponsesStreamItem) any {
 		return map[string]any{"server_label": item.ServerLabel, "name": item.Name, "arguments": item.Arguments}
 	}},
@@ -367,7 +382,10 @@ func openaiResponsesLowerMessages(request *schema.LLMRequest) ([]openaiResponses
 
 // openaiResponsesLowerSystemMessage appends a wrapped system update to a trailing
 // user item, or starts a new user item.
-func openaiResponsesLowerSystemMessage(input []openaiResponsesInputItem, msg schema.Message) []openaiResponsesInputItem {
+func openaiResponsesLowerSystemMessage(
+	input []openaiResponsesInputItem,
+	msg schema.Message,
+) []openaiResponsesInputItem {
 	update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
 	text := openaiResponsesInputText{Type: "input_text", Text: update}
 	if len(input) > 0 {
@@ -392,7 +410,11 @@ func openaiResponsesLowerUserMessage(msg schema.Message) (openaiResponsesUserIte
 	return openaiResponsesUserItem{Role: "user", Content: userContent}, nil
 }
 
-func openaiResponsesLowerAssistantMessage(input []openaiResponsesInputItem, msg schema.Message, store *bool) ([]openaiResponsesInputItem, error) {
+func openaiResponsesLowerAssistantMessage(
+	input []openaiResponsesInputItem,
+	msg schema.Message,
+	store *bool,
+) ([]openaiResponsesInputItem, error) {
 	var textParts []string
 	reasoningItems := map[string]*openaiResponsesReasoningItem{}
 	var reasoningRefs map[string]bool
@@ -448,7 +470,9 @@ func openaiResponsesLowerAssistantMessage(input []openaiResponsesInputItem, msg 
 				}
 			}
 		default:
-			return nil, fmt.Errorf("OpenAI Responses assistant messages only support text, reasoning, tool-call and tool-result content")
+			return nil, fmt.Errorf(
+				"OpenAI Responses assistant messages only support text, reasoning, tool-call and tool-result content",
+			)
 		}
 	}
 	openaiResponsesFlushText(&input, &textParts)
@@ -662,7 +686,10 @@ func openaiResponsesHostedEvents(item openaiResponsesStreamItem, tool openaiResp
 	}
 }
 
-func openaiResponsesOnOutputTextDelta(state openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnOutputTextDelta(
+	state openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent) {
 	if evt.Delta == nil {
 		return state, nil
 	}
@@ -675,7 +702,10 @@ func openaiResponsesOnOutputTextDelta(state openaiResponsesParserState, evt open
 	return state, events
 }
 
-func openaiResponsesOnReasoningDelta(state openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnReasoningDelta(
+	state openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent) {
 	if evt.Delta == nil {
 		return state, nil
 	}
@@ -736,7 +766,10 @@ func openaiResponsesTerminal(event any) bool {
 	return openaiResponsesTerminalTypes[evt.Type]
 }
 
-func openaiResponsesOnReasoningSummaryPartAdded(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnReasoningSummaryPartAdded(
+	s openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	if evt.ItemID == nil || evt.SummaryIndex == nil {
 		return s, nil, nil
 	}
@@ -769,7 +802,10 @@ func openaiResponsesOnReasoningSummaryPartAdded(s openaiResponsesParserState, ev
 	return s, events, nil
 }
 
-func openaiResponsesOnReasoningSummaryPartDone(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnReasoningSummaryPartDone(
+	s openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	if evt.ItemID == nil || evt.SummaryIndex == nil {
 		return s, nil, nil
 	}
@@ -790,7 +826,10 @@ func openaiResponsesOnReasoningSummaryPartDone(s openaiResponsesParserState, evt
 	return s, events, nil
 }
 
-func openaiResponsesOnOutputItemAdded(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnOutputItemAdded(
+	s openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	item := evt.Item
 	if item == nil {
 		return s, nil, nil
@@ -828,7 +867,10 @@ func openaiResponsesOnOutputItemAdded(s openaiResponsesParserState, evt openaiRe
 	return s, events, nil
 }
 
-func openaiResponsesOnFunctionCallArgumentsDelta(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnFunctionCallArgumentsDelta(
+	s openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	if evt.ItemID == nil || evt.Delta == nil {
 		return s, nil, nil
 	}
@@ -846,7 +888,10 @@ func openaiResponsesOnFunctionCallArgumentsDelta(s openaiResponsesParserState, e
 	return s, events, nil
 }
 
-func openaiResponsesOnOutputItemDone(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnOutputItemDone(
+	s openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	item := evt.Item
 	if item == nil {
 		return s, nil, nil
@@ -863,7 +908,10 @@ func openaiResponsesOnOutputItemDone(s openaiResponsesParserState, evt openaiRes
 	return s, nil, nil
 }
 
-func openaiResponsesOnFunctionCallDone(s openaiResponsesParserState, item openaiResponsesStreamItem) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnFunctionCallDone(
+	s openaiResponsesParserState,
+	item openaiResponsesStreamItem,
+) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	if item.ID == nil || item.CallID == nil || item.Name == nil {
 		return s, nil, nil
 	}
@@ -898,14 +946,21 @@ func openaiResponsesOnFunctionCallDone(s openaiResponsesParserState, item openai
 	return s, events, nil
 }
 
-func openaiResponsesOnHostedToolDone(s openaiResponsesParserState, item openaiResponsesStreamItem, t openaiResponsesHostedToolDef) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnHostedToolDone(
+	s openaiResponsesParserState,
+	item openaiResponsesStreamItem,
+	t openaiResponsesHostedToolDef,
+) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	var events []schema.LLMEvent
 	utils.StepStart(&s.lifecycle, &events)
 	events = append(events, openaiResponsesHostedEvents(item, t)...)
 	return s, events, nil
 }
 
-func openaiResponsesOnReasoningItemDone(s openaiResponsesParserState, item openaiResponsesStreamItem) (openaiResponsesParserState, []schema.LLMEvent, error) {
+func openaiResponsesOnReasoningItemDone(
+	s openaiResponsesParserState,
+	item openaiResponsesStreamItem,
+) (openaiResponsesParserState, []schema.LLMEvent, error) {
 	var events []schema.LLMEvent
 	if ri := s.reasoningItems[*item.ID]; ri != nil {
 		for k, v := range ri.SummaryParts {
@@ -928,7 +983,10 @@ func openaiResponsesOnReasoningItemDone(s openaiResponsesParserState, item opena
 	return s, events, nil
 }
 
-func openaiResponsesOnResponseFinish(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnResponseFinish(
+	s openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent) {
 	var events []schema.LLMEvent
 	usage := openaiResponsesMapUsage(nil)
 	if evt.Response != nil {
@@ -953,11 +1011,17 @@ func openaiResponsesOnResponseFinish(s openaiResponsesParserState, evt openaiRes
 	return s, events
 }
 
-func openaiResponsesOnResponseFailed(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnResponseFailed(
+	s openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent) {
 	return s, []schema.LLMEvent{openaiResponsesProviderError(evt, "OpenAI Responses response failed")}
 }
 
-func openaiResponsesOnError(s openaiResponsesParserState, evt openaiResponsesEvent) (openaiResponsesParserState, []schema.LLMEvent) {
+func openaiResponsesOnError(
+	s openaiResponsesParserState,
+	evt openaiResponsesEvent,
+) (openaiResponsesParserState, []schema.LLMEvent) {
 	return s, []schema.LLMEvent{openaiResponsesProviderError(evt, "OpenAI Responses stream error")}
 }
 

@@ -9,6 +9,8 @@ linters:
   # `standard` is errcheck, govet, ineffassign, staticcheck and unused.
   # Pinned explicitly so a global config cannot change the default set.
   default: standard
+  enable:
+    - lll
   settings:
     errcheck:
       # Ignoring these results is idiomatic and the error is not actionable
@@ -38,17 +40,26 @@ linters:
       # adds noise without catching defects.
       disable:
         - inline
+    lll:
+      line-length: 120
+      tab-width: 1
   exclusions:
     rules:
-      # Test code may ignore errors from setup/cleanup calls.
+      # Test code may ignore errors from setup/cleanup calls and is not held to
+      # the line-length limit (table-driven cases and fixtures read better wide).
       - path: _test\.go
         linters:
           - errcheck
+          - lll
       # Cleanup/close/rollback results are ignored throughout; the error is not
       # actionable in context.
       - linters:
           - errcheck
         text: Error return value of .*(Close|Rollback|Remove|Rename)
+      # Long SQL statements read better on one line.
+      - linters:
+          - lll
+        source: (SELECT|INSERT INTO|UPDATE |CREATE TABLE|CREATE (UNIQUE )?INDEX|CONSTRAINT |FOREIGN KEY)
       # MCP logging and roots are deprecated pending migration (SEP-2577); the
       # calls remain functional during the deprecation window.
       - path: mcp/client\.go

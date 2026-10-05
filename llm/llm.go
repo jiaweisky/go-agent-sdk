@@ -307,7 +307,11 @@ func generateObjectError(reason schema.LLMErrorReason) *schema.LLMError {
 // GenerateObject forces a single tool call and returns its validated input as
 // the object. The schema's model projection is sent to the model; its validation
 // projection checks the returned input.
-func GenerateObject(ctx context.Context, client route.LLMClient, opts GenerateObjectOptions) (*GenerateObjectResponse, error) {
+func GenerateObject(
+	ctx context.Context,
+	client route.LLMClient,
+	opts GenerateObjectOptions,
+) (*GenerateObjectResponse, error) {
 	var toolInputSchema schema.JsonSchema
 	var schemaInstance *jsonschema6.Schema
 	if opts.Schema != nil {
@@ -336,7 +340,9 @@ func GenerateObject(ctx context.Context, client route.LLMClient, opts GenerateOb
 		if call.Type == schema.EventToolCall && call.Name == generateObjectToolName {
 			if schemaInstance != nil {
 				if err := schemaInstance.Validate(call.Input); err != nil {
-					return nil, generateObjectError(schema.NewInvalidProviderOutputReason("generateObject: tool input failed schema decode: " + err.Error()))
+					return nil, generateObjectError(
+						schema.NewInvalidProviderOutputReason("generateObject: tool input failed schema decode: " + err.Error()),
+					)
 				}
 			}
 			return &GenerateObjectResponse{

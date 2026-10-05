@@ -138,11 +138,19 @@ func resolveRequestOptions(request *schema.LLMRequest) *schema.LLMRequest {
 		}
 	}
 	updated := *request
-	updated.Generation = schema.MergeGenerationOptions(routeDefaults.Generation, modelDefaults.Generation, request.Generation)
+	updated.Generation = schema.MergeGenerationOptions(
+		routeDefaults.Generation,
+		modelDefaults.Generation,
+		request.Generation,
+	)
 	if updated.Generation == nil {
 		updated.Generation = &schema.GenerationOptions{}
 	}
-	updated.ProviderOptions = schema.MergeProviderOptions(routeDefaults.ProviderOptions, modelDefaults.ProviderOptions, request.ProviderOptions)
+	updated.ProviderOptions = schema.MergeProviderOptions(
+		routeDefaults.ProviderOptions,
+		modelDefaults.ProviderOptions,
+		request.ProviderOptions,
+	)
 	updated.Http = schema.MergeHttpOptions(routeDefaults.Http, modelDefaults.Http, request.Http)
 	return &updated
 }

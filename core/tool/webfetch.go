@@ -24,6 +24,7 @@ const (
 	WebFetchMaxTimeoutSeconds     = 120
 )
 
+//nolint:lll // prose description
 const WebFetchDescription = `Fetch content from an HTTP or HTTPS URL and return it as text, markdown, or HTML. Markdown is the default.
 
 Use a more targeted tool when one is available. This tool is read-only. Large text results may be replaced with a preview while the complete output is retained in managed storage.`
@@ -82,7 +83,7 @@ type WebFetchOutput struct {
 }
 
 const (
-	webFetchBrowserUserAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+	webFetchBrowserUserAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36" //nolint:lll // canonical user-agent string
 	webFetchFallbackUserAgent = "go-agent-sdk"
 )
 
@@ -148,7 +149,11 @@ func webFetchIsCloudflareChallenge(err error) bool {
 		statusErr.response.Header.Get("cf-mitigated") == "challenge"
 }
 
-func webFetchExecute(client WebFetchHTTPClient, ctx context.Context, rawURL, format, userAgent string) (*http.Response, error) {
+func webFetchExecute(
+	client WebFetchHTTPClient,
+	ctx context.Context,
+	rawURL, format, userAgent string,
+) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -260,7 +265,12 @@ func MakeWebFetch(deps WebFetchDeps) *Def[WebFetchInput, WebFetchOutput, WebFetc
 	})
 }
 
-func executeWebFetch(deps WebFetchDeps, execCtx context.Context, input WebFetchInput, ctx Context) (WebFetchOutput, error) {
+func executeWebFetch(
+	deps WebFetchDeps,
+	execCtx context.Context,
+	input WebFetchInput,
+	ctx Context,
+) (WebFetchOutput, error) {
 	if err := webFetchAssertHTTPURL(input.URL); err != nil {
 		return WebFetchOutput{}, err
 	}

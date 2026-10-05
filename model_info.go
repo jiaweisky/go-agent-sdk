@@ -13,7 +13,11 @@ import (
 // optional: an empty value uses the route's default endpoint. The ProviderID is
 // set to the protocol id, so ClientOptions.Credentials is called with it. Hand
 // the result to ClientOptions.ModelInfo.
-func NewModelInfo(protocol schema.ProtocolID, modelID, baseURL string, limit schema.ModelLimit) (schema.ModelInfo, error) {
+func NewModelInfo(
+	protocol schema.ProtocolID,
+	modelID, baseURL string,
+	limit schema.ModelLimit,
+) (schema.ModelInfo, error) {
 	if _, ok := protocols.LookupProtocol(llmschema.ProtocolID(protocol)); !ok {
 		return schema.ModelInfo{}, fmt.Errorf("unknown protocol %q", protocol)
 	}

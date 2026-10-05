@@ -275,7 +275,10 @@ func (deterministicModel) Generate(context.Context, *llmschema.LLMRequest) (*llm
 	return nil, nil
 }
 
-func (deterministicModel) Stream(_ context.Context, req *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+func (deterministicModel) Stream(
+	_ context.Context,
+	req *llmschema.LLMRequest,
+) (iter.Seq2[llmschema.LLMEvent, error], error) {
 	events := modelEvents(req)
 	return func(yield func(llmschema.LLMEvent, error) bool) {
 		for _, event := range events {

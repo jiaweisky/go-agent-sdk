@@ -15,7 +15,10 @@ import (
 const ApplyPatchName = "apply_patch"
 
 var ApplyPatchInputSchema = jsonschema.Object(
-	jsonschema.Required("patchText", jsonschema.String(jsonschema.Description("The full patch text describing add, update, and delete operations"))),
+	jsonschema.Required(
+		"patchText",
+		jsonschema.String(jsonschema.Description("The full patch text describing add, update, and delete operations")),
+	),
 )
 
 var applyPatchAppliedSchema = jsonschema.Object(
@@ -86,7 +89,9 @@ func MakeApplyPatch(deps ApplyPatchDeps) *Def[ApplyPatchInput, ApplyPatchOutput,
 	})
 }
 
-func WithApplyPatchPermission(tool *Def[ApplyPatchInput, ApplyPatchOutput, ApplyPatchOutput]) *Def[ApplyPatchInput, ApplyPatchOutput, ApplyPatchOutput] {
+func WithApplyPatchPermission(
+	tool *Def[ApplyPatchInput, ApplyPatchOutput, ApplyPatchOutput],
+) *Def[ApplyPatchInput, ApplyPatchOutput, ApplyPatchOutput] {
 	return WithPermission(tool, "edit")
 }
 

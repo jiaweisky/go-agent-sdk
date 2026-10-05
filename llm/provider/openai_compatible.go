@@ -29,7 +29,10 @@ type OpenAICompatibleProvider struct {
 // OpenAICompatibleRoutes is the route every OpenAI-compatible facade is built on.
 var OpenAICompatibleRoutes []route.Route
 
-func configureOpenAICompatible(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
+func configureOpenAICompatible(
+	openAICompatibleChatRoute route.Route,
+	input OpenAICompatibleGenericOptions,
+) OpenAICompatibleProvider {
 	prov := input.Provider
 	if prov == "" {
 		prov = string(OpenAICompatibleProviderID)
@@ -56,7 +59,10 @@ func configureOpenAICompatible(openAICompatibleChatRoute route.Route, input Open
 	}
 }
 
-func defineOpenAICompatibleProfile(openAICompatibleChatRoute route.Route, profile OpenAICompatibleProfile) OpenAICompatibleProvider {
+func defineOpenAICompatibleProfile(
+	openAICompatibleChatRoute route.Route,
+	profile OpenAICompatibleProfile,
+) OpenAICompatibleProvider {
 	facade := configureOpenAICompatible(openAICompatibleChatRoute, OpenAICompatibleGenericOptions{
 		CommonConfig: CommonConfig{BaseURL: profile.BaseURL},
 		Provider:     profile.Provider,
@@ -76,7 +82,10 @@ func defineOpenAICompatibleProfile(openAICompatibleChatRoute route.Route, profil
 // NewOpenAICompatible builds a facade for a generic OpenAI Chat-compatible
 // endpoint. When input.Provider is empty the provider id defaults to
 // "openai-compatible".
-func NewOpenAICompatible(openAICompatibleChatRoute route.Route, input OpenAICompatibleGenericOptions) OpenAICompatibleProvider {
+func NewOpenAICompatible(
+	openAICompatibleChatRoute route.Route,
+	input OpenAICompatibleGenericOptions,
+) OpenAICompatibleProvider {
 	return configureOpenAICompatible(openAICompatibleChatRoute, input)
 }
 

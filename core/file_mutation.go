@@ -122,7 +122,12 @@ func (fm *fileMutation) Create(input FileMutationWriteInput) (*FileMutationWrite
 			err = e
 			return
 		}
-		result = &FileMutationWriteResult{Operation: "write", Target: input.Target.Canonical, Resource: input.Target.Resource, Existed: false}
+		result = &FileMutationWriteResult{
+			Operation: "write",
+			Target:    input.Target.Canonical,
+			Resource:  input.Target.Resource,
+			Existed:   false,
+		}
 	})
 	return result, err
 }
@@ -135,7 +140,12 @@ func (fm *fileMutation) Write(input FileMutationWriteInput) (*FileMutationWriteR
 		if err = WriteWithDirs(input.Target.Canonical, input.Content); err != nil {
 			return
 		}
-		result = &FileMutationWriteResult{Operation: "write", Target: input.Target.Canonical, Resource: input.Target.Resource, Existed: existed}
+		result = &FileMutationWriteResult{
+			Operation: "write",
+			Target:    input.Target.Canonical,
+			Resource:  input.Target.Resource,
+			Existed:   existed,
+		}
 	})
 	return result, err
 }
@@ -160,7 +170,12 @@ func (fm *fileMutation) WriteTextPreservingBom(input FileMutationTextWriteInput)
 		if err = WriteWithDirs(input.Target.Canonical, []byte(content)); err != nil {
 			return
 		}
-		result = &FileMutationWriteResult{Operation: "write", Target: input.Target.Canonical, Resource: input.Target.Resource, Existed: currentBytes != nil}
+		result = &FileMutationWriteResult{
+			Operation: "write",
+			Target:    input.Target.Canonical,
+			Resource:  input.Target.Resource,
+			Existed:   currentBytes != nil,
+		}
 	})
 	return result, err
 }
@@ -181,7 +196,12 @@ func (fm *fileMutation) WriteIfUnchanged(input FileMutationConditionalWriteInput
 		if err = WriteWithDirs(input.Target.Canonical, input.Content); err != nil {
 			return
 		}
-		result = &FileMutationWriteResult{Operation: "write", Target: input.Target.Canonical, Resource: input.Target.Resource, Existed: true}
+		result = &FileMutationWriteResult{
+			Operation: "write",
+			Target:    input.Target.Canonical,
+			Resource:  input.Target.Resource,
+			Existed:   true,
+		}
 	})
 	return result, err
 }
@@ -199,7 +219,12 @@ func (fm *fileMutation) Remove(input FileMutationRemoveInput) (*FileMutationRemo
 				return
 			}
 		}
-		result = &FileMutationRemoveResult{Operation: "remove", Target: input.Target.Canonical, Resource: input.Target.Resource, Existed: existed}
+		result = &FileMutationRemoveResult{
+			Operation: "remove",
+			Target:    input.Target.Canonical,
+			Resource:  input.Target.Resource,
+			Existed:   existed,
+		}
 	})
 	return result, err
 }

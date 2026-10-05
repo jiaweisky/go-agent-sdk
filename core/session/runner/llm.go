@@ -127,7 +127,10 @@ func NewLLMRunner(runner LLMRunner) *LLMRunner {
 	return result
 }
 
-func (r *LLMRunner) compactionStream(ctx context.Context, request llmschema.LLMRequest) iter.Seq2[llmschema.LLMEvent, error] {
+func (r *LLMRunner) compactionStream(
+	ctx context.Context,
+	request llmschema.LLMRequest,
+) iter.Seq2[llmschema.LLMEvent, error] {
 	stream, err := r.LLM.Stream(ctx, &request)
 	if err != nil {
 		return func(yield func(llmschema.LLMEvent, error) bool) { yield(llmschema.LLMEvent{}, err) }
@@ -401,7 +404,11 @@ func queuePromotion(hasQueue bool) *schema.SessionDelivery {
 }
 
 // drainTurns runs consecutive turns until none requests continuation.
-func (r *LLMRunner) drainTurns(ctx context.Context, sessionID schema.SessionID, promotion *schema.SessionDelivery) (err error) {
+func (r *LLMRunner) drainTurns(
+	ctx context.Context,
+	sessionID schema.SessionID,
+	promotion *schema.SessionDelivery,
+) (err error) {
 	handle := r.beginTurn(sessionID)
 	defer r.finishTurn(handle, &err)
 	needsContinuation := true
@@ -579,11 +586,22 @@ func (r *LLMRunner) failInterruptedTools(sessionID schema.SessionID) error {
 	return nil
 }
 
-func (r *LLMRunner) runTurn(ctx context.Context, sessionID schema.SessionID, promotion *schema.SessionDelivery, step int) (turnResult, error) {
+func (r *LLMRunner) runTurn(
+	ctx context.Context,
+	sessionID schema.SessionID,
+	promotion *schema.SessionDelivery,
+	step int,
+) (turnResult, error) {
 	return r.runTurnLoop(ctx, sessionID, promotion, step, true)
 }
 
-func (r *LLMRunner) runTurnLoop(ctx context.Context, sessionID schema.SessionID, promotion *schema.SessionDelivery, step int, recoverOverflow bool) (turnResult, error) {
+func (r *LLMRunner) runTurnLoop(
+	ctx context.Context,
+	sessionID schema.SessionID,
+	promotion *schema.SessionDelivery,
+	step int,
+	recoverOverflow bool,
+) (turnResult, error) {
 	for {
 		var recover func(session.CompactionInput) (bool, error)
 		if recoverOverflow {
@@ -689,7 +707,8 @@ func (r *LLMRunner) prepareTurnAttempt(
 	if stored == nil {
 		return nil, fmt.Errorf("Session not found: %s", sessionID)
 	}
-	if string(stored.Location.Directory) != string(r.Location.Directory) || !sameWorkspace(stored.Location.WorkspaceID, r.Location.WorkspaceID) {
+	if string(stored.Location.Directory) != string(r.Location.Directory) ||
+		!sameWorkspace(stored.Location.WorkspaceID, r.Location.WorkspaceID) {
 		return nil, errInterrupted
 	}
 
@@ -734,7 +753,16 @@ func (r *LLMRunner) prepareTurnAttempt(
 	if err != nil {
 		return nil, err
 	}
-	request := buildTurnRequest(sessionID, agent, stored, system, contextMessagesOf(entries), model, isLastStep, toolMaterialization)
+	request := buildTurnRequest(
+		sessionID,
+		agent,
+		stored,
+		system,
+		contextMessagesOf(entries),
+		model,
+		isLastStep,
+		toolMaterialization,
+	)
 	if turnID, ok := r.currentTurn(sessionID); ok {
 		request.Metadata[RequestMetaTurnID] = string(turnID)
 	}
@@ -760,8 +788,12 @@ func (r *LLMRunner) prepareTurnAttempt(
 	publisher := NewLLMEventPublisher(r.Events, LLMEventPublisherInput{
 		SessionID: sessionID,
 		Agent:     string(agent.ID),
-		Model:     schema.ModelRef{ID: schema.ModelID(model.ID), ProviderID: schema.ProviderID(model.Provider), Variant: variant},
-		Snapshot:  snapshot,
+		Model: schema.ModelRef{
+			ID:         schema.ModelID(model.ID),
+			ProviderID: schema.ProviderID(model.Provider),
+			Variant:    variant,
+		},
+		Snapshot: snapshot,
 	})
 
 	return &turnAttempt{
@@ -783,7 +815,10 @@ func (r *LLMRunner) prepareTurnAttempt(
 
 // initializeSystemContext loads the context sources and initializes the epoch,
 // returning the prepared epoch when one already existed.
-func (r *LLMRunner) initializeSystemContext(agent core.AgentSelection, sessionID schema.SessionID) (*session.ContextEpochPrepared, error) {
+func (r *LLMRunner) initializeSystemContext(
+	agent core.AgentSelection,
+	sessionID schema.SessionID,
+) (*session.ContextEpochPrepared, error) {
 	systemContext, err := r.loadSystemContext(agent)
 	if err != nil {
 		return nil, err
@@ -792,7 +827,10 @@ func (r *LLMRunner) initializeSystemContext(agent core.AgentSelection, sessionID
 }
 
 // prepareSystemContext builds a fresh epoch baseline for the attempt.
-func (r *LLMRunner) prepareSystemContext(agent core.AgentSelection, sessionID schema.SessionID) (session.ContextEpochPrepared, error) {
+func (r *LLMRunner) prepareSystemContext(
+	agent core.AgentSelection,
+	sessionID schema.SessionID,
+) (session.ContextEpochPrepared, error) {
 	systemContext, err := r.loadSystemContext(agent)
 	if err != nil {
 		return session.ContextEpochPrepared{}, err
@@ -802,7 +840,11 @@ func (r *LLMRunner) prepareSystemContext(agent core.AgentSelection, sessionID sc
 
 // promotePendingDeliveries admits pending steer/queue input, resetting the step
 // when anything was promoted.
-func (r *LLMRunner) promotePendingDeliveries(sessionID schema.SessionID, promotion *schema.SessionDelivery, step int) (int, error) {
+func (r *LLMRunner) promotePendingDeliveries(
+	sessionID schema.SessionID,
+	promotion *schema.SessionDelivery,
+	step int,
+) (int, error) {
 	if promotion == nil {
 		return step, nil
 	}
@@ -835,7 +877,12 @@ func (r *LLMRunner) promotePendingDeliveries(sessionID schema.SessionID, promoti
 }
 
 // materializeTools resolves the tools for the attempt, or nil on the last step.
-func (r *LLMRunner) materializeTools(sessionID schema.SessionID, agent core.AgentSelection, stored *schema.SessionInfo, isLastStep bool) (*tool.Materialization, error) {
+func (r *LLMRunner) materializeTools(
+	sessionID schema.SessionID,
+	agent core.AgentSelection,
+	stored *schema.SessionInfo,
+	isLastStep bool,
+) (*tool.Materialization, error) {
 	if isLastStep {
 		return nil, nil
 	}
@@ -1050,7 +1097,9 @@ func (a *turnAttempt) settle() (turnResult, error) {
 		return turnResult{}, err
 	}
 	if recovered {
-		return turnResult{}, &turnTransitionError{Transition: turnTransition{Tag: "ContinueAfterOverflowCompaction", Step: a.step}}
+		return turnResult{}, &turnTransitionError{
+			Transition: turnTransition{Tag: "ContinueAfterOverflowCompaction", Step: a.step},
+		}
 	}
 	if a.overflowFailure != nil {
 		if err := a.withPublication(func() error { return a.publisher.Publish(*a.overflowFailure, nil) }); err != nil {
@@ -1182,7 +1231,9 @@ func (a *turnAttempt) handleInterrupts(collected []error, streamErr error) (erro
 		return nil, err
 	}
 	if a.publisher.HasActiveAssistant() {
-		if err := a.withPublication(func() error { return a.publisher.FailAssistant("Provider turn interrupted") }); err != nil {
+		if err := a.withPublication(
+			func() error { return a.publisher.FailAssistant("Provider turn interrupted") },
+		); err != nil {
 			return nil, err
 		}
 	}

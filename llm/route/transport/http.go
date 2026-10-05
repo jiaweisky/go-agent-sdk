@@ -49,7 +49,11 @@ func forbiddenBodyOverlayKeys(body map[string]any) []string {
 	return forbidden
 }
 
-func bodyWithOverlay(body any, request *schema.LLMRequest, encodeBody func(any) (string, error)) (bodyText string, err error) {
+func bodyWithOverlay(
+	body any,
+	request *schema.LLMRequest,
+	encodeBody func(any) (string, error),
+) (bodyText string, err error) {
 	if request.Http == nil || request.Http.Body == nil {
 		return encodeBody(body)
 	}
@@ -146,7 +150,12 @@ type HttpJsonInput struct {
 type HttpJsonTransport struct {
 	id      string
 	prepare func(input route.TransportPrepareInput) (HttpPrepared, error)
-	frames  func(ctx context.Context, prepared HttpPrepared, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error]
+	frames  func(
+		ctx context.Context,
+		prepared HttpPrepared,
+		request *schema.LLMRequest,
+		runtime route.TransportRuntime,
+	) iter.Seq2[any, error]
 }
 
 // ID identifies the transport.
@@ -158,7 +167,12 @@ func (t *HttpJsonTransport) Prepare(input route.TransportPrepareInput) (any, err
 }
 
 // Frames sends the prepared request and yields its frames.
-func (t *HttpJsonTransport) Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
+func (t *HttpJsonTransport) Frames(
+	ctx context.Context,
+	prepared any,
+	request *schema.LLMRequest,
+	runtime route.TransportRuntime,
+) iter.Seq2[any, error] {
 	p := prepared.(HttpPrepared)
 	return t.frames(ctx, p, request, runtime)
 }
@@ -180,7 +194,12 @@ func NewHttpJsonTransport(input HttpJsonInput) *HttpJsonTransport {
 				Framing: input.Framing,
 			}, nil
 		},
-		frames: func(ctx context.Context, prepared HttpPrepared, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
+		frames: func(
+			ctx context.Context,
+			prepared HttpPrepared,
+			request *schema.LLMRequest,
+			runtime route.TransportRuntime,
+		) iter.Seq2[any, error] {
 			return func(yield func(any, error) bool) {
 				req, err := http.NewRequestWithContext(ctx, prepared.Method, prepared.URL, strings.NewReader(prepared.Body))
 				if err != nil {

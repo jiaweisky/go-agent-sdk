@@ -155,7 +155,14 @@ func ProjectAdmitted(db DB, input ProjectAdmittedInput) error {
 	}
 	result, err := db.Exec(
 		"INSERT INTO `session_input` (`id`,`session_id`,`admitted_seq`,`prompt`,`delivery`,`time_created`) VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-		string(input.ID), string(input.SessionID), input.AdmittedSeq, string(prompt), string(input.Delivery), input.TimeCreated,
+		string(
+			input.ID,
+		),
+		string(input.SessionID),
+		input.AdmittedSeq,
+		string(prompt),
+		string(input.Delivery),
+		input.TimeCreated,
 	)
 	if err != nil {
 		return err
@@ -184,7 +191,9 @@ type ProjectPromptedInput struct {
 func ProjectPrompted(db DB, input ProjectPromptedInput) error {
 	row := db.QueryRow(
 		"UPDATE `session_input` SET `promoted_seq` = ? WHERE `id` = ? AND `session_id` = ? AND `promoted_seq` IS NULL RETURNING "+inputSelectColumns,
-		input.PromotedSeq, string(input.ID), string(input.SessionID),
+		input.PromotedSeq,
+		string(input.ID),
+		string(input.SessionID),
 	)
 	inputRow, err := scanInputRow(row)
 	if err == nil {
@@ -206,7 +215,8 @@ func ProjectPrompted(db DB, input ProjectPromptedInput) error {
 		return err
 	}
 	if stored != nil {
-		if !matchesProjection(*stored, input) || stored.PromotedSeq == nil || int64(*stored.PromotedSeq) != input.PromotedSeq {
+		if !matchesProjection(*stored, input) || stored.PromotedSeq == nil ||
+			int64(*stored.PromotedSeq) != input.PromotedSeq {
 			return &LifecycleConflict{ID: input.ID}
 		}
 		return nil
@@ -218,8 +228,13 @@ func ProjectPrompted(db DB, input ProjectPromptedInput) error {
 	}
 	_, err = db.Exec(
 		"INSERT INTO `session_input` (`id`,`session_id`,`prompt`,`delivery`,`admitted_seq`,`promoted_seq`,`time_created`) VALUES (?,?,?,?,?,?,?)",
-		string(input.ID), string(input.SessionID), string(prompt), string(input.Delivery),
-		input.PromotedSeq, input.PromotedSeq, input.TimeCreated,
+		string(input.ID),
+		string(input.SessionID),
+		string(prompt),
+		string(input.Delivery),
+		input.PromotedSeq,
+		input.PromotedSeq,
+		input.TimeCreated,
 	)
 	return err
 }
@@ -242,7 +257,12 @@ func HasPending(db DB, sessionID schema.SessionID, delivery schema.SessionDelive
 
 // Equivalent reports whether an admitted input matches the same session, prompt
 // and delivery.
-func Equivalent(input schema.SessionInputAdmitted, sessionID schema.SessionID, prompt schema.Prompt, delivery schema.SessionDelivery) bool {
+func Equivalent(
+	input schema.SessionInputAdmitted,
+	sessionID schema.SessionID,
+	prompt schema.Prompt,
+	delivery schema.SessionDelivery,
+) bool {
 	return input.Delivery == delivery && matchesPrompt(input, sessionID, prompt)
 }
 
@@ -287,7 +307,8 @@ func publishInputs(db DB, events EventPublisher, sessionID schema.SessionID, row
 func PromoteSteers(db DB, events EventPublisher, sessionID schema.SessionID, cutoff int64) (int, error) {
 	rows, err := db.Query(
 		"SELECT "+inputSelectColumns+" FROM `session_input` WHERE `session_id` = ? AND `promoted_seq` IS NULL AND `delivery` = 'steer' AND `admitted_seq` <= ? ORDER BY `admitted_seq` ASC",
-		string(sessionID), cutoff,
+		string(sessionID),
+		cutoff,
 	)
 	if err != nil {
 		return 0, err

@@ -82,7 +82,10 @@ func openRouterProtocol(openAIChatProtocol route.Protocol) route.Protocol {
 }
 
 func openRouterAuth(input OpenRouterConfig) *route.Auth {
-	return route.BearerAuth(route.BearerAuthOptions{Auth: input.Auth, APIKey: input.APIKey}, []string{"OPENROUTER_API_KEY"})
+	return route.BearerAuth(
+		route.BearerAuthOptions{Auth: input.Auth, APIKey: input.APIKey},
+		[]string{"OPENROUTER_API_KEY"},
+	)
 }
 
 // NewOpenRouter builds the OpenRouter facade over the OpenAI Chat protocol.

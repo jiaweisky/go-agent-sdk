@@ -179,7 +179,8 @@ func readImageMime(bytes []byte) string {
 	if readStartsWith(bytes, []byte{0x47, 0x49, 0x46, 0x38}) {
 		return "image/gif"
 	}
-	if readStartsWith(bytes, []byte{0x52, 0x49, 0x46, 0x46}) && len(bytes) >= 8 && readStartsWith(bytes[8:], []byte{0x57, 0x45, 0x42, 0x50}) {
+	if readStartsWith(bytes, []byte{0x52, 0x49, 0x46, 0x46}) && len(bytes) >= 8 &&
+		readStartsWith(bytes[8:], []byte{0x57, 0x45, 0x42, 0x50}) {
 		return "image/webp"
 	}
 	return ""
@@ -346,7 +347,12 @@ func readFirstChunkSize(size int64) int64 {
 
 // readImageContent reads a recognized image as base64, bounded by the media
 // ingest limit.
-func readImageContent(file *os.File, first []byte, size int64, resource, real, mime string) (core.FileSystemContent, error) {
+func readImageContent(
+	file *os.File,
+	first []byte,
+	size int64,
+	resource, real, mime string,
+) (core.FileSystemContent, error) {
 	if size > ReadMaxMediaIngestBytes {
 		return core.FileSystemContent{}, &ReadMediaIngestLimitError{Resource: resource, MaximumBytes: ReadMaxMediaIngestBytes}
 	}

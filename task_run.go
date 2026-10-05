@@ -59,7 +59,10 @@ func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (TaskRunOutpu
 
 // resolveSubagent checks the nesting limit and returns the subagent to run,
 // together with the permission ruleset its session starts from.
-func (r *runtime) resolveSubagent(parent *schema.SessionInfo, input TaskRunInput) (*schema.AgentInfo, schema.PermissionRuleset, error) {
+func (r *runtime) resolveSubagent(
+	parent *schema.SessionInfo,
+	input TaskRunInput,
+) (*schema.AgentInfo, schema.PermissionRuleset, error) {
 	if err := r.checkSubagentDepth(parent); err != nil {
 		return nil, nil, err
 	}
@@ -72,7 +75,12 @@ func (r *runtime) resolveSubagent(parent *schema.SessionInfo, input TaskRunInput
 
 // childAgentAndRules is the agent and permission ruleset a child session runs
 // with. A resumed session keeps the agent and ruleset it was created with.
-func (r *runtime) childAgentAndRules(childID schema.SessionID, reused bool, subagent *schema.AgentInfo, derived schema.PermissionRuleset) (*schema.AgentInfo, schema.PermissionRuleset) {
+func (r *runtime) childAgentAndRules(
+	childID schema.SessionID,
+	reused bool,
+	subagent *schema.AgentInfo,
+	derived schema.PermissionRuleset,
+) (*schema.AgentInfo, schema.PermissionRuleset) {
 	if !reused {
 		return subagent, derived
 	}
@@ -95,7 +103,12 @@ func (r *runtime) childAgentAndRules(childID schema.SessionID, reused bool, suba
 // publishTaskProgress reports the running task state on the parent session,
 // mirroring the tool's progress metadata. The child session id links the
 // subagent's events to this task.
-func (r *runtime) publishTaskProgress(input TaskRunInput, childID schema.SessionID, subagent *schema.AgentInfo, parent *schema.SessionInfo) {
+func (r *runtime) publishTaskProgress(
+	input TaskRunInput,
+	childID schema.SessionID,
+	subagent *schema.AgentInfo,
+	parent *schema.SessionInfo,
+) {
 	if input.Progress == nil {
 		return
 	}
@@ -129,7 +142,10 @@ func (r *runtime) checkSubagentDepth(parent *schema.SessionInfo) error {
 		return err
 	}
 	if depth >= r.subagentDepth {
-		return fmt.Errorf("Subagent depth limit reached (%d). Increase subagent depth to allow nested subagents", r.subagentDepth)
+		return fmt.Errorf(
+			"Subagent depth limit reached (%d). Increase subagent depth to allow nested subagents",
+			r.subagentDepth,
+		)
 	}
 	return nil
 }

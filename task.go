@@ -19,7 +19,10 @@ import (
 const TaskName = "task"
 
 // TaskDescription is the task tool's description for the model.
+//
+//nolint:lll // prose lines in the description exceed 120 columns by design
 const TaskDescription = `Launch a new agent to handle complex, multistep tasks autonomously.
+
 
 When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
 
@@ -41,14 +44,24 @@ Usage notes:
 
 // TaskInputSchema is the task tool's parameters schema.
 var TaskInputSchema = jsonschema.Object(
-	jsonschema.Required("description", jsonschema.String(jsonschema.Description("A short (3-5 words) description of the task"))),
+	jsonschema.Required(
+		"description",
+		jsonschema.String(jsonschema.Description("A short (3-5 words) description of the task")),
+	),
 	jsonschema.Required("prompt", jsonschema.String(jsonschema.Description("The task for the agent to perform"))),
-	jsonschema.Required("subagent_type", jsonschema.String(jsonschema.Description("The type of specialized agent to use for this task"))),
+	jsonschema.Required(
+		"subagent_type",
+		jsonschema.String(jsonschema.Description("The type of specialized agent to use for this task")),
+	),
 	jsonschema.Optional("task_id", jsonschema.String(jsonschema.Description(
-		"This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)"))),
+		"This should only be set if you mean to resume a previous task (you can pass a prior task_id "+
+			"and the task will continue the same subagent session as before instead of creating a fresh one)",
+	))),
 	jsonschema.Optional("command", jsonschema.String(jsonschema.Description("The command that triggered this task"))),
 	jsonschema.Optional("background", jsonschema.Boolean(jsonschema.Description(
-		"Run the agent in the background. You will be notified when it completes. DO NOT sleep, poll, or proactively check on its progress"))),
+		"Run the agent in the background. You will be notified when it completes. "+
+			"DO NOT sleep, poll, or proactively check on its progress",
+	))),
 )
 
 // TaskOutputSchema is the task tool's structured output schema.
@@ -219,7 +232,10 @@ func RegisterTask(tools tool.Tools, deps TaskToolDeps) (func(), error) {
 // DeriveSubagentSessionPermission combines the parent session's deny and
 // external_directory rules with default todowrite/task denies, unless the
 // subagent's own ruleset already defines a rule for them.
-func DeriveSubagentSessionPermission(parent schema.PermissionRuleset, subagent schema.AgentInfo) schema.PermissionRuleset {
+func DeriveSubagentSessionPermission(
+	parent schema.PermissionRuleset,
+	subagent schema.AgentInfo,
+) schema.PermissionRuleset {
 	hasTaskRule := hasPermissionAction(subagent.Permissions, TaskName)
 	hasTodoRule := hasPermissionAction(subagent.Permissions, "todowrite")
 	result := make(schema.PermissionRuleset, 0, len(parent)+2)
@@ -229,7 +245,10 @@ func DeriveSubagentSessionPermission(parent schema.PermissionRuleset, subagent s
 		}
 	}
 	if !hasTodoRule {
-		result = append(result, schema.PermissionRule{Action: "todowrite", Resource: "*", Effect: schema.PermissionEffectDeny})
+		result = append(
+			result,
+			schema.PermissionRule{Action: "todowrite", Resource: "*", Effect: schema.PermissionEffectDeny},
+		)
 	}
 	if !hasTaskRule {
 		result = append(result, schema.PermissionRule{Action: TaskName, Resource: "*", Effect: schema.PermissionEffectDeny})

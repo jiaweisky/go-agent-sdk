@@ -159,7 +159,10 @@ type toolDispatcher struct {
 	sessions map[string]*tool.Registry
 }
 
-func (d *toolDispatcher) MaterializeFor(sessionID string, permissions []core.PermissionRule) (*tool.Materialization, error) {
+func (d *toolDispatcher) MaterializeFor(
+	sessionID string,
+	permissions []core.PermissionRule,
+) (*tool.Materialization, error) {
 	d.mu.Lock()
 	registry := d.sessions[sessionID]
 	d.mu.Unlock()
@@ -257,7 +260,11 @@ func (s *sessionAgents) effectiveFor(sessionID schema.SessionID) (schema.AgentIn
 
 // newSessionRegistry builds a registry with the built-ins plus the client and
 // session user tools, isolating session-scoped tools from other sessions.
-func (r *runtime) newSessionRegistry(agent *schema.AgentInfo, sessionRules schema.PermissionRuleset, sessionTools []Tool) (*tool.Registry, error) {
+func (r *runtime) newSessionRegistry(
+	agent *schema.AgentInfo,
+	sessionRules schema.PermissionRuleset,
+	sessionTools []Tool,
+) (*tool.Registry, error) {
 	registry := tool.NewRegistry(tool.WithOutputStore(r.outputStore))
 	var permissions schema.PermissionRuleset
 	if agent != nil {
@@ -633,7 +640,11 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 // askBackendQuestion asks the local user for input a remote agent requested and
 // joins the answers into one relay string. It runs while the calling turn is
 // parked, so a held turn blocks until the user replies.
-func (r *runtime) askBackendQuestion(ctx context.Context, sessionID string, questions []schema.QuestionInfo) (string, error) {
+func (r *runtime) askBackendQuestion(
+	ctx context.Context,
+	sessionID string,
+	questions []schema.QuestionInfo,
+) (string, error) {
 	answers, err := r.question.Ask(ctx, core.QuestionAskInput{SessionID: sessionID, Questions: questions})
 	if err != nil {
 		return "", err
@@ -730,7 +741,12 @@ func buildAgents(opts *ClientOptions, location *core.Location, global core.Globa
 	}
 	// Config agents inherit the default ruleset (a configured agent never
 	// inherits a built-in's permissions), so merge it in as the base.
-	if err := defsconfig.ApplyDirAgents(agents, opts.ConfigDirs, global, core.DefaultAgentPermissions(global)); err != nil {
+	if err := defsconfig.ApplyDirAgents(
+		agents,
+		opts.ConfigDirs,
+		global,
+		core.DefaultAgentPermissions(global),
+	); err != nil {
 		return nil, err
 	}
 	return agents, nil
@@ -774,7 +790,12 @@ func buildSkills(opts *ClientOptions, global core.Global) (*core.Skill, error) {
 
 // buildReferences registers the named reference sources the client was
 // configured with.
-func buildReferences(opts *ClientOptions, global core.Global, events core.Event, git core.Git) (*core.Reference, error) {
+func buildReferences(
+	opts *ClientOptions,
+	global core.Global,
+	events core.Event,
+	git core.Git,
+) (*core.Reference, error) {
 	cache := core.NewRepositoryCache(git, global.Repos)
 	references := core.NewReference(global, events, cache)
 	if len(opts.References) == 0 {
@@ -855,7 +876,12 @@ func (r *runtime) connectMCP(ctx context.Context, configs []MCPConfig) {
 	if len(configs) == 0 {
 		return
 	}
-	client := mcp.NewClient(string(r.location.Directory), r.name, installation.InstallationVersion, mcp.WithEvents(mcpEventPublisher{events: r.events}))
+	client := mcp.NewClient(
+		string(r.location.Directory),
+		r.name,
+		installation.InstallationVersion,
+		mcp.WithEvents(mcpEventPublisher{events: r.events}),
+	)
 	var connected sync.WaitGroup
 	for _, cfg := range configs {
 		connected.Add(1)

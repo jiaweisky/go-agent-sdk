@@ -102,7 +102,11 @@ type ripgrepRunInput[A any] struct {
 
 // ripgrepRun runs ripgrep and parses its rows, stopping after limit+1 rows as the
 // stream bound requires.
-func ripgrepRun[A any](process AppProcess, binary RipgrepBinary, input ripgrepRunInput[A]) (*ripgrepRunResult[A], error) {
+func ripgrepRun[A any](
+	process AppProcess,
+	binary RipgrepBinary,
+	input ripgrepRunInput[A],
+) (*ripgrepRunResult[A], error) {
 	path, err := binary.Filepath()
 	if err != nil {
 		return nil, err

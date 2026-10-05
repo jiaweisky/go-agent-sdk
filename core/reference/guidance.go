@@ -52,7 +52,10 @@ func (g *Guidance) Load() (systemcontext.SystemContext, error) {
 		}
 		available = append(available, Summary(item))
 	}
-	sort.Slice(available, func(i, j int) bool { return util.CompareLocale(available[i].Name, available[j].Name, g.locale) < 0 })
+	sort.Slice(
+		available,
+		func(i, j int) bool { return util.CompareLocale(available[i].Name, available[j].Name, g.locale) < 0 },
+	)
 	if len(available) == 0 {
 		return systemcontext.Empty, nil
 	}

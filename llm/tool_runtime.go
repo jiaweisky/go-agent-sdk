@@ -26,10 +26,18 @@ type DispatchResult struct {
 func Dispatch(ctx context.Context, tools Tools, call schema.ToolCallPart) *DispatchResult {
 	tool := tools[call.Name]
 	if tool == nil {
-		return buildResult(call, schema.ToolResultValue{Type: "error", Value: fmt.Sprintf("Unknown tool: %s", call.Name)}, nil)
+		return buildResult(
+			call,
+			schema.ToolResultValue{Type: "error", Value: fmt.Sprintf("Unknown tool: %s", call.Name)},
+			nil,
+		)
 	}
 	if tool.execute == nil {
-		return buildResult(call, schema.ToolResultValue{Type: "error", Value: fmt.Sprintf("Tool has no execute handler: %s", call.Name)}, nil)
+		return buildResult(
+			call,
+			schema.ToolResultValue{Type: "error", Value: fmt.Sprintf("Tool has no execute handler: %s", call.Name)},
+			nil,
+		)
 	}
 	decoded, err := tool.Decode(call.Input)
 	if err != nil {
@@ -53,7 +61,12 @@ func Dispatch(ctx context.Context, tools Tools, call schema.ToolCallPart) *Dispa
 	return buildResult(call, result, nil, &output)
 }
 
-func buildResult(call schema.ToolCallPart, result schema.ToolResultValue, cause error, output ...*schema.ToolOutput) *DispatchResult {
+func buildResult(
+	call schema.ToolCallPart,
+	result schema.ToolResultValue,
+	cause error,
+	output ...*schema.ToolOutput,
+) *DispatchResult {
 	dr := &DispatchResult{Result: result}
 	if len(output) > 0 {
 		dr.Output = output[0]

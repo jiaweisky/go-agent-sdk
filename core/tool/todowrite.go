@@ -18,8 +18,14 @@ const TodoWriteDescription = "Create and maintain a structured task list for the
 
 var todoWriteInfoSchema = jsonschema.Object(
 	jsonschema.Required("content", jsonschema.String(jsonschema.Description("Brief description of the task"))),
-	jsonschema.Required("status", jsonschema.String(jsonschema.Description("Current status of the task: pending, in_progress, completed, cancelled"))),
-	jsonschema.Required("priority", jsonschema.String(jsonschema.Description("Priority level of the task: high, medium, low"))),
+	jsonschema.Required(
+		"status",
+		jsonschema.String(jsonschema.Description("Current status of the task: pending, in_progress, completed, cancelled")),
+	),
+	jsonschema.Required(
+		"priority",
+		jsonschema.String(jsonschema.Description("Priority level of the task: high, medium, low")),
+	),
 )
 
 var TodoWriteInputSchema = jsonschema.Object(

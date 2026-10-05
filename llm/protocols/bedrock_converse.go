@@ -347,7 +347,11 @@ func bedrockConverseLowerMessages(request *schema.LLMRequest, bp *utils.Breakpoi
 	return msgs, nil
 }
 
-func bedrockConverseLowerSystemMessage(msgs []bedrockConverseMessage, bp *utils.Breakpoints, msg schema.Message) []bedrockConverseMessage {
+func bedrockConverseLowerSystemMessage(
+	msgs []bedrockConverseMessage,
+	bp *utils.Breakpoints,
+	msg schema.Message,
+) []bedrockConverseMessage {
 	update := WrapSystemUpdate(SystemUpdateParts(msg.Content))
 	blocks := bedrockConverseTextWithCache(bp, update, SystemUpdateCache(msg.Content))
 	if len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
@@ -473,7 +477,8 @@ func bedrockConverseStep(state any, event any) (any, []schema.LLMEvent, error) {
 		return bedrockConverseOnMessageStop(s, evt)
 	case evt.Metadata != nil:
 		return bedrockConverseOnMetadata(s, evt)
-	case evt.InternalServerException != nil || evt.ModelStreamErrorException != nil || evt.ServiceUnavailableException != nil:
+	case evt.InternalServerException != nil || evt.ModelStreamErrorException != nil ||
+		evt.ServiceUnavailableException != nil:
 		return s, bedrockConverseRetryableError(evt), nil
 	case evt.ValidationException != nil || evt.ThrottlingException != nil:
 		return s, bedrockConverseTerminalError(evt), nil
@@ -481,7 +486,10 @@ func bedrockConverseStep(state any, event any) (any, []schema.LLMEvent, error) {
 	return s, nil, nil
 }
 
-func bedrockConverseOnContentBlockStart(s bedrockConverseParserState, evt bedrockConverseEvent) (any, []schema.LLMEvent, error) {
+func bedrockConverseOnContentBlockStart(
+	s bedrockConverseParserState,
+	evt bedrockConverseEvent,
+) (any, []schema.LLMEvent, error) {
 	idx := evt.ContentBlockStart.ContentBlockIndex
 	tu := evt.ContentBlockStart.Start.ToolUse
 	var events []schema.LLMEvent
@@ -491,7 +499,10 @@ func bedrockConverseOnContentBlockStart(s bedrockConverseParserState, evt bedroc
 	return s, events, nil
 }
 
-func bedrockConverseOnContentBlockDelta(s bedrockConverseParserState, evt bedrockConverseEvent) (any, []schema.LLMEvent, error) {
+func bedrockConverseOnContentBlockDelta(
+	s bedrockConverseParserState,
+	evt bedrockConverseEvent,
+) (any, []schema.LLMEvent, error) {
 	d := evt.ContentBlockDelta.Delta
 	idx := evt.ContentBlockDelta.ContentBlockIndex
 	switch {
@@ -507,7 +518,11 @@ func bedrockConverseOnContentBlockDelta(s bedrockConverseParserState, evt bedroc
 	return s, nil, nil
 }
 
-func bedrockConverseOnReasoningDelta(s bedrockConverseParserState, idx int, text, signature *string) (any, []schema.LLMEvent, error) {
+func bedrockConverseOnReasoningDelta(
+	s bedrockConverseParserState,
+	idx int,
+	text, signature *string,
+) (any, []schema.LLMEvent, error) {
 	var events []schema.LLMEvent
 	if text != nil && *text != "" {
 		utils.ReasoningDelta(&s.lifecycle, &events, fmt.Sprintf("reasoning-%d", idx), *text)
@@ -521,7 +536,11 @@ func bedrockConverseOnReasoningDelta(s bedrockConverseParserState, idx int, text
 	return s, events, nil
 }
 
-func bedrockConverseOnToolUseDelta(s bedrockConverseParserState, idx int, input string) (any, []schema.LLMEvent, error) {
+func bedrockConverseOnToolUseDelta(
+	s bedrockConverseParserState,
+	idx int,
+	input string,
+) (any, []schema.LLMEvent, error) {
 	result, err := utils.AppendExisting(bedrockConverseAdapter, s.tools, fmt.Sprint(idx), input,
 		"Bedrock Converse tool delta is missing its tool call")
 	if err != nil {
@@ -536,7 +555,10 @@ func bedrockConverseOnToolUseDelta(s bedrockConverseParserState, idx int, input 
 	return s, events, nil
 }
 
-func bedrockConverseOnContentBlockStop(s bedrockConverseParserState, evt bedrockConverseEvent) (any, []schema.LLMEvent, error) {
+func bedrockConverseOnContentBlockStop(
+	s bedrockConverseParserState,
+	evt bedrockConverseEvent,
+) (any, []schema.LLMEvent, error) {
 	idx := evt.ContentBlockStop.ContentBlockIndex
 	result, err := utils.FinishTool(bedrockConverseAdapter, s.tools, fmt.Sprint(idx))
 	if err != nil {
@@ -573,7 +595,10 @@ func (s bedrockConverseParserState) reasoningSignature(idx int) schema.ProviderM
 	return providerMetadata("bedrock", map[string]any{"signature": sig})
 }
 
-func bedrockConverseOnMessageStop(s bedrockConverseParserState, evt bedrockConverseEvent) (any, []schema.LLMEvent, error) {
+func bedrockConverseOnMessageStop(
+	s bedrockConverseParserState,
+	evt bedrockConverseEvent,
+) (any, []schema.LLMEvent, error) {
 	pending := &bedrockConversePendingFinish{Reason: bedrockConverseFinishReason(evt.MessageStop.StopReason)}
 	if s.pendingFinish != nil {
 		pending.Usage = s.pendingFinish.Usage
@@ -698,7 +723,12 @@ func (bedrockConverseTransport) Prepare(input route.TransportPrepareInput) (any,
 }
 
 // Frames sends the prepared request and yields its event-stream frames.
-func (bedrockConverseTransport) Frames(ctx context.Context, prepared any, request *schema.LLMRequest, runtime route.TransportRuntime) iter.Seq2[any, error] {
+func (bedrockConverseTransport) Frames(
+	ctx context.Context,
+	prepared any,
+	request *schema.LLMRequest,
+	runtime route.TransportRuntime,
+) iter.Seq2[any, error] {
 	p := prepared.(bedrockConversePrepared)
 	return func(yield func(any, error) bool) {
 		req, err := http.NewRequestWithContext(ctx, "POST", p.URL, strings.NewReader(p.Body))

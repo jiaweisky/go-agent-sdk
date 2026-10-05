@@ -7,8 +7,9 @@ import (
 )
 
 // Default agent system prompts.
-const agentBuildSystem = "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions."
+const agentBuildSystem = "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions." //nolint:lll // prose prompt
 
+//nolint:lll // prose prompt
 const agentPromptExplore = `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
 
 Your strengths:
@@ -27,12 +28,14 @@ Guidelines:
 
 Complete the user's search request efficiently and report your findings clearly.`
 
+//nolint:lll // prose prompt
 const agentPromptCompaction = `You are a context summarization agent. You are given a conversation between a user and an agent. Your goal is to produce a structured summary matching the format specified so another coding agent can continue the work.
 
 Always follow the exact output structure requested by the user prompt. Keep every section, preserve exact file paths and identifiers when known, and prefer terse bullets over paragraphs.
 
 Do not continue the conversation. Do not respond to any questions in the conversation. Only output the structured summary in the exact format requested by the user prompt. Respond in the same language as the conversation.`
 
+//nolint:lll // prose prompt
 const agentPromptTitle = `You are a title generator. You output ONLY a thread title. Nothing else.
 
 <task>
@@ -78,6 +81,7 @@ Your output must be:
 "@App.tsx add dark mode toggle" -> Dark mode toggle in App
 </examples>`
 
+//nolint:lll // prose prompt
 const agentPromptSummary = `Summarize what was done in this conversation. Write like a pull request description.
 
 Rules:
@@ -160,7 +164,7 @@ func ApplyDefaultAgents(agents *Agent, location *Location, global Global) error 
 		})
 
 		draft.Update(schema.AgentID("general"), func(item *schema.AgentInfo) {
-			description := "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel."
+			description := "General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel." //nolint:lll // prose description
 			item.Description = &description
 			item.Mode = schema.AgentModeSubagent
 			item.Permissions = append(item.Permissions, PermissionMerge(defaults, PermissionRuleset{
@@ -169,7 +173,7 @@ func ApplyDefaultAgents(agents *Agent, location *Location, global Global) error 
 		})
 
 		draft.Update(schema.AgentID("explore"), func(item *schema.AgentInfo) {
-			description := `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`
+			description := `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.` //nolint:lll // prose description
 			item.Description = &description
 			system := agentPromptExplore
 			item.System = &system

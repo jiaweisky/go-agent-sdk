@@ -36,7 +36,9 @@ func SigV4(credentials *Credentials) AuthFunc {
 func sigV4(credentials *Credentials) AuthFunc {
 	return func(input AuthInput) (map[string]string, error) {
 		if credentials == nil {
-			return nil, fmt.Errorf("Bedrock Converse requires either route bearer auth or AWS credentials configured on the route")
+			return nil, fmt.Errorf(
+				"Bedrock Converse requires either route bearer auth or AWS credentials configured on the route",
+			)
 		}
 		if input.Headers == nil {
 			input.Headers = make(map[string]string)

@@ -126,11 +126,13 @@ func MakeBash(deps BashDeps) *Def[BashInput, BashOutput, BashStructuredOutput] {
 // TODO: Replace token-based command-argument external-directory advisories with parser-based detection.
 // TODO: Restore PowerShell and cmd-specific invocation/path handling on Windows.
 // TODO: Add plugin shell.env environment augmentation once V2 plugin hooks exist.
-// TODO: Add durable/live progress metadata streaming for long-running commands once V2 tool invocation progress context is wired.
+// TODO: Add durable/live progress metadata streaming for long-running commands
+// once V2 tool invocation progress context is wired.
 // TODO: Persist background job status and define restart recovery before exposing remote observation.
 // TODO: Re-add model-facing background launch only with owner-bound get/wait/cancel tools and completion delivery.
 // TODO: Add HTTP background-job observation only after durable status, restart recovery, and authorization are defined.
-// TODO: Revisit process-group cleanup and platform coverage with shell-specific tests if current AppProcess semantics do not fully cover it.
+// TODO: Revisit process-group cleanup and platform coverage with shell-specific
+// tests if current AppProcess semantics do not fully cover it.
 // TODO: Revisit binary output handling if stdout/stderr decoding is text-only.
 // TODO: Stream full shell output into managed storage while retaining only a bounded in-memory preview.
 

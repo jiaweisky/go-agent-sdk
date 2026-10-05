@@ -92,7 +92,8 @@ func (s *turnTaskStore) Update(ctx context.Context, req *taskstore.UpdateRequest
 	}
 
 	current := decodeVersion(existing.Metadata)
-	if req.PrevVersion != taskstore.TaskVersionMissing && current != taskstore.TaskVersionMissing && current != req.PrevVersion {
+	if req.PrevVersion != taskstore.TaskVersionMissing && current != taskstore.TaskVersionMissing &&
+		current != req.PrevVersion {
 		return taskstore.TaskVersionMissing, taskstore.ErrConcurrentModification
 	}
 	next := current + 1
@@ -165,7 +166,8 @@ func (s *turnTaskStore) List(ctx context.Context, req *a2a.ListTasksRequest) (*a
 		if req != nil && req.Status != a2a.TaskStateUnspecified && task.Status.State != req.Status {
 			continue
 		}
-		if req != nil && req.StatusTimestampAfter != nil && task.Status.Timestamp != nil && task.Status.Timestamp.Before(*req.StatusTimestampAfter) {
+		if req != nil && req.StatusTimestampAfter != nil && task.Status.Timestamp != nil &&
+			task.Status.Timestamp.Before(*req.StatusTimestampAfter) {
 			continue
 		}
 		entries = append(entries, taskEntry{task: task, updated: info.TimeUpdated})

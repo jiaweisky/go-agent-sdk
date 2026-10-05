@@ -24,8 +24,14 @@ var EditInputSchema = jsonschema.Object(
 			"Absolute paths inside that Location are accepted; external absolute paths require "+
 			"external_directory approval."))),
 	jsonschema.Required("oldString", jsonschema.String(jsonschema.Description("Exact text to replace"))),
-	jsonschema.Required("newString", jsonschema.String(jsonschema.Description("Replacement text, which must differ from oldString"))),
-	jsonschema.Optional("replaceAll", jsonschema.Boolean(jsonschema.Description("Replace all exact occurrences of oldString (default false)"))),
+	jsonschema.Required(
+		"newString",
+		jsonschema.String(jsonschema.Description("Replacement text, which must differ from oldString")),
+	),
+	jsonschema.Optional(
+		"replaceAll",
+		jsonschema.Boolean(jsonschema.Description("Replace all exact occurrences of oldString (default false)")),
+	),
 )
 
 var editFileDiffSchema = jsonschema.Object(

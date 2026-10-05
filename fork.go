@@ -43,7 +43,12 @@ func (c *Client) ForkSession(ctx context.Context, sessionID, messageID string) (
 	if err != nil {
 		return nil, err
 	}
-	if err := session.Fork(c.rt.db, schema.SessionID(sessionID), schema.SessionID(forked.ID()), schema.MessageID(messageID)); err != nil {
+	if err := session.Fork(
+		c.rt.db,
+		schema.SessionID(sessionID),
+		schema.SessionID(forked.ID()),
+		schema.MessageID(messageID),
+	); err != nil {
 		_ = forked.Close()
 		_ = c.DeleteSession(ctx, forked.ID())
 		return nil, err

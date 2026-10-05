@@ -29,9 +29,18 @@ func grepDefaultLimit() int {
 }
 
 var GrepInputSchema = jsonschema.Object(
-	jsonschema.Required("pattern", jsonschema.String(jsonschema.Description("Regex pattern to search for in file contents"))),
-	jsonschema.Optional("path", jsonschema.String(jsonschema.Description("Relative directory to search. Defaults to the active Location."))),
-	jsonschema.Optional("include", jsonschema.String(jsonschema.Description(`File glob to include in the search (for example, "*.js" or "*.{ts,tsx}")`))),
+	jsonschema.Required(
+		"pattern",
+		jsonschema.String(jsonschema.Description("Regex pattern to search for in file contents")),
+	),
+	jsonschema.Optional(
+		"path",
+		jsonschema.String(jsonschema.Description("Relative directory to search. Defaults to the active Location.")),
+	),
+	jsonschema.Optional(
+		"include",
+		jsonschema.String(jsonschema.Description(`File glob to include in the search (for example, "*.js" or "*.{ts,tsx}")`)),
+	),
 	jsonschema.Optional("limit", jsonschema.Integer(
 		jsonschema.ExclusiveMinimum(0),
 		jsonschema.Description("Maximum matches to return"),

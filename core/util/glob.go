@@ -92,7 +92,12 @@ func globPattern(pattern, cwd string, options GlobOptions) ([]string, error) {
 }
 
 // globLiteral resolves a pattern that contains no wildcard characters.
-func globLiteral(pattern, cwd string, absolute bool, options GlobOptions, format func(string) string) ([]string, error) {
+func globLiteral(
+	pattern, cwd string,
+	absolute bool,
+	options GlobOptions,
+	format func(string) string,
+) ([]string, error) {
 	full := pattern
 	if !absolute {
 		full = filepath.Join(cwd, full)

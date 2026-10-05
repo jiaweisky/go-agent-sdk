@@ -172,7 +172,8 @@ func latestTextIndex(assistant *schema.SessionMessageAssistant, textID string) i
 
 func latestReasoningIndex(assistant *schema.SessionMessageAssistant, reasoningID string) int {
 	for i := len(assistant.Content) - 1; i >= 0; i-- {
-		if reasoning, ok := assistant.Content[i].(schema.SessionMessageAssistantReasoning); ok && reasoning.ID == reasoningID {
+		if reasoning, ok := assistant.Content[i].(schema.SessionMessageAssistantReasoning); ok &&
+			reasoning.ID == reasoningID {
 			return i
 		}
 	}
@@ -190,7 +191,11 @@ func latestToolIndex(assistant *schema.SessionMessageAssistant, callID string) i
 	return -1
 }
 
-func updateOwnedAssistant(adapter Adapter, messageID schema.MessageID, recipe func(*schema.SessionMessageAssistant)) error {
+func updateOwnedAssistant(
+	adapter Adapter,
+	messageID schema.MessageID,
+	recipe func(*schema.SessionMessageAssistant),
+) error {
 	assistant, ok := adapter.GetAssistant(messageID)
 	if !ok {
 		return nil

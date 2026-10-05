@@ -56,19 +56,31 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 			return err
 		},
 		func() error {
-			_, err := tool.RegisterApplyPatch(tools, tool.ApplyPatchDeps{Mutation: mutation, Files: files, Permission: deps.permission})
+			_, err := tool.RegisterApplyPatch(
+				tools,
+				tool.ApplyPatchDeps{Mutation: mutation, Files: files, Permission: deps.permission},
+			)
 			return err
 		},
 		func() error {
-			_, err := tool.RegisterBash(tools, tool.BashDeps{Mutation: mutation, Process: process, Permission: deps.permission, Shell: deps.shell})
+			_, err := tool.RegisterBash(
+				tools,
+				tool.BashDeps{Mutation: mutation, Process: process, Permission: deps.permission, Shell: deps.shell},
+			)
 			return err
 		},
 		func() error {
-			_, err := tool.RegisterGlob(tools, tool.GlobDeps{Ripgrep: ripgrepService, Directory: directory, Permission: deps.permission})
+			_, err := tool.RegisterGlob(
+				tools,
+				tool.GlobDeps{Ripgrep: ripgrepService, Directory: directory, Permission: deps.permission},
+			)
 			return err
 		},
 		func() error {
-			_, err := tool.RegisterGrep(tools, tool.GrepDeps{Ripgrep: ripgrepService, Directory: directory, Permission: deps.permission})
+			_, err := tool.RegisterGrep(
+				tools,
+				tool.GrepDeps{Ripgrep: ripgrepService, Directory: directory, Permission: deps.permission},
+			)
 			return err
 		},
 		func() error {
@@ -80,7 +92,10 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 			return err
 		},
 		func() error {
-			_, err := tool.RegisterWebFetch(tools, tool.WebFetchDeps{HTTPClient: http.DefaultClient, Permission: deps.permission, UserAgent: deps.name})
+			_, err := tool.RegisterWebFetch(
+				tools,
+				tool.WebFetchDeps{HTTPClient: http.DefaultClient, Permission: deps.permission, UserAgent: deps.name},
+			)
 			return err
 		},
 		func() error {

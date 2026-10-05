@@ -29,7 +29,10 @@ func globDefaultLimit() int {
 
 var GlobInputSchema = jsonschema.Object(
 	jsonschema.Required("pattern", jsonschema.String(jsonschema.Description("Glob pattern to match files against"))),
-	jsonschema.Optional("path", jsonschema.String(jsonschema.Description("Relative directory to search. Defaults to the active Location."))),
+	jsonschema.Optional(
+		"path",
+		jsonschema.String(jsonschema.Description("Relative directory to search. Defaults to the active Location.")),
+	),
 	jsonschema.Optional("limit", jsonschema.Integer(
 		jsonschema.ExclusiveMinimum(0),
 		jsonschema.Description("Maximum results to return"),

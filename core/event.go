@@ -347,7 +347,10 @@ func (s *eventService) signalDurableWakes(aggregateID string) {
 	}
 }
 
-func (s *eventService) Subscribe(ctx context.Context, def schema.EventDefinition) iter.Seq2[schema.EventPayload, error] {
+func (s *eventService) Subscribe(
+	ctx context.Context,
+	def schema.EventDefinition,
+) iter.Seq2[schema.EventPayload, error] {
 	return func(yield func(schema.EventPayload, error) bool) {
 		q := newEventQueue(0)
 		s.addTypedSubscriber(def.Type, q)
@@ -390,7 +393,11 @@ func (s *eventService) AllBounded(ctx context.Context, capacity int) iter.Seq2[s
 	}
 }
 
-func (s *eventService) Durable(ctx context.Context, aggregateID string, after ...int) iter.Seq2[schema.EventPayload, error] {
+func (s *eventService) Durable(
+	ctx context.Context,
+	aggregateID string,
+	after ...int,
+) iter.Seq2[schema.EventPayload, error] {
 	start := -1
 	if len(after) > 0 {
 		start = after[0]
@@ -440,7 +447,11 @@ func drainQueue(ctx context.Context, q *eventQueue, yield func(schema.EventPaylo
 	}
 }
 
-func (s *eventService) Publish(def schema.EventDefinition, data any, options *EventPublishOptions) (schema.EventPayload, error) {
+func (s *eventService) Publish(
+	def schema.EventDefinition,
+	data any,
+	options *EventPublishOptions,
+) (schema.EventPayload, error) {
 	event := schema.EventPayload{Type: def.Type, Data: data}
 	if options != nil && options.ID != nil {
 		event.ID = *options.ID

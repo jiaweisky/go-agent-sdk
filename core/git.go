@@ -435,7 +435,12 @@ func (g *gitImpl) repositoryArgs(repository GitRepository, args []string) []stri
 	return append(result, args...)
 }
 
-func (g *gitImpl) repositoryOperation(kind GitOperationKind, repository GitRepository, args []string, stdin ...string) (*gitResult, error) {
+func (g *gitImpl) repositoryOperation(
+	kind GitOperationKind,
+	repository GitRepository,
+	args []string,
+	stdin ...string,
+) (*gitResult, error) {
 	var input []byte
 	if len(stdin) > 0 {
 		input = []byte(stdin[0])
@@ -612,11 +617,19 @@ func (g *gitImpl) listLines(kind GitOperationKind, repository GitRepository, arg
 }
 
 func (g *gitImpl) Refresh(input GitIndexRefreshInput) (*GitIndexRefreshResult, error) {
-	tracked, err := g.listLines(GitOperationRefresh, input.Repository, []string{"diff-files", "--name-only", "-z", "--", string(input.Scope)})
+	tracked, err := g.listLines(
+		GitOperationRefresh,
+		input.Repository,
+		[]string{"diff-files", "--name-only", "-z", "--", string(input.Scope)},
+	)
 	if err != nil {
 		return nil, err
 	}
-	untracked, err := g.listLines(GitOperationRefresh, input.Repository, []string{"ls-files", "--others", "--exclude-standard", "-z", "--", string(input.Scope)})
+	untracked, err := g.listLines(
+		GitOperationRefresh,
+		input.Repository,
+		[]string{"ls-files", "--others", "--exclude-standard", "-z", "--", string(input.Scope)},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -671,7 +684,12 @@ func (g *gitImpl) ignoredCandidates(input GitIndexRefreshInput, candidates []str
 		return ignored
 	}
 	stdin := strings.Join(candidates, "\x00") + "\x00"
-	result, err := g.repositoryOperation(GitOperationRefresh, *input.Ignores, []string{"check-ignore", "--no-index", "--stdin", "-z"}, stdin)
+	result, err := g.repositoryOperation(
+		GitOperationRefresh,
+		*input.Ignores,
+		[]string{"check-ignore", "--no-index", "--stdin", "-z"},
+		stdin,
+	)
 	if err != nil {
 		return ignored
 	}
@@ -737,17 +755,31 @@ func (g *gitImpl) Ignored(input GitIndexIgnoredInput) (map[RelativePath]bool, er
 	for i, p := range input.Paths {
 		paths[i] = string(p)
 	}
-	run, err := g.proc.Run(context.Background(), "git", g.repositoryArgs(input.Repository, []string{"check-ignore", "--no-index", "--stdin", "-z"}), RunOptions{
-		Dir:       string(input.Repository.Worktree),
-		ExtendEnv: true,
-		Stdin:     []byte(strings.Join(paths, "\x00") + "\x00"),
-	})
+	run, err := g.proc.Run(
+		context.Background(),
+		"git",
+		g.repositoryArgs(input.Repository, []string{"check-ignore", "--no-index", "--stdin", "-z"}),
+		RunOptions{
+			Dir:       string(input.Repository.Worktree),
+			ExtendEnv: true,
+			Stdin:     []byte(strings.Join(paths, "\x00") + "\x00"),
+		},
+	)
 	if err != nil {
-		return nil, &GitOperationError{Operation: GitOperationListFiles, Directory: &input.Repository.Worktree, Message: err.Error(), Cause: err}
+		return nil, &GitOperationError{
+			Operation: GitOperationListFiles,
+			Directory: &input.Repository.Worktree,
+			Message:   err.Error(),
+			Cause:     err,
+		}
 	}
 	if run.ExitCode != 0 && run.ExitCode != 1 {
 		message := gitErrorMessage(string(run.Stderr), "", "Failed to check ignored paths")
-		return nil, &GitOperationError{Operation: GitOperationListFiles, Directory: &input.Repository.Worktree, Message: message}
+		return nil, &GitOperationError{
+			Operation: GitOperationListFiles,
+			Directory: &input.Repository.Worktree,
+			Message:   message,
+		}
 	}
 	for _, item := range strings.Split(string(run.Stdout), "\x00") {
 		if item != "" {
@@ -785,7 +817,11 @@ func (g *gitImpl) Capture(input GitTreeCaptureInput) (GitTreeID, error) {
 }
 
 func (g *gitImpl) Files(input GitTreeFilesInput) ([]RelativePath, error) {
-	items, err := g.listLines(GitOperationListFiles, input.Repository, []string{"diff", "--name-only", "-z", string(input.From), string(input.To)})
+	items, err := g.listLines(
+		GitOperationListFiles,
+		input.Repository,
+		[]string{"diff", "--name-only", "-z", string(input.From), string(input.To)},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -811,7 +847,11 @@ func (g *gitImpl) Diff(input GitTreeDiffInput) ([]FileDiff, error) {
 	}
 	result := make([]FileDiff, 0, len(paths))
 	for _, file := range paths {
-		statusResult, err := g.repositoryOperation(GitOperationDiff, input.Repository, []string{"diff", "--name-status", "--no-renames", string(input.From), string(input.To), "--", string(file)})
+		statusResult, err := g.repositoryOperation(
+			GitOperationDiff,
+			input.Repository,
+			[]string{"diff", "--name-status", "--no-renames", string(input.From), string(input.To), "--", string(file)},
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -822,7 +862,11 @@ func (g *gitImpl) Diff(input GitTreeDiffInput) ([]FileDiff, error) {
 		} else if strings.HasPrefix(statusText, "D") {
 			status = FileDiffDeleted
 		}
-		statsResult, err := g.repositoryOperation(GitOperationDiff, input.Repository, []string{"diff", "--numstat", "--no-renames", string(input.From), string(input.To), "--", string(file)})
+		statsResult, err := g.repositoryOperation(
+			GitOperationDiff,
+			input.Repository,
+			[]string{"diff", "--numstat", "--no-renames", string(input.From), string(input.To), "--", string(file)},
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -830,7 +874,19 @@ func (g *gitImpl) Diff(input GitTreeDiffInput) ([]FileDiff, error) {
 		binary := len(stats) > 1 && (stats[0] == "-" || stats[1] == "-")
 		patch := ""
 		if !binary {
-			patchResult, err := g.repositoryOperation(GitOperationDiff, input.Repository, []string{"diff", fmt.Sprintf("--unified=%d", contextLines), "--no-renames", string(input.From), string(input.To), "--", string(file)})
+			patchResult, err := g.repositoryOperation(
+				GitOperationDiff,
+				input.Repository,
+				[]string{
+					"diff",
+					fmt.Sprintf("--unified=%d", contextLines),
+					"--no-renames",
+					string(input.From),
+					string(input.To),
+					"--",
+					string(file),
+				},
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -859,7 +915,11 @@ type gitTreeEntry struct {
 }
 
 func (g *gitImpl) entry(repository GitRepository, tree GitTreeID, file RelativePath) (*gitTreeEntry, error) {
-	result, err := g.repositoryOperation(GitOperationRestore, repository, []string{"ls-tree", "-z", string(tree), "--", string(file)})
+	result, err := g.repositoryOperation(
+		GitOperationRestore,
+		repository,
+		[]string{"ls-tree", "-z", string(tree), "--", string(file)},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -921,7 +981,9 @@ func (g *gitImpl) Preview(input GitTreePreviewInput) ([]FileDiff, error) {
 				}
 				continue
 			}
-			if _, err = run([]string{"update-index", "--add", "--cacheinfo", source.Mode, source.Object, string(file)}); err != nil {
+			if _, err = run(
+				[]string{"update-index", "--add", "--cacheinfo", source.Mode, source.Object, string(file)},
+			); err != nil {
 				return
 			}
 		}
@@ -955,7 +1017,11 @@ func (g *gitImpl) Restore(input GitTreeRestoreInput) error {
 				return
 			}
 			if entry != nil {
-				if _, err = g.repositoryOperation(GitOperationRestore, input.Repository, []string{"checkout", string(tree), "--", string(file)}); err != nil {
+				if _, err = g.repositoryOperation(
+					GitOperationRestore,
+					input.Repository,
+					[]string{"checkout", string(tree), "--", string(file)},
+				); err != nil {
 					return
 				}
 				continue
@@ -977,7 +1043,11 @@ func (g *gitImpl) Restore(input GitTreeRestoreInput) error {
 func (g *gitImpl) Checkout(input GitTreeCheckoutInput) error {
 	var err error
 	g.locks.WithLock(string(input.Repository.GitDirectory), func() {
-		if _, err = g.repositoryOperation(GitOperationRestore, input.Repository, []string{"read-tree", string(input.Tree)}); err != nil {
+		if _, err = g.repositoryOperation(
+			GitOperationRestore,
+			input.Repository,
+			[]string{"read-tree", string(input.Tree)},
+		); err != nil {
 			return
 		}
 		_, err = g.repositoryOperation(GitOperationRestore, input.Repository, []string{"checkout-index", "--all", "--force"})
@@ -996,7 +1066,11 @@ func (g *gitImpl) CaptureChange(input GitChangeCaptureInput) (GitChangeSet, erro
 		return "", &GitPatchError{Operation: GitPatchCapture, Directory: input.Path, Message: message}
 	}
 
-	untracked := gitRun(g.proc, string(input.Repository.Worktree), []string{"ls-files", "--others", "--exclude-standard", "-z", "--", scope})
+	untracked := gitRun(
+		g.proc,
+		string(input.Repository.Worktree),
+		[]string{"ls-files", "--others", "--exclude-standard", "-z", "--", scope},
+	)
 	if untracked.ExitCode != 0 {
 		message := gitErrorMessage(untracked.Stderr, untracked.Text, "Failed to list untracked changes")
 		return "", &GitPatchError{Operation: GitPatchCapture, Directory: input.Path, Message: message}
@@ -1007,7 +1081,11 @@ func (g *gitImpl) CaptureChange(input GitChangeCaptureInput) (GitChangeSet, erro
 		if file == "" {
 			continue
 		}
-		result := gitRun(g.proc, string(input.Repository.Worktree), []string{"diff", "--binary", "--no-index", "--", "/dev/null", file})
+		result := gitRun(
+			g.proc,
+			string(input.Repository.Worktree),
+			[]string{"diff", "--binary", "--no-index", "--", "/dev/null", file},
+		)
 		if result.ExitCode == 0 || result.ExitCode == 1 {
 			created = append(created, result.Text)
 			continue
@@ -1071,7 +1149,13 @@ func (g *gitImpl) Discard(input GitChangeDiscardInput) error {
 	return &GitPatchError{Operation: GitPatchReset, Directory: input.Path, Message: message}
 }
 
-func (g *gitImpl) worktreeRun(operation GitWorktreeOperation, repository GitRepository, args []string, worktreeDirectory *AbsolutePath, cwd string) (string, error) {
+func (g *gitImpl) worktreeRun(
+	operation GitWorktreeOperation,
+	repository GitRepository,
+	args []string,
+	worktreeDirectory *AbsolutePath,
+	cwd string,
+) (string, error) {
 	if cwd == "" {
 		cwd = string(repository.Worktree)
 	}
@@ -1083,7 +1167,8 @@ func (g *gitImpl) worktreeRun(operation GitWorktreeOperation, repository GitRepo
 		return string(result.Stdout), nil
 	}
 	message := gitErrorMessage(string(result.Stderr), string(result.Stdout), "Git failed")
-	forceRequired := operation == GitWorktreeRemoveOp && regexp.MustCompile(`contains modified or untracked files|is dirty`).MatchString(message)
+	forceRequired := operation == GitWorktreeRemoveOp &&
+		regexp.MustCompile(`contains modified or untracked files|is dirty`).MatchString(message)
 	return "", &GitWorktreeError{
 		Operation:     operation,
 		Directory:     worktreeDirectory,
@@ -1094,7 +1179,13 @@ func (g *gitImpl) worktreeRun(operation GitWorktreeOperation, repository GitRepo
 
 func (g *gitImpl) CreateWorktree(input GitWorktreeCreateInput) (*GitRepository, error) {
 	dir := input.Directory
-	if _, err := g.worktreeRun(GitWorktreeCreateOp, input.Repository, []string{"worktree", "add", "--detach", string(input.Directory), "HEAD"}, &dir, ""); err != nil {
+	if _, err := g.worktreeRun(
+		GitWorktreeCreateOp,
+		input.Repository,
+		[]string{"worktree", "add", "--detach", string(input.Directory), "HEAD"},
+		&dir,
+		"",
+	); err != nil {
 		return nil, err
 	}
 	repository, err := g.Discover(input.Directory)
@@ -1104,7 +1195,11 @@ func (g *gitImpl) CreateWorktree(input GitWorktreeCreateInput) (*GitRepository, 
 	if repository != nil {
 		return repository, nil
 	}
-	return nil, &GitWorktreeError{Operation: GitWorktreeCreateOp, Directory: &dir, Message: "Created worktree could not be opened"}
+	return nil, &GitWorktreeError{
+		Operation: GitWorktreeCreateOp,
+		Directory: &dir,
+		Message:   "Created worktree could not be opened",
+	}
 }
 
 func (g *gitImpl) RemoveWorktree(input GitWorktreeRemoveInput) error {

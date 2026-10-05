@@ -171,7 +171,9 @@ type LocationMutationPermissionRequest struct {
 	Save      []string
 }
 
-func LocationMutationExternalDirectoryPermission(input LocationMutationExternalDirectoryAuthorization) LocationMutationPermissionRequest {
+func LocationMutationExternalDirectoryPermission(
+	input LocationMutationExternalDirectoryAuthorization,
+) LocationMutationPermissionRequest {
 	return LocationMutationPermissionRequest{
 		Action:    input.Action,
 		Resources: []string{input.Resource},

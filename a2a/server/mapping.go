@@ -219,7 +219,11 @@ func usageMetadata(usage any) map[string]any {
 // text part plus a long-running function_call data part, matching the ADK
 // human-in-the-loop convention. When the park is a question, its questions
 // travel in the call's args so the client can show them.
-func awaitInputMessage(execCtx *a2asrv.ExecutorContext, requestID string, questions []schema.QuestionInfo) *a2a.Message {
+func awaitInputMessage(
+	execCtx *a2asrv.ExecutorContext,
+	requestID string,
+	questions []schema.QuestionInfo,
+) *a2a.Message {
 	args := map[string]any{}
 	if len(questions) > 0 {
 		args["questions"] = normalizeValue(questions)

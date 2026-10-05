@@ -85,7 +85,9 @@ func NewSnapshot(git Git, global Global, location *Location) (*Snapshot, error) 
 		}
 		worktree = AbsolutePath(real)
 	}
-	gitDirectory := AbsolutePath(filepath.Join(global.Data, "snapshot", string(location.Project.ID), util.HashFastString(string(worktree))))
+	gitDirectory := AbsolutePath(
+		filepath.Join(global.Data, "snapshot", string(location.Project.ID), util.HashFastString(string(worktree))),
+	)
 
 	enabled := location.Vcs != nil && location.Vcs.Type == project.VcsTypeGit
 
@@ -306,7 +308,10 @@ func (s *Snapshot) Checkout(snapshot SnapshotID) error {
 	return nil
 }
 
-func (s *Snapshot) plan(operation SnapshotOperation, input SnapshotRestoreInput) (map[schema.RelativePath]GitTreeID, error) {
+func (s *Snapshot) plan(
+	operation SnapshotOperation,
+	input SnapshotRestoreInput,
+) (map[schema.RelativePath]GitTreeID, error) {
 	files := map[schema.RelativePath]GitTreeID{}
 	for file, snapshot := range input.Files {
 		absolute := filepath.Join(string(s.worktree), filepath.FromSlash(string(file)))

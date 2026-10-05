@@ -343,7 +343,11 @@ func compareObservations(entries []entry, previous Snapshot) (map[Key]compared, 
 }
 
 // buildUpdatedSnapshot renders the changed entries and carries the rest forward.
-func buildUpdatedSnapshot(entries []entry, previous Snapshot, comparisons map[Key]compared) (Snapshot, []string, error) {
+func buildUpdatedSnapshot(
+	entries []entry,
+	previous Snapshot,
+	comparisons map[Key]compared,
+) (Snapshot, []string, error) {
 	snapshot := Snapshot{}
 	var updates []string
 	for _, entry := range entries {

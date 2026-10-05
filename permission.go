@@ -223,7 +223,11 @@ func (p *permissionHandler) Assert(input core.PermissionAssertInput) error {
 
 // applyDecision records the handler's decision and returns the error matching
 // it.
-func (p *permissionHandler) applyDecision(requestID core.PermissionID, save []string, decision PermissionDecision) error {
+func (p *permissionHandler) applyDecision(
+	requestID core.PermissionID,
+	save []string,
+	decision PermissionDecision,
+) error {
 	if decision.Allow {
 		reply := core.PermissionReplyOnce
 		if decision.Always && len(save) > 0 {
@@ -371,7 +375,11 @@ func (p permissionEvents) PublishAsked(request core.PermissionRequest) error {
 	return err
 }
 
-func (p permissionEvents) PublishReplied(sessionID string, requestID core.PermissionID, reply core.PermissionReply) error {
+func (p permissionEvents) PublishReplied(
+	sessionID string,
+	requestID core.PermissionID,
+	reply core.PermissionReply,
+) error {
 	_, err := p.events.Publish(schema.PermissionEventReplied, map[string]any{
 		"sessionID": sessionID,
 		"requestID": string(requestID),

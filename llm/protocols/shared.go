@@ -229,7 +229,12 @@ func strVal(p *string, def ...string) string {
 // MatchToolChoice maps a tool choice to the value a protocol sends: the mode
 // choices use auto, none and required, and any other type is a named tool, which
 // needs a name.
-func MatchToolChoice(route string, toolChoice schema.ToolChoice, auto, none, required any, tool func(name string) any) (any, error) {
+func MatchToolChoice(
+	route string,
+	toolChoice schema.ToolChoice,
+	auto, none, required any,
+	tool func(name string) any,
+) (any, error) {
 	switch toolChoice.Type {
 	case "auto":
 		return auto, nil

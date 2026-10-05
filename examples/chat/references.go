@@ -92,11 +92,15 @@ func (c *chat) addGitReference(references *core.Reference, name, repository stri
 	}
 	info, ok := findReference(references, name)
 	if !ok {
-		c.console.write(fmt.Sprintf("%s%s was not accepted (needs a remote repository and a valid branch)%s\n", yellow, name, reset))
+		c.console.write(
+			fmt.Sprintf("%s%s was not accepted (needs a remote repository and a valid branch)%s\n", yellow, name, reset),
+		)
 		return
 	}
-	c.console.write(fmt.Sprintf("added git reference %s%s%s → %s%s%s (cloning in the background; /reference shows progress)\n",
-		cyan, name, reset, dim, info.Path, reset))
+	c.console.write(
+		fmt.Sprintf("added git reference %s%s%s → %s%s%s (cloning in the background; /reference shows progress)\n",
+			cyan, name, reset, dim, info.Path, reset),
+	)
 }
 
 func (c *chat) removeReference(references *core.Reference, name string) {

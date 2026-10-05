@@ -62,7 +62,11 @@ func serveHTTP(ctx context.Context, server *sdk.Server, addr string) {
 // newServer exposes the store as MCP tools, prompts and resources.
 func newServer(s *store) *sdk.Server {
 	server := sdk.NewServer(
-		&sdk.Implementation{Name: "notes", Version: "0.1.0", Description: "Persistent notes for the go-agent-sdk chat example."},
+		&sdk.Implementation{
+			Name:        "notes",
+			Version:     "0.1.0",
+			Description: "Persistent notes for the go-agent-sdk chat example.",
+		},
 		&sdk.ServerOptions{Instructions: "Persistent notes shared across sessions. Use the note_* tools to read and " +
 			"write. Each note is also readable as notes://note/<id>, with an index at notes://index."},
 	)
@@ -154,7 +158,7 @@ func registerResources(server *sdk.Server, s *store) {
 // Tool inputs.
 type (
 	noteSaveInput struct {
-		ID   string `json:"id" jsonschema:"Note id, e.g. todo"`
+		ID   string `json:"id"   jsonschema:"Note id, e.g. todo"`
 		Text string `json:"text" jsonschema:"Note body (markdown)"`
 	}
 	noteIDInput struct {

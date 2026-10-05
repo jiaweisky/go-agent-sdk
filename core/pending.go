@@ -92,7 +92,9 @@ func (r *pendingRegistry[K, R, S, M]) close() []*pendingEntry[K, R, S, M] {
 }
 
 // takeUnsettled removes and returns the unsettled entries matching keep.
-func (r *pendingRegistry[K, R, S, M]) takeUnsettled(keep func(*pendingEntry[K, R, S, M]) bool) []*pendingEntry[K, R, S, M] {
+func (r *pendingRegistry[K, R, S, M]) takeUnsettled(
+	keep func(*pendingEntry[K, R, S, M]) bool,
+) []*pendingEntry[K, R, S, M] {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var taken []*pendingEntry[K, R, S, M]

@@ -223,7 +223,11 @@ func anthropicMessagesServerToolResultWire(partName string) string {
 	return ""
 }
 
-func anthropicMessagesLowerTool(bp *anthropicMessagesBreakpointTracker, td schema.ToolDefinition, inputSchema any) anthropicMessagesTool {
+func anthropicMessagesLowerTool(
+	bp *anthropicMessagesBreakpointTracker,
+	td schema.ToolDefinition,
+	inputSchema any,
+) anthropicMessagesTool {
 	return anthropicMessagesTool{
 		Name:         td.Name,
 		Description:  td.Description,
@@ -440,7 +444,10 @@ func anthropicMessagesOutputLimit(request *schema.LLMRequest) int {
 	return outputLimit
 }
 
-func anthropicMessagesLowerTools(request *schema.LLMRequest, bp *anthropicMessagesBreakpointTracker) []anthropicMessagesTool {
+func anthropicMessagesLowerTools(
+	request *schema.LLMRequest,
+	bp *anthropicMessagesBreakpointTracker,
+) []anthropicMessagesTool {
 	var tools []anthropicMessagesTool
 	if len(request.Tools) == 0 || (request.ToolChoice != nil && request.ToolChoice.Type == "none") {
 		return tools
@@ -451,7 +458,10 @@ func anthropicMessagesLowerTools(request *schema.LLMRequest, bp *anthropicMessag
 	return tools
 }
 
-func anthropicMessagesLowerSystem(request *schema.LLMRequest, bp *anthropicMessagesBreakpointTracker) []anthropicMessagesTextBlock {
+func anthropicMessagesLowerSystem(
+	request *schema.LLMRequest,
+	bp *anthropicMessagesBreakpointTracker,
+) []anthropicMessagesTextBlock {
 	var system []anthropicMessagesTextBlock
 	for _, p := range request.System {
 		block := anthropicMessagesTextBlock{Type: "text", Text: p.Text}
@@ -482,7 +492,10 @@ func anthropicMessagesLowerThinking(request *schema.LLMRequest) (*anthropicMessa
 	return &anthropicMessagesThinking{Type: "enabled", BudgetTokens: budget}, nil
 }
 
-func anthropicMessagesLowerMessages(request *schema.LLMRequest, bp *anthropicMessagesBreakpointTracker) ([]anthropicMessagesMessage, error) {
+func anthropicMessagesLowerMessages(
+	request *schema.LLMRequest,
+	bp *anthropicMessagesBreakpointTracker,
+) ([]anthropicMessagesMessage, error) {
 	msgs := []anthropicMessagesMessage{}
 	nativeSystem := anthropicMessagesSupportsNativeSystemUpdate(request)
 
@@ -641,7 +654,10 @@ func anthropicMessagesLowerToolContent(msg schema.Message) ([]any, error) {
 	return content, nil
 }
 
-func anthropicMessagesLowerNativeSystemUpdate(msg schema.Message, bp *anthropicMessagesBreakpointTracker) (anthropicMessagesMessage, error) {
+func anthropicMessagesLowerNativeSystemUpdate(
+	msg schema.Message,
+	bp *anthropicMessagesBreakpointTracker,
+) (anthropicMessagesMessage, error) {
 	var content []any
 	for _, p := range msg.Content {
 		if tp, ok := p.(schema.TextPart); ok {
@@ -793,7 +809,10 @@ func anthropicMessagesStep(state any, event any) (any, []schema.LLMEvent, error)
 	return s, nil, nil
 }
 
-func anthropicMessagesOnMessageStart(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
+func anthropicMessagesOnMessageStart(
+	s anthropicMessagesParserState,
+	evt anthropicMessagesEvent,
+) (anthropicMessagesParserState, []schema.LLMEvent) {
 	usage := anthropicMessagesMapUsage(nil)
 	if evt.Message != nil {
 		usage = anthropicMessagesMapUsage(evt.Message.Usage)
@@ -804,7 +823,10 @@ func anthropicMessagesOnMessageStart(s anthropicMessagesParserState, evt anthrop
 	return s, nil
 }
 
-func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent, error) {
+func anthropicMessagesOnContentBlockStart(
+	s anthropicMessagesParserState,
+	evt anthropicMessagesEvent,
+) (anthropicMessagesParserState, []schema.LLMEvent, error) {
 	block := evt.ContentBlock
 	if block == nil {
 		return s, nil, nil
@@ -864,7 +886,10 @@ func anthropicMessagesOnContentBlockStart(s anthropicMessagesParserState, evt an
 	return s, nil, nil
 }
 
-func anthropicMessagesOnContentBlockDelta(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent, error) {
+func anthropicMessagesOnContentBlockDelta(
+	s anthropicMessagesParserState,
+	evt anthropicMessagesEvent,
+) (anthropicMessagesParserState, []schema.LLMEvent, error) {
 	delta := evt.Delta
 	if delta == nil {
 		return s, nil, nil
@@ -909,7 +934,10 @@ func anthropicMessagesOnContentBlockDelta(s anthropicMessagesParserState, evt an
 	return s, nil, nil
 }
 
-func anthropicMessagesOnContentBlockStop(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent, error) {
+func anthropicMessagesOnContentBlockStop(
+	s anthropicMessagesParserState,
+	evt anthropicMessagesEvent,
+) (anthropicMessagesParserState, []schema.LLMEvent, error) {
 	if evt.Index == nil {
 		return s, nil, nil
 	}
@@ -930,7 +958,10 @@ func anthropicMessagesOnContentBlockStop(s anthropicMessagesParserState, evt ant
 	return s, events, nil
 }
 
-func anthropicMessagesOnMessageDelta(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
+func anthropicMessagesOnMessageDelta(
+	s anthropicMessagesParserState,
+	evt anthropicMessagesEvent,
+) (anthropicMessagesParserState, []schema.LLMEvent) {
 	usage := anthropicMessagesMergeUsage(s.usage, anthropicMessagesMapUsage(evt.Usage))
 	var events []schema.LLMEvent
 	var pm schema.ProviderMetadata
@@ -953,7 +984,10 @@ func anthropicMessagesDeltaStopReason(delta *anthropicMessagesStreamDelta) *stri
 	return delta.StopReason
 }
 
-func anthropicMessagesOnError(s anthropicMessagesParserState, evt anthropicMessagesEvent) (anthropicMessagesParserState, []schema.LLMEvent) {
+func anthropicMessagesOnError(
+	s anthropicMessagesParserState,
+	evt anthropicMessagesEvent,
+) (anthropicMessagesParserState, []schema.LLMEvent) {
 	msg := "Anthropic Messages stream error"
 	raw := ""
 	if evt.Error != nil {

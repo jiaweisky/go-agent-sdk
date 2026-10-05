@@ -62,7 +62,11 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *Sessi
 
 // overrideStoredPermissions returns the ruleset a session resumes with. A
 // per-session ruleset passed on resume replaces the stored one.
-func (c *Client) overrideStoredPermissions(sessionID string, stored *schema.SessionInfo, rules schema.PermissionRuleset) (schema.PermissionRuleset, error) {
+func (c *Client) overrideStoredPermissions(
+	sessionID string,
+	stored *schema.SessionInfo,
+	rules schema.PermissionRuleset,
+) (schema.PermissionRuleset, error) {
 	if len(rules) == 0 {
 		return permissionRulesOf(stored), nil
 	}
@@ -127,7 +131,15 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 	for rows.Next() {
 		var info SessionInfo
 		var agent, parentID *string
-		if err := rows.Scan(&info.ID, &info.Title, &agent, &info.Directory, &parentID, &info.TimeCreated, &info.TimeUpdated); err != nil {
+		if err := rows.Scan(
+			&info.ID,
+			&info.Title,
+			&agent,
+			&info.Directory,
+			&parentID,
+			&info.TimeCreated,
+			&info.TimeUpdated,
+		); err != nil {
 			return nil, err
 		}
 		if agent != nil {
@@ -226,8 +238,19 @@ func insertSessionRow(db *sql.DB, row sessionRow) error {
 	_, err := db.Exec(
 		"INSERT INTO `session` (`id`,`project_id`,`parent_id`,`slug`,`directory`,`title`,`version`,`agent`,`model`,`permission`,`revert`,`time_created`,`time_updated`) "+
 			"VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-		string(row.ID), string(row.ProjectID), row.ParentID, "session", row.Directory,
-		row.Title, "1", row.Agent, row.Model, row.Permission, row.Revert, now, now,
+		string(row.ID),
+		string(row.ProjectID),
+		row.ParentID,
+		"session",
+		row.Directory,
+		row.Title,
+		"1",
+		row.Agent,
+		row.Model,
+		row.Permission,
+		row.Revert,
+		now,
+		now,
 	)
 	return err
 }

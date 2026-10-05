@@ -13,7 +13,10 @@ func RegisterSessionProjectors(events Event) error {
 
 type sessionProjectRegistrar struct{ events Event }
 
-func (r sessionProjectRegistrar) Project(def schema.EventDefinition, projector func(schema.EventPayload, session.DB) error) error {
+func (r sessionProjectRegistrar) Project(
+	def schema.EventDefinition,
+	projector func(schema.EventPayload, session.DB) error,
+) error {
 	return r.events.Project(def, func(event schema.EventPayload, tx EventDB) error {
 		return projector(event, tx)
 	})

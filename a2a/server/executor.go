@@ -108,7 +108,11 @@ func (e *executor) resolveWorkspace(ctx context.Context, execCtx *a2asrv.Executo
 
 // resolveSession creates a new session for a new task or resolves the mirrored
 // session for a resumed task, yielding the submitted task when it creates one.
-func (e *executor) resolveSession(ctx context.Context, execCtx *a2asrv.ExecutorContext, yield func(a2a.Event, error) bool) (Session, error) {
+func (e *executor) resolveSession(
+	ctx context.Context,
+	execCtx *a2asrv.ExecutorContext,
+	yield func(a2a.Event, error) bool,
+) (Session, error) {
 	workspace, err := e.resolveWorkspace(ctx, execCtx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace: %w", err)
@@ -187,7 +191,11 @@ func (e *executor) remember(sess Session) {
 // fresh turn from the incoming message. The turn is keyed by the A2A task id.
 // When a restart dropped the parked turn (no in-process pending) but the task
 // is still input-required, it rebuilds the turn from the durable history.
-func (e *executor) streamFor(ctx context.Context, execCtx *a2asrv.ExecutorContext, sess Session) iter.Seq2[Event, error] {
+func (e *executor) streamFor(
+	ctx context.Context,
+	execCtx *a2asrv.ExecutorContext,
+	sess Session,
+) iter.Seq2[Event, error] {
 	turnID := string(execCtx.TaskID)
 	e.mu.Lock()
 	pending := e.pending[execCtx.TaskID]
@@ -335,7 +343,11 @@ func (e *executor) awaitInput(
 		return
 	}
 	e.setPending(execCtx.TaskID, sess, requestID, question)
-	status := a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateInputRequired, awaitInputMessage(execCtx, requestID, questions))
+	status := a2a.NewStatusUpdateEvent(
+		execCtx,
+		a2a.TaskStateInputRequired,
+		awaitInputMessage(execCtx, requestID, questions),
+	)
 	status.Metadata = map[string]any{
 		metaKeySession:        sess.ID(),
 		metaKeyPendingRequest: requestID,

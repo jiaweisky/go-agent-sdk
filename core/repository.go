@@ -106,7 +106,9 @@ func RepositoryValidateBranch(branch string) error {
 	if repositoryBranch.MatchString(branch) && !strings.HasPrefix(branch, "-") && !strings.Contains(branch, "..") {
 		return nil
 	}
-	return fmt.Errorf("Branch must contain only alphanumeric characters, /, _, ., and -, and cannot start with - or contain ..")
+	return fmt.Errorf(
+		"Branch must contain only alphanumeric characters, /, _, ., and -, and cannot start with - or contain ..",
+	)
 }
 
 // RepositoryCachePath is the checkout directory for a repository and branch.

@@ -94,7 +94,11 @@ func validateBase64(route, base64Str string) error {
 }
 
 // ValidateToolFile checks a tool file result's type and size.
-func ValidateToolFile(route string, part schema.ToolFileContent, supportedMIMEs map[string]struct{}) (*ValidatedMedia, error) {
+func ValidateToolFile(
+	route string,
+	part schema.ToolFileContent,
+	supportedMIMEs map[string]struct{},
+) (*ValidatedMedia, error) {
 	return ValidateMedia(route, schema.MediaPart{
 		Type:      "media",
 		MediaType: part.Mime,

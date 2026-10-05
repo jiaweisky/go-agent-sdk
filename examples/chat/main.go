@@ -135,8 +135,12 @@ func writeBanner(console *console, yolo bool) {
 		console.write(yellow + "warning: --yolo skips all permission prompts" + reset + "\n")
 	}
 	console.write("Chat with go-agent-sdk (Ctrl+C to exit; Esc interrupts; type during a turn to steer it)\n")
-	console.write(dim + "SessionHooks: lifecycle logged as [hook]; \"?<text>\" asks for a concise answer; rm -rf is denied" + reset + "\n")
-	console.write(dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /mcp  /task [<#n>]  /compact  /tool  /tool-output  /attach  /todos  /diff  /undo  /redo  /async  /plugin  /reference  /persona  /prompt  /history" + reset + "\n\n")
+	console.write(
+		dim + "SessionHooks: lifecycle logged as [hook]; \"?<text>\" asks for a concise answer; rm -rf is denied" + reset + "\n", //nolint:lll // UI banner
+	)
+	console.write(
+		dim + "Commands: /help  /new  /sessions [<#n|id>]  /delete <#n|id>  /model [<id>]  /agent [<id>]  /skills  /agents  /mcps  /mcp  /task [<#n>]  /compact  /tool  /tool-output  /attach  /todos  /diff  /undo  /redo  /async  /plugin  /reference  /persona  /prompt  /history" + reset + "\n\n", //nolint:lll // UI banner
+	)
 }
 
 // chatLoop prompts until stdin closes or the user interrupts a turn. The active
@@ -175,7 +179,13 @@ func runTurn(ctx context.Context, console *console, renderer *chat, input string
 	// While the turn runs, the bottom status line animates a spinner and prompts
 	// for the second Esc after the first.
 	// Typing during the turn steers it (Enter sends); Esc/Ctrl+C interrupt.
-	action := console.watchInterrupt(turnDone, renderer.session.Abort, renderer.submitDuringTurn, renderer.updateStatus, renderer.setInterruptArmed)
+	action := console.watchInterrupt(
+		turnDone,
+		renderer.session.Abort,
+		renderer.submitDuringTurn,
+		renderer.updateStatus,
+		renderer.setInterruptArmed,
+	)
 	<-turnDone
 	renderer.captureTurnEnd()
 	if action == interruptNone {
@@ -272,7 +282,13 @@ func commandName(command string) string {
 }
 
 // sendTurn drives one turn; rendering happens in the client event handler.
-func sendTurn(ctx context.Context, console *console, session *agent.Session, prompt string, files []schema.PromptFileAttachment) {
+func sendTurn(
+	ctx context.Context,
+	console *console,
+	session *agent.Session,
+	prompt string,
+	files []schema.PromptFileAttachment,
+) {
 	for _, err := range session.Send(ctx, agent.MessageOptions{Prompt: prompt, Files: files}) {
 		if err != nil {
 			console.write(fmt.Sprintf("%s%v%s\n", yellow, err, reset))

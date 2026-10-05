@@ -50,7 +50,11 @@ func DecodeSessionMessageWithMeta(data []byte, id MessageID, messageType string)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRequiredJSON(reflect.TypeOf(message), object, map[string]bool{"id": true, "type": true}); err != nil {
+	if err := validateRequiredJSON(
+		reflect.TypeOf(message),
+		object,
+		map[string]bool{"id": true, "type": true},
+	); err != nil {
 		return nil, err
 	}
 	return message, nil

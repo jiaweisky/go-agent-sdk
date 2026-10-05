@@ -109,7 +109,12 @@ func (c *Client) Connect(ctx context.Context, name string, cfg ServerConfig) Sta
 }
 
 // ConnectTransport connects a single transport, storing the session on success.
-func (c *Client) ConnectTransport(ctx context.Context, name string, transport sdk.Transport, timeout time.Duration) Status {
+func (c *Client) ConnectTransport(
+	ctx context.Context,
+	name string,
+	transport sdk.Transport,
+	timeout time.Duration,
+) Status {
 	sdkClient := sdk.NewClient(&sdk.Implementation{Name: c.name, Version: c.version}, &sdk.ClientOptions{
 		ToolListChangedHandler: func(context.Context, *sdk.ToolListChangedRequest) {
 			c.refreshTools(name)
@@ -494,7 +499,11 @@ func (c *Client) CallTool(ctx context.Context, server, toolName string, args any
 }
 
 // GetPrompt fetches a prompt from the named server.
-func (c *Client) GetPrompt(ctx context.Context, server, name string, args map[string]string) (*sdk.GetPromptResult, error) {
+func (c *Client) GetPrompt(
+	ctx context.Context,
+	server, name string,
+	args map[string]string,
+) (*sdk.GetPromptResult, error) {
 	session, err := c.sessionFor(server)
 	if err != nil {
 		return nil, err

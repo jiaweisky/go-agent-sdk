@@ -181,7 +181,10 @@ func ValidateName(name string) error {
 	return nil
 }
 
-func WithPermission[Input, Output, Structured any](tool *Def[Input, Output, Structured], permission string) *Def[Input, Output, Structured] {
+func WithPermission[Input, Output, Structured any](
+	tool *Def[Input, Output, Structured],
+	permission string,
+) *Def[Input, Output, Structured] {
 	rt := tool.rt
 	if rt == nil {
 		panic("invalid tool: nil runtime")

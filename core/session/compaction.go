@@ -23,6 +23,7 @@ const (
 	compactionSummaryOutputTokens = 4_096
 )
 
+//nolint:lll // prose prompt template
 const compactionSummaryTemplate = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 <template>
 ## Objective
@@ -55,6 +56,7 @@ Rules:
 - Preserve exact file paths, symbols, commands, error strings, URLs, and identifiers when known.
 - Do not mention the summary process or that context was compacted.`
 
+//nolint:lll // prose prompt template
 const compactionSummaryUpdateInstructions = `The <prior-summary> summarizes everything that happened before the <conversation>. Construct a new summary that combines both. The <prior-summary> is discarded after this: anything you do not carry into the new summary is lost.
 
 When combining:
@@ -244,7 +246,11 @@ func compactionPreviousSummary(entries []CompactionEntry) *schema.SessionMessage
 
 // summarizeCompaction streams the summary prompt and reports whether it
 // produced usable text.
-func (c *Compaction) summarizeCompaction(input CompactionInput, summaryPrompt string, summaryOutput int) (string, bool, error) {
+func (c *Compaction) summarizeCompaction(
+	input CompactionInput,
+	summaryPrompt string,
+	summaryOutput int,
+) (string, bool, error) {
 	maxTokens := summaryOutput
 	request := llm.NewRequest(llm.RequestInput{
 		Model:      input.Model,
@@ -321,7 +327,7 @@ func BuildCompactionPrompt(input CompactionPromptInput) string {
 	if input.PreviousSummary == "" {
 		return strings.Join([]string{
 			conversation,
-			"Create a new anchored summary from the conversation history in the <conversation> tags above so another coding agent can continue the work.",
+			"Create a new anchored summary from the conversation history in the <conversation> tags above so another coding agent can continue the work.", //nolint:lll // prose prompt
 			compactionSummaryTemplate,
 		}, "\n\n")
 	}

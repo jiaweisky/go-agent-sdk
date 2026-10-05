@@ -575,7 +575,8 @@ func (s *turndownWhitespaceState) visit(node *html.Node) (*html.Node, bool) {
 	switch node.Type {
 	case html.TextNode, html.RawNode:
 		text := turndownWhitespaceRun.ReplaceAllString(node.Data, " ")
-		if (s.prevText == nil || strings.HasSuffix(s.prevText.Data, " ")) && !s.keepLeadingWs && strings.HasPrefix(text, " ") {
+		if (s.prevText == nil || strings.HasSuffix(s.prevText.Data, " ")) && !s.keepLeadingWs &&
+			strings.HasPrefix(text, " ") {
 			text = text[1:]
 		}
 		if text == "" {
@@ -777,7 +778,8 @@ func turndownEdgeWhitespace(s string) turndownEdges {
 	trailing := string(runes[trailStart:])
 	trailingRunes := runes[trailStart:]
 	asciiSuffix := 0
-	for asciiSuffix < len(trailingRunes) && turndownIsASCIIWhitespaceRune(trailingRunes[len(trailingRunes)-1-asciiSuffix]) {
+	for asciiSuffix < len(trailingRunes) &&
+		turndownIsASCIIWhitespaceRune(trailingRunes[len(trailingRunes)-1-asciiSuffix]) {
 		asciiSuffix++
 	}
 	trailingAscii := string(trailingRunes[len(trailingRunes)-asciiSuffix:])

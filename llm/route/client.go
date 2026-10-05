@@ -62,7 +62,12 @@ type Route struct {
 	With             func(patch RoutePatch) Route
 	Model            func(input RouteModelInput) Model
 	PrepareTransport func(body any, request *schema.LLMRequest) (any, error)
-	StreamPrepared   func(ctx context.Context, prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error]
+	StreamPrepared   func(
+		ctx context.Context,
+		prepared any,
+		request *schema.LLMRequest,
+		runtime TransportRuntime,
+	) iter.Seq2[any, error]
 }
 
 // MakeTransportInput describes a route to build.
@@ -236,7 +241,12 @@ func routeStreamPrepared(
 
 // stepFrame decodes one frame, steps the state machine, and reports whether the
 // frame was terminal.
-func stepFrame(ri makeTransportInput, stream ProtocolStream, state any, frame any) (any, []schema.LLMEvent, bool, error) {
+func stepFrame(
+	ri makeTransportInput,
+	stream ProtocolStream,
+	state any,
+	frame any,
+) (any, []schema.LLMEvent, bool, error) {
 	frameStr, ok := frame.(string)
 	if !ok {
 		return state, nil, false, fmt.Errorf("route %s: expected string frame, got %T", ri.ID, frame)
@@ -290,7 +300,11 @@ func mergeRouteDefaults(base RouteDefaults, input RouteDefaultsInput) RouteDefau
 }
 
 // mergeHttpDefaults folds merged headers and a patch into the base HTTP options.
-func mergeHttpDefaults(base *schema.HttpOptions, headers map[string]string, input *schema.HttpOptions) *schema.HttpOptions {
+func mergeHttpDefaults(
+	base *schema.HttpOptions,
+	headers map[string]string,
+	input *schema.HttpOptions,
+) *schema.HttpOptions {
 	if headers == nil {
 		if input == nil {
 			return base
