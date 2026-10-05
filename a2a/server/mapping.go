@@ -87,17 +87,31 @@ func questionAnswersFromMessage(message *a2a.Message) []Answer {
 	return []Answer{{Labels: []string{text}}}
 }
 
-// permissionReplyFromMessage maps a reply message onto a permission reply. It
-// matches whole words so "not"/"now" do not read as a rejection.
+// permissionReplyFromMessage maps a reply message onto a permission reply.
+// Recognition is whole-word and fails closed: an explicit rejection wins over
+// any allowance, and a message with no recognizable decision is rejected rather
+// than silently allowed once.
 func permissionReplyFromMessage(message *a2a.Message) string {
-	text := strings.ToLower(messageText(message))
-	for _, word := range strings.FieldsFunc(text, func(r rune) bool { return !unicode.IsLetter(r) }) {
+	words := strings.FieldsFunc(strings.ToLower(messageText(message)), func(r rune) bool {
+		return !unicode.IsLetter(r)
+	})
+	allowed := false
+	always := false
+	for _, word := range words {
 		switch word {
-		case "always":
-			return "always"
-		case "reject", "deny", "no":
+		case "reject", "deny", "no", "never", "cancel", "stop", "abort", "not", "don", "dont":
 			return "reject"
+		case "always":
+			allowed, always = true, true
+		case "once", "yes", "y", "ok", "okay", "allow", "approve", "accept":
+			allowed = true
 		}
+	}
+	if !allowed {
+		return "reject"
+	}
+	if always {
+		return "always"
 	}
 	return "once"
 }

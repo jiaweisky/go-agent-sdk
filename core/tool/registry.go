@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
@@ -163,6 +164,9 @@ func (r *Registry) Materialize(permissions []PermissionRule) *Materialization {
 	for name, entry := range registrations {
 		defs = append(defs, Definition(name, entry.tool))
 	}
+	// Map iteration order is random; sort so the model-facing tool list is
+	// stable across turns (providers cache on the request prefix).
+	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
 
 	identities := make(map[string]interface{}, len(registrations))
 	for name, entry := range registrations {
