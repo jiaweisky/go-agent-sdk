@@ -96,8 +96,8 @@ func TestRuneWidth(t *testing.T) {
 		want int
 	}{
 		{'a', 1},
-		{'你', 2},
-		{'　', 2},      // ideographic space
+		{'\u4f60', 2}, // CJK ideograph "you"
+		{'\u3000', 2}, // ideographic space
 		{'\u0301', 0}, // combining acute accent
 		{'\u20e3', 0}, // combining enclosing keycap
 		{0, 0},

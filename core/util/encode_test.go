@@ -7,11 +7,11 @@ import (
 
 func TestChecksumMatchesUpstream(t *testing.T) {
 	cases := map[string]string{
-		"":                  "",
-		"ses_checksum_test": "ifoe61",
-		"ses_abc":           "1qrpf0p",
-		"hello world":       "1n91413",
-		"测试会话":              "jizlx4",
+		"":                         "",
+		"ses_checksum_test":        "ifoe61",
+		"ses_abc":                  "1qrpf0p",
+		"hello world":              "1n91413",
+		"\u6d4b\u8bd5\u4f1a\u8bdd": "jizlx4",
 	}
 	for input, want := range cases {
 		if got := Checksum(input); got != want {
@@ -41,14 +41,14 @@ func TestBase64URLRoundTrip(t *testing.T) {
 	if got := Base64Encode("hello world"); got != "aGVsbG8gd29ybGQ" {
 		t.Fatalf("Base64Encode = %q", got)
 	}
-	if got := Base64Encode("测试 hello"); got != "5rWL6K-VIGhlbGxv" {
+	if got := Base64Encode("\u6d4b\u8bd5 hello"); got != "5rWL6K-VIGhlbGxv" {
 		t.Fatalf("Base64Encode unicode = %q", got)
 	}
 	decoded, err := Base64Decode("5rWL6K-VIGhlbGxv")
 	if err != nil {
 		t.Fatalf("Base64Decode: %v", err)
 	}
-	if decoded != "测试 hello" {
+	if decoded != "\u6d4b\u8bd5 hello" {
 		t.Fatalf("Base64Decode = %q", decoded)
 	}
 	// atob accepts padding and ASCII whitespace.

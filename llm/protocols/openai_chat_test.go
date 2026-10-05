@@ -81,13 +81,13 @@ func TestOpenAIChatLowerAssistantUsesCompatibleNativeReasoning(t *testing.T) {
 func TestOpenAIChatLowerMessagesDropsReasoningOnlyAssistant(t *testing.T) {
 	request := &schema.LLMRequest{
 		Messages: []schema.Message{
-			schema.MessageUser("分析本项目"),
+			schema.MessageUser("analyze this project"),
 			{
 				ID:      "msg_interrupted",
 				Role:    schema.RoleAssistant,
-				Content: []schema.ContentPart{schema.ReasoningPart{Type: "reasoning", Text: "项目"}},
+				Content: []schema.ContentPart{schema.ReasoningPart{Type: "reasoning", Text: "project"}},
 			},
-			schema.MessageUser("继续"),
+			schema.MessageUser("continue"),
 		},
 	}
 	msgs, err := openaiChatLowerMessages(request)

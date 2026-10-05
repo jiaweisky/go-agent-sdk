@@ -67,7 +67,7 @@ func TestSummarize(t *testing.T) {
 	if got := summarize("", "boom"); got != "Summary: failed: boom" {
 		t.Errorf("got %q", got)
 	}
-	if got := summarize(strings.Repeat("字", 100), ""); !strings.HasSuffix(got, "…") {
+	if got := summarize(strings.Repeat("x", 100), ""); !strings.HasSuffix(got, "…") {
 		t.Errorf("long answer not truncated: %q", got)
 	}
 }

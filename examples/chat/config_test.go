@@ -60,7 +60,7 @@ func TestModeAgentInheritsDefaultPermissions(t *testing.T) {
 // collation reorders mixed-script subagent names.
 func TestSubagentLocaleOrdering(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"翻译", "摘要"} {
+	for _, name := range []string{"\u7ffb\u8bd1", "\u6458\u8981"} {
 		writeAgentFile(t, dir, "agent", name, "description: helper\nmode: subagent\n", "help")
 	}
 	agents := core.NewAgent()

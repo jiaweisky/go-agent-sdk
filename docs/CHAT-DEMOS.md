@@ -191,9 +191,8 @@ usage/cost, reasoning stream, subagent nesting, SessionHooks (see 2.1), `-C`/`--
 - modes: new `examples/chat/.config/mode/planner.md` → a **primary agent** (`{mode,modes}/*.md` is loaded by `defs/config`,
   `Mode` forced to `primary`), listed and switchable under **`/agent`** (not `/agents`); only `{agent,agents}/**/*.md` are subagents and go under `/agents`.
 - Locale: `ClientOptions.Locale` is not set, so env is used (`util.LocaleTag` parsed from `LC_ALL`/`LC_COLLATE`/`LANG`). It does locale-aware
-  ordering, affecting the model-side guidance (advertised subagent types, skills/reference guidance) and chat's `/agents`, `/mcps`. Also added two Chinese-named
-  subagents (`.config/agent/翻译.md`, `摘要.md`): with `LC_ALL=zh_CN.UTF-8` they sort by pinyin, with `en_US.UTF-8` by code point, so `/agents` order differs
-  (locked by `TestSubagentLocaleOrdering`).
+  ordering, affecting the model-side guidance (advertised subagent types, skills/reference guidance) and chat's `/agents`, `/mcps`. Locale-aware collation of
+  mixed-script subagent names is locked by `TestSubagentLocaleOrdering`.
 - Note: `/agent` (the primary list) uses `sort.Strings` and does not use locale; the example does not expose `ClientOptions.Locale` (env only).
 
 ### 2.15 File/image attachments — high ✅ implemented (with minor SDK changes)
