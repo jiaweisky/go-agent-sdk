@@ -106,16 +106,18 @@ func TestValidate(t *testing.T) {
 	}
 
 	cases := map[string]config{
-		"missing root":         {Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"missing model":        {Root: "/r", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"missing protocol":     {Root: "/r", Model: "m", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"no agents":            {Root: "/r", Model: "m", Protocol: "p", Credentials: credentialsConfig{APIKey: "k"}},
-		"no credentials":       {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}},
-		"aws missing fields":   {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{AWS: &awsCredentials{Region: "us-east-1"}}},
-		"empty bearer":         {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, Auth: &authConfig{}},
-		"negative keepAlive":   {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, KeepAlive: "-1s"},
-		"non-loopback no auth": {Listen: "0.0.0.0:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"all-interfaces host":  {Listen: ":9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"missing root":          {Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"missing model":         {Root: "/r", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"missing protocol":      {Root: "/r", Model: "m", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"no agents":             {Root: "/r", Model: "m", Protocol: "p", Credentials: credentialsConfig{APIKey: "k"}},
+		"no credentials":        {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}},
+		"aws missing fields":    {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{AWS: &awsCredentials{Region: "us-east-1"}}},
+		"empty bearer":          {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, Auth: &authConfig{}},
+		"negative keepAlive":    {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, KeepAlive: "-1s"},
+		"non-loopback no auth":  {Listen: "0.0.0.0:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"all-interfaces host":   {Listen: ":9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
+		"negative contextLimit": {Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, ContextLimit: -1},
+		"tls missing key":       {Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, TLS: &tlsConfig{CertFile: "c"}},
 	}
 	for name, cfg := range cases {
 		if err := cfg.validate(); err == nil {

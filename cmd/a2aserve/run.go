@@ -33,13 +33,15 @@ func run(ctx context.Context, cfg config) error {
 		Protocol:         schema.ProtocolID(cfg.Protocol),
 		ModelInfo:        modelInfoProvider(cfg),
 		Credentials:      credentialProvider(cfg),
+		ContextLimit:     cfg.ContextLimit,
+		OutputLimit:      cfg.OutputLimit,
 	})
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 
-	agents, err := exposeAgents(client, cfg.Agents)
+	agents, err := exposeAgents(client, cfg.Agents, cfg.Cards)
 	if err != nil {
 		return err
 	}
@@ -70,7 +72,13 @@ func run(ctx context.Context, cfg config) error {
 	fmt.Fprintf(os.Stderr, "a2aserve: card at %s/.well-known/agent-card.json\n", logBaseURL(cfg))
 
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- httpServer.ListenAndServe() }()
+	go func() {
+		if cfg.TLS != nil {
+			serveErr <- httpServer.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile)
+			return
+		}
+		serveErr <- httpServer.ListenAndServe()
+	}()
 
 	select {
 	case <-ctx.Done():
@@ -86,13 +94,19 @@ func run(ctx context.Context, cfg config) error {
 }
 
 // exposeAgents marks each named existing agent exposed and returns its info.
-func exposeAgents(client *agent.Client, names []string) ([]schema.AgentInfo, error) {
+// cards optionally overrides an agent's card name/description.
+func exposeAgents(client *agent.Client, names []string, cards map[string]cardConfig) ([]schema.AgentInfo, error) {
 	exposed := make([]schema.AgentInfo, 0, len(names))
 	for _, name := range names {
 		if info := client.Agents().Get(schema.AgentID(name)); info == nil {
 			return nil, fmt.Errorf("unknown agent %q", name)
 		}
-		if err := client.RegisterAgent(name, agent.AgentConfig{Expose: &schema.AgentExpose{}}); err != nil {
+		expose := &schema.AgentExpose{}
+		if override, ok := cards[name]; ok {
+			expose.Name = override.Name
+			expose.Description = override.Description
+		}
+		if err := client.RegisterAgent(name, agent.AgentConfig{Expose: expose}); err != nil {
 			return nil, fmt.Errorf("expose agent %q: %w", name, err)
 		}
 		exposed = append(exposed, *client.Agents().Get(schema.AgentID(name)))

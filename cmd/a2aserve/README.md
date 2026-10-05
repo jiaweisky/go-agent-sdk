@@ -48,12 +48,19 @@ credentials:                        # required; the only secret source (no env)
   #   secretAccessKey: ...
   #   sessionToken: ...             # optional
 agents: [build]                     # existing agent names to expose
+cards:                              # optional per-agent card overrides
+  build: { name: Build Agent, description: "..." }
+contextLimit: 128000                # optional; drives automatic compaction
+outputLimit: 8192                   # optional
 inboundPermissions:                 # default: SDK deny-by-default ruleset
   - { action: bash, resource: "*", effect: deny }
 keepAlive: 15s
 # auth:                             # optional; when set, RPC requires a bearer token
 #   bearer: <token>
 # allowInsecure: false              # required to bind non-loopback without auth
+# tls:                              # optional; serve HTTPS when both are set
+#   certFile: /etc/a2aserve/tls.crt
+#   keyFile: /etc/a2aserve/tls.key
 ```
 
 Configuration precedence is **defaults < file < flags**. Unknown file keys are

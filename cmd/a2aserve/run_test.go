@@ -28,19 +28,32 @@ func newTestClient(t *testing.T) *agent.Client {
 
 func TestExposeAgentsUnknown(t *testing.T) {
 	client := newTestClient(t)
-	if _, err := exposeAgents(client, []string{"does-not-exist"}); err == nil {
+	if _, err := exposeAgents(client, []string{"does-not-exist"}, nil); err == nil {
 		t.Fatal("expected an error for an unknown agent")
 	}
 }
 
 func TestExposeAgentsBuild(t *testing.T) {
 	client := newTestClient(t)
-	exposed, err := exposeAgents(client, []string{"build"})
+	exposed, err := exposeAgents(client, []string{"build"}, nil)
 	if err != nil {
 		t.Fatalf("exposeAgents: %v", err)
 	}
 	if len(exposed) != 1 || exposed[0].Expose == nil {
 		t.Fatalf("exposed = %+v, want build with Expose set", exposed)
+	}
+}
+
+func TestExposeAgentsCardOverride(t *testing.T) {
+	client := newTestClient(t)
+	exposed, err := exposeAgents(client, []string{"build"}, map[string]cardConfig{
+		"build": {Name: "Custom", Description: "custom card"},
+	})
+	if err != nil {
+		t.Fatalf("exposeAgents: %v", err)
+	}
+	if exposed[0].Expose == nil || exposed[0].Expose.Name != "Custom" || exposed[0].Expose.Description != "custom card" {
+		t.Fatalf("expose = %+v, want the card override", exposed[0].Expose)
 	}
 }
 

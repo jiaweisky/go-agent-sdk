@@ -18,21 +18,37 @@ import (
 // then a YAML file, then CLI flags (flags win). No environment variables are
 // read.
 type config struct {
-	Listen             string            `yaml:"listen"`
-	BaseURL            string            `yaml:"baseURL"`
-	Root               string            `yaml:"root"`
-	WorkingDirectory   string            `yaml:"workingDirectory"`
-	ConfigDirs         []string          `yaml:"configDirs"`
-	Model              string            `yaml:"model"`
-	Protocol           string            `yaml:"protocol"`
-	Credentials        credentialsConfig `yaml:"credentials"`
-	Agents             []string          `yaml:"agents"`
-	InboundPermissions []permissionRule  `yaml:"inboundPermissions"`
-	KeepAlive          string            `yaml:"keepAlive"`
-	Auth               *authConfig       `yaml:"auth"`
+	Listen             string                `yaml:"listen"`
+	BaseURL            string                `yaml:"baseURL"`
+	Root               string                `yaml:"root"`
+	WorkingDirectory   string                `yaml:"workingDirectory"`
+	ConfigDirs         []string              `yaml:"configDirs"`
+	Model              string                `yaml:"model"`
+	Protocol           string                `yaml:"protocol"`
+	Credentials        credentialsConfig     `yaml:"credentials"`
+	Agents             []string              `yaml:"agents"`
+	Cards              map[string]cardConfig `yaml:"cards"`
+	ContextLimit       int                   `yaml:"contextLimit"`
+	OutputLimit        int                   `yaml:"outputLimit"`
+	InboundPermissions []permissionRule      `yaml:"inboundPermissions"`
+	KeepAlive          string                `yaml:"keepAlive"`
+	Auth               *authConfig           `yaml:"auth"`
+	TLS                *tlsConfig            `yaml:"tls"`
 	// AllowInsecure permits binding a non-loopback address without auth. It is
 	// an explicit opt-out of the safe default.
 	AllowInsecure bool `yaml:"allowInsecure"`
+}
+
+// cardConfig overrides an exposed agent's card name and description.
+type cardConfig struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+}
+
+// tlsConfig enables HTTPS when both files are set.
+type tlsConfig struct {
+	CertFile string `yaml:"certFile"`
+	KeyFile  string `yaml:"keyFile"`
 }
 
 // credentialsConfig holds the credential for the configured protocol: an API
@@ -126,6 +142,12 @@ func (c config) validate() error {
 		if aws.Region == "" || aws.AccessKeyID == "" || aws.SecretAccessKey == "" {
 			return errors.New("aws credentials require region, accessKeyId and secretAccessKey")
 		}
+	}
+	if c.ContextLimit < 0 || c.OutputLimit < 0 {
+		return errors.New("contextLimit and outputLimit must not be negative")
+	}
+	if tls := c.TLS; tls != nil && (tls.CertFile == "" || tls.KeyFile == "") {
+		return errors.New("tls requires both certFile and keyFile")
 	}
 	if _, err := c.keepAliveDuration(); err != nil {
 		return err
