@@ -1,68 +1,67 @@
-# go-agent-sdk 设计文档
+# go-agent-sdk design document
 
-> ⚠️ **本文档中的 Go 代码仅为示意**，用于表达架构设计和模式，不代表最终实现。每个函数签名、类型定义、错误处理的细节都以 opencode 的 TypeScript 源码为准。移植时请对照 opencode 对应文件的完整逻辑。
+> ⚠️ **The Go code in this document is illustrative only**, expressing the architecture and patterns; it does not represent the final implementation. Every function signature, type definition and error-handling detail is governed by opencode's TypeScript source. When porting, compare against the full logic of the corresponding opencode file.
 
-## 1. 项目概述
+## 1. Project overview
 
-go-agent-sdk 是 [opencode](https://opencode.ai) 的 Go 移植版，目标是提供一套完整可嵌入的 Agent SDK。核心能力包括：
+go-agent-sdk is a Go port of [opencode](https://opencode.ai), aiming to provide a complete, embeddable Agent SDK. Core capabilities include:
 
-- **LLM 协议层** — 支持 OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini / Bedrock Converse 等协议（另有 openai-compatible chat），
-  调用方按**协议 id** 选择（`ClientOptions.Protocol`），六种协议均可经 `llm/protocols` 注册表到达；`llm/provider/` 的 facade 只是预置默认值的便捷层（见 §5）。
-- **Agent 循环** — 自动化的 tool-calling agent 循环，支持步骤管理、上下文溢出恢复、steer/queue 输入。
-- **Agent 定义** — 可配置的 agent 元信息、system prompt、权限规则、模型覆盖。
-- **Skill** — 从 markdown 文件加载专业知识，注入系统上下文。
-- **MCP 集成** — 原生 Model Context Protocol 客户端，支持本地和远程 MCP 服务器。
-- **内置工具** — read, write, edit, apply_patch, bash, glob, grep, webfetch, question, skill, todowrite（11 个，见 §7.4）；另有 `task`（subagent 委托，见 §6.3）。
-- **权限系统** — 基于规则的 allow/deny/ask 权限模型。
-- **Subagent** — agent 内通过 task tool 递归创建独立子会话。
+- **LLM protocol layer** — supports OpenAI Chat / OpenAI Responses / Anthropic Messages / Gemini / Bedrock Converse and more (plus openai-compatible chat); callers choose by **protocol id** (`ClientOptions.Protocol`), and all six protocols are reachable through the `llm/protocols` registry; the `llm/provider/` facades are only a convenience layer with preset defaults (see §5).
+- **Agent loop** — an automated tool-calling agent loop supporting step management, context-overflow recovery, and steer/queue input.
+- **Agent definitions** — configurable agent metadata, system prompt, permission rules, and model override.
+- **Skill** — load specialized knowledge from markdown files and inject it into the system context.
+- **MCP integration** — a native Model Context Protocol client supporting local and remote MCP servers.
+- **Built-in tools** — read, write, edit, apply_patch, bash, glob, grep, webfetch, question, skill, todowrite (11, see §7.4); plus `task` (subagent delegation, see §6.3).
+- **Permission system** — a rule-based allow/deny/ask permission model.
+- **Subagent** — recursively create independent child sessions via the task tool within an agent.
 
 ---
 
-## 2. MVP 范围
+## 2. MVP scope
 
-基于上述设计，第一版（MVP）实现以下核心闭环，支持端到端的 agent 对话：
+Based on the above design, the first version (MVP) implements the following core loop, supporting end-to-end agent conversations:
 
-### 包含
+### Included
 
-| 模块 | 内容 | 说明 |
+| Module | Content | Note |
 |---|---|---|
-| `llm/schema/` | LLMRequest, LLMEvent, LLMClient 接口, Model, options, ids, errors | 规范类型定义 |
-| `llm/route/` | Route + Protocol + Transport + Framing + Auth + Endpoint | LLM 协议层核心 |
-| `llm/protocols/` | OpenAI Chat / Responses、Anthropic Messages、Bedrock Converse、Gemini | 各 provider 线协议 |
-| `llm/provider/` | Provider Facades（openai, anthropic, openrouter, ...） | 预配置默认值 |
-| 根包 `agent`（已实现） | 高层公开 API（Client/Session/Send/On/DefineTool/Hooks） | 组装 core/session + llm + tool |
-| `core/tool/` | ToolRegistry + `registry.go` / `tool.go` | 注册、查询、权限过滤 |
-| 内置工具 | 11 个（`core/tool/`，见 §7.4） | read/write/edit/apply_patch/bash/glob/grep/webfetch/question/skill/todowrite |
-| `core/permission.go` | 规则引擎（allow / deny / ask） | 权限评估 |
-| `core/` | file-mutation / location-mutation / git / database / process ... | 支撑模块 |
-| 根包 `agent` | `NewClient` / `CreateSession` / `Send` / `On` / `RegisterAgent` | 公开 API（已实现，见 §11） |
-| `schema/` | 基础类型 | JSON Schema、ID 生成 |
+| `llm/schema/` | LLMRequest, LLMEvent, the LLMClient interface, Model, options, ids, errors | Canonical type definitions |
+| `llm/route/` | Route + Protocol + Transport + Framing + Auth + Endpoint | LLM protocol-layer core |
+| `llm/protocols/` | OpenAI Chat / Responses, Anthropic Messages, Bedrock Converse, Gemini | Per-provider wire protocols |
+| `llm/provider/` | Provider Facades (openai, anthropic, openrouter, ...) | Preset defaults |
+| root package `agent` (implemented) | high-level public API (Client/Session/Send/On/DefineTool/Hooks) | Assembles core/session + llm + tool |
+| `core/tool/` | ToolRegistry + `registry.go` / `tool.go` | Registration, lookup, permission filtering |
+| Built-in tools | 11 (`core/tool/`, see §7.4) | read/write/edit/apply_patch/bash/glob/grep/webfetch/question/skill/todowrite |
+| `core/permission.go` | Rule engine (allow / deny / ask) | Permission evaluation |
+| `core/` | file-mutation / location-mutation / git / database / process ... | Supporting modules |
+| root package `agent` | `NewClient` / `CreateSession` / `Send` / `On` / `RegisterAgent` | Public API (implemented, see §11) |
+| `schema/` | Base types | JSON Schema, ID generation |
 
-### 不包含（推迟到后续版本）
+### Not included (deferred to later versions)
 
-| 模块 | 推迟原因 |
+| Module | Reason for deferral |
 |---|---|
-| `lsp` 工具 | 非核心路径，后续追加 |
-| Provider facade（OpenRouter / xAI / Azure / Cloudflare / GitHub Copilot / Google / Bedrock 的预置 base URL） | 协议与 facade 已实现；`agent` 层改用 `Protocol` + `ModelInfo`，facade 仅供直接使用 `llm` 包的调用方（见 §5.4） |
-| `bash` 高级特性（tree-sitter、arity、后台任务、progress 流） | 见 `core/tool/bash.go` 的 TODO |
-| `edit` 高级特性（fuzzy match、formatter、watcher、snapshot、LSP） | 见 `core/tool/edit.go` 的 TODO |
-| `apply_patch` 的 move 与原子回滚 | 见 `core/tool/apply_patch.go` 的 TODO |
-| credential / catalog / integration 服务 | CLI 基础设施，SDK 改用窄输入（见 AGENTS.md） |
-| `weak` 包、`os.Root` 等安全特性 | 后续加固 |
+| `lsp` tool | Not on the core path; to be added later |
+| Provider facade (preset base URLs for OpenRouter / xAI / Azure / Cloudflare / GitHub Copilot / Google / Bedrock) | Protocols and facades are implemented; the `agent` layer uses `Protocol` + `ModelInfo`, and facades are only for callers using the `llm` package directly (see §5.4) |
+| `bash` advanced features (tree-sitter, arity, background tasks, progress stream) | See the TODO in `core/tool/bash.go` |
+| `edit` advanced features (fuzzy match, formatter, watcher, snapshot, LSP) | See the TODO in `core/tool/edit.go` |
+| `apply_patch` move and atomic rollback | See the TODO in `core/tool/apply_patch.go` |
+| credential / catalog / integration services | CLI infrastructure; the SDK uses narrow input instead (see AGENTS.md) |
+| `weak` package, `os.Root` and other security features | To be hardened later |
 
-> 已实现（早期文档曾列为"推迟"，现已落地）：MCP 集成（§8）、Skill 系统（§9）、Config frontmatter 加载（`defs/config`）、上下文压缩（§6）、Steer/Queue 输入、Plugin（窄化，§7.3）、Reference 服务、`task` 子 agent（§6.3）。
+> Implemented (previously listed as "deferred" in early documents, now landed): MCP integration (§8), Skill system (§9), Config frontmatter loading (`defs/config`), context compaction (§6), Steer/Queue input, Plugin (narrowed, §7.3), Reference service, `task` subagents (§6.3).
 
-### MVP 用户代码示例
+### MVP user code example
 
 ```go
 client, err := agent.NewClient(&agent.ClientOptions{
     Model:       "gpt-4o",
-    Protocol:    "openai-responses",           // 协议 id
+    Protocol:    "openai-responses",           // protocol id
     Credentials: agent.APIKey(os.Getenv("OPENAI_API_KEY")),
-    // 可选：catalog 元数据（endpoint/limits/headers）。不设则用协议路由默认值。
+    // Optional: catalog metadata (endpoint/limits/headers). If unset, the protocol route defaults are used.
     ModelInfo: func(id string) (schema.ModelInfo, error) {
         return agent.NewModelInfo("openai-responses", id, "https://api.openai.com/v1",
-            schema.ModelLimit{Context: 128_000, Output: 8_192}) // 启用自动压缩
+            schema.ModelLimit{Context: 128_000, Output: 8_192}) // enables automatic compaction
     },
 })
 
@@ -88,24 +87,24 @@ for event, err := range session.Send(ctx, agent.MessageOptions{Prompt: "Read mai
 
 ---
 
-## 3. 架构总览
+## 3. Architecture overview
 
-Go 目录直接镜像 opencode 的 TS monorepo 包结构（详见 §4）。依赖方向：
+The Go directories directly mirror opencode's TS monorepo package structure (see §4). Dependency direction:
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  根包 agent         ← 高层公开 API（已实现）                     │
+│  root package agent      ← high-level public API (implemented)  │
 │  High-level API (Agent, Session, Prompt, Stream)               │
 └───────────────────────────┬────────────────────────────────────┘
                             │ depends on
 ┌───────────────────────────v────────────────────────────────────┐
-│  Agent 循环 (loop / turn / session / context / steer / compact) │
+│  Agent loop (loop / turn / session / context / steer / compact) │
 └──────┬──────────────┬──────────────┬──────────────┬────────────┘
        │              │              │              │
 ┌──────v───────┐ ┌────v─────┐ ┌──────v─────┐ ┌──────v───────────┐
 │ core/tool/   │ │ mcp/     │ │ skill/     │ │ core/permission  │
 │ Registry     │ │ Client   │ │ Loader     │ │ Ruleset / assert │
-│ write, ...   │ │ (已实现) │ │ (已实现)   │ │                  │
+│ write, ...   │ │ (impl.)  │ │ (impl.)    │ │                  │
 └──────┬───────┘ └──────────┘ └────────────┘ └──────────────────┘
        │ depends on
 ┌──────v─────────────────────────────────────────────────────────┐
@@ -128,11 +127,11 @@ Go 目录直接镜像 opencode 的 TS monorepo 包结构（详见 §4）。依�
 └─────────────────────────────────────────────────────────────────┘
        │
 ┌──────v─────────────────────────────────────────────────────────┐
-│  schema/        ID 生成、Location / Project / Permission ...    │
+│  schema/        ID generation, Location / Project / Permission  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 依赖方向
+### Dependency direction
 
 ```
 agent ──> core/tool ──┐
@@ -141,37 +140,37 @@ agent ──> core/tool ──┐
           core/permission ─┘
 ```
 
-- `core/` 提供工具框架（tool / permission / file-mutation / location-mutation）与基础设施（git / database / process / fs-util）
-- `llm/` 提供协议层；`llm/schema` 是 LLM 规范类型
-- `schema/` 是跨领域共享类型（ID、Location、Project、Permission）
-- `mcp/` 包装官方 Go SDK `github.com/modelcontextprotocol/go-sdk`（local stdio / remote StreamableHTTP→SSE 回退），不涉及 LLM 概念；`mcp/tool.go` 的适配层将 MCP Tool 转为 LLM 可消费的 ToolDefinition
+- `core/` provides the tool framework (tool / permission / file-mutation / location-mutation) and infrastructure (git / database / process / fs-util)
+- `llm/` provides the protocol layer; `llm/schema` holds the LLM canonical types
+- `schema/` holds cross-domain shared types (ID, Location, Project, Permission)
+- `mcp/` wraps the official Go SDK `github.com/modelcontextprotocol/go-sdk` (local stdio / remote StreamableHTTP→SSE fallback) and does not involve LLM concepts; the adapter layer in `mcp/tool.go` converts an MCP Tool into an LLM-consumable ToolDefinition
 
-## 4. 包结构
+## 4. Package structure
 
-Go 目录**直接镜像 opencode 的 TS monorepo 包结构**：`packages/<pkg>/src/<path>` → `<pkg>/<path>`（kebab-case → snake_case），不使用 `pkg/` 或 `internal/`。完整约定（符号前缀、循环依赖处理、index.ts 规则）见 `AGENTS.md`。
+Go directories **directly mirror opencode's TS monorepo package structure**: `packages/<pkg>/src/<path>` → `<pkg>/<path>` (kebab-case → snake_case), without using `pkg/` or `internal/`. The full conventions (symbol prefixes, circular-dependency handling, index.ts rules) are in `AGENTS.md`.
 
 ```
 go-agent-sdk/                            opencode TS
-├── *.go            模块根包 agent（无 TS 对应目录，对标 copilot-sdk/go）
-│   ├── client.go / session.go / runtime.go    Client/Session/runtime 装配
-│   ├── task.go / task_run.go                   task（subagent）
-│   ├── events.go / hooks.go / permission.go    事件/钩子/权限
+├── *.go            module root package agent (no corresponding TS dir; modeled on copilot-sdk/go)
+│   ├── client.go / session.go / runtime.go    Client/Session/runtime assembly
+│   ├── task.go / task_run.go                   task (subagent)
+│   ├── events.go / hooks.go / permission.go    events/hooks/permissions
 │   └── ...
 ├── llm/            ← packages/llm/src/          (@opencode-ai/llm)
-│   ├── llm.go                       包入口、LLM re-exports (llm.ts)
-│   ├── tool.go                      LLM 层 Tool 定义 (tool.ts)
-│   ├── tool_runtime.go              工具运行时编排 (tool-runtime.ts)
-│   ├── cache_policy.go              缓存策略 (cache-policy.ts)
-│   ├── provider.go                  Provider 类型定义 (provider.ts)
-│   ├── provider_error.go            provider-error.ts（re-export llm/schema 的实现）
-│   ├── schema/                      LLM 规范类型 (schema/)
+│   ├── llm.go                       package entry, LLM re-exports (llm.ts)
+│   ├── tool.go                      LLM-layer Tool definition (tool.ts)
+│   ├── tool_runtime.go              tool runtime orchestration (tool-runtime.ts)
+│   ├── cache_policy.go              cache policy (cache-policy.ts)
+│   ├── provider.go                  Provider type definitions (provider.ts)
+│   ├── provider_error.go            provider-error.ts (re-exports llm/schema's implementation)
+│   ├── schema/                      LLM canonical types (schema/)
 │   │   ├── ids.go                   ProviderID, ModelID, ProtocolID, FinishReason, MessageRole
 │   │   ├── events.go                LLMEvent (events.ts)
 │   │   ├── messages.go              LLMRequest, LLMResponse, Message (messages.ts)
 │   │   ├── options.go               GenerationOptions (options.ts)
 │   │   ├── errors.go                LLMError + ProviderError (errors.ts)
-│   │   └── provider_error.go        IsContextOverflow 规范实现（llm 与 llm/route 共用）
-│   ├── route/                       Route 层 (route/)
+│   │   └── provider_error.go        the canonical IsContextOverflow implementation (shared by llm and llm/route)
+│   ├── route/                       Route layer (route/)
 │   │   ├── client.go                Route + LLMClient (route/client.ts)
 │   │   ├── transport.go             Transport / TransportRuntime / TransportPrepareInput
 │   │   ├── protocol.go              Protocol (route/protocol.ts)
@@ -181,7 +180,7 @@ go-agent-sdk/                            opencode TS
 │   │   ├── framing.go               Framing SSE (route/framing.ts)
 │   │   ├── executor.go              RequestExecutor (route/executor.ts)
 │   │   └── transport/               HttpTransport (route/transport/)
-│   ├── protocols/                   各 provider 线协议（平铺，符号加协议前缀）
+│   ├── protocols/                   per-provider wire protocols (flat, symbols prefixed by protocol)
 │   │   ├── openai_chat.go           protocols/openai-chat.ts
 │   │   ├── openai_responses.go      protocols/openai-responses.ts
 │   │   ├── anthropic_messages.go    protocols/anthropic-messages.ts
@@ -191,7 +190,7 @@ go-agent-sdk/                            opencode TS
 │   │   ├── shared.go                protocols/shared.ts
 │   │   └── utils/                   protocols/utils/
 │   ├── provider/                    Provider Facades (providers/)
-│   └── utils/                       通用工具 (utils/record.ts)
+│   └── utils/                       general utilities (utils/record.ts)
 ├── core/           ← packages/core/src/          (@opencode-ai/core)
 │   ├── schema.go                    re-exports (schema.ts)
 │   ├── global.go                    Global (global.ts)
@@ -207,56 +206,56 @@ go-agent-sdk/                            opencode TS
 │   ├── process.go                   process.ts
 │   ├── git.go                       git.ts
 │   ├── database/                    SQLite + migrations (database/)
-│   ├── effect/                      Effect 运行时工具 (effect/keyed-mutex.ts, ...)
+│   ├── effect/                      Effect runtime utilities (effect/keyed-mutex.ts, ...)
 │   ├── project/                     project/schema.ts, project/directories.ts
-│   ├── tool/                        工具框架 (tool/)
+│   ├── tool/                        tool framework (tool/)
 │   │   ├── tool.go                  tool.ts
 │   │   ├── registry.go              registry.ts
 │   │   ├── read.go / read_filesystem.go  read.ts / read-filesystem.ts
 │   │   ├── write.go                 write.ts
 │   │   ├── edit.go                  edit.ts
 │   │   └── bash.go                  bash.ts
-│   └── util/                        通用工具 (util/wildcard.ts, util/hash.ts, util/markdown.ts)
-│       └── markdown.go              ConfigMarkdown（frontmatter 解析，config/markdown.ts）
-├── a2a/            A2A（Agent2Agent）协议支持（无 TS 对应物，Go 专属能力；见 DESIGN-A2A.md）
-│   ├── client/     出向薄接口（SDK 自有类型，不泄漏 a2a-go）
-│   ├── a2ago/      出向 a2a-go 适配（唯一 import a2a-go 的出向层）
-│   └── server/     入向：AgentExecutor + taskstore.Store + AgentCard + http.Handler
+│   └── util/                        general utilities (util/wildcard.ts, util/hash.ts, util/markdown.ts)
+│       └── markdown.go              ConfigMarkdown (frontmatter parsing, config/markdown.ts)
+├── a2a/            A2A (Agent2Agent) protocol support (no TS counterpart; Go-specific; see DESIGN-A2A.md)
+│   ├── client/     outbound thin interface (SDK's own types, does not leak a2a-go)
+│   ├── a2ago/      outbound a2a-go adapter (the only outbound layer importing a2a-go)
+│   └── server/     inbound: AgentExecutor + taskstore.Store + AgentCard + http.Handler
 ├── opencode/       ← packages/opencode/src/      (opencode CLI)
-│   ├── config/                      内容型配置加载（agent/mode markdown）
-│   │   ├── agent.go                 config/agent.ts（LoadAgentEntries）
-│   │   ├── agent_info.go            config/agent.ts 的 AgentInfo 类型
+│   ├── config/                      content config loading (agent/mode markdown)
+│   │   ├── agent.go                 config/agent.ts (LoadAgentEntries)
+│   │   ├── agent_info.go            the AgentInfo type from config/agent.ts
 │   │   ├── entry_name.go            config/entry-name.ts
-│   │   └── agent_apply.go           config/plugin/agent.ts 的应用逻辑
-│   ├── skill/                       技能发现 (skill/index.ts 的 discoverSkills)
-│   │   └── skill.go                 DiscoverSkills（仅扫描给定目录）
-│   └── id/                          带前缀的单调 ID 生成 (id/id.ts)
+│   │   └── agent_apply.go           the application logic of config/plugin/agent.ts
+│   ├── skill/                       skill discovery (discoverSkills in skill/index.ts)
+│   │   └── skill.go                 DiscoverSkills (scans only the given directories)
+│   └── id/                          prefixed monotonic ID generation (id/id.ts)
 └── schema/         ← packages/schema/src/        (@opencode-ai/schema)
     ├── schema.go                    schema.ts
     ├── identifier.go                identifier.ts
     ├── event.go                     event.ts
-    ├── session_event.go             session-event.ts（含 durable/live-only 清单）
-    ├── session_message*.go          session-message.ts + JSON 解码
+    ├── session_event.go             session-event.ts (includes the durable/live-only list)
+    ├── session_message*.go          session-message.ts + JSON decoding
     ├── agent.go / permission.go / skill.go / location.go / project.go
     ├── model.go / provider.go / question.go / prompt.go / ...
-    └── v1/                          legacy SessionV1 事件形状
+    └── v1/                          legacy SessionV1 event shapes
 ```
 
-> 上面只是**代表性**目录，非完整清单（`schema/` 约 42 个文件、`core/` 模块更多）。
+> The above is only a **representative** tree, not the complete list (`schema/` has about 42 files, `core/` has many more modules).
 
-> 已实现：模块根包 `agent` 公开 API、core/session 主循环、12 个内置工具 + `task`、Skill、MCP、Plugin（窄化）、Reference 服务。尚未移植：`lsp` 工具。
+> Implemented: the module root package `agent` public API, the core/session main loop, 12 built-in tools + `task`, Skill, MCP, Plugin (narrowed), the Reference service. Not yet ported: the `lsp` tool.
 
-> **A2A（Agent2Agent）**：Go 专属能力（无 TS 对应物），设计与实现见 `docs/DESIGN-A2A.md`；入向/出向、HITL、`turn` 一等实体、Phase 5 生产化组件均已落地。
+> **A2A (Agent2Agent)**: a Go-specific capability (no TS counterpart); see `docs/DESIGN-A2A.md` for design and implementation; inbound/outbound, HITL, the `turn` first-class entity, and the Phase 5 productionization components have all landed.
 
-> **数据库**：`core/database` 用 `database/sql` + modernc SQLite。连接池 `MaxOpenConns=4`，per-connection pragma（`journal_mode=WAL`/`synchronous`/`busy_timeout`/`cache_size`/`foreign_keys`）经 DSN 注入，`_txlock=immediate` 让每个事务以 BEGIN IMMEDIATE 串行写；WAL 允许读并发，从而提升多会话吞吐（写仍串行，超 `busy_timeout` 报忙）。
+> **Database**: `core/database` uses `database/sql` + modernc SQLite. The pool is `MaxOpenConns=4`, per-connection pragmas (`journal_mode=WAL`/`synchronous`/`busy_timeout`/`cache_size`/`foreign_keys`) are injected via the DSN, and `_txlock=immediate` makes every transaction write serially with BEGIN IMMEDIATE; WAL allows concurrent reads, improving multi-session throughput (writes remain serial, reporting busy past `busy_timeout`).
 
 ---
 
-## 5. LLM 层详细设计
+## 5. LLM layer detailed design
 
-### 5.1 Route (路由)——核心抽象
+### 5.1 Route — the core abstraction
 
-Route 表示一个具体的 API 部署：1 个 URL + 1 个认证方式 + 1 个线协议 + 1 个流帧处理。
+A Route represents one concrete API deployment: 1 URL + 1 auth method + 1 wire protocol + 1 stream framing.
 
 ```go
 // llm/route/client.go
@@ -275,29 +274,29 @@ type Route struct {
     StreamPrepared   func(ctx context.Context, prepared any, request *schema.LLMRequest, runtime TransportRuntime) iter.Seq2[any, error]
 }
 
-// 构建请求体：LLMRequest → Provider-native body
+// Build the request body: LLMRequest → Provider-native body
 type RouteBody struct {
     Schema schema.JsonSchema
     From   func(request *schema.LLMRequest) (any, error)
 }
 ```
 
-Route 由四个正交层组合而成：
+A Route is composed of four orthogonal layers:
 
 ```
 Route = Protocol + Endpoint + Auth + Framing
 ```
 
 ```go
-// 从已就绪的 Transport 构造 Route（protocols/*.go 使用）
+// Build a Route from a ready Transport (used by protocols/*.go)
 func MakeFromTransport(input MakeTransportInput) Route
 ```
 
-> TS 的 `Route<Body, Prepared>` 泛型在 Go 里用 `any` 擦除（异构集合需要）。
+> TS's `Route<Body, Prepared>` generic is erased with `any` in Go (heterogeneous collections require it).
 
-### 5.2 Protocol (协议)
+### 5.2 Protocol
 
-Protocol 封装一个 provider 原生 API 的语义：body 构建、body schema、流式事件状态机。
+A Protocol encapsulates the semantics of one provider-native API: body construction, body schema, and the streaming event state machine.
 
 ```go
 // llm/route/protocol.go
@@ -308,7 +307,7 @@ type Protocol struct {
 }
 
 type ProtocolBody struct {
-    // 协议 body 契约（jsonschema AST）；路由构造时编译，compile() 校验每个 body。
+    // Protocol body contract (jsonschema AST); compiled when the route is built, compile() validates each body.
     Schema *jsonschema.Schema
     From   func(request *schema.LLMRequest) (any, error)
 }
@@ -322,9 +321,9 @@ type ProtocolStream struct {
 }
 ```
 
-> **body 校验**：每个协议在 `llm/protocols/body_schema.go` 定义 `Schema`（对齐 TS 的 Effect body schema）；`MakeFromTransport` 用 `jsonschema.CompileValidation` 编译 `Validation()` 投影，`llm.Client.compile` 在 `Body.From` 之后校验 marshal 出来的 body，不合法则返回 `InvalidRequestReason`（对齐 TS `ProviderShared.validateWith`）。这层校验抓到了几处 lowering 偏差（如 `messages: null` 而非 `[]`、`parameters: null`）。
+> **Body validation**: each protocol defines its `Schema` in `llm/protocols/body_schema.go` (aligned with TS's Effect body schema); `MakeFromTransport` compiles the `Validation()` projection with `jsonschema.CompileValidation`, and `llm.Client.compile` validates the marshalled body after `Body.From`, returning `InvalidRequestReason` if invalid (aligned with TS `ProviderShared.validateWith`). This layer caught several lowering deviations (e.g. `messages: null` instead of `[]`, `parameters: null`).
 
-### 5.3 LLMEvent (流式事件)
+### 5.3 LLMEvent (streaming events)
 
 ```go
 // llm/schema/events.go
@@ -362,16 +361,16 @@ type LLMEvent struct {
 
 ### 5.4 Provider Facades
 
-> SDK 的 `agent` 层**不直接使用**这些 facade：它按 `ModelInfo.API.Protocol` 查 `llm/protocols` 注册表（协议 id → route + 认证方案）并自行套 `schema.Credential`。facade 供直接使用 `llm` 包的调用方。
+> The SDK's `agent` layer **does not use** these facades directly: it looks up the `llm/protocols` registry by `ModelInfo.API.Protocol` (protocol id → route + auth scheme) and applies `schema.Credential` itself. Facades are for callers using the `llm` package directly.
 
 ```go
-// llm/provider/openai.go —— 传入预配置的 route（见 llm/protocols/）
+// llm/provider/openai.go —— takes preconfigured routes (see llm/protocols/)
 openai := provider.NewOpenAI(responsesRoute, chatRoute, provider.OpenAIConfig{
     APIKey: &apiKey,
 })
-model := openai.Model("gpt-4o")       // 默认协议
-chat  := openai.Chat("gpt-4o")        // 绑定 Chat 协议
-resp  := openai.Responses("gpt-4o")   // 绑定 Responses 协议
+model := openai.Model("gpt-4o")       // default protocol
+chat  := openai.Chat("gpt-4o")        // bound to the Chat protocol
+resp  := openai.Responses("gpt-4o")   // bound to the Responses protocol
 
 // llm/provider/anthropic.go
 anthropic := provider.NewAnthropic(anthropicMessagesRoute, provider.AnthropicConfig{
@@ -391,49 +390,49 @@ type LLMClient interface {
 }
 ```
 
-### 5.6 协议实现
+### 5.6 Protocol implementations
 
-| 协议 | 位置 | Provider |
+| Protocol | Location | Provider |
 |------|------|----------|
-| OpenAI Chat | `llm/protocols/openai_chat.go` | OpenAI、DeepSeek、TogetherAI、Cerebras |
+| OpenAI Chat | `llm/protocols/openai_chat.go` | OpenAI, DeepSeek, TogetherAI, Cerebras |
 | OpenAI Responses | `llm/protocols/openai_responses.go` | OpenAI |
 | Anthropic Messages | `llm/protocols/anthropic_messages.go` | Anthropic (Claude) |
 | Bedrock Converse | `llm/protocols/bedrock_converse.go` | AWS Bedrock |
 | Google Gemini | `llm/protocols/gemini.go` | Google |
-| OpenAI Compatible Chat | `llm/protocols/openai_compatible_chat.go` | 通用 OpenAI 兼容 |
+| OpenAI Compatible Chat | `llm/protocols/openai_compatible_chat.go` | Generic OpenAI-compatible |
 
 ---
 
-## 6. Agent 循环
+## 6. Agent loop
 
-> **已实现。** 对应 opencode `packages/core/src/agent*`、`packages/opencode/src/session/`；实现在 `core/session/`（`run_coordinator.go`、`runner/`、`compaction.go`、`context_epoch.go` 等）与根包 `runtime.go`。
+> **Implemented.** Corresponds to opencode `packages/core/src/agent*`, `packages/opencode/src/session/`; implemented in `core/session/` (`run_coordinator.go`, `runner/`, `compaction.go`, `context_epoch.go`, etc.) and the root package's `runtime.go`.
 
-### 6.1 Session Runner 主循环
+### 6.1 Session Runner main loop
 
 ```
 SessionRunner.Run(sessionID, force)
-  → 循环直到没有待处理输入:
+  → loop until there is no pending input:
       runTurn(sessionID, input)
-        → 循环直到不需要 continuation:
-            1. 加载 session、agent、model、系统上下文
-            2. 组装 LLMRequest
-            3. 检查上下文压缩
-            4. LLMClient.Stream(request) — 一次 provider 调用
-            5. 对每个 tool-call 事件:
-                - 持久化记录 tool call
-                - 权限检查
+        → loop until no continuation is needed:
+            1. Load session, agent, model, system context
+            2. Assemble the LLMRequest
+            3. Check for context compaction
+            4. LLMClient.Stream(request) — one provider call
+            5. For each tool-call event:
+                - Persist a record of the tool call
+                - Permission check
                 - ToolRegistry.Execute(tool, params, ctx)
-                - 发布 tool-result 事件
-            6. 跟踪 step 数，超限则终止
-            7. 有工具调用 → 重载历史 → 再次 provider 调用 (continuation)
-            8. 上下文溢出 → 压缩后重试
-            9. Steer 事件 → 在下一轮边界提升（不打断进行中的 provider 流）
-      → 检查队列输入 → 继续外层循环
+                - Publish a tool-result event
+            6. Track the step count, terminate if over the limit
+            7. If there were tool calls → reload history → provider call again (continuation)
+            8. Context overflow → compact and retry
+            9. Steer events → promote at the next turn boundary (without interrupting the in-flight provider stream)
+      → check queued input → continue the outer loop
 ```
 
-> 上下文压缩依赖模型的 `Limits`（`ModelInfo.Limit` → route defaults → `compactionModelLimits`）。**未设置 `Limits` 时自动压缩被禁用**，超长请求会直接以 provider 400 失败。SDK 不内置模型目录（catalog），由调用方按需提供 `Context`/`Output` 限额。除自动压缩（阈值触发）与溢出后压缩外，`Session.Compact(ctx)` 提供**手动压缩**（空闲会话，无需 `Limits`，`reason` 记为 `manual`）。
+> Context compaction depends on the model's `Limits` (`ModelInfo.Limit` → route defaults → `compactionModelLimits`). **When `Limits` is unset, automatic compaction is disabled**, and an over-long request fails directly with a provider 400. The SDK does not ship a model catalog; the caller supplies `Context`/`Output` limits as needed. Besides automatic compaction (threshold-triggered) and post-overflow compaction, `Session.Compact(ctx)` provides **manual compaction** (on an idle session, no `Limits` needed, with `reason` recorded as `manual`).
 
-### 6.2 Agent 定义
+### 6.2 Agent definition
 
 ```go
 type Agent struct {
@@ -444,42 +443,42 @@ type Agent struct {
     Permission  permission.Ruleset
     Model       *ModelOverride  // providerID + modelID
     Prompt      string          // system prompt override
-    Steps       int             // max turn steps; 0 = 不限制（与 TS 一致，无默认值）
+    Steps       int             // max turn steps; 0 = unlimited (consistent with TS, no default)
     Temperature float64
     TopP        float64
 }
 ```
 
-### 6.3 Subagent (TaskTool) — 已实现
+### 6.3 Subagent (TaskTool) — implemented
 
-对应 opencode `packages/opencode/src/tool/task.ts`。`task` 是一个内置工具：主 agent 调用它后，在**独立子会话**里运行另一个 agent，并把结果文本返回。实现在根包 `task.go`（工具定义 + `DeriveSubagentSessionPermission`）与 `task_run.go`（`runtime.runTask`）。子会话会继承父会话的 `SessionHooks` 与 per-session permission/question handler（`runtime.inheritSession`），因此 `OnPreToolUse`/`OnPostToolUse`/`OnToolDefinition` 对 subagent 的工具调用同样生效。
+Corresponds to opencode `packages/opencode/src/tool/task.ts`. `task` is a built-in tool: after the primary agent calls it, another agent runs in a **separate child session** and its result text is returned. Implemented in the root package's `task.go` (tool definition + `DeriveSubagentSessionPermission`) and `task_run.go` (`runtime.runTask`). The child session inherits the parent session's `SessionHooks` and per-session permission/question handler (`runtime.inheritSession`), so `OnPreToolUse`/`OnPostToolUse`/`OnToolDefinition` also take effect for the subagent's tool calls.
 
-**工具参数**：`description`、`prompt`、`subagent_type`、`task_id`（续跑同一子会话）、`command`、`background`（暂不支持，返回失败）。
+**Tool parameters**: `description`, `prompt`, `subagent_type`, `task_id` (resume the same child session), `command`, `background` (not yet supported; returns a failure).
 
-**执行流程**：
-1. 深度检查：沿 `parent_id` 数子会话深度，超过 `ClientOptions.SubagentDepth`（默认 1）报错。
-2. 权限检查：action `task`、resource `subagent_type`。
-3. 解析 agent：`subagent_type` 必须是已注册 agent，否则报 `Unknown agent type`。
-4. 派生权限：`DeriveSubagentSessionPermission(父会话权限, 子 agent)` —— 继承父的 deny 规则 + `external_directory`，并默认追加 `todowrite` / `task` 的 `deny`（除非子 agent 自己已声明该 action）。写入子会话的 `session.permission` 列。
-5. 创建子会话：`parent_id = 当前会话`、`agent = subagent_type`、`permission = 派生规则`；给了 `task_id` 且会话存在则复用（复用其已存储的 agent 与 permission）。
-6. `Admit` + `coordinator.Run(childID)` 跑一轮；从 `session_message` 取最后一条 assistant 消息的最后一段 text 返回。工具上下文被取消时 `coordinator.Interrupt(childID)`。
-7. 结束后移除子会话的 dispatcher / 权限登记（保留 session 行以便 `task_id` 续跑）。
+**Execution flow**:
+1. Depth check: count child-session depth along `parent_id`; error if it exceeds `ClientOptions.SubagentDepth` (default 1).
+2. Permission check: action `task`, resource `subagent_type`.
+3. Resolve the agent: `subagent_type` must be a registered agent, otherwise report `Unknown agent type`.
+4. Derive permissions: `DeriveSubagentSessionPermission(parent session permissions, child agent)` — inherit the parent's deny rules + `external_directory`, and by default append `deny` for `todowrite` / `task` (unless the child agent itself already declares that action). Write into the child session's `session.permission` column.
+5. Create the child session: `parent_id = current session`, `agent = subagent_type`, `permission = derived rules`; if `task_id` is given and the session exists, reuse it (reusing its stored agent and permission).
+6. `Admit` + `coordinator.Run(childID)` to run a turn; return the last text segment of the last assistant message from `session_message`. When the tool context is cancelled, `coordinator.Interrupt(childID)`.
+7. After finishing, remove the child session's dispatcher / permission registration (keeping the session row so `task_id` can resume).
 
-**权限生效**：`core.PermissionSessionInfo.Permissions` 让 `configured` 返回 `merge(agent.permissions, session.permissions)`；runner 的 `MaterializeFor` 也合并 session 规则（工具可见性）。均对齐 TS 的 `Permission.merge(agent.permission, session.permission)`。
+**How permissions take effect**: `core.PermissionSessionInfo.Permissions` makes `configured` return `merge(agent.permissions, session.permissions)`; the runner's `MaterializeFor` also merges session rules (tool visibility). Both align with TS's `Permission.merge(agent.permission, session.permission)`.
 
-**工具描述**：由 `SubagentTypes(agents, 调用方权限)` 动态注入 `mode != "primary"` 且 `task` 权限未 deny 的 agent 列表，对齐 TS `registry.describeTask`。
+**Tool description**: dynamically injects, via `SubagentTypes(agents, caller permissions)`, the list of agents with `mode != "primary"` whose `task` permission is not denied, aligned with TS `registry.describeTask`.
 
-**可观测性**：`runTask` 通过工具的 progress 回调在父会话上发布 **durable** 的 `session.next.tool.progress` 事件（`structured` 携带 `sessionId` / `parentSessionId` / `subagentType` / `description` / `model`），对齐 v2 的 tool invocation progress（`Tool.Context.Progress`）。用 `Client.On` 全局订阅即可观察子会话的 reasoning/text/tool 事件（`Session.On` 按 session 过滤，看不到子会话）。事件分发统一为**同步无损**：`Client.On`/`PluginContext.On` 与 `Session.On`/`Session.Send` 一样在发布者 goroutine 上顺序调用（慢观察者会拖慢发布轮次，而不是丢事件）；观察者回调应保持轻量。handler panic 一律被 recover（不崩进程），并可通过 `ClientOptions.OnPanic` 观测。
+**Observability**: `runTask` publishes a **durable** `session.next.tool.progress` event on the parent session via the tool's progress callback (`structured` carries `sessionId` / `parentSessionId` / `subagentType` / `description` / `model`), aligned with v2's tool invocation progress (`Tool.Context.Progress`). Subscribing globally with `Client.On` lets you observe the child session's reasoning/text/tool events (`Session.On` filters by session and cannot see child sessions). Event dispatch is uniformly **synchronous and lossless**: `Client.On`/`PluginContext.On`, like `Session.On`/`Session.Send`, are called in order on the publisher's goroutine (a slow observer slows down the publishing turn rather than losing events); observer callbacks should stay lightweight. Handler panics are always recovered (without crashing the process) and can be observed via `ClientOptions.OnPanic`.
 
-**与 `mode` 的关系**：`mode: subagent`（或 `all`）的 agent 会出现在 `subagent_type` 列表；`primary` 只当主 agent。
+**Relationship to `mode`**: an agent with `mode: subagent` (or `all`) appears in the `subagent_type` list; `primary` is only a primary agent.
 
-**已知偏差**：`background`（实验性后台子 agent）未实现，请求时返回失败（对齐 TS 在 flag 关闭时的行为）。
+**Known deviation**: `background` (experimental background subagents) is not implemented and returns a failure when requested (aligned with TS's behavior when the flag is off).
 
 ---
 
-## 7. 工具系统
+## 7. Tool system
 
-### 7.1 Tool 定义
+### 7.1 Tool definition
 
 ```go
 // core/tool/tool.go
@@ -488,14 +487,14 @@ type Context struct {
     Agent              string
     AssistantMessageID string
     ToolCallID         string
-    // 发布 running-tool 状态（durable session.next.tool.progress）
+    // Publish running-tool state (durable session.next.tool.progress)
     Progress           func(structured map[string]any, content []Content) error
 }
 
-// 泛型工具定义（Input / Output / Structured 为 Go 类型）
+// Generic tool definition (Input / Output / Structured are Go types)
 type Def[Input, Output, Structured any] struct { /* runtime */ }
 
-// 类型擦除后的工具句柄，注册中心使用
+// The type-erased tool handle used by the registry
 type Tool interface { /* unexported */ }
 
 type Config[Input, Output, Structured any] struct {
@@ -511,11 +510,11 @@ type Config[Input, Output, Structured any] struct {
 func Make[Input, Output, Structured any](cfg Config[Input, Output, Structured]) *Def[Input, Output, Structured]
 ```
 
-> 对应 TS `core/src/tool/tool.ts` 的 `Tool.make()` / `Tool.Definition` / `Tool.Context`。TS 的 `WeakMap<AnyTool, Runtime>` 在 Go 里直接内联为 `Def.rt`。
+> Corresponds to TS `core/src/tool/tool.ts`'s `Tool.make()` / `Tool.Definition` / `Tool.Context`. TS's `WeakMap<AnyTool, Runtime>` is inlined directly as `Def.rt` in Go.
 >
-> 工具 schema 使用类型化的 `jsonschema.Schema`（对标 Effect 的 `Schema` AST），单一来源产出两个投影：`Model()` 是发给模型的 JSON Schema（对象闭合 `additionalProperties:false`、optional 仅不进 `required`、literal → typed enum、int check → `allOf`），`Validation()` 用于校验（对象不闭合、容忍多余字段）。两者只在「对象是否闭合」上不同，且**都不广告解码器会拒绝的值**（optional 不接受 `null`、number 不接受 `"NaN"` 等字符串——Effect 会广告但它们解码器实际拒绝）。外部 JSON Schema 用 `jsonschema.Raw` 包一层。注意：Effect 会把带 `identifier` 的 schema 提升到 `$defs` 并用 `$ref` 引用，Go 侧**内联**（LLM 层不解析 `$ref`，内联对 provider 更安全）。
+> Tool schemas use the typed `jsonschema.Schema` (modeled on Effect's `Schema` AST), producing two projections from a single source: `Model()` is the JSON Schema sent to the model (objects closed with `additionalProperties:false`, optional fields excluded from `required`, literal → typed enum, int check → `allOf`), and `Validation()` is used for validation (objects not closed, tolerating extra fields). The two differ only in "whether the object is closed", and **neither advertises values the decoder would reject** (optional does not accept `null`, number does not accept strings like `"NaN"` — Effect would advertise them, but its decoder actually rejects them). External JSON Schema is wrapped with `jsonschema.Raw`. Note: Effect lifts schemas with an `identifier` into `$defs` and references them with `$ref`, whereas the Go side **inlines** them (the LLM layer does not resolve `$ref`; inlining is safer for providers).
 
-### 7.2 内置工具定义
+### 7.2 Built-in tool definition
 
 ```go
 // core/tool/write.go
@@ -530,7 +529,7 @@ func MakeWrite(deps WriteDeps) *Def[WriteInput, WriteOutput, WriteOutput] {
 }
 ```
 
-### 7.3 注册中心
+### 7.3 Registry
 
 ```go
 // core/tool/registry.go
@@ -538,51 +537,51 @@ type Registry struct { /* ... */ }
 
 func NewRegistry(opts ...RegistryOption) *Registry
 
-// 注册工具，返回 scope 结束时的清理函数
+// Register tools, returning a cleanup function for when the scope ends
 func (r *Registry) Register(tools map[string]Tool) (cleanup func(), err error)
 
-// 合并 application + local 注册，按权限过滤，产出 definitions + settle
+// Merge application + local registrations, filter by permission, produce definitions + settle
 func (r *Registry) Materialize(permissions core.PermissionRuleset) *Materialization
 
-// 内置工具便捷注册
+// Convenience registration for built-in tools
 func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 ```
 
-> MCP 已实现（见 §8，`mcp/` 包）。Plugin 已实现（窄化）：`core/plugin.go` 的 lifecycle 管理器（`Add`/`Remove`/`Wait`/`Close`，含 loading 环检测与失败缓存）。根包 `PluginContext` 内嵌 `core.PluginContext`（`Agents`/`Skills`/`Reference`/`Plugin`/`Events`），并加 `Options`（来自 `PluginConfig.Options`）、`Tools`（`*ToolRegistrar`，运行时注册应用级工具，对新旧会话均生效）与 `On`（订阅高层 `agent.Event`，含子会话）。`PluginConfig.Tools` 提供静态工具贡献；`Client.RegisterTools` 启动后动态注册/注销（与建会话共用同一把锁，避免并发漏注册）。`SessionHooks.OnToolDefinition` 在工具定义发给模型前逐条改写（错误中止本轮，对齐 TS `tool.definition`）。TS 的动态工具（外部 JSON Schema）未移植，MCP 工具即通过 `jsonschema.Raw` 走这条路径。
+> MCP is implemented (see §8, the `mcp/` package). Plugin is implemented (narrowed): `core/plugin.go`'s lifecycle manager (`Add`/`Remove`/`Wait`/`Close`, including loading-cycle detection and failure caching). The root package's `PluginContext` embeds `core.PluginContext` (`Agents`/`Skills`/`Reference`/`Plugin`/`Events`), and adds `Options` (from `PluginConfig.Options`), `Tools` (`*ToolRegistrar`, registering application-level tools at runtime, effective for both new and existing sessions) and `On` (subscribing to high-level `agent.Event`, including child sessions). `PluginConfig.Tools` provides static tool contributions; `Client.RegisterTools` dynamically registers/unregisters after startup (sharing the same lock as session creation, avoiding missed registrations under concurrency). `SessionHooks.OnToolDefinition` rewrites each tool definition before it is sent to the model (an error aborts the turn, aligned with TS `tool.definition`). TS's dynamic tools (external JSON Schema) are not ported; MCP tools go through this path via `jsonschema.Raw`.
 
-> **工具输出限额**：`core.ToolOutputStore`（`MAX_LINES=2000` / `MAX_BYTES=50KB`）会把超限的 tool result 落盘为 `tool-output/tool_*`，只把 head/tail 预览发给模型（`core/tool/output_store.go` 适配 `tool.OutputStore`，由根包 `runtime.go` 通过 `tool.WithOutputStore` 注入）。**未注入时 registry 的 `store == nil`，限额被跳过**，一次大 `grep`/`read` 就能撑爆上下文窗口。
+> **Tool output limits**: `core.ToolOutputStore` (`MAX_LINES=2000` / `MAX_BYTES=50KB`) spills over-limit tool results to `tool-output/tool_*` on disk and sends only a head/tail preview to the model (`core/tool/output_store.go` adapts `tool.OutputStore`, injected by the root package's `runtime.go` via `tool.WithOutputStore`). **When not injected, the registry's `store == nil` and the limit is skipped**, so a single large `grep`/`read` can blow the context window.
 >
-> 落盘目录是 `{Global.Data}/tool-output`，即 `{ClientOptions.Root}/data/tool-output`；`ClientOptions.Root` 必填。`ToolOutputStore.Cleanup` 按文件 mtime 清理超过 7 天（`ToolOutputStoreRetention`）的文件：`agent` 层在 `newRuntime` 时起一个 goroutine，启动时跑一次、之后每小时一次，`Client.Close()` 时随 runtime 的 lifetime context 退出；也可用 `Client.CleanupToolOutput()` 手动触发（对齐 v2 `tool-output-store.ts` 的 `cleanupLayer` + `cleanupNode`）。
+> The spill directory is `{Global.Data}/tool-output`, i.e. `{ClientOptions.Root}/data/tool-output`; `ClientOptions.Root` is required. `ToolOutputStore.Cleanup` removes files older than 7 days (`ToolOutputStoreRetention`) by file mtime: the `agent` layer starts a goroutine in `newRuntime` that runs once at startup and then hourly, exiting with the runtime's lifetime context on `Client.Close()`; it can also be triggered manually with `Client.CleanupToolOutput()` (aligned with v2 `tool-output-store.ts`'s `cleanupLayer` + `cleanupNode`).
 
-### 7.4 内置工具
+### 7.4 Built-in tools
 
-| 工具 | ID | 状态 |
+| Tool | ID | Status |
 |------|----|------|
-| Write | `write` | ✅ 已移植（`core/tool/write.go`） |
-| Read | `read` | ✅ 已移植（`core/tool/read.go`） |
-| Edit | `edit` | ✅ 已移植（`core/tool/edit.go`） |
-| Bash | `bash` | ✅ 已移植（`core/tool/bash.go`） |
-| Glob | `glob` | ✅ 已移植（`core/tool/glob.go`） |
-| Grep | `grep` | ✅ 已移植（`core/tool/grep.go`） |
-| WebFetch | `webfetch` | ✅ 已移植（`core/tool/webfetch.go`） |
-| Task | `task` | ✅ 已移植（根包 `task.go`；子会话 + 权限派生，见 §6.3） |
-| Question | `question` | ✅ 已移植（`core/tool/question.go`） |
-| Skill | `skill` | ✅ 已移植（`core/tool/skill.go`） |
-| TodoWrite | `todowrite` | ✅ 已移植（`core/tool/todowrite.go`） |
-| LSP | `lsp` | 待移植（位于 opencode v1 层） |
-| ApplyPatch | `apply_patch` | ✅ 已移植（`core/tool/apply_patch.go`） |
+| Write | `write` | ✅ ported (`core/tool/write.go`) |
+| Read | `read` | ✅ ported (`core/tool/read.go`) |
+| Edit | `edit` | ✅ ported (`core/tool/edit.go`) |
+| Bash | `bash` | ✅ ported (`core/tool/bash.go`) |
+| Glob | `glob` | ✅ ported (`core/tool/glob.go`) |
+| Grep | `grep` | ✅ ported (`core/tool/grep.go`) |
+| WebFetch | `webfetch` | ✅ ported (`core/tool/webfetch.go`) |
+| Task | `task` | ✅ ported (root package `task.go`; child sessions + permission derivation, see §6.3) |
+| Question | `question` | ✅ ported (`core/tool/question.go`) |
+| Skill | `skill` | ✅ ported (`core/tool/skill.go`) |
+| TodoWrite | `todowrite` | ✅ ported (`core/tool/todowrite.go`) |
+| LSP | `lsp` | to be ported (lives in the opencode v1 layer) |
+| ApplyPatch | `apply_patch` | ✅ ported (`core/tool/apply_patch.go`) |
 
-## 8. MCP 集成
+## 8. MCP integration
 
-**已实现**（`mcp/` 包）。移植 opencode `packages/opencode/src/mcp/` 的**纯 client + 适配**；OAuth/凭据/浏览器/TUI/v1 config 按 AGENTS.md 窄化掉，改为传入 `ServerConfig`。
+**Implemented** (the `mcp/` package). Ports opencode `packages/opencode/src/mcp/`'s **client + adapter** only; OAuth/credentials/browser/TUI/v1 config are narrowed away per AGENTS.md and replaced by a passed-in `ServerConfig`.
 
-协议层使用官方 Go SDK `github.com/modelcontextprotocol/go-sdk`（对标 TS 用官方 `@modelcontextprotocol/sdk`）。
+The protocol layer uses the official Go SDK `github.com/modelcontextprotocol/go-sdk` (parallel to TS using the official `@modelcontextprotocol/sdk`).
 
 ```go
 // mcp/client.go
 type Client struct { /* sessions, status per server */ }
 func NewClient(directory, version string) *Client
-func (c *Client) Connect(ctx, name string, cfg ServerConfig) Status      // local: stdio; remote: StreamableHTTP → SSE 回退
+func (c *Client) Connect(ctx, name string, cfg ServerConfig) Status      // local: stdio; remote: StreamableHTTP → SSE fallback
 func (c *Client) ConnectTransport(ctx, name string, t sdk.Transport, timeout time.Duration) Status
 func (c *Client) Disconnect(name string)
 func (c *Client) Status() map[string]Status
@@ -598,32 +597,32 @@ type ServerConfig struct {
 }
 type Status struct { Status string; Error string } // connected|disabled|failed|needs_auth|needs_client_registration
 
-// mcp/catalog.go —— 对应 McpCatalog
+// mcp/catalog.go —— corresponds to McpCatalog
 func Sanitize(value string) string
 func ToolName(server, name string) string   // sanitize(server)+"_"+sanitize(name)
 func ListTools/ListPrompts/ListResources/ListResourceTemplates(ctx, session)
 
-// mcp/tool.go —— 对应 McpCatalog.convertTool
+// mcp/tool.go —— corresponds to McpCatalog.convertTool
 func AdaptMCPTool(def *sdk.Tool, session *sdk.ClientSession, server string, timeout time.Duration) tool.Tool
 type AdaptedTool struct { Def *sdk.Tool; Session *sdk.ClientSession; Server string; Timeout time.Duration }
 func (t AdaptedTool) CoreTool() tool.Tool
 ```
 
-- 运行时接线（根包）：`runtime.connectMCP` **并行**连接各 server，并缓存「已转换的 MCP 工具集」；订阅 `mcp.tools.changed` 事件刷新缓存（`runtime.mcpToolSet` 读缓存），因此 server 的 `ToolListChanged` 对新会话生效且每建会话无需重建。
-- `schema/mcp_event.go`：`mcp.tools.changed` / `mcp.browser.open.failed`。
-- 远程鉴权：**完全对齐 TS** —— 只用 `ServerConfig.Headers`（如 `Authorization: Bearer <token>` 或 `X-API-Key: <key>`），不做 OAuth（TS 的 `oauth-provider.ts`/`oauth-callback.ts`/`browser.ts`/`auth.ts` 均不移植）。也不接 `EventV2Bridge`/`InstanceState`/`CrossSpawnSpawner`/`ConfigV1`。
-- 其他已对齐：`GetPrompt`/`ReadResource`、server `instructions`、`clientName` 过滤、运行时 `Add`、server 日志（`WithLogHandler`）。
-- 唯一无法对齐：`callTool` 的 `resetTimeoutOnProgress`/`onprogress`（进度重置超时）—— Go SDK 的 `CallTool` 未暴露该选项，只能用 context 超时。
+- Runtime wiring (root package): `runtime.connectMCP` connects to each server **in parallel** and caches the "converted MCP tool set"; it subscribes to the `mcp.tools.changed` event to refresh the cache (`runtime.mcpToolSet` reads the cache), so a server's `ToolListChanged` takes effect for new sessions without rebuilding on every session creation.
+- `schema/mcp_event.go`: `mcp.tools.changed` / `mcp.browser.open.failed`.
+- Remote auth: **fully aligned with TS** — only `ServerConfig.Headers` (e.g. `Authorization: Bearer <token>` or `X-API-Key: <key>`), no OAuth (TS's `oauth-provider.ts`/`oauth-callback.ts`/`browser.ts`/`auth.ts` are not ported). It also does not wire in `EventV2Bridge`/`InstanceState`/`CrossSpawnSpawner`/`ConfigV1`.
+- Other aligned items: `GetPrompt`/`ReadResource`, server `instructions`, `clientName` filtering, runtime `Add`, server logs (`WithLogHandler`).
+- The only thing that cannot be aligned: `callTool`'s `resetTimeoutOnProgress`/`onprogress` (progress resets the timeout) — the Go SDK's `CallTool` does not expose that option, so only a context timeout can be used.
 
-## 9. Skill 系统
+## 9. Skill system
 
-> **已实现。** 对应 opencode `packages/core/src/skill.ts`、`packages/core/src/skill/`（见 `core/skill.go` / `core/skill/`）。
+> **Implemented.** Corresponds to opencode `packages/core/src/skill.ts`, `packages/core/src/skill/` (see `core/skill.go` / `core/skill/`).
 
 ```go
 type Skill struct {
     Name        string
     Description string
-    Prompt      string       // 完整的 SKILL.md 内容
+    Prompt      string       // the full SKILL.md content
     Source      SkillSource  // File | URL | Git
 }
 
@@ -633,32 +632,32 @@ type SkillLoader interface {
 }
 ```
 
-发现路径（`ClientOptions.ConfigDirs` 的每个目录，按优先级）:
+Discovery paths (each directory in `ClientOptions.ConfigDirs`, in priority order):
 1. `{skill,skills}/**/SKILL.md`
 2. `.agents/skills/**/SKILL.md`
 3. `.claude/skills/**/SKILL.md`
 
-> 仅扫描显式给出的目录，不做环境变量/全局目录/向上查找（见 §11.1）。
+> Only the explicitly given directories are scanned; there is no environment-variable/global-directory/upward search (see §11.1).
 
 ---
 
-## 10. 权限系统
+## 10. Permission system
 
 ```go
-// core/permission.go（对应 packages/schema/src/permission.ts + packages/core/src/permission.ts）
+// core/permission.go (corresponds to packages/schema/src/permission.ts + packages/core/src/permission.ts)
 type PermissionRule struct {
-    Action   string           // glob（如 "edit"、"read.*"、"*"）
+    Action   string           // glob (e.g. "edit", "read.*", "*")
     Resource string           // glob
     Effect   PermissionEffect // allow | deny | ask
 }
 
 type PermissionRuleset []PermissionRule
 
-// 取最后一条同时匹配 action 与 resource 的规则；无匹配则默认 ask
+// Take the last rule matching both action and resource; if none matches, default to ask
 func PermissionEvaluate(action, resource string, rulesets ...PermissionRuleset) PermissionRule
 func PermissionMerge(rulesets ...PermissionRuleset) PermissionRuleset
 
-// 评估 + 断言：deny → 报错；ask → 创建待审批请求并阻塞等待 reply
+// Evaluate + assert: deny → error; ask → create a pending approval request and block waiting for a reply
 type Permission interface {
     Ask(input PermissionAssertInput) (*PermissionAskResult, error)
     Assert(input PermissionAssertInput) error
@@ -673,69 +672,71 @@ func NewPermission(cfg PermissionConfig) Permission
 
 ---
 
-## 11. SDK 层 (高级 API)
+## 11. SDK layer (high-level API)
 
-公开入口是模块根包 `agent`，导入路径 `github.com/jiaweisky/go-agent-sdk`。**已实现**，形态参考 `github/copilot-sdk/go`（`Client` → `CreateSession` → `Send`/`On`）。
+The public entry point is the module root package `agent`, import path `github.com/jiaweisky/go-agent-sdk`. **Implemented**, modeled on `github/copilot-sdk/go` (`Client` → `CreateSession` → `Send`/`On`).
 
 ```go
 import "github.com/jiaweisky/go-agent-sdk"
 
 // ─── Client ─────────────────────────────────────────────
 type ClientOptions struct {
-    // 位置
-    WorkingDirectory string                    // 项目/worktree 根；空则用进程 cwd
-    Root             string                    // SDK 状态根（data/cache/state/tmp）；**必填**，库不选默认位置
-    DatabaseMaxConns int                       // SQLite 连接池大小；0 用默认（4）
-    ConfigDirs       []string                  // 内容配置目录（agent/skill markdown，见「配置模型」）
-    Home             string                    // ~ 展开用；空则用 OS home
+    // Location
+    WorkingDirectory string                    // project/worktree root; empty uses the process cwd
+    Root             string                    // SDK state root (data/cache/state/tmp); **required**; the library picks no default location
+    DatabaseMaxConns int                       // SQLite pool size; 0 uses the default (4)
+    ConfigDirs       []string                  // content config directories (agent/skill markdown, see "configuration model")
+    Home             string                    // for ~ expansion; empty uses the OS home
 
-    // 模型与 provider
-    Model            string                    // 默认模型
-    Protocol         schema.ProtocolID         // 协议 id（"openai-responses"|"anthropic-messages"|"gemini"|...）
-    ModelInfo        ModelInfoProvider         // 可选：catalog 元数据（protocol/endpoint/limits/headers）
-    ContextLimit     int                       // 覆盖模型 context window（tokens），自动压缩阈值；0 用 ModelInfo 的 limit
-    OutputLimit      int                       // 覆盖模型 output 预算（tokens）；0 用 ModelInfo 的 limit
-    Credentials      CredentialProvider        // provider → 秘密（APIKey / AWS）
-    LLM              route.LLMClient           // 可选：注入自定义 LLM client
+    // Model and provider
+    Model            string                    // default model
+    Protocol         schema.ProtocolID         // protocol id ("openai-responses"|"anthropic-messages"|"gemini"|...)
+    ModelInfo        ModelInfoProvider         // optional: catalog metadata (protocol/endpoint/limits/headers)
+    ContextLimit     int                       // override the model context window (tokens), the automatic compaction threshold; 0 uses ModelInfo's limit
+    OutputLimit      int                       // override the model output budget (tokens); 0 uses ModelInfo's limit
+    Credentials      CredentialProvider        // provider → secret (APIKey / AWS)
+    LLM              route.LLMClient           // optional: inject a custom LLM client
 
-    // 工具与扩展
-    Tools            []Tool                    // 应用级工具
-    MCP              []MCPConfig               // MCP servers（工具注册为应用级）
-    Plugins          []PluginConfig            // 启动时加载的插件（ID/Options/Tools/Func）
-    References       map[string]core.ReferenceSource // 命名 reference 源
-    ToolOutput       *ToolOutputConfig         // 工具输出落盘上限（MaxLines / MaxBytes）
+    // Tools and extensions
+    Tools            []Tool                    // application-level tools
+    MCP              []MCPConfig               // MCP servers (tools registered as application-level)
+    Plugins          []PluginConfig            // plugins loaded at startup (ID/Options/Tools/Func)
+    References       map[string]core.ReferenceSource // named reference sources
+    ToolOutput       *ToolOutputConfig         // tool output spill limits (MaxLines / MaxBytes)
 
-    // 运行行为
-    Permission       PermissionHandlerFunc     // 默认权限回调（默认 ApproveAll）
-    Question         QuestionHandlerFunc       // 默认 question 回调（默认 RejectQuestions）
-    OnPanic          func(PanicInfo)           // 用户事件 handler panic 上报（panic 总会被 recover）
-    SubagentDepth    int                       // task 子会话最大深度（默认 1）
-    Shell            string                    // bash 工具使用的 shell（默认 sh）
-    Locale           string                    // 列表排序 locale；空则用 LC_ALL/LC_COLLATE/LANG
-    Compaction       *CompactionConfig         // 上下文压缩（Auto / PreserveRecentTokens / Reserved）
-    Title            *TitleConfig              // 自动会话标题（Auto，默认关闭）；见 §
+    // Runtime behavior
+    Permission       PermissionHandlerFunc     // default permission callback (default ApproveAll)
+    Question         QuestionHandlerFunc       // default question callback (default RejectQuestions)
+    OnPanic          func(PanicInfo)           // reports user event-handler panics (panics are always recovered)
+    SubagentDepth    int                       // max depth of task child sessions (default 1)
+    Shell            string                    // shell used by the bash tool (default sh)
+    Locale           string                    // locale for list ordering; empty uses LC_ALL/LC_COLLATE/LANG
+    Compaction       *CompactionConfig         // context compaction (Auto / PreserveRecentTokens / Reserved)
+    Title            *TitleConfig              // automatic session titles (Auto, off by default); see §
 }
-// TitleConfig 控制内置 "title" agent 的自动标题生成：首个用户轮后，若会话仍是默认标题
-// 且历史恰好一条 user 消息，则用 "title" agent 生成标题并持久化（session.next.title.updated）。
-// 模型优先级：TitleConfig.Model → "title" agent 的 model → 会话 model。内置 agent 的 model
-// 可经 RegisterAgent("title", AgentConfig{Model: ...}) 或插件指定。
+// TitleConfig controls automatic title generation by the built-in "title" agent: after the first user turn,
+// if the session still has the default title and the history is exactly one user message, generate the title
+// with the "title" agent and persist it (session.next.title.updated).
+// Model precedence: TitleConfig.Model → the "title" agent's model → the session model. The built-in agent's
+// model can be specified via RegisterAgent("title", AgentConfig{Model: ...}) or a plugin.
 type TitleConfig struct {
-    Auto  *bool  // 是否启用；nil 默认关闭
-    Model string // 覆盖标题模型；空则回退到 title agent / 会话 model
+    Auto  *bool  // whether enabled; nil means off by default
+    Model string // overrides the title model; empty falls back to the title agent / session model
 }
-// 用 NewModelInfo(protocol, modelID, baseURL, limit) 构造受支持的 ModelInfo。
-// ModelInfo 是 models.dev catalog 的窄输入替代：调用方提供 limits/endpoint/headers/variants，
-// SDK 走 runner.FromCatalogModel 建 route（Protocol 决定鉴权与路由）。
+// Build a supported ModelInfo with NewModelInfo(protocol, modelID, baseURL, limit).
+// ModelInfo is the narrow-input replacement for the models.dev catalog: the caller supplies
+// limits/endpoint/headers/variants, and the SDK builds a route via runner.FromCatalogModel
+// (Protocol decides auth and routing).
 type ModelInfoProvider func(modelID string) (schema.ModelInfo, error)
 func NewClient(*ClientOptions) (*Client, error)
 func (c *Client) RegisterAgent(name string, cfg AgentConfig) error
 func (c *Client) CreateSession(ctx, *SessionConfig) (*Session, error)
 func (c *Client) ResumeSession(ctx, sessionID string, *SessionConfig) (*Session, error)
-func (c *Client) ListSessions(ctx) ([]SessionInfo, error) // SessionInfo.ParentID 区分顶层/子会话
+func (c *Client) ListSessions(ctx) ([]SessionInfo, error) // SessionInfo.ParentID distinguishes top-level/child sessions
 func (c *Client) DeleteSession(ctx, sessionID string) error
-func (c *Client) On(func(Event)) (unsubscribe func())   // 全局订阅（含子 agent 会话）
-func (c *Client) SessionMessages(sessionID string) ([]schema.SessionMessage, error) // 读任意会话（含子会话）的消息
-func (c *Client) RegisterTools(tools ...Tool) (unregister func(), err error) // 启动后动态注册/注销应用级工具
+func (c *Client) On(func(Event)) (unsubscribe func())   // global subscription (including subagent sessions)
+func (c *Client) SessionMessages(sessionID string) ([]schema.SessionMessage, error) // read any session's messages (including child sessions)
+func (c *Client) RegisterTools(tools ...Tool) (unregister func(), err error) // dynamically register/unregister application-level tools after startup
 func (c *Client) Close() error
 
 // ─── Session ────────────────────────────────────────────
@@ -743,31 +744,31 @@ type SessionConfig struct {
     Agent        string
     Model        string
     Title        string
-    SystemPrompt *SystemPromptConfig           // append | replace | customize（内置 agent_system/instructions + 自定义 section）
-    Permissions  schema.PermissionRuleset      // 本会话规则，合并覆盖 agent 的权限（session 规则优先）
+    SystemPrompt *SystemPromptConfig           // append | replace | customize (built-in agent_system/instructions + custom sections)
+    Permissions  schema.PermissionRuleset      // this session's rules, merged over the agent's permissions (session rules win)
     Tools        []Tool
-    OnPermissionRequest PermissionHandlerFunc  // 覆盖 client 级权限回调
-    OnQuestion   QuestionHandlerFunc           // 覆盖 client 级 question 回调
+    OnPermissionRequest PermissionHandlerFunc  // overrides the client-level permission callback
+    OnQuestion   QuestionHandlerFunc           // overrides the client-level question callback
     Hooks        *SessionHooks
 }
-type MessageOptions struct { Prompt string; Mode string } // Mode: "queue"(默认)|"steer"
+type MessageOptions struct { Prompt string; Mode string } // Mode: "queue"(default)|"steer"
 
 func (s *Session) ID() string
-func (s *Session) Messages() ([]schema.SessionMessage, error)       // 历史读取
-func (s *Session) Send(ctx, MessageOptions) iter.Seq2[Event, error] // 本轮流，结尾 Idle
-func (s *Session) Steer(prompt string) error                        // 仅入队（steer），立即返回；由活动轮在下个 step 边界吸收
-func (s *Session) Compact(ctx) (bool, error)                        // 手动压缩历史（空闲时）；活动轮中返回 ErrSessionBusy
+func (s *Session) Messages() ([]schema.SessionMessage, error)       // history read
+func (s *Session) Send(ctx, MessageOptions) iter.Seq2[Event, error] // this turn's stream, ends with Idle
+func (s *Session) Steer(prompt string) error                        // enqueue only (steer), returns immediately; absorbed by the active turn at the next step boundary
+func (s *Session) Compact(ctx) (bool, error)                        // manually compact history (when idle); returns ErrSessionBusy during an active turn
 func (s *Session) On(func(Event)) (unsubscribe func())
 func (s *Session) Abort()
 func (s *Session) Close() error
 
-// Usage 是单轮事件，携带 provider 的**原始 usage 对象**（放在 ProviderMetadata，按 provider
-// 名索引，如 {"openai": {...}}，含 DeepSeek 的 prompt_cache_hit_tokens 等扩展字段）。
-// SDK 不合计、不算 cost；app 自己订阅、按 provider 语义理解与计费。
-// （原始 usage 经 LLMEvent.Usage.ProviderMetadata → LLMEventTokens.ProviderMetadata → step.ended 透传，
-//   各 protocol mapper 都设 providerMetadata: {<provider>: usage}，与 TS 一致。）
+// Usage is a single-turn event carrying the provider's **raw usage object** (placed in ProviderMetadata,
+// indexed by provider name, e.g. {"openai": {...}}, including DeepSeek extensions like prompt_cache_hit_tokens).
+// The SDK does not aggregate it or compute cost; the app subscribes and interprets/bills per provider semantics.
+// (Raw usage flows through LLMEvent.Usage.ProviderMetadata → LLMEventTokens.ProviderMetadata → step.ended;
+//   every protocol mapper sets providerMetadata: {<provider>: usage}, consistent with TS.)
 
-// ─── 事件（类型化并集） ──────────────────────────────────
+// ─── Events (typed union) ────────────────────────────────
 type Event interface{ eventKind() string }
 // TextDelta / TextEnded / ReasoningDelta / ReasoningStarted / ReasoningEnded /
 // ToolInputStarted / ToolCalled / ToolProgress / ToolSuccess / ToolFailed /
@@ -775,68 +776,68 @@ type Event interface{ eventKind() string }
 // Usage / CompactionStarted / CompactionEnded / ShellStarted / ShellEnded /
 // ErrorEvent / Idle
 
-// ─── 用户工具 ───────────────────────────────────────────
+// ─── User tools ─────────────────────────────────────────
 func DefineTool[In, Out any](name, description string,
     handler func(In, ToolContext) (Out, error)) Tool
 func SchemaForType(reflect.Type) *jsonschema.Schema // reflect → AST
 
-// ─── 权限 / Hooks ───────────────────────────────────────
+// ─── Permissions / Hooks ────────────────────────────────
 type PermissionHandlerFunc func(PermissionRequest) (PermissionDecision, error)
 var ApproveAll PermissionHandlerFunc
 type SessionHooks struct { /* Pre/PostToolUse, UserPromptSubmitted,
                               SessionStart/End, ErrorOccurred */ }
 ```
 
-实现要点：
-- 进程内运行（无外部 runtime 进程）：`NewClient` 组装 DB + 事件服务 + projectors + 工具注册 + runner + coordinator。
-- 工具**按会话隔离**：每个会话一个 registry（内置 + 客户端工具 + 会话工具），通过 `core/session/runner.ToolRegistry.MaterializeFor(sessionID, permissions)` 分派。
-- 权限：`OnPermissionRequest` 回调经装饰器桥接 `core.Permission`（allow/deny/ask → 回调 → 自动 reply）。
-- 工具 Hooks（Pre/PostToolUse）通过 `hookedRegistry` 包裹 settlement 实现。
+Implementation points:
+- Runs in-process (no external runtime process): `NewClient` assembles the DB + event service + projectors + tool registration + runner + coordinator.
+- Tools are **isolated per session**: one registry per session (built-ins + client tools + session tools), dispatched via `core/session/runner.ToolRegistry.MaterializeFor(sessionID, permissions)`.
+- Permissions: the `OnPermissionRequest` callback bridges `core.Permission` via a decorator (allow/deny/ask → callback → automatic reply).
+- Tool Hooks (Pre/PostToolUse) are implemented by wrapping settlement with a `hookedRegistry`.
 
-> 已接入：MCP 工具（`connectMCP`）、Plugin（窄化）、Reference 服务。system prompt sections 粒度比 copilot 粗。取消语义（对齐 TS `run-coordinator.ts` 的 `uninterruptibleMask`）：**只有 `Abort()`** 经 `coordinator.Interrupt` 取消 drain ctx 并中断进行中的 LLM 流与工具执行；取消 `Send(ctx)` 的 ctx 只停止等待，不中断当前轮。`Client.Close()` 会先 `coordinator.StopAll`（中断并等待所有活动轮，上限 `shutdownGrace`；停止后协调器拒绝新轮，返回 `session.ErrStopped`），再关会话与数据库，避免在运行中的轮下关闭 DB；关闭时也以有界等待 drain reference 缓存预热。`context` 已贯穿 `SessionRunner.Run` → `Transport.Frames` → `http.NewRequestWithContext`，所以 `Abort()` 能真正打断 provider 请求。默认 LLM HTTP client 对 provider 响应头设 `defaultLLMResponseHeaderTimeout`（不限制流式 body）；需要不同策略可注入 `ClientOptions.LLM`。
+> Wired in: MCP tools (`connectMCP`), Plugin (narrowed), the Reference service. The granularity of system prompt sections is coarser than copilot. Cancellation semantics (aligned with TS `run-coordinator.ts`'s `uninterruptibleMask`): **only `Abort()`** cancels the drain ctx via `coordinator.Interrupt` and interrupts the in-flight LLM stream and tool execution; cancelling the ctx of `Send(ctx)` only stops waiting and does not interrupt the current turn. `Client.Close()` first calls `coordinator.StopAll` (interrupts and waits for all active turns, bounded by `shutdownGrace`; after stopping, the coordinator rejects new turns with `session.ErrStopped`), then closes sessions and the database, avoiding closing the DB under a running turn; on close it also drains reference cache warmup with a bounded wait. `context` is threaded through `SessionRunner.Run` → `Transport.Frames` → `http.NewRequestWithContext`, so `Abort()` can genuinely interrupt provider requests. The default LLM HTTP client sets `defaultLLMResponseHeaderTimeout` on provider response headers (without limiting the streaming body); inject `ClientOptions.LLM` for a different policy.
 
-### 11.1 配置模型（code config + 内容目录）
+### 11.1 Configuration model (code config + content directories)
 
-SDK **不使用 `opencode.json`**，也不做目录发现（无 `OPENCODE_CONFIG_DIR` / `XDG_*` / 向上查找 `.opencode`）。所有**设置**都由代码通过 `ClientOptions` 传入（见上）。
+The SDK **does not use `opencode.json`** and does no directory discovery (no `OPENCODE_CONFIG_DIR` / `XDG_*` / upward search for `.opencode`). All **settings** are passed in code via `ClientOptions` (see above).
 
-### 11.2 状态目录（一个 Root，不读 XDG/OPENCODE env）
+### 11.2 State directory (one Root, reading no XDG/OPENCODE env)
 
-TS 的 `global.ts` 是 CLI 模块：加载时读 `XDG_*` / `OPENCODE_CONFIG_DIR` 等 env。**SDK 刻意偏离**——可嵌入的库不该读宿主进程的 env 来定位自己的状态，只保留「宿主事实」类输入（`$HOME`、Windows 的 `COMSPEC`、`LC_*`/`LANG` 作为 locale 默认）。全部状态由 `ClientOptions.Root` 派生（`core.NewGlobal(root, home)` 是纯函数，不读 env）：
+TS's `global.ts` is a CLI module: at load time it reads `XDG_*` / `OPENCODE_CONFIG_DIR` and other env. **The SDK deliberately deviates** — an embeddable library should not read the host process's env to locate its own state, keeping only "host-fact" inputs (`$HOME`, Windows `COMSPEC`, `LC_*`/`LANG` as locale defaults). All state is derived from `ClientOptions.Root` (`core.NewGlobal(root, home)` is a pure function that reads no env):
 
 ```
-{Root}/data/    agent.db、snapshot、reference clone、plans、tool-output、log
-{Root}/cache/   下载的二进制（ripgrep）、skill 内容缓存
-{Root}/state/   运行期状态（保留，对齐 TS 的 flock）
-{Root}/tmp/     临时文件
+{Root}/data/    agent.db, snapshot, reference clone, plans, tool-output, log
+{Root}/cache/   downloaded binaries (ripgrep), skill content cache
+{Root}/state/   runtime state (reserved, aligned with TS's flock)
+{Root}/tmp/     temporary files
 ```
 
-`Root` **必填**：库不选默认位置，否则会往宿主没指定的目录（例如 opencode CLI 的 `~/.local/share/opencode`）读写，且行为会被机器上已有的 DB / clone / snapshot 影响。想沿用 CLI 约定的宿主自己算（`$XDG_DATA_HOME/opencode` 或 `~/.local/share/opencode`，示例里就是 `dataRoot()`；`~` 来自 `os.UserHomeDir`，是宿主事实）。除 `$HOME` / `COMSPEC` / locale 默认外，SDK 不读任何 `XDG_*` / `OPENCODE_*`；每个实例指向自己的 `Root` 即可完全隔离（测试、沙箱、多租户），`agent` / `examples` 的测试因此不需要再污染 `XDG_*`。
+`Root` is **required**: the library picks no default location, otherwise it would read/write in a directory the host did not specify (e.g. the opencode CLI's `~/.local/share/opencode`), and behavior would be affected by an existing DB / clone / snapshot on the machine. A host wanting to follow the CLI convention computes it itself (`$XDG_DATA_HOME/opencode` or `~/.local/share/opencode`, which is `dataRoot()` in the examples; `~` comes from `os.UserHomeDir`, a host fact). Apart from `$HOME` / `COMSPEC` / locale defaults, the SDK reads no `XDG_*` / `OPENCODE_*`; pointing each instance at its own `Root` fully isolates it (tests, sandboxes, multi-tenancy), so the `agent` / `examples` tests no longer need to pollute `XDG_*`.
 
-同一原则也适用于仓库：`core/repository.go` 不再读 `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`，改为显式输入：
+The same principle applies to repositories: `core/repository.go` no longer reads `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`, taking explicit input instead:
 
-- github 镜像：`core.WithGitHubBaseURL(base)` 传给 `RepositoryParse` / `NewRepositoryCache`（TS 对**所有** github.com host 都走 `githubRemote`，显式 URL 同样被改写，以保证 origin 与 clone target 一致）。
-- 排序 locale：`util.CompareLocale(left, right, tag)` 显式接收 tag，`ClientOptions.Locale` 一路传到 read 工具的目录列表、skill/reference guidance 与 task 的 subagent 列表；`util.ResolveLocale(name)` 负责解析，空值回退到 env 推断出的 `util.LocaleTag`（对齐 JS `localeCompare` 的默认行为）。
-- `core/flag` **不移植**：`flag.ts` 是 CLI 的 env 模块（import 时把 ~25 个 `OPENCODE_*` / `OTEL_*` 快照进 `Flag` 表），SDK 没有消费者，唯一用到它的 websearch 工具已按下面的理由删除。
-- **`websearch` 工具不移植**：它硬编码 Exa / Parallel 两家商业后端的 MCP 端点，且必须靠宿主 env 传 provider key —— TS 自己注明这是「retained in V2 core for launch parity」的妥协。宿主想要搜索能力可以用 `agent.DefineTool` 自行接入；通用的 `webfetch`（HTTP + HTML→markdown）保留。
-- **`share` / `unshare` 不移植**：会话分享是**托管服务 + OAuth 账号 + 网络同步**（V1 `packages/opencode/src/share/` 依赖 `Account`/`EventV2Bridge`/`InstanceState`，用 `HttpClient` 打 `${baseUrl}/api/share|shares/{create,sync,remove}`，并带 `secret` 上传 session/message/part/diff 队列）。v2 core 只有数据模型（`session_share` 表、`share_url` 列、projector 里 `share_url: info.share?.url`），**没有 service / `setShare` / 事件**，属 CLI 基础设施，不在 SDK 范围。数据库仍保留 `share_url` 列并原样投影 `V1SessionShare`，以对齐 v2 core 的 `info.share?.url`。
+- github mirror: `core.WithGitHubBaseURL(base)` is passed to `RepositoryParse` / `NewRepositoryCache` (TS routes **all** github.com hosts through `githubRemote`, and an explicit URL is likewise rewritten to keep origin and clone target consistent).
+- Ordering locale: `util.CompareLocale(left, right, tag)` takes the tag explicitly, and `ClientOptions.Locale` is threaded all the way to the read tool's directory listing, skill/reference guidance, and the task's subagent list; `util.ResolveLocale(name)` handles resolution, falling back to the env-inferred `util.LocaleTag` when empty (aligned with JS `localeCompare`'s default behavior).
+- `core/flag` is **not ported**: `flag.ts` is the CLI's env module (at import time it snapshots ~25 `OPENCODE_*` / `OTEL_*` into the `Flag` table); the SDK has no consumer, and the only tool that used it, websearch, was removed for the reason below.
+- **The `websearch` tool is not ported**: it hardcodes the MCP endpoints of two commercial backends, Exa / Parallel, and requires the host env to pass provider keys — TS itself notes this is a compromise "retained in V2 core for launch parity". A host wanting search can wire it in itself with `agent.DefineTool`; the generic `webfetch` (HTTP + HTML→markdown) is retained.
+- **`share` / `unshare` are not ported**: session sharing is a **hosted service + OAuth account + network sync** (V1 `packages/opencode/src/share/` depends on `Account`/`EventV2Bridge`/`InstanceState`, uses `HttpClient` against `${baseUrl}/api/share|shares/{create,sync,remove}`, and uploads session/message/part/diff queues with a `secret`). v2 core has only the data model (`session_share` table, `share_url` column, `share_url: info.share?.url` in the projector), with **no service / `setShare` / events**, and is CLI infrastructure outside the SDK's scope. The database still retains the `share_url` column and projects `V1SessionShare` as-is, to align with v2 core's `info.share?.url`.
 
-文件只承载**内容**（agent / mode / skill 的 markdown），且来源必须**显式**声明：`ClientOptions.ConfigDirs`。每个目录按以下模式扫描：
+Files carry **content only** (agent / mode / skill markdown), and the source must be **explicitly** declared: `ClientOptions.ConfigDirs`. Each directory is scanned with the following patterns:
 
-- `{agent,agents}/**/*.md` —— 子 agent
-- `{mode,modes}/*.md` —— primary agent（旧称 mode）
-- `{skill,skills}/**/SKILL.md` —— 技能
+- `{agent,agents}/**/*.md` — subagents
+- `{mode,modes}/*.md` — primary agents (formerly "mode")
+- `{skill,skills}/**/SKILL.md` — skills
 
-优先级：内置 agent（代码）< `ConfigDirs`（文件）< `RegisterAgent`（代码）。
+Precedence: built-in agents (code) < `ConfigDirs` (files) < `RegisterAgent` (code).
 
-与 TS 的差异：TS 从 `.opencode` 向上查找并合并 `opencode.json` + 环境变量 + 全局目录；Go SDK 只读取调用方给出的目录，避免隐式 I/O 与全局状态。`core/config.go`（Config.Info/Document 发现）、`core/config/`、`core/v1/config/`（legacy ConfigV1）**已删除**。
+Difference from TS: TS searches upward from `.opencode` and merges `opencode.json` + environment variables + global directories; the Go SDK reads only the directories the caller gives, avoiding implicit I/O and global state. `core/config.go` (Config.Info/Document discovery), `core/config/`, and `core/v1/config/` (legacy ConfigV1) have been **deleted**.
 
-## 12. 错误处理
+## 12. Error handling
 
 ```go
 // llm/schema/errors.go
 type LLMError struct {
-    Module string          // 例如 "ProviderShared"
-    Method string          // 例如 "stream"
+    Module string          // e.g. "ProviderShared"
+    Method string          // e.g. "stream"
     Reason LLMErrorReason
 }
 
@@ -845,10 +846,10 @@ type LLMErrorReason struct {
                                // QuotaExceeded | ContentPolicy | ProviderInternal |
                                // Transport | InvalidProviderOutput | UnknownProvider
     Message string
-    // 可选字段：Parameter / Classification / Status / Http / Route / Provider / Model / ...
+    // Optional fields: Parameter / Classification / Status / Http / Route / Provider / Model / ...
 }
 
-// 工具失败（对应 TS @opencode-ai/llm 的 ToolFailure）
+// Tool failure (corresponds to TS @opencode-ai/llm's ToolFailure)
 type ToolFailure struct {
     Message  string
     Cause    error
@@ -856,29 +857,29 @@ type ToolFailure struct {
 }
 ```
 
-> 权限相关错误见 `core/permission.go`：`PermissionBlockedError`、`PermissionDeclinedError`、`PermissionCorrectedError`、`PermissionNotFoundError`。
+> Permission-related errors are in `core/permission.go`: `PermissionBlockedError`, `PermissionDeclinedError`, `PermissionCorrectedError`, `PermissionNotFoundError`.
 
 ---
 
-## 13. 流式事件模型
+## 13. Streaming event model
 
-> **已实现。** 规范事件是 `schema/session_event.go` 的 `SessionEvent*`（core session 事件，durable 落库 + live-only delta）；runner 通过 `LLMEventPublisher` 把 `llm/schema/LLMEvent` 翻译成 session 事件。根包 `agent` 再把 session 事件映射为高层 `agent.Event` 并集（`events.go`），`Session.Send` 返回 `iter.Seq2[agent.Event, error]`（以 `Idle` 结束）；`Client.On` 可全局订阅（含子 agent 会话）。provider → 调用方的原始流仍是 `iter.Seq2[schema.LLMEvent, error]`（见 §5.3）。
+> **Implemented.** The canonical events are `schema/session_event.go`'s `SessionEvent*` (core session events, durable persistence + live-only deltas); the runner translates `llm/schema.LLMEvent` into session events via `LLMEventPublisher`. The root package `agent` then maps session events into the high-level `agent.Event` union (`events.go`), and `Session.Send` returns `iter.Seq2[agent.Event, error]` (ending with `Idle`); `Client.On` can subscribe globally (including subagent sessions). The raw provider → caller stream remains `iter.Seq2[schema.LLMEvent, error]` (see §5.3).
 
-> **会话运行状态**：SDK 在 drain 生命周期发 `session.status`（`busy`/`idle`，live-only），agent 层映射为 `agent.SessionStatus`。订阅者据此判断某会话是否在运行，从而只在运行时渲染 spinner/心跳（对齐 TS `session.status`；TS 的发布者在 v1 CLI 层，Go 改为在 `runtime` 的 coordinator 闭包里发布）。
+> **Session running state**: the SDK emits `session.status` (`busy`/`idle`, live-only) over the drain lifecycle, mapped by the agent layer to `agent.SessionStatus`. Subscribers use it to tell whether a session is running, so they render a spinner/heartbeat only while it is (aligned with TS `session.status`; TS's publisher is in the v1 CLI layer, whereas Go publishes it in the runtime's coordinator closure).
 
 ---
 
-## 14. 构建与测试
+## 14. Build and test
 
 ```bash
-# 测试
+# Tests
 go test ./...
 go test -race ./...
 ```
 
 ---
 
-## 15. 参考
+## 15. References
 
 - [opencode GitHub](https://github.com/anomalyco/opencode)
 - [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat)

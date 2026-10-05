@@ -1,258 +1,258 @@
-# go-agent-sdk A2A 支持设计文档
+# go-agent-sdk A2A support design
 
-> 状态：**已实现（Phase 0–5 全部落地；含与 ADK-go 的跨实现互操作测试）**
-> 范围：为 go-agent-sdk 增加 A2A（Agent2Agent）协议支持（入向 + 出向）
-> 关系：本文是 `docs/DESIGN.md` 的分册，只覆盖 A2A 能力；通用架构、公开 API、移植规则仍以 `docs/DESIGN.md` 与 `AGENTS.md` 为准
-> 约定：本文中的 Go 代码片段**仅为示意**，用于表达类型边界与契约，不代表最终签名
+> Status: **implemented (Phases 0–5 all landed; includes cross-implementation interop tests with ADK-go)**
+> Scope: add A2A (Agent2Agent) protocol support to go-agent-sdk (inbound + outbound)
+> Relationship: this document is a sub-volume of `docs/DESIGN.md`, covering only A2A; the general architecture, public API and porting rules are still defined by `docs/DESIGN.md` and `AGENTS.md`
+> Convention: the Go code snippets in this document are **illustrative only**; they express type boundaries and contracts, not final signatures
 
-## 变更记录
+## Change log
 
-| 日期 | 变更 |
+| Date | Change |
 |---|---|
-| 2026-09-26 | 初稿：映射规格、入向/出向设计、路线图、决策清单 |
-| 2026-10-04 | 新增 §0 协议速览（5W1H / 数据模型 / 状态机 / 操作流程 / 与 MCP 的区别） |
-| 2026-10-04 | 出向收敛：删除独立「工具形态」，远端 agent 统一为「带 A2A backend 的 agent」，经 `task` 表现为子 agent、可作主 agent（§2.1 / §3.2 / §6.1） |
-| 2026-10-04 | 依赖定稿：只支持 `a2a-go/v2` 单版本（D4）；适配层 `a2a/a2ago/`、逃生通道 `WithNativeOptions`；不依赖 adk-go（§3.1） |
-| 2026-10-04 | 统一抽象定稿（A1/A2/A7 + A8 方案 C）：`turn` 升为 core 一等 durable 实体（`taskId = turn.id`，本地/远程 subagent 共用）；backend 分派 + 镜像子会话；复用 `task` 权限 action（§3.3 / §4.1 / §5.6） |
-| 2026-10-04 | 入向暴露与安全定稿（A3/A4/A5/A6）：显式 `Expose`，一 card = 一 agent、多 agent = 多 card URL；权限可配置、默认对危险工具 `deny`；上下文显式导出（§3.4 / §5.5 / §6.2） |
-| 2026-10-04 | SDK 侧改名：`PluginEffect` → `PluginFunc`、`PluginConfig.Effect` → `.Func`（去 Effect 残留） |
-| 2026-10-04 | §4 映射与互操作（对照 adk-go v2 / a2a-go）：part 用 `adk_*` 约定、metadata 前缀 `adk_`/`a2a:`；新增 §4.7 互操作清单（身份键、artifact `append`/`lastChunk`、HITL `function_call`、增量同步） |
-| 2026-10-04 | 入向 §5 重构：新增 §5.0 职责边界（继承 a2a-go；我们实现 `AgentExecutor` + `taskstore.Store`）；认证继承 / 授权自定义（§5.5）；HITL 唯一设计 = 挂起 + resume（D1），重启降级重建；心跳继承 `WithTransportKeepAlive`（§5.4 / §5.7） |
-| 2026-10-04 | 出向 §6 重构：新增 §6.0 职责边界（继承 `a2aclient`）；`GetTask` / `ListTasks` / `SubscribeToTask` 归 a2a-go；HITL 映射为本地 `QuestionRequest`（D2） |
-| 2026-10-04 | §7-§10 与附录收敛：Phase 0 = `turn` 实体 / backend 字段 + drain 分派 / 暴露标记；§9 结论「无架构级风险」；§10 全部决策收敛（A1–A8 / D1–D5）；允许直接改 `core/database/migration.go`、不做版本化迁移；附录 A 补 HITL 编码 / task 持久化对照 |
-| 2026-10-04 | 落地实现（Go）：`turn` 实体/store、backend 分派（复用 `runner.SessionRunner` + provider-executed 工具）、出向 `a2ago` + HITL 闭环 + ADK `function_response` 编码、入向 `Executor`/`turnTaskStore`/card/handler、park+resume 与重启降级重建、usage/file_diff/tool trace；Phase 5：`WorkspaceResolver`、`ArtifactExternalizer`、`Options.NativeOptions` 透传。§5.1 补「实现」列、§5.5 补认证/工作区落地、§8 补状态（§5.1 / §5.5 / §8） |
-| 2026-10-04 | 跨实现互操作测试：`examples/adka2a`（adk-go 服务端，独立 Go module，SDK 不依赖 adk-go）+ `examples/chat` 的 `TestAdkA2AInterop`（SDK 客户端 ↔ ADK 服务端）；chat 注册远端 `echo` agent（名字描述其作用；「经 A2A 访问」由 agent 定义里的 backend 记录），`/agent echo` 或 `task` 委派（§8 Phase 4） |
-| 2026-10-04 | 收口此前未落地项：入向附件落盘（raw/URL part → 工作区 + prompt 路径，§4.2/§5.3）；出向取消/清理（Abort → 远端 `CancelTask`，仅非终态且非 input-required，§6.2）；`turn` 补齐（本地轮次也落 turn，`parent_turn_id`/`anchor_seq`/`end_seq`/`input_id` 均写入，A2A 入向 turn 由 task store 独占，§5.6/A8）；入向 steer（working 任务追加消息 → `SessionDeliverySteer`，§5.3）；出向远端 `taskId`/`contextId` 持久化到 turn metadata 并在下轮续跑（§4.7 第 2 条） |
+| 2026-09-26 | First draft: mapping spec, inbound/outbound design, roadmap, decision list |
+| 2026-10-04 | Added §0 protocol primer (5W1H / data model / state machine / operation flow / differences from MCP) |
+| 2026-10-04 | Outbound convergence: removed the separate "tool form"; a remote agent is uniformly "an agent with an A2A backend", surfacing via `task` as a subagent and usable as a primary agent (§2.1 / §3.2 / §6.1) |
+| 2026-10-04 | Dependency finalized: support only the single version `a2a-go/v2` (D4); adapter layer `a2a/a2ago/`, escape hatch `WithNativeOptions`; no dependency on adk-go (§3.1) |
+| 2026-10-04 | Unified abstraction finalized (A1/A2/A7 + A8 option C): `turn` is promoted to a core first-class durable entity (`taskId = turn.id`, shared by local/remote subagents); backend dispatch + mirrored child session; reuse the `task` permission action (§3.3 / §4.1 / §5.6) |
+| 2026-10-04 | Inbound exposure and security finalized (A3/A4/A5/A6): explicit `Expose`, one card = one agent, multiple agents = multiple card URLs; permissions configurable, default `deny` for dangerous tools; explicit context export (§3.4 / §5.5 / §6.2) |
+| 2026-10-04 | SDK-side rename: `PluginEffect` → `PluginFunc`, `PluginConfig.Effect` → `.Func` (removing the last Effect remnants) |
+| 2026-10-04 | §4 mapping and interoperability (against adk-go v2 / a2a-go): parts use the `adk_*` convention, metadata prefixes `adk_`/`a2a:`; added §4.7 interop checklist (identity keys, artifact `append`/`lastChunk`, HITL `function_call`, incremental sync) |
+| 2026-10-04 | Inbound §5 rework: added §5.0 responsibility boundary (inherit a2a-go; we implement `AgentExecutor` + `taskstore.Store`); auth inherited / authorization custom (§5.5); the single HITL design = park + resume (D1), with rebuild as a fallback after restart; heartbeat inherits `WithTransportKeepAlive` (§5.4 / §5.7) |
+| 2026-10-04 | Outbound §6 rework: added §6.0 responsibility boundary (inherit `a2aclient`); `GetTask` / `ListTasks` / `SubscribeToTask` belong to a2a-go; HITL maps to a local `QuestionRequest` (D2) |
+| 2026-10-04 | §7–§10 and appendix convergence: Phase 0 = `turn` entity / backend field + drain dispatch / exposure marker; §9 conclusion "no architectural-level risk"; §10 all decisions converged (A1–A8 / D1–D5); allowed to directly edit `core/database/migration.go` with no versioned migrations; appendix A adds HITL encoding / task persistence comparison |
+| 2026-10-04 | Implementation landed (Go): `turn` entity/store, backend dispatch (reusing `runner.SessionRunner` + provider-executed tools), outbound `a2ago` + HITL loop + ADK `function_response` encoding, inbound `Executor`/`turnTaskStore`/card/handler, park+resume and restart fallback rebuild, usage/file_diff/tool trace; Phase 5: `WorkspaceResolver`, `ArtifactExternalizer`, `Options.NativeOptions` pass-through. §5.1 added an "implementation" column, §5.5 added auth/workspace landing, §8 added status (§5.1 / §5.5 / §8) |
+| 2026-10-04 | Cross-implementation interop test: `examples/adka2a` (an adk-go server, a separate Go module; the SDK does not depend on adk-go) + `examples/chat`'s `TestAdkA2AInterop` (SDK client ↔ ADK server); chat registers a remote `echo` agent (the name describes its role; "accessed over A2A" is recorded by the backend in the agent definition), via `/agent echo` or `task` delegation (§8 Phase 4) |
+| 2026-10-04 | Closed out previously unlanded items: inbound attachment spooling (raw/URL part → workspace + prompt path, §4.2/§5.3); outbound cancel/cleanup (Abort → remote `CancelTask`, only non-terminal and not input-required, §6.2); `turn` completion (local turns also persist a turn; `parent_turn_id`/`anchor_seq`/`end_seq`/`input_id` are all written; A2A inbound turns are exclusively owned by the task store, §5.6/A8); inbound steer (append a message to a working task → `SessionDeliverySteer`, §5.3); outbound remote `taskId`/`contextId` persisted to turn metadata and resumed on the next turn (§4.7 item 2) |
 
 ---
 
-## 0. A2A 协议速览（读前必读）
+## 0. A2A protocol primer (read first)
 
-> 本节只讲**协议本身**，不含本 SDK 的任何取舍。不熟悉 A2A 的读者先读这里，再看 §1 的背景判断。
+> This section covers **the protocol itself only**, without any of this SDK's trade-offs. Readers unfamiliar with A2A should read this first, then §1 for the background judgments.
 
-### 0.1 是什么（What）
+### 0.1 What it is
 
-A2A（Agent2Agent）是一个开放标准，让**互相独立、彼此不透明（opaque）的 AI agent 系统**跨进程 / 跨主机 / 跨厂商互相调用。它复用既有 Web 标准（HTTP、JSON-RPC 2.0、SSE），目标是让 agent 能**发现**彼此能力、协作完成任务，并在**不暴露内部 state / memory / tool** 的前提下安全交换信息。
+A2A (Agent2Agent) is an open standard that lets **mutually independent, mutually opaque AI agent systems** call each other across processes / hosts / vendors. It reuses existing Web standards (HTTP, JSON-RPC 2.0, SSE), with the goal of letting agents **discover** each other's capabilities, collaborate on tasks, and safely exchange information **without exposing internal state / memory / tools**.
 
-一句话：**A2A 是「agent 调 agent」的协议；MCP 是「agent 调工具」的协议**（详见 §0.6）。
+In one line: **A2A is the "agent calls agent" protocol; MCP is the "agent calls tool" protocol** (see §0.6).
 
 ### 0.2 5W1H
 
-| 维度 | 内容 |
+| Dimension | Content |
 |---|---|
-| **Why** | agent 系统异构（语言 / 框架 / 厂商不同），需要一个共同语言来委托任务、交换上下文 |
-| **Who** | **A2A Client**（发起方）↔ **A2A Server / Remote Agent**（暴露 A2A endpoint 的一方）；两侧都可以是 agent |
-| **What** | 围绕 `Task`（有状态工作单元）交换 `Message` / `Part` / `Artifact` |
-| **When** | 同步一问一答、流式实时更新，或长任务异步 + push notification + human-in-the-loop |
-| **Where** | HTTP 上的三种绑定：JSON-RPC 2.0、gRPC、HTTP+JSON/REST；端点与能力写在 AgentCard |
-| **How** | 见 §0.5：发现 card → 发消息 → 任务状态机推进 → 取结果 / 续跑 / 取消 |
+| **Why** | Agent systems are heterogeneous (different languages / frameworks / vendors) and need a common language to delegate tasks and exchange context |
+| **Who** | **A2A Client** (initiator) ↔ **A2A Server / Remote Agent** (the side exposing an A2A endpoint); either side can be an agent |
+| **What** | Exchanges `Message` / `Part` / `Artifact` around a `Task` (a stateful unit of work) |
+| **When** | Synchronous request/response, streaming real-time updates, or long tasks asynchronous + push notification + human-in-the-loop |
+| **Where** | Three bindings over HTTP: JSON-RPC 2.0, gRPC, HTTP+JSON/REST; endpoints and capabilities are declared in the AgentCard |
+| **How** | See §0.5: discover card → send message → advance the task state machine → fetch result / resume / cancel |
 
-### 0.3 核心概念与数据模型
+### 0.3 Core concepts and data model
 
-- **Agent Card**：服务端发布的 JSON 元数据（well-known URI `/.well-known/agent-card.json`），声明身份、接口 URL、传输绑定、`capabilities`（是否支持流式等）、`skills`、`securitySchemes`、`defaultInputModes/OutputModes`、`protocolVersion`。**客户端先取 card，才知道该怎么调**。
-- **Message**：一次通信回合，有 `role`（`user` / `agent`）与若干 `Part`。
-- **Part**：最小内容单元——文本、文件引用（URL / raw bytes）、结构化 data。
-- **Task**：A2A 的核心工作单元，有唯一 `id` 与生命周期状态，产出 `Artifact`。
-- **Artifact**：任务输出（文档 / 图片 / 结构化数据），由 `Part` 组成。
-- **Context**：可选 id，把若干相关 task / message 逻辑分组（相当于「会话」）。
-- **Streaming / Push Notification**：task 更新的两种异步投递方式（SSE 流 / 服务端向客户端 webhook 回调）。
-- **Extension**：核心协议之外的可选扩展（`capabilities.extensions[]`，带 `required` 标记）。
+- **Agent Card**: JSON metadata published by the server (well-known URI `/.well-known/agent-card.json`), declaring identity, interface URLs, transport bindings, `capabilities` (e.g. whether streaming is supported), `skills`, `securitySchemes`, `defaultInputModes/OutputModes`, `protocolVersion`. **A client fetches the card first to know how to call it.**
+- **Message**: one communication turn, with a `role` (`user` / `agent`) and several `Part`s.
+- **Part**: the smallest unit of content — text, file reference (URL / raw bytes), structured data.
+- **Task**: A2A's core unit of work, with a unique `id` and a lifecycle state, producing `Artifact`s.
+- **Artifact**: task output (document / image / structured data), composed of `Part`s.
+- **Context**: an optional id that logically groups several related tasks / messages (equivalent to a "session").
+- **Streaming / Push Notification**: the two asynchronous delivery mechanisms for task updates (SSE stream / server-to-client webhook callback).
+- **Extension**: optional extensions beyond the core protocol (`capabilities.extensions[]`, with a `required` flag).
 
-标识符语义（本设计的关键落点，详见 §4.1）：
+Identifier semantics (a key landing point for this design; see §4.1):
 
-| 标识 | 语义 |
+| Identifier | Semantics |
 |---|---|
-| `contextId` | 会话：多轮的分组 |
-| `taskId` | 一次**有终态**的任务（比会话细一级） |
-| `messageId` | 单条消息 |
+| `contextId` | Session: the grouping of multiple turns |
+| `taskId` | A single **terminal** task (one level finer than a session) |
+| `messageId` | A single message |
 
-### 0.4 Task 状态机
+### 0.4 Task state machine
 
 ```
-              ┌─────────────────────► canceled（终态）
+              ┌─────────────────────► canceled (terminal)
               │
-submitted ─► working ─┬─► completed（终态）
-   │            │      ├─► failed（终态）
-   │            │      └─► rejected（终态）
+submitted ─► working ─┬─► completed (terminal)
+   │            │      ├─► failed (terminal)
+   │            │      └─► rejected (terminal)
    │            │
-   │            ├─► input-required ──(客户端再发 message)──► working
-   │            └─► auth-required  ──(客户端提供凭据)────► working
-   └─（也可能直接返回 Message，不建 Task 的简单交互）
+   │            ├─► input-required ──(client sends another message)──► working
+   │            └─► auth-required  ──(client provides credentials)───► working
+   └─(a simple interaction may also return a Message directly, without creating a Task)
 ```
 
-- **终态**：`completed` / `failed` / `canceled` / `rejected`——终态 task 不再接受新 message。
-- **可中断态**：`input-required`（等用户补充信息）/ `auth-required`（等授权凭据）——这正是 A2A 的 human-in-the-loop 原语，也是本设计最看重的部分（§5.4）。
+- **Terminal states**: `completed` / `failed` / `canceled` / `rejected` — a terminal task no longer accepts new messages.
+- **Interruptible states**: `input-required` (awaiting more user information) / `auth-required` (awaiting authorization credentials) — exactly A2A's human-in-the-loop primitive, and the part this design values most (§5.4).
 
-### 0.5 核心操作与典型流程
+### 0.5 Core operations and a typical flow
 
-绑定无关的核心操作（下表以 JSON-RPC 方法名为例）：
+Binding-agnostic core operations (the table uses JSON-RPC method names):
 
-| 操作 | 作用 |
+| Operation | Purpose |
 |---|---|
-| Send Message | 发消息；返回 `Task`，或对简单交互直接返回 `Message` |
-| Send Streaming Message | 同 Send，但以 SSE 流式返回状态 / artifact 事件 |
-| Get Task | 按 `taskId` 查任务与历史 |
-| List Tasks | 按 `contextId` / 状态列出任务（分页） |
-| Cancel Task | 协作式取消 |
-| Subscribe to Task | 断连后重订阅某任务的更新流 |
-| Push Notification Config（CRUD） | 为任务配置 / 查询 / 删除 webhook 回调 |
-| Get Extended Agent Card | 取认证后的扩展 card |
+| Send Message | Send a message; returns a `Task`, or a `Message` directly for simple interactions |
+| Send Streaming Message | Like Send, but returns status / artifact events as an SSE stream |
+| Get Task | Fetch a task and its history by `taskId` |
+| List Tasks | List tasks by `contextId` / state (paginated) |
+| Cancel Task | Cooperative cancellation |
+| Subscribe to Task | Re-subscribe to a task's update stream after a disconnect |
+| Push Notification Config (CRUD) | Configure / query / delete a task's webhook callback |
+| Get Extended Agent Card | Fetch the authenticated extended card |
 
-一次典型（流式 + HITL）往返：
+A typical (streaming + HITL) round trip:
 
 ```
 Client                                      Server (Remote Agent)
   │  GET /.well-known/agent-card.json  ─────► │
-  │  ◄────────────── AgentCard ──────────────│   发现
+  │  ◄────────────── AgentCard ──────────────│   discovery
   │                                            │
   │  SendStreamingMessage(message)  ─────────► │
   │  ◄──── Task{state: submitted} ────────────│
   │  ◄──── TaskStatusUpdate{working} ─────────│
-  │  ◄──── TaskArtifactUpdate{append} ────────│   流式产出
-  │  ◄──── TaskStatusUpdate{input-required} ──│   需要用户输入
+  │  ◄──── TaskArtifactUpdate{append} ────────│   streaming output
+  │  ◄──── TaskStatusUpdate{input-required} ──│   user input needed
   │                                            │
-  │  SendMessage(taskId, answer)  ───────────► │   多轮续跑
+  │  SendMessage(taskId, answer)  ───────────► │   multi-turn resume
   │  ◄──── TaskStatusUpdate{working} ─────────│
   │  ◄──── TaskArtifactUpdate{lastChunk} ─────│
-  │  ◄──── TaskStatusUpdate{completed} ───────│   终态
+  │  ◄──── TaskStatusUpdate{completed} ───────│   terminal
 ```
 
-变体：
+Variants:
 
-- **非流式**：`SendMessage` 阻塞到终态或中断态才返回（默认行为）；
-- **异步**：`SendMessage{returnImmediately:true}` 立即返回 `working`，之后靠 `GetTask` 轮询 / `SubscribeToTask` / push notification 取更新；
-- **取消**：客户端 `CancelTask`，服务端转换到 `canceled`。
+- **Non-streaming**: `SendMessage` blocks until a terminal or interruptible state before returning (default behavior);
+- **Asynchronous**: `SendMessage{returnImmediately:true}` returns `working` immediately, after which updates are fetched via `GetTask` polling / `SubscribeToTask` / push notification;
+- **Cancel**: the client calls `CancelTask`, and the server transitions to `canceled`.
 
 ### 0.6 A2A ≠ MCP
 
 | | A2A | MCP |
 |---|---|---|
-| 连接 | agent ↔ **agent**（对等，各自有推理循环） | agent ↔ **工具 / 资源**（无自主循环） |
-| 抽象 | 有状态的 `Task`、多轮、HITL | 无状态的函数调用 / 资源读取 |
-| 典型用途 | 把任务委托给另一个 agent | 让模型调用一个工具 |
+| Connection | agent ↔ **agent** (peers, each with its own reasoning loop) | agent ↔ **tool / resource** (no autonomous loop) |
+| Abstraction | stateful `Task`, multi-turn, HITL | stateless function call / resource read |
+| Typical use | delegate a task to another agent | let the model call a tool |
 
-本 SDK 出向把远端 agent 当「**agent**」（子 agent / 主 agent）而不是「工具」，正是这一区别的直接后果（§3.3 / §6.1）。
+This SDK's outbound path treats a remote agent as an **agent** (subagent / primary agent) rather than a "tool", which is a direct consequence of this distinction (§3.3 / §6.1).
 
-### 0.7 版本与本文档约定
+### 0.7 Versions and conventions in this document
 
-A2A 最新为 **1.0.0**（此前 0.3.0 / 0.2.6 / 0.1.0）。1.0 含**破坏性变更**：移除 `kind` 判别字段、状态枚举改为 `TASK_STATE_*`（0.3 为 `input-required` 这类小写 kebab）、card 的接口描述改为 `supportedInterfaces[]`（含 `protocolBinding` / `protocolVersion`）等。
+The latest A2A is **1.0.0** (previously 0.3.0 / 0.2.6 / 0.1.0). 1.0 contains **breaking changes**: removing the `kind` discriminator field, renaming the state enum to `TASK_STATE_*` (0.3 used lowercase kebab such as `input-required`), and changing the card's interface description to `supportedInterfaces[]` (including `protocolBinding` / `protocolVersion`), etc.
 
-本 SDK 以 `github.com/a2aproject/a2a-go/v2` 的实现为准（§3.1，已定 D4）。正文采用该库的方法名（`SendMessage` / `SendStreamingMessage` / `GetTask` / `ListTasks` / `CancelTask` / `SubscribeToTask`）；A2A 各版本（0.3 / 1.0）间的字段与枚举拼写差异（如 `TASK_STATE_*` vs `input-required`、`supportedInterfaces`）一律以该库实际绑定的版本为准。
+This SDK targets the implementation in `github.com/a2aproject/a2a-go/v2` (§3.1, decided as D4). The main text uses that library's method names (`SendMessage` / `SendStreamingMessage` / `GetTask` / `ListTasks` / `CancelTask` / `SubscribeToTask`); differences in field and enum spellings across A2A versions (0.3 / 1.0) (e.g. `TASK_STATE_*` vs `input-required`, `supportedInterfaces`) are always resolved by the version that library actually binds.
 
 ---
 
-## 1. 背景与三个前置判断
+## 1. Background and three preliminary judgments
 
-A2A 是一套让 Agent 之间跨进程/跨主机互相调用的协议。目标是双向支持：
+A2A is a protocol for agents to call each other across processes/hosts. The goal is bidirectional support:
 
-- **出向（client）**：让 SDK 的 agent 能调用远端 A2A agent；
-- **入向（server）**：让 SDK 的 agent 能被 A2A 客户端调用。
+- **Outbound (client)**: let the SDK's agents call remote A2A agents;
+- **Inbound (server)**: let the SDK's agents be called by A2A clients.
 
-在动手前先确立三个判断，它们决定了后面所有设计取舍。
+Before starting, establish three judgments; they determine every subsequent design trade-off.
 
-### 判断一：不要照搬 adk-go 的 `adka2a` / `remoteagent`
+### Judgment one: do not copy adk-go's `adka2a` / `remoteagent`
 
-ADK 的前提是「无状态 agent + SessionService + `runner.Run` 可重入」，因此它用「input-required 结束本轮 → 下一条消息重跑」来换取**无进程内状态**。
+ADK's premise is "stateless agent + SessionService + reentrant `runner.Run`", so it uses "end this turn with input-required → rerun on the next message" to buy **no in-process state**.
 
-go-agent-sdk 的前提完全不同：
+go-agent-sdk's premise is completely different:
 
-- session 是 durable 的（SQLite，`session` / `session_message` 表）；
-- 对外是**事件并集**（`agent.Event` + `iter.Seq2`），不是 task 状态机；
-- 权限/提问会**在轮内阻塞挂起**（`core.Permission.Ask` / `core.Question.Ask` 阻塞在 channel 上）。
+- sessions are durable (SQLite, `session` / `session_message` tables);
+- externally it is a **union of events** (`agent.Event` + `iter.Seq2`), not a task state machine;
+- permissions/questions **block and suspend within a turn** (`core.Permission.Ask` / `core.Question.Ask` block on a channel).
 
-把 ADK 的实现平移到本 SDK，会丢掉 SDK 最有价值的一点（durable session + 可挂起的轮），因此**映射表与事件状态机必须重新设计**。
+Porting ADK's implementation into this SDK would discard the SDK's most valuable property (durable sessions + suspendable turns), so the **mapping table and event state machine must be redesigned**.
 
-### 判断二：本 SDK 已有 `input-required` 的现成红利
+### Judgment two: this SDK already has the ready-made dividend of `input-required`
 
-`core/permission.go` / `core/question.go` 已经是如下形态：
+`core/permission.go` / `core/question.go` already have this shape:
 
-| 已有能力 | 位置 |
+| Existing capability | Location |
 |---|---|
-| 发布 `permission.asked` / `permission.replied` | `schema/permission.go` + `permissionEvents.PublishAsked` |
-| 发布 `question.asked` / `question.replied` / `question.rejected` | `schema/question.go` + `core/question.go` |
-| 阻塞等待应答 | `core.Permission.pending` / `core.Question.pending`（`pendingRegistry`） |
-| 按 requestID 回复 | `Permission.Reply` / `Question.Reply` / `Question.Reject` |
-| 枚举 pending | `Permission.Get/ForSession/List`、`Question.List` |
+| Publish `permission.asked` / `permission.replied` | `schema/permission.go` + `permissionEvents.PublishAsked` |
+| Publish `question.asked` / `question.replied` / `question.rejected` | `schema/question.go` + `core/question.go` |
+| Block waiting for a reply | `core.Permission.pending` / `core.Question.pending` (`pendingRegistry`) |
+| Reply by requestID | `Permission.Reply` / `Question.Reply` / `Question.Reject` |
+| Enumerate pending | `Permission.Get/ForSession/List`, `Question.List` |
 
-这正是 A2A `input-required` + 后续 message 恢复所需的全部原语。ADK 需要自己造一套 long-running tool 协议，我们只需要做**桥接**。
+These are exactly all the primitives A2A's `input-required` + subsequent message recovery needs. ADK has to build its own long-running tool protocol; we only need to **bridge**.
 
-### 判断三：真正要解决的是「统一抽象」，而不是出向/入向的先后
+### Judgment three: what really must be solved is the "unified abstraction", not the order of outbound/inbound
 
-方向先后只是排期问题。真正决定架构成败的是两个问题（详见 §3.3 / §3.4）：
+The order of directions is only a scheduling matter. What really determines the architecture's success are two questions (see §3.3 / §3.4):
 
-1. **远端 subagent 与本地 subagent 如何在设计上兼容、使用上一致？** → 答案是把差异落在「session 的执行后端」上 + 镜像子会话，而不是在 `task` 工具层分叉；
-2. **入向时如何定义与暴露本地 subagent？** → 答案是显式声明**哪些 agent 对外提供服务**：暴露的 agent **各自提供一个 card URL**（一 card = 一 agent）。
+1. **How can remote subagents and local subagents be design-compatible and usage-consistent?** → The answer is to place the difference in "the session's execution backend" + a mirrored child session, rather than forking at the `task` tool layer;
+2. **Inbound, how should local subagents be defined and exposed?** → The answer is to explicitly declare **which agents provide service externally**: an exposed agent **each provides a card URL** (one card = one agent).
 
-这两个问题定完，出向与入向只是在同一套抽象上各写一个适配器，先后顺序无关紧要。
-
----
-
-## 2. 目标与非目标
-
-### 2.1 目标
-
-1. **出向**：SDK 的 agent 能调用远端 A2A agent。唯一机制是「带 A2A 执行后端的 agent」，它经 `task` 工具表现为**子 agent**，并可被选为**主 agent**（§3.3 / §6.1）；不提供独立的「工具形态」；
-2. **入向**：SDK 的 agent 能作为 A2A server 被调用，支持流式、多轮、`input-required`、取消、task 重查；
-3. **保真**：part / tool-call / HITL 语义在往返中尽量不丢，支持 SDK↔SDK 与 **SDK↔ADK-go 跨实现互操作**；
-4. **安全**：远端调用方**不能**隐式获得本机代码执行能力。
-
-### 2.2 非目标
-
-- 不做 opencode CLI 那套 launcher / 多形态入口（与 `AGENTS.md` 的 CLI 基础设施不照搬原则一致）；
-- 不做 A2A registry / discovery 服务；
-- 不引入 OTel / 遥测（SDK 当前没有 telemetry，不在本次引入）；
-- 不自造 AgentCard 声明之外的**额外**能力协商机制（不做双向能力握手 / 降级协商）。仅按 AgentCard 的 `capabilities` / `defaultInputModes` / `defaultOutputModes` / `protocolVersion` 做最小适配：不认识的 non-required 扩展安全忽略，`required` 扩展不支持则拒绝（见 §6.2）；
-- 不移植 opencode 的任何 v1/legacy 层代码。
+Once these two are settled, outbound and inbound are merely writing one adapter each on the same abstraction, and precedence does not matter.
 
 ---
 
-## 3. 包结构与依赖策略
+## 2. Goals and non-goals
 
-A2A 在 opencode TS 中**没有对应物**，属于 Go 专属能力，应像 `jsonschema/` 那样在 `AGENTS.md` 的包架构表中显式登记「无 TS 对应目录」。
+### 2.1 Goals
+
+1. **Outbound**: the SDK's agents can call remote A2A agents. The only mechanism is "an agent with an A2A execution backend", which surfaces via the `task` tool as a **subagent** and can be selected as a **primary agent** (§3.3 / §6.1); no separate "tool form" is provided;
+2. **Inbound**: the SDK's agents can be called as an A2A server, supporting streaming, multi-turn, `input-required`, cancel, and task re-query;
+3. **Fidelity**: part / tool-call / HITL semantics are preserved as far as possible across round trips, supporting SDK↔SDK and **SDK↔ADK-go cross-implementation interop**;
+4. **Security**: a remote caller **cannot** implicitly obtain local code-execution capability.
+
+### 2.2 Non-goals
+
+- Do not build opencode CLI's launcher / multi-form entry points (consistent with `AGENTS.md`'s principle of not copying CLI infrastructure);
+- Do not build an A2A registry / discovery service;
+- Do not introduce OTel / telemetry (the SDK currently has no telemetry, not introduced here);
+- Do not invent **additional** capability-negotiation mechanisms beyond AgentCard declarations (no bidirectional capability handshake / downgrade negotiation). Do only minimal adaptation based on the AgentCard's `capabilities` / `defaultInputModes` / `defaultOutputModes` / `protocolVersion`: unknown non-required extensions are safely ignored, and an unsupported `required` extension is rejected (see §6.2);
+- Do not port any of opencode's v1/legacy layer code.
+
+---
+
+## 3. Package structure and dependency strategy
+
+A2A has **no counterpart** in opencode TS; it is a Go-specific capability and should be explicitly registered as "no corresponding TS directory" in `AGENTS.md`'s package architecture table, like `jsonschema/`.
 
 ```
-a2a/                    协议无关核心：类型、映射、状态机（不依赖 transport）
-a2a/server/             入向：executor + AgentCard 生成 + http.Handler
-a2a/client/             出向：card 解析、消息发送、A2A 事件 → SDK 事件转换；定义薄接口
-a2a/a2ago/              出向薄接口的 a2a-go 实现（唯一 import a2a-go 的出向适配层，可替换）
+a2a/                     protocol-agnostic core: types, mapping, state machine (no transport dependency)
+a2a/server/              inbound: executor + AgentCard generation + http.Handler
+a2a/client/              outbound: card resolution, message sending, A2A event → SDK event conversion; defines the thin interface
+a2a/a2ago/               the a2a-go implementation of the outbound thin interface (the only outbound adapter layer that imports a2a-go; replaceable)
 ```
 
-### 3.1 依赖策略
+### 3.1 Dependency strategy
 
-| 决策 | 内容 | 理由 |
+| Decision | Content | Rationale |
 |---|---|---|
-| 依赖库 | **只支持 `github.com/a2aproject/a2a-go/v2`**（v2），单一版本；不兼容 `a2a-go` v0.x，也不同时引入两个版本 | adk-go 当前同时依赖 `a2a-go v0.3.15` 与 `a2a-go/v2 v2.2.1`，双版本共存对依赖图不友好，属于明确要避免的坑 |
-| 类型隔离 | 对外 API 使用 SDK 自己的类型 + `iter.Seq2`，不泄漏 a2a-go 类型 | 对齐 `mcp/` 包装官方 SDK 的思路 |
-| 适配层 | 薄接口定义在 `a2a/client`（模式参考 ADK 的 `internal/agent/remoteagent.A2AClient`），由 `a2a/a2ago/` 用 a2a-go 实现 | 协议仍在演进，升级只需改一处 |
-| 逃生通道 | `server.Options.NativeOptions []any` 透传被打包库（a2a-go）的原生配置 | 不因封装而失去协议全部能力；签名用 `any`，不把 `a2a-go` 类型写进公开 API，契合「类型隔离」 |
+| Dependency library | **Support only `github.com/a2aproject/a2a-go/v2`** (v2), a single version; not compatible with `a2a-go` v0.x, and not both versions at once | adk-go currently depends on both `a2a-go v0.3.15` and `a2a-go/v2 v2.2.1`; dual-version coexistence is unfriendly to the dependency graph and is a pitfall to explicitly avoid |
+| Type isolation | The public API uses the SDK's own types + `iter.Seq2`, never leaking a2a-go types | Follows `mcp/`'s approach of wrapping the official SDK |
+| Adapter layer | The thin interface is defined in `a2a/client` (pattern modeled on ADK's `internal/agent/remoteagent.A2AClient`), implemented by `a2a/a2ago/` using a2a-go | The protocol is still evolving; upgrading requires changing only one place |
+| Escape hatch | `server.Options.NativeOptions []any` passes through the native configuration of the wrapped library (a2a-go) | Avoid losing the protocol's full capability due to wrapping; the signature uses `any` so a2a-go types do not enter the public API, consistent with "type isolation" |
 
-> **依赖边界**：本 SDK **不依赖 adk-go**——adk-go 仅在 §1 / 附录 A 作为参照实现。`a2a/a2ago/` 是出向唯一 import `github.com/a2aproject/a2a-go/v2` 的适配层；a2a-go 类型不越过 `a2a/a2ago/` 与 `a2a/server/` 的边界进入 `a2a/` 核心与公开 API（见上「类型隔离」）。
+> **Dependency boundary**: this SDK **does not depend on adk-go** — adk-go is only a reference implementation in §1 / appendix A. `a2a/a2ago/` is the only outbound adapter layer that imports `github.com/a2aproject/a2a-go/v2`; a2a-go types do not cross the boundary of `a2a/a2ago/` and `a2a/server/` into the `a2a/` core and public API (see "type isolation" above).
 
-→ **已定（D4，§10.2）：只支持 `a2a-go/v2` 单版本。**
+→ **Decided (D4, §10.2): support only the single version `a2a-go/v2`.**
 
-### 3.2 与既有扩展机制的定位
+### 3.2 Positioning relative to existing extension mechanisms
 
-A2A 能力应当**融入现有机制**，而不是另起一套：
+A2A capabilities should **integrate with existing mechanisms**, not start a separate set:
 
-| 既有机制 | A2A 如何接入 |
+| Existing mechanism | How A2A plugs in |
 |---|---|
-| `Client.On` / `Session.On` | 远端事件镜像进子会话后，`Client.On` 与子会话的 `Session.On` 可观察（父会话的 `Session.On` 看不到子会话，同本地 subagent） |
-| `Client.RegisterAgent` / `AgentConfig`（及 `ConfigDirs` 的 agent 定义） | 远端 agent 的**主注册路径**：`AgentConfig` / `schema.AgentInfo` 增加 `A2A` backend 字段后，即可注册为命名 agent（进 `SubagentTypes`、可作主 agent） |
-| `PluginFunc` | 插件经 `PluginContext.Agents`（`Transform`）贡献/改写 agent（含远端），用 `On` 观测远端往返；**不单设「远端 agent 工具」注册面** |
-| `SessionHooks` | 只对**本地** `task` 调用（委派边界）生效：可在委派前拦截/审计「是否调用远端 agent」。远端 agent **内部**的工具调用不经本地 hooks，只能经 A2A 事件观测（降级为 `ToolProgress`，不伪装成 `ToolCalled`，见 §3.3 / §6.2） |
-| `SessionConfig.Permissions` | **仅对入向**有效：外部调用触发的是**本机** agent，执行在本机发生，故按调用方身份注入的会话级规则集约束的是**本机工具**。出向远端 agent 的内部工具不受本地规则约束（§3.3） |
-| `core/database` 建表 | 新增 core 一等 **`turn`** 实体（本地/远程 subagent 共用；A2A `taskId` 即 `turn.id`，见 §5.6）。直接改 `migration.go` 的建表清单即可 |
-| `task` 工具 + `TaskRunner`（`task_run.go`） | 复用为出向**子 agent 形态**的**入口与本地编排**：`task` 工具、`runTask`、`task_id`、进度、深度、权限派生全部不变。真正的接入点是更下层的 `runner.SessionRunner` **drain 分派**（§3.3），因此 `task.go` / `task_run.go` 均不改；远端专属的 `a2a` 权限断言由 A2A backend 在该分派点追加（A7） |
+| `Client.On` / `Session.On` | After remote events are mirrored into the child session, `Client.On` and the child session's `Session.On` can observe them (the parent session's `Session.On` cannot see child sessions, just like a local subagent) |
+| `Client.RegisterAgent` / `AgentConfig` (and agent definitions from `ConfigDirs`) | The **primary registration path** for a remote agent: once `AgentConfig` / `schema.AgentInfo` gains an `A2A` backend field, it can be registered as a named agent (enters `SubagentTypes`, can be a primary agent) |
+| `PluginFunc` | Plugins contribute/rewrite agents (including remote ones) via `PluginContext.Agents` (`Transform`), and observe remote round trips via `On`; **no separate "remote agent tool" registration surface** |
+| `SessionHooks` | Take effect only for **local** `task` calls (the delegation boundary): you can intercept/audit "is a remote agent being called" before delegation. A remote agent's **internal** tool calls do not go through local hooks and can only be observed via A2A events (downgraded to `ToolProgress`, not disguised as `ToolCalled`, see §3.3 / §6.2) |
+| `SessionConfig.Permissions` | **Inbound only**: an external call triggers a **local** agent, execution happens locally, so the session-level ruleset injected by caller identity constrains **local tools**. A remote agent's internal tools are not constrained by local rules (§3.3) |
+| `core/database` table creation | Add a core first-class **`turn`** entity (shared by local/remote subagents; the A2A `taskId` is `turn.id`, see §5.6). Just edit `migration.go`'s table list |
+| `task` tool + `TaskRunner` (`task_run.go`) | Reused as the **entry and local orchestration** for the outbound **subagent form**: the `task` tool, `runTask`, `task_id`, progress, depth, and permission derivation are all unchanged. The real integration point is the lower-level `runner.SessionRunner` **drain dispatch** (§3.3), so neither `task.go` nor `task_run.go` changes; the remote-specific `a2a` permission assertion is appended by the A2A backend at that dispatch point (A7) |
 
-> **执行侧边界（与 §3.3 一致）**：A2A 不提供控制对端工具/权限的原语（opaque execution）。**权限与 hooks 只对执行侧生效**：入向执行侧是本机 → 本地规则有效；出向执行侧是远端 → 本地只能控制「是否委派」与「发什么上下文」，远端内部工具调用**仅可观测、不可拦截**。
+> **Execution-side boundary (consistent with §3.3)**: A2A provides no primitives to control the peer's tools/permissions (opaque execution). **Permissions and hooks take effect only on the execution side**: for inbound the execution side is local → local rules apply; for outbound the execution side is remote → locally you can only control "whether to delegate" and "what context to send", and the remote's internal tool calls are **observable only, not interceptable**.
 
-### 3.3 统一抽象：agent 的「执行后端」（backend）
+### 3.3 Unified abstraction: an agent's "execution backend" (backend)
 
-**要回答的问题**：远端 subagent 与本地 subagent 如何在设计上兼容，且使用上完全一致？
+**The question to answer**: how can remote subagents and local subagents be design-compatible and fully usage-consistent?
 
-**关键发现**：现成的接缝已经存在，**不需要新增 Agent 抽象层**。
+**Key finding**: the seam already exists; **no new Agent abstraction layer is needed**.
 
-`runtime.buildRunner` 把 coordinator 的 drain 注入为一个「按 session 调用」的函数：
+`runtime.buildRunner` injects the coordinator's drain as a "per-session call" function:
 
 ```go
 r.coord = session.NewCoordinator(func(ctx, id, force) error {
@@ -261,538 +261,538 @@ r.coord = session.NewCoordinator(func(ctx, id, force) error {
 })
 ```
 
-而 `r.runner`（`*runner.LLMRunner`）满足 `runner.SessionRunner` 接口（`Run(ctx, RunInput) error`）；runner 又通过 `runner.AgentSelector` 接口的 `Select(sessionID, id)` **按 session 解析要运行的 agent**（runtime 侧的实现是 `sessionAgents`）。
+And `r.runner` (`*runner.LLMRunner`) satisfies the `runner.SessionRunner` interface (`Run(ctx, RunInput) error`); the runner in turn resolves **which agent to run per session** via the `runner.AgentSelector` interface's `Select(sessionID, id)` (the runtime-side implementation is `sessionAgents`).
 
-也就是说：**「用哪个 agent」与「怎么跑一个 session」已经是两个正交的注入点。**
+In other words: **"which agent to use" and "how to run a session" are already two orthogonal injection points.**
 
-#### 设计
+#### Design
 
-把 agent 的差异落在「session 的执行后端」上，**不要**在 `task` 工具或 `runTask` 里分叉：
+Place the agent's difference in "the session's execution backend", and do **not** fork inside the `task` tool or `runTask`:
 
-1. `schema.AgentInfo` 增加可选 backend 字段（如 `A2A *AgentA2ABackend`），声明该 agent 由谁执行：本地 LLM 循环（默认，零值）或远端 A2A（endpoint / card / auth / 映射策略）；公开的 `AgentConfig` 同步增加该字段，由 `applyAgentConfig` 合并（`Client.RegisterAgent` 据此注册远端 agent）；
-2. runtime 的 drain 改成分派：**先读 session 行拿到 `session.agent`，再经 `sessionAgents.Select(sessionID, &agentID)` 解析有效 agent**（与 runner 内部解析一致），据其 backend 分派——有远端 backend 走 `A2ARunner`，否则走 `LLMRunner`。两个 Runner 都实现 `runner.SessionRunner`；
-3. **远端子 agent 仍然创建一个真实的本地子会话**（复用 `resolveChildSession`），远端事件**镜像写入**该子会话；该子会话的这轮执行记为一条 `turn`（`parent_turn_id` 指向父轮），与本地 subagent 完全同构（§5.6）。
+1. `schema.AgentInfo` gains an optional backend field (e.g. `A2A *AgentA2ABackend`), declaring who executes the agent: a local LLM loop (default, zero value) or a remote A2A one (endpoint / card / auth / mapping policy); the public `AgentConfig` gains the same field, merged by `applyAgentConfig` (`Client.RegisterAgent` registers a remote agent accordingly);
+2. runtime's drain becomes a dispatch: **first read the session row to get `session.agent`, then resolve the effective agent via `sessionAgents.Select(sessionID, &agentID)`** (consistent with the runner's internal resolution), and dispatch by its backend — a remote backend goes to `A2ARunner`, otherwise `LLMRunner`. Both Runners implement `runner.SessionRunner`;
+3. **A remote subagent still creates a real local child session** (reusing `resolveChildSession`), and remote events are **mirrored** into that child session; this turn of the child session's execution is recorded as one `turn` (with `parent_turn_id` pointing at the parent turn), fully isomorphic to a local subagent (§5.6).
 
-这称为「**镜像子会话（mirrored child session）**」模型。用法一致性不是靠两套并行实现互相「对齐」，而是靠两种后端**共享同一套 session 语义**。
+This is called the "**mirrored child session**" model. Usage consistency is not achieved by two parallel implementations "aligning" with each other, but by the two backends **sharing the same session semantics**.
 
-**澄清两个容易误解的点：**
+**Clarifying two easily-misunderstood points:**
 
-- 镜像子会话**不是**「子会话里再跑一个本地 LLM，由它去调 A2A」。那样会多一层推理与 token 消耗，`task_id` 语义也会变。镜像子会话中**没有本地 LLM 参与**，子会话只是被 `A2ARunner` 驱动的 durable 账本 —— 对话实际发生在远端，本地子会话负责承载它的输入、事件与状态。
-- 「建子会话」这件事本来就不由 `task` 工具负责，而是由 `runtime.runTask` 负责（`resolveSubagent` → `resolveChildSession` → `setSessionRegistry` / `inheritSession` / `publishTaskProgress` → `runChildSession`）。本设计只替换**最后一跳**：drain 的分派。因此 `task_id` 复用、存量会话的 `Agent` / `Permission` 恢复等逻辑全部沿用。
+- A mirrored child session is **not** "running a local LLM inside the child session, which then calls A2A". That would add a layer of reasoning and token cost, and change `task_id` semantics. In a mirrored child session **no local LLM participates**; the child session is just a durable ledger driven by the `A2ARunner` — the conversation actually happens remotely, and the local child session carries its input, events and state.
+- "Creating a child session" was never the `task` tool's job anyway; it is `runtime.runTask`'s job (`resolveSubagent` → `resolveChildSession` → `setSessionRegistry` / `inheritSession` / `publishTaskProgress` → `runChildSession`). This design replaces only the **last hop**: the drain's dispatch. Thus `task_id` reuse, and the restoration of an existing session's `Agent` / `Permission`, are all inherited unchanged.
 
-#### 两条路径的对照
+#### Comparison of the two paths
 
 ```
-task 工具
+task tool
   → RunTask
-    → resolveSubagent          // 查 registry：本地与远端 agent 都走这里
-    → resolveChildSession      // 建 / 复用 session 行：两种 agent 都走这里
-    → …（registry / hooks / progress，全部不变）
+    → resolveSubagent          // look up the registry: both local and remote agents go here
+    → resolveChildSession      // create / reuse the session row: both kinds of agent go here
+    → …(registry / hooks / progress, all unchanged)
     → coord.Run(childID)
       → drain(childID, force)
-        ├─ agent.Backend == nil   → LLMRunner.Run(childID)   // 本地：LLM 循环读写该 session
-        └─ agent.Backend == A2A   → A2ARunner.Run(childID)   // 远端：读 pending input → 发 A2A
-                                                             //       远端事件 → 镜像写入该 session
+        ├─ agent.Backend == nil   → LLMRunner.Run(childID)   // local: the LLM loop reads/writes this session
+        └─ agent.Backend == A2A   → A2ARunner.Run(childID)   // remote: read pending input → send A2A
+                                                             //        remote events → mirror into this session
 ```
 
-唯一新增的分支是最后一行；其余全部复用。
+The only new branch is the last line; everything else is reused.
 
-#### 不变量清单
+#### Invariant checklist
 
-远端 subagent 必须与本地 subagent 逐条一致，全部要进测试：
+A remote subagent must match a local subagent item by item; all must be tested:
 
-| 不变量 | 由什么保证 |
+| Invariant | Guaranteed by |
 |---|---|
-| `SubagentTypes()` 同时列出本地与远端 agent，排序与描述来源一致 | 不动 `SubagentTypes`，只让 agent 定义携带 backend |
-| `task` 工具入参 / 出参 schema 不变 | 不动 `task.go` |
-| `TaskOutput.SessionID` 都是本地子会话 ID | 镜像子会话（`resolveChildSession`） |
-| `task_id` 续跑 | 本地子会话复用；远端 `taskId` 即该子会话活动 `turn` 的 id（§5.6） |
-| `session.next.tool.progress` 字段一致 | 不动 `publishTaskProgress` |
-| `SubagentDepth` 限制 | 不动 `checkSubagentDepth` |
-| 权限派生（父规则 → 子会话） | 不动 `DeriveSubagentSessionPermission` |
-| hooks 继承 / Abort 传播 | 不动 `inheritSession` / `coord.Interrupt`。**注意**：对 A2A 子会话，hooks **没有实际触发点**——远端内部工具不在本地执行（§3.2），这里保留的只是机制（本地/远程共用同一套 session 语义）；真正生效的是委派边界处对本地 `task` 调用的 hook 与 Abort→`CancelTask` 传播 |
-| `Client.On` / `SessionMessages(childID)` 可观察远端对话 | 远端事件镜像落库 |
-| 错误形态（统一为 `tool.Failure`） | 由 `A2ARunner` 内转换。注意 `task` 工具的错误路径**只**产出 `tool.Failure`，从不产出 `TaskOutput.State="error"`（`task.go` 仅在成功时置 `State="completed"`） |
+| `SubagentTypes()` lists both local and remote agents, with consistent ordering and description sources | Do not touch `SubagentTypes`; only let agent definitions carry a backend |
+| `task` tool input / output schema unchanged | Do not touch `task.go` |
+| `TaskOutput.SessionID` is always a local child session ID | Mirrored child session (`resolveChildSession`) |
+| `task_id` resume | Local child session reuse; the remote `taskId` is the id of that child session's active `turn` (§5.6) |
+| `session.next.tool.progress` fields consistent | Do not touch `publishTaskProgress` |
+| `SubagentDepth` limit | Do not touch `checkSubagentDepth` |
+| Permission derivation (parent rules → child session) | Do not touch `DeriveSubagentSessionPermission` |
+| hooks inheritance / Abort propagation | Do not touch `inheritSession` / `coord.Interrupt`. **Note**: for an A2A child session, hooks have **no actual trigger point** — the remote's internal tools do not execute locally (§3.2); what is retained here is only the mechanism (local/remote share the same session semantics); what actually takes effect is the hook on the local `task` call at the delegation boundary and the Abort→`CancelTask` propagation |
+| `Client.On` / `SessionMessages(childID)` can observe the remote conversation | Remote events are mirrored into the DB |
+| Error shape (unified as `tool.Failure`) | Converted inside `A2ARunner`. Note the `task` tool's error path produces **only** `tool.Failure` and never `TaskOutput.State="error"` (`task.go` sets `State="completed"` only on success) |
 
-#### 必须不同、且要写进用户文档的语义降级
+#### Semantic degradations that must differ, and must be documented
 
-| 项 | 说明 |
+| Item | Description |
 |---|---|
-| 权限作用域 | 本地 permission 只覆盖「是否允许调用该远端 agent」「是否允许把本地上下文发出去」，**不覆盖远端内部的工具调用** |
-| 路径语义 | 远端看不到本地文件系统 → 需要显式的上下文导出策略（§6.2 / A6），不能靠 prompt 里塞本地路径 |
-| 取消 | 远端是协作式取消（A2A `CancelTask`），不保证立即停止 |
-| usage / 计费 | 远端 usage 可能不可见 → `StepEnded` / `Usage` 事件可能缺失，UI 需容忍 |
-| steering | A2A 没有等价语义，映射需单独定义 |
+| Permission scope | Local permissions only cover "whether calling that remote agent is allowed" and "whether local context may be sent out"; they **do not cover the remote's internal tool calls** |
+| Path semantics | The remote cannot see the local filesystem → an explicit context-export policy is needed (§6.2 / A6); you cannot rely on stuffing local paths into the prompt |
+| Cancel | Remote cancel is cooperative (A2A `CancelTask`) and is not guaranteed to stop immediately |
+| usage / billing | Remote usage may be invisible → `StepEnded` / `Usage` events may be missing, and the UI must tolerate that |
+| steering | A2A has no equivalent semantics; mapping must be defined separately |
 
-#### 顺带的净收益
+#### An incidental net benefit
 
-同一个后端分派让「**远端 agent 当主 agent**」零成本可用（`CreateSession(Agent: "remote-x")` 即可）—— 这正是 ADK `remoteagent` 的用法，但在这里只是同一接缝的一个推论，不需要额外设计。
+The same backend dispatch makes "**a remote agent as a primary agent**" available at zero cost (`CreateSession(Agent: "remote-x")` is enough) — exactly ADK `remoteagent`'s usage, but here it is merely a corollary of the same seam, requiring no extra design.
 
-### 3.4 入向暴露：哪些 agent 能被外部调用
+### 3.4 Inbound exposure: which agents can be called externally
 
-**要解决的问题**：入向当 A2A server 时，**哪些本地 agent 对外提供服务**（各自一张 card）。
+**The problem to solve**: inbound, when acting as an A2A server, **which local agents provide service externally** (each with its own card).
 
-**A2A 的模型**：一张 AgentCard 描述**一个** agent；要暴露多个 agent，就提供**多个 card URL**（各自一个端点）。card 的 `skills` 列这个 agent 能做的事——它的工具、能力、子 agent 都可以列，**列哪些、要不要列，都是定义 card 时的选择**。
+**A2A's model**: one AgentCard describes **one** agent; exposing multiple agents means providing **multiple card URLs** (each with its own endpoint). A card's `skills` lists what this agent can do — its tools, capabilities, and subagents can all be listed; **which to list, and whether to list at all, is a choice made when defining the card**.
 
-**为什么需要显式声明**：不能靠任何「默认/可见性」之类的启发式去推断「哪些 agent 对外提供服务」。至少这些诉求它都表达不了：
+**Why an explicit declaration is needed**: no "default/visibility"-style heuristic can infer "which agents provide service externally". At the very least it cannot express these requirements:
 
-1. 「可暴露但不可内部委派」；
-2. 对外专用的描述 / 安全策略（脱敏）；
-3. 外部身份 → 权限映射（card 的 `securitySchemes` / 入向授权）；
-4. 明确**不可暴露**的项——靠启发式迟早会漏。
+1. "Exposable but not internally delegatable";
+2. External-specific descriptions / security policy (redaction);
+3. External identity → permission mapping (the card's `securitySchemes` / inbound authorization);
+4. Explicitly **non-exposable** items — a heuristic will eventually miss one.
 
-**方案**：`AgentConfig` / `AgentInfo` 增加显式暴露声明（如 `Expose` / `A2A` 子结构），决定某 agent 是否、以及以什么描述与安全要求**对外提供一张 card**；未声明的 agent 不提供 card。
+**Approach**: `AgentConfig` / `AgentInfo` gain an explicit exposure declaration (e.g. an `Expose` / `A2A` sub-structure) deciding whether an agent **provides a card externally**, and with what description and security requirements; an undeclared agent provides no card.
 
-#### 多个 agent = 多个 card URL
+#### Multiple agents = multiple card URLs
 
-A2A 里一张 card 只描述**一个** agent。一个 server 要对外暴露 N 个 agent，就提供 **N 个 card URL**（各自一个端点，可在不同路径）。所以「入向暴露」= 决定本地哪些 agent 各自拥有一个 card/端点；客户端通过**选哪个 card/URL** 来选 agent。
+In A2A, a card describes only **one** agent. For a server to expose N agents externally, it provides **N card URLs** (each with its own endpoint, possibly at different paths). So "inbound exposure" = deciding which local agents each own a card/endpoint; the client chooses an agent by **choosing which card/URL**.
 
-每个被外部直接调用的 agent 跑在**根会话**（无父），权限派生与本地 `task` 委派不同：
+Each agent called directly from outside runs in a **root session** (no parent), and its permission derivation differs from local `task` delegation:
 
-| 维度 | 本地委派（task 工具） | 外部直接调用暴露 agent |
+| Dimension | Local delegation (task tool) | External direct call of an exposed agent |
 |---|---|---|
-| 会话结构 | 有 `parent_id` 的子会话 | 无父的根会话 |
-| 权限来源 | `DeriveSubagentSessionPermission(父规则, 子 agent)` | 该 agent 自身、由 server 定义的规则集（**无父可派生**）；多租户时再由调用方身份收敛 |
-| 闸门 | `PermissionEvaluate(task, agentID, …)` | 暴露声明本身即闸门（可选：per-agent 的外部调用权限） |
-| 深度限制 | 生效 | 不适用（无父），但要防止「外部 → 内部委派」链式放大 |
-| 取消 | 父取消 → 子中断 | 由 A2A `cancel` 驱动 |
+| Session structure | A child session with `parent_id` | A root session with no parent |
+| Permission source | `DeriveSubagentSessionPermission(parent rules, child agent)` | The agent's own ruleset, defined by the server (**no parent to derive from**); in multi-tenant cases, further narrowed by caller identity |
+| Gate | `PermissionEvaluate(task, agentID, …)` | The exposure declaration itself is the gate (optionally: per-agent external-call permission) |
+| Depth limit | Applies | Not applicable (no parent), but must prevent chained amplification of "external → internal delegation" |
+| Cancel | Parent cancel → child interrupt | Driven by A2A `cancel` |
 
-→ 见 §10.1 A3（暴露模型）/ A4（暴露 agent 的权限）。
+→ See §10.1 A3 (exposure model) / A4 (permissions of an exposed agent).
 
 ---
 
-## 4. 核心映射规格
+## 4. Core mapping specification
 
-> 本节是整个方案的地基，实现前必须先评审通过。
+> This section is the foundation of the whole scheme and must be reviewed and approved before implementation.
 
-### 4.1 身份映射
+### 4.1 Identity mapping
 
-| A2A | SDK | 说明 |
+| A2A | SDK | Description |
 |---|---|---|
-| `contextId` | `sessionID` | SDK session 本身 durable、可 resume，天然承载多轮；与 ADK 的选择一致 |
-| `taskId` | `turn.id`（core 新增的一等 durable 实体，见 §5.6） | A2A task 有终态；SDK session 永续、一轮 turn 有终态，二者同构 |
-| `messageId` | `session_message.id` | 便于 `GetTask` 与审计对齐 |
-| 调用方身份（`CallContext.User`） | session 的 agent + `Permissions` 规则集 + 工作区 | 安全关键，见 §5.5 |
-| task 处于 `input-required` | turn 的 `awaiting_input` → core 的 pending permission / question request | 见 §5.4 / §5.6 |
+| `contextId` | `sessionID` | The SDK session is itself durable and resumable, naturally carrying multiple turns; consistent with ADK's choice |
+| `taskId` | `turn.id` (a new core first-class durable entity, see §5.6) | An A2A task has a terminal state; an SDK session is perpetual while one turn is terminal — the two are isomorphic |
+| `messageId` | `session_message.id` | Eases alignment between `GetTask` and auditing |
+| Caller identity (`CallContext.User`) | The session's agent + `Permissions` ruleset + workspace | Security-critical, see §5.5 |
+| task in `input-required` | The turn's `awaiting_input` → a core pending permission / question request | See §5.4 / §5.6 |
 
-补充事实（已有数据模型支撑，无需新造概念）：
+Supporting facts (already backed by the data model; no new concepts needed):
 
-- session 行已带 `ProjectID`（`insertSessionRow`）；
-- `schema.LocationInfo{Directory, WorkspaceID, Project}`、`schema.ProjectInfo{Worktree, Sandboxes, ...}` 已存在；
-- `core/project/directories.go` 已支持一个 project 挂多个目录。
+- The session row already carries `ProjectID` (`insertSessionRow`);
+- `schema.LocationInfo{Directory, WorkspaceID, Project}` and `schema.ProjectInfo{Worktree, Sandboxes, ...}` already exist;
+- `core/project/directories.go` already supports one project having multiple directories.
 
-### 4.2 Part 映射
+### 4.2 Part mapping
 
-A2A 原生只有 **text / file / data** 三类 part，并不定义「工具调用 / 思考」的语义——这些靠 **data part + metadata** 表达。为与 ADK-go 互操作（目标 3），共享语义**直接采用 `a2a-go` / ADK 的既有约定**（`adk_` 前缀、`function_call` / `function_response` 类型）；SDK 专属语义用 `sdk_` 前缀。依据：`server/adka2a/v2/parts.go`。
+A2A natively has only **text / file / data** part kinds and does not define "tool call / thought" semantics — these are expressed via **data part + metadata**. To interoperate with ADK-go (goal 3), shared semantics **directly adopt the existing conventions of `a2a-go` / ADK** (the `adk_` prefix, `function_call` / `function_response` types); SDK-specific semantics use the `sdk_` prefix. Basis: `server/adka2a/v2/parts.go`.
 
-| SDK 侧 | A2A 侧 | 备注 |
+| SDK side | A2A side | Note |
 |---|---|---|
-| `TextDelta` / `TextEnded` | Text part | 流式由 artifact 的 `append` / `lastChunk` 表达（§4.5） |
-| `ReasoningDelta` / `ReasoningEnded` | Text part + meta `adk_thought=true` | 与 ADK 一致 |
-| `ToolCalled` | Data part，meta `adk_type="function_call"`（长任务再加 `adk_is_long_running=true`） | **必须能在对端还原**，coding agent 可观测性命脉 |
-| `ToolSuccess` / `ToolFailed` | Data part，meta `adk_type="function_response"` | 失败信息放进 response 载荷 |
-| `ToolProgress` | Data part，meta `sdk_type="tool_progress"`；或仅发 `working` 心跳 | SDK 专属（§5.7） |
-| `Usage` / `StepEnded` | artifact metadata `adk_usage_metadata` | 成本可观测 |
-| `FileDiffInfo{File, Patch, Additions, Deletions, Status}` | Data part，meta `sdk_type="file_diff"` | SDK 专属；代码改动本身是可消费 artifact |
-| 入向非文本 part（图片 / raw / 文件 URL） | File **URL part**（`NewFileURLPart`）或 **raw part**（`NewRawPart`） | coding agent 落盘为路径（§6.2） |
-| 其他结构化 data | Data part；ADK 对无法识别的 data 会包成 `<a2a_datapart_json>…</a2a_datapart_json>` 的 text/plain | 保证往返不丢 |
+| `TextDelta` / `TextEnded` | Text part | Streaming is expressed by the artifact's `append` / `lastChunk` (§4.5) |
+| `ReasoningDelta` / `ReasoningEnded` | Text part + meta `adk_thought=true` | Consistent with ADK |
+| `ToolCalled` | Data part, meta `adk_type="function_call"` (plus `adk_is_long_running=true` for long tasks) | **Must be restorable on the peer**; the lifeline of coding-agent observability |
+| `ToolSuccess` / `ToolFailed` | Data part, meta `adk_type="function_response"` | Failure information goes into the response payload |
+| `ToolProgress` | Data part, meta `sdk_type="tool_progress"`; or just send a `working` heartbeat | SDK-specific (§5.7) |
+| `Usage` / `StepEnded` | artifact metadata `adk_usage_metadata` | Cost observability |
+| `FileDiffInfo{File, Patch, Additions, Deletions, Status}` | Data part, meta `sdk_type="file_diff"` | SDK-specific; the code change itself is a consumable artifact |
+| Inbound non-text part (image / raw / file URL) | File **URL part** (`NewFileURLPart`) or **raw part** (`NewRawPart`) | The coding agent spools it to a path (§6.2) |
+| Other structured data | Data part; ADK wraps unrecognized data as a `<a2a_datapart_json>…</a2a_datapart_json>` text/plain | Guarantees round-trip fidelity |
 
-### 4.3 Metadata 命名约定
+### 4.3 Metadata naming conventions
 
-A2A 没有标准 metadata 键空间。为互操作，**共享键沿用 ADK 的键名**；SDK 专属键用自有前缀。**禁止各处手写字符串**，统一走常量。依据：`server/adka2a/v2/metadata.go`。
+A2A has no standard metadata key space. For interoperability, **shared keys reuse ADK's key names**; SDK-specific keys use their own prefix. **Hand-written strings are forbidden everywhere**; go through constants. Basis: `server/adka2a/v2/metadata.go`.
 
-| 方向 | 前缀 | 常量（对齐 ADK） |
+| Direction | Prefix | Constant (aligned with ADK) |
 |---|---|---|
-| SDK → A2A（写进 A2A 对象 metadata） | `adk_`（共享）/ `sdk_`（SDK 专属） | `a2a.ToA2AMetaKey(key)`（ADK 同为 `adk_` 前缀） |
-| A2A → SDK（写进 session event custom metadata） | `a2a:` | `a2a.ToSDKMetaKey(key)`（ADK 为 `a2a:`） |
+| SDK → A2A (written into A2A object metadata) | `adk_` (shared) / `sdk_` (SDK-specific) | `a2a.ToA2AMetaKey(key)` (ADK also uses the `adk_` prefix) |
+| A2A → SDK (written into session event custom metadata) | `a2a:` | `a2a.ToSDKMetaKey(key)` (ADK uses `a2a:`) |
 
-- **共享键（对齐 ADK）**：`type`、`thought`、`partial`、`is_long_running`、`usage_metadata`、`error_code`、`session_id`、`invocation_id`、`author`、`branch`、`app_name`、`user_id`、`task_id`、`context_id`。
-- **SDK 专属键**：`file_diff`、`tool_progress` 等（`sdk_` 前缀）。
+- **Shared keys (aligned with ADK)**: `type`, `thought`, `partial`, `is_long_running`, `usage_metadata`, `error_code`, `session_id`, `invocation_id`, `author`, `branch`, `app_name`, `user_id`, `task_id`, `context_id`.
+- **SDK-specific keys**: `file_diff`, `tool_progress`, etc. (the `sdk_` prefix).
 
-### 4.4 事件 → task 状态机
+### 4.4 Event → task state machine
 
-| 时机 | 发出 |
+| Timing | Emitted |
 |---|---|
-| 无既有 turn（新 taskId） | 新建 `turn` + `Task{state=submitted}` |
-| 开始 `Send` 之前 | `TaskStatusUpdateEvent{working}` |
+| No existing turn (new taskId) | Create a `turn` + `Task{state=submitted}` |
+| Before starting `Send` | `TaskStatusUpdateEvent{working}` |
 | text / reasoning / tool delta | `TaskArtifactUpdateEvent{append=true, lastChunk=false}` |
-| `permission.asked` / `question.asked` | `TaskStatusUpdateEvent{input-required}`；status message 里带 `adk_type=function_call` 的 data part（ADK 长任务约定，见 §4.7） |
-| `Idle` | 补 `lastChunk=true` 封口 artifact → `completed` |
-| `ErrorEvent` / `StepFailed` | `failed`（message 带错误文本） |
+| `permission.asked` / `question.asked` | `TaskStatusUpdateEvent{input-required}`; the status message carries a data part with `adk_type=function_call` (the ADK long-task convention, see §4.7) |
+| `Idle` | Add `lastChunk=true` to close the artifact → `completed` |
+| `ErrorEvent` / `StepFailed` | `failed` (the message carries the error text) |
 | A2A `cancel` | `Session.Abort()` → `canceled` |
 
-### 4.5 Artifact 粒度
+### 4.5 Artifact granularity
 
-**建议只提供一种粒度**：per-turn 流式追加，turn 结束时发 `lastChunk=true`。
+**It is recommended to provide only one granularity**: per-turn streaming append, emitting `lastChunk=true` at turn end.
 
-理由：ADK 的 `OutputArtifactPerRun` / `OutputArtifactPerEvent` 双模式是历史包袱（partial artifact 需要在结束时用空 data part「擦除」），对端聚合逻辑极易重复发布。本 SDK 的 delta 事件天然适合「追加 + 封口」一种模型。若后续确实需要第二种，只增加 per-message，**不要**引入 partial 擦除语义。
+Rationale: ADK's dual `OutputArtifactPerRun` / `OutputArtifactPerEvent` modes are legacy baggage (a partial artifact must be "erased" with an empty data part at the end), and peer aggregation logic is prone to duplicate publication. This SDK's delta events naturally fit a single "append + close" model. If a second mode is genuinely needed later, add only per-message, and **do not** introduce partial-erasure semantics.
 
-### 4.6 明确不保证的部分（语义降级清单）
+### 4.6 What is explicitly not guaranteed (semantic degradation list)
 
-任何「无损双向映射」的企图都会失败。以下为**显式降级**，必须写进用户文档：
+Any attempt at "lossless bidirectional mapping" will fail. The following are **explicit degradations**, which must be documented:
 
-- SDK 的 `steer` 与 A2A 的「向进行中 task 追加消息」不是同一语义 → 只在受控场景映射（见 §5.3）；
-- SDK 的 `CompactionStarted/Ended` 没有 A2A 对应物 → 只出现在 metadata；
-- SDK 的 `Retried` 无对应物 → metadata；
-- SDK 的一次 turn 可能包含多次 LLM 调用（step），A2A 只有一个 task 生命周期 → 中间 step 边界降级为 metadata；
-- A2A 的 `relatedTasks` / task 图能力本次不使用；
-- **HITL 编码不同**：本 SDK 的 `input-required` 桥接的是 permission / question；ADK 用的是 **long-running function call**（`adk_is_long_running` + `function_call`/`function_response`，ADK 侧由 `HandleInputRequired` 按 function call ID 匹配）。跨实现时要按 §4.2 约定互转。
+- The SDK's `steer` and A2A's "append a message to an in-progress task" are not the same semantics → map only in controlled scenarios (see §5.3);
+- The SDK's `CompactionStarted/Ended` has no A2A counterpart → appears only in metadata;
+- The SDK's `Retried` has no counterpart → metadata;
+- One SDK turn may contain multiple LLM calls (steps), while A2A has only one task lifecycle → intermediate step boundaries are downgraded to metadata;
+- A2A's `relatedTasks` / task-graph capability is not used here;
+- **HITL encoding differs**: this SDK's `input-required` bridges permission / question; ADK uses a **long-running function call** (`adk_is_long_running` + `function_call`/`function_response`; on the ADK side `HandleInputRequired` matches by function call ID). Across implementations, convert according to the §4.2 conventions.
 
-### 4.7 与 ADK-go 互操作清单（wire-level）
+### 4.7 ADK-go interoperability checklist (wire-level)
 
-目标是 SDK↔ADK-go **双向**互操作（§2.1 目标 3）。以下线上约定必须对齐，均取自 `a2a-go/v2` + adka2a v2（`server/adka2a/v2/*`、`agent/remoteagent/v2/*`）：
+The goal is SDK↔ADK-go **bidirectional** interop (§2.1 goal 3). The following wire conventions must be aligned, all taken from `a2a-go/v2` + adka2a v2 (`server/adka2a/v2/*`, `agent/remoteagent/v2/*`):
 
-1. **传输 / 发现**：`a2a-go/v2` + AgentCard 的 `supportedInterfaces`（JSON-RPC / gRPC / HTTP+JSON）；well-known `/.well-known/agent-card.json` 返回**单个** AgentCard。
-2. **身份**：`contextId ↔ sessionID`（ADK 侧 `sessionID = ContextID`）。ADK 客户端把 `taskId` / `contextId` 记在 session event 的 custom metadata 里（键 `a2a:task_id` / `a2a:context_id`，`GetA2ATaskInfo` 读回）——我们作为客户端时也要这样做以续跑。
-3. **Part**：§4.2（text + `adk_thought`；data + `adk_type=function_call/function_response`、`adk_is_long_running`；file → URL/raw）。未知 data 在 ADK 侧会退化为 `<a2a_datapart_json>` 内联文本，不会报错。
-4. **Artifact**：用 `TaskArtifactUpdateEvent` 的 `append` / `lastChunk`。**不要**设 `adk_partial`（那是 ADK 的 legacy 模式：客户端会跳过自己的聚合，期望服务端已聚合）。ADK 客户端在非 legacy 下按 `ArtifactID` 聚合，服务端发 `lastChunk=true` 收口。
-5. **状态**：`submitted → working →` 终态（`completed`/`failed`/`canceled`）；`input-required` 表达 HITL。**非终态的 status message 会被 ADK 客户端当成 thought（推理）显示**；`failed` 且仅一段文本时会被当作 error message。
-6. **HITL**：ADK 用 **long-running function call** 做 HITL——`input-required` 的 status message 里放 `adk_type=function_call` 的 data part（`adk_is_long_running=true`）；客户端下一轮把用户应答作为 `function_response` 发回（带 `taskId` / `contextId`），服务端按 call ID 匹配（ADK: `HandleInputRequired`）。要与 ADK 客户端互通，我们承载 permission/question 时**必须用这套 function_call/response 编码**。SDK 侧为让调用端能展示题目，把 question 的 `QuestionInfo`（题目/选项）放进该 function_call 的 `args.questions`（ADK 会当作该长任务的调用参数；这是**保真增强**，不强制对端理解）。
-7. **客户端增量同步**：ADK 客户端只发「自上一个远端响应以来」的事件，并把本地其它 agent 的事件渲染成 user 文本（`presentAsUserMessage`），不重发全量；我们出向时同样只发增量。
-8. **简单交互**：A2A 允许对简单请求直接返回 `Message`（无 `Task`）；ADK 客户端把 `Message` 视为 `TurnComplete=true` 的一轮。
+1. **Transport / discovery**: `a2a-go/v2` + the AgentCard's `supportedInterfaces` (JSON-RPC / gRPC / HTTP+JSON); the well-known `/.well-known/agent-card.json` returns a **single** AgentCard.
+2. **Identity**: `contextId ↔ sessionID` (on the ADK side `sessionID = ContextID`). The ADK client records `taskId` / `contextId` in the session event's custom metadata (keys `a2a:task_id` / `a2a:context_id`, read back via `GetA2ATaskInfo`) — we must do the same as a client in order to resume.
+3. **Part**: §4.2 (text + `adk_thought`; data + `adk_type=function_call/function_response`, `adk_is_long_running`; file → URL/raw). Unknown data degrades on the ADK side into `<a2a_datapart_json>` inline text, without erroring.
+4. **Artifact**: use `TaskArtifactUpdateEvent`'s `append` / `lastChunk`. **Do not** set `adk_partial` (that is ADK's legacy mode: the client skips its own aggregation and expects the server to have already aggregated). In non-legacy mode the ADK client aggregates by `ArtifactID`, and the server closes with `lastChunk=true`.
+5. **State**: `submitted → working →` terminal (`completed`/`failed`/`canceled`); `input-required` expresses HITL. **A non-terminal status message is displayed by the ADK client as a thought (reasoning)**; a `failed` with only one text segment is treated as an error message.
+6. **HITL**: ADK uses a **long-running function call** for HITL — the `input-required` status message contains a data part with `adk_type=function_call` (`adk_is_long_running=true`); on the next turn the client sends the user's answer back as a `function_response` (with `taskId` / `contextId`), and the server matches by call ID (ADK: `HandleInputRequired`). To interoperate with an ADK client, when carrying permission/question we **must use this function_call/response encoding**. To let the caller display the prompt, on the SDK side we put the question's `QuestionInfo` (prompt/options) into that function_call's `args.questions` (ADK treats it as the long task's call arguments; this is a **fidelity enhancement**, not required for the peer to understand).
+7. **Client incremental sync**: the ADK client sends only the events "since the last remote response", and renders other local agents' events as user text (`presentAsUserMessage`), without resending everything; outbound, we likewise send only the delta.
+8. **Simple interactions**: A2A allows returning a `Message` directly for simple requests (no `Task`); the ADK client treats a `Message` as a turn with `TurnComplete=true`.
 
 ---
 
-## 5. 入向（Server）设计
+## 5. Inbound (Server) design
 
-### 5.0 职责边界：a2a-go 提供什么 / 我们实现什么
+### 5.0 Responsibility boundary: what a2a-go provides / what we implement
 
-我们**基于 `a2a-go/v2/a2asrv` 组装，不重复造轮子**。协议与传输层已由它提供，我们只做「SDK ⇄ A2A」的适配：
+We **assemble on top of `a2a-go/v2/a2asrv` and do not reinvent the wheel**. The protocol and transport layers are provided by it; we only do "SDK ⇄ A2A" adaptation:
 
-| 能力 | 归属 | 挂载点 |
+| Capability | Owner | Mount point |
 |---|---|---|
-| JSON-RPC / REST(HTTP+JSON) 绑定、SSE 流、keep-alive、panic 处理 | **a2a-go**（继承） | `NewJSONRPCHandler` / `NewRESTHandler` / `WithTransportKeepAlive` |
-| 请求管线：caps 校验、并发、inactivity、集群、拦截器、push、`GetTask`·`ListTasks`·`SubscribeToTask` | **a2a-go**（配置） | `NewHandler(executor, opts…)` + `WithTaskStore` / `WithPushNotifications` / … |
-| 认证（`securitySchemes` / `CallContext`） | **a2a-go**（继承） | `a2asrv/auth.go` |
-| AgentCard 类型 + well-known / 动态 card handler | **a2a-go**（继承） | `NewStaticAgentCardHandler` / `NewAgentCardHandler` |
-| A2A 类型（Task / Message / Part / Artifact / Event） | **a2a-go** | |
-| **Executor**（Execute / Cancel / Cleanup） | **我们实现** | 实现 `a2asrv.AgentExecutor`：把 session 事件流映射为 A2A 事件 |
-| **TaskStore 持久化** | **a2a-go 定接口，我们实现** | 用 DB 实现 `a2asrv/taskstore.Store`（映射到 core `turn`，§5.6） |
-| **Card 生成（agent → AgentCard）** | **我们** | `CardBuilder`（§5.1） |
-| **类型 / 事件映射（§4）** | **我们** | 核心工作量 |
-| **HITL 桥接、backend 分派、`turn`、暴露声明、授权策略** | **我们** | §5.4 / §3.3 / §5.6 / §3.4 / §5.5 |
+| JSON-RPC / REST(HTTP+JSON) bindings, SSE streams, keep-alive, panic handling | **a2a-go** (inherited) | `NewJSONRPCHandler` / `NewRESTHandler` / `WithTransportKeepAlive` |
+| Request pipeline: caps validation, concurrency, inactivity, clustering, interceptors, push, `GetTask`·`ListTasks`·`SubscribeToTask` | **a2a-go** (configured) | `NewHandler(executor, opts…)` + `WithTaskStore` / `WithPushNotifications` / … |
+| Authentication (`securitySchemes` / `CallContext`) | **a2a-go** (inherited) | `a2asrv/auth.go` |
+| AgentCard type + well-known / dynamic card handler | **a2a-go** (inherited) | `NewStaticAgentCardHandler` / `NewAgentCardHandler` |
+| A2A types (Task / Message / Part / Artifact / Event) | **a2a-go** | |
+| **Executor** (Execute / Cancel / Cleanup) | **we implement** | Implement `a2asrv.AgentExecutor`: map the session event stream to A2A events |
+| **TaskStore persistence** | **a2a-go defines the interface, we implement** | Implement `a2asrv/taskstore.Store` with the DB (mapped to core `turn`, §5.6) |
+| **Card generation (agent → AgentCard)** | **we** | `CardBuilder` (§5.1) |
+| **Type / event mapping (§4)** | **we** | The core workload |
+| **HITL bridging, backend dispatch, `turn`, exposure declaration, authorization policy** | **we** | §5.4 / §3.3 / §5.6 / §3.4 / §5.5 |
 
-本节之后只写「我们」的部分；表中标 **a2a-go** 的只说明「如何配置 / 实现其接口」，不再展开设计。
+After this section we write only the "we" parts; rows marked **a2a-go** only explain "how to configure / implement its interface", without further design.
 
-### 5.1 我们实现的组件
+### 5.1 Components we implement
 
-| 组件 | 职责 | 实现（Go） |
+| Component | Responsibility | Implementation (Go) |
 |---|---|---|
-| `CardBuilder` | 为**每个显式暴露的 agent** 生成一张 AgentCard（**一 card = 一 agent**，各自 URL/端点）；其 `skills` 描述该 agent 的能力（条目可为工具 / subagent / 其它，默认不铺工具）；`capabilities` 据实声明（§3.4 / §6.2） | `a2a/server.buildCard` |
-| `Executor` | 实现 `a2asrv.AgentExecutor`（Execute / Cancel）：把 `session.Send` 的事件流映射为 A2A 事件（§4） | `a2a/server.executor`（经 `executorConfig` 注入依赖） |
-| `TaskStore` | 实现 `a2asrv/taskstore.Store`（Create / Update / Get / List），映射到 core `turn`（§5.6） | `a2a/server.turnTaskStore`（version/pending 落在 turn metadata） |
-| Pending（原 `PendingRegistry`） | 挂起的 turn + 待回复的 requestID | `executor.pending` + `a2aSession.turns`（按 `turnID` 的 channel，`OnTurnEnd` 统一释放） |
-| `WorkspaceResolver` | 调用方身份 → 工作区 / Root / 权限规则集 | `a2a/server.WorkspaceResolver`（`WorkspaceResolverFunc`），每次入向调用解析并交给 `Factory` |
-| `ArtifactExternalizer` | artifact 外置 / 改写钩子（§8） | `a2a/server.ArtifactExternalizer`，于每个 artifact 事件发出前调用 |
-| `Handler()` | 返回 `http.Handler`：用标准库 `http.ServeMux` 组合 `a2asrv` 的 card handler 与 `NewJSONRPCHandler`（JSON-RPC 绑定）；多暴露 agent 时按各自 card URL/端点分别提供 | `a2a/server.Server.Handler`；`BaseURL` 为空时按请求 Host 推导 card 端点 |
+| `CardBuilder` | Generates one AgentCard for **each explicitly exposed agent** (**one card = one agent**, each with its own URL/endpoint); its `skills` describe that agent's capabilities (entries may be tools / subagents / others; tools are not dumped by default); `capabilities` are declared truthfully (§3.4 / §6.2) | `a2a/server.buildCard` |
+| `Executor` | Implements `a2asrv.AgentExecutor` (Execute / Cancel): maps the `session.Send` event stream to A2A events (§4) | `a2a/server.executor` (dependencies injected via `executorConfig`) |
+| `TaskStore` | Implements `a2asrv/taskstore.Store` (Create / Update / Get / List), mapped to core `turn` (§5.6) | `a2a/server.turnTaskStore` (version/pending live in turn metadata) |
+| Pending (formerly `PendingRegistry`) | Parked turns + requestIDs awaiting reply | `executor.pending` + `a2aSession.turns` (a channel per `turnID`, released uniformly by `OnTurnEnd`) |
+| `WorkspaceResolver` | Caller identity → workspace / Root / permission ruleset | `a2a/server.WorkspaceResolver` (`WorkspaceResolverFunc`), resolved on each inbound call and handed to the `Factory` |
+| `ArtifactExternalizer` | Artifact externalization / rewrite hook (§8) | `a2a/server.ArtifactExternalizer`, called before each artifact event is emitted |
+| `Handler()` | Returns an `http.Handler`: composes a2asrv's card handler with `NewJSONRPCHandler` (the JSON-RPC binding) using the standard library `http.ServeMux`; with multiple exposed agents, provides each card URL/endpoint separately | `a2a/server.Server.Handler`; when `BaseURL` is empty, derives the card endpoint from the request Host |
 
-- `Factory`：宿主提供 `server.Factory`；SDK 自带 `agent.NewA2AFactory(client)` 适配单 project 的 `Client`（应用入向默认 deny 规则集与 `Workspace.Permissions`）。多工作区由宿主按 `Workspace` 自行实现 `Factory`。
-- 逃生通道：`server.Options.NativeOptions []any` 透传 `a2asrv.RequestHandlerOption` / `TransportOption`（认证、限流、push 等），签名用 `any` 以免 a2a-go 类型进入公开 API（§3.1）。
-- 出向：`agent` 侧经 `a2aBackend`（`route.LLMClient` 接缝）驱动远端；`a2a/a2ago` 是唯一 import a2a-go 的出向适配层。
+- `Factory`: the host provides a `server.Factory`; the SDK ships `agent.NewA2AFactory(client)` adapting a single-project `Client` (applying the inbound default deny ruleset and `Workspace.Permissions`). Multi-workspace is up to the host to implement `Factory` per `Workspace`.
+- Escape hatch: `server.Options.NativeOptions []any` passes through `a2asrv.RequestHandlerOption` / `TransportOption` (auth, rate limiting, push, etc.); the signature uses `any` to keep a2a-go types out of the public API (§3.1).
+- Outbound: the `agent` side drives the remote via `a2aBackend` (through the `route.LLMClient` seam); `a2a/a2ago` is the only outbound adapter layer that imports a2a-go.
 
-### 5.2 接线方式与 HTTP 依赖
+### 5.2 Wiring and HTTP dependencies
 
-**返回 `http.Handler`，由宿主自己挂 mux。**
+**Return an `http.Handler`; the host mounts it on its own mux.**
 
-- **HTTP 依赖只用标准库 `net/http`**；协议绑定用 `a2a-go/v2/a2asrv` 提供的 handler（`NewStaticAgentCardHandler` / `NewJSONRPCHandler`，本身就是 `http.Handler`）。**不引入第三方 router / server 框架**（adk-go 的 `gorilla/mux` 只是它 launcher 的组合选择）。
-- SDK **不自己启动 server、不绑定端口、不读 env**：宿主拿到 `http.Handler` 挂到自己的 `http.Server` 上；测试用 `httptest`。
-- 不做 adk-go 那种 `launcher` 把 server 与启动方式强绑定。理由：符合 SDK 一贯的「窄输入、不读 env、不选默认位置」哲学（`Root` 必填、`ConfigDirs` 显式声明），也让嵌入既有 HTTP 服务变得简单。
+- **HTTP dependencies use only the standard library `net/http`**; protocol bindings use the handlers provided by `a2a-go/v2/a2asrv` (`NewStaticAgentCardHandler` / `NewJSONRPCHandler`, which are themselves `http.Handler`). **Do not introduce a third-party router / server framework** (adk-go's `gorilla/mux` is just its launcher's composition choice).
+- The SDK **does not start a server, bind a port, or read env** itself: the host takes the `http.Handler` and mounts it on its own `http.Server`; tests use `httptest`.
+- Do not do adk-go's `launcher`-style tight coupling of the server with a startup method. Rationale: consistent with the SDK's long-standing philosophy of "narrow input, no env reading, no default location" (`Root` required, `ConfigDirs` explicit), and it makes embedding in an existing HTTP service simple.
 
-### 5.3 一轮的生命周期与 message 语义
+### 5.3 A turn's lifecycle and message semantics
 
-执行流程：
+Execution flow:
 
-1. 解析 card / `taskId` / `contextId` → 决定「新 session」「resume session」还是「续一个 input-required 的 task」；
-2. message parts → prompt + 附件落盘 + 路径注入；
-3. `session.Send(ctx, MessageOptions{Prompt, Mode})` → 事件流 → A2A 事件流（§4.4）；
-4. 终止：`Idle` → completed；`ErrorEvent` → failed；`asked` → input-required。
+1. Resolve the card / `taskId` / `contextId` → decide "new session", "resume session", or "continue an input-required task";
+2. message parts → prompt + attachment spooling + path injection;
+3. `session.Send(ctx, MessageOptions{Prompt, Mode})` → event stream → A2A event stream (§4.4);
+4. Termination: `Idle` → completed; `ErrorEvent` → failed; `asked` → input-required.
 
-A2A 的消息语义比 SDK 丰富，需要明确映射：
+A2A's message semantics are richer than the SDK's and need explicit mapping:
 
-| 到达的消息 | 映射 |
+| Arriving message | Mapping |
 |---|---|
-| 无 `taskId`，新 `contextId` | 新 session + 新 turn |
-| 有 `taskId`，task 处于 `input-required` | 解析为 reply（`Permission.Reply` / `Question.Reply`），**续挂起的 turn** |
-| 有 `taskId`，task 处于 `working` | `SessionDeliverySteer` |
-| 有 `taskId`，task 已终态 | 拒绝（`UnsupportedOperationError`）→ **D3 已定** |
+| No `taskId`, new `contextId` | New session + new turn |
+| Has `taskId`, task in `input-required` | Resolve as a reply (`Permission.Reply` / `Question.Reply`), **continuing the parked turn** |
+| Has `taskId`, task in `working` | `SessionDeliverySteer` |
+| Has `taskId`, task already terminal | Reject (`UnsupportedOperationError`) → **D3 decided** |
 
-**并发模型**：SDK 一个 session 同时只能跑一轮（queue/steer）；A2A 同一 context 的 task 串行、不同 context 并发。`contextId → session` 的一一映射天然保证了串行性。
+**Concurrency model**: an SDK session can run only one turn at a time (queue/steer); in A2A, tasks in the same context are serial and different contexts are concurrent. The one-to-one `contextId → session` mapping naturally guarantees serialization.
 
-### 5.4 HITL：最关键的设计决策
+### 5.4 HITL: the most critical design decision
 
-远端用户应答权限/提问的架构其实**只有一个选择：挂起 + resume**。**与 ADK 客户端互通时，`input-required` 的载荷必须按 §4.7 编码为 `function_call`（应答为 `function_response`）**，否则 ADK 侧无法应答。
+Architecturally, for a remote user to answer permissions/questions there is really **only one choice: park + resume**. **When interoperating with an ADK client, the `input-required` payload must be encoded as `function_call` (with `function_response` as the answer) per §4.7**, otherwise the ADK side cannot answer.
 
-#### 设计：挂起 + resume
+#### Design: park + resume
 
-`asked` 事件到达时，A2A 层把这个 turn 的迭代器 **park 住**（`session.Send` 的 goroutine 本来就阻塞在 `Ask` 的 channel 上），发 `input-required` 并把 requestID 写进 turn 状态；下一条 A2A message 回来后调用 `Reply`，被阻塞的 goroutine 自然继续，原迭代器继续 yield。
+When an `asked` event arrives, the A2A layer **parks** this turn's iterator (the `session.Send` goroutine is already blocked on `Ask`'s channel), emits `input-required`, and writes the requestID into the turn state; when the next A2A message returns it calls `Reply`, the blocked goroutine naturally continues, and the original iterator keeps yielding.
 
-它同时满足：
+It simultaneously satisfies:
 
-- **语义保真**：模型上下文、工具侧状态、已完成的 step 都不丢；
-- **不重复调用 LLM、不重复计费**。
+- **Semantic fidelity**: the model context, tool-side state, and completed steps are all preserved;
+- **No duplicate LLM calls, no duplicate billing**.
 
-代价：挂起状态在**进程内**（受限于 sticky session）。
+Cost: the parked state is **in-process** (limited by sticky sessions).
 
-#### 唯一的降级路径：重建（不是并列选项）
+#### The only fallback path: rebuild (not a parallel option)
 
-当 parked turn 不可达时（进程崩溃/重启，或非 sticky 的水平扩展），进程内状态已丢，只能**降级重建**：turn 状态已落库（§5.6），重启后若发现活动 turn 处于 `awaiting_input`，就把「问题 + 待批准的工具调用」重新作为一轮继续。
+When a parked turn is unreachable (process crash/restart, or non-sticky horizontal scaling), the in-process state is lost and only **fallback rebuild** remains: the turn state is already persisted (§5.6), so after a restart, if an active turn is found in `awaiting_input`, the "question + tool call awaiting approval" is resumed as a new turn.
 
-- 代价：模型要重新推理；工具可能被重放（对 `bash` / `write` 危险）。
+- Cost: the model must re-reason; tools may be replayed (dangerous for `bash` / `write`).
 
-结论：**在线路径恒为「挂起 + resume」；「重建」只是 parked turn 不可达时的降级恢复**，不是与它并列、需要二选一的设计。ADK 只有后者（本轮结束、下轮重跑）；我们两者兼有，正是本次投入最值得的部分。**决策见 §10.2 D1（已定）。**
+Conclusion: **the online path is always "park + resume"; "rebuild" is only a fallback recovery when a parked turn is unreachable**, not a parallel design requiring a choice between the two. ADK has only the latter (end this turn, rerun next turn); we have both, and that is the most worthwhile part of this investment. **Decision in §10.2 D1 (decided).**
 
-**参考实现（ADK）**：ADK 的整套入向就是这条「重建」路径——`Executor.Execute` 先调 `HandleInputRequired`（`server/adka2a/v2/input_required.go:152`）校验应答是否覆盖 status message 里全部 pending `function_call`，缺失则回 `input-required` + 校验错误，齐了则在 durable session 上重跑（`executor.go:197/215/238`）；ADK 无进程内 park。我们的 `turn.awaiting_input` + `pending_request_id` 等价于它的 `StoredTask`。
+**Reference implementation (ADK)**: ADK's entire inbound path is this "rebuild" path — `Executor.Execute` first calls `HandleInputRequired` (`server/adka2a/v2/input_required.go:152`) to validate that the reply covers all pending `function_call`s in the status message, returning `input-required` + a validation error if any are missing, and rerunning on the durable session once complete (`executor.go:197/215/238`); ADK has no in-process park. Our `turn.awaiting_input` + `pending_request_id` is equivalent to its `StoredTask`.
 
-#### 配套的 SDK 侧改动
+#### Accompanying SDK-side changes
 
-1. **已具备**：`agent.Event` 已携带 permission/question 事件——`PermissionAsked` / `PermissionReplied` / `QuestionAsked` / `QuestionReplied` / `QuestionRejected`，`events.go` 的 `mapEvents` 已映射，并经 `Session.Send` 与 `On` 透出。入向可直接感知 `asked`，无需再改；
-2. **待做**：把「等待输入」表达在 **turn** 上（`awaiting_input`，§5.6），而非 session 上；session 的 busy/idle 由活动 turn 派生。挂起期间 session 仍是 busy 会阻塞同 session 的其他 `Send`，语义上需要由 turn 状态区分。
+1. **Already present**: `agent.Event` already carries permission/question events — `PermissionAsked` / `PermissionReplied` / `QuestionAsked` / `QuestionReplied` / `QuestionRejected`, mapped by `events.go`'s `mapEvents` and surfaced through `Session.Send` and `On`. Inbound can directly observe `asked` with no further change;
+2. **To do**: express "awaiting input" on the **turn** (`awaiting_input`, §5.6), not on the session; the session's busy/idle is derived from the active turn. If the session remained busy while parked it would block other `Send`s on the same session, so semantically the turn state must distinguish this.
 
-### 5.5 认证与授权
+### 5.5 Authentication and authorization
 
-agent 能做什么（工具 / 子 agent / 技能）是**定义 agent 时定的**，card 的 `skills` 只是对外**描述**——协议不参与、调用方也改不了；本节只谈**由外部调用触发的那次 session 的信任边界**。
+What an agent can do (tools / subagents / skills) is **decided when the agent is defined**; the card's `skills` only **describe** it externally — the protocol does not participate, and the caller cannot change it. This section addresses only **the trust boundary of the session triggered by an external call**.
 
-**认证（authentication）**：A2A 协议已定义，**直接继承 `a2a-go/v2/a2asrv`**，不自行决策——card 的 `securitySchemes` 声明方案，服务端据此校验调用方请求头；我们从 `CallContext.User` 取身份。宿主经 `server.Options.NativeOptions` 挂载 a2a-go 的认证拦截器等（§3.1 逃生通道）。
+**Authentication**: already defined by A2A and **inherited directly from `a2a-go/v2/a2asrv`**, not decided by us — the card's `securitySchemes` declares the scheme, and the server validates the caller's request headers accordingly; we take the identity from `CallContext.User`. The host mounts a2a-go's auth interceptors etc. via `server.Options.NativeOptions` (§3.1 escape hatch).
 
-**授权（authorization）**：协议**明确留给实现**（spec §7.5：授权「based on the authenticated identity and its own policies」，是 implementation-specific，MAY 参考 requested skills / actions attempted / data access policies）。a2a-go 只给身份、不给策略，因此这部分仍要我们定：
+**Authorization**: the protocol **explicitly leaves this to the implementation** (spec §7.5: authorization is "based on the authenticated identity and its own policies", implementation-specific, MAY reference requested skills / actions attempted / data access policies). a2a-go provides only identity, not policy, so this part is still ours to define:
 
-| 规则 | 内容 |
+| Rule | Content |
 |---|---|
-| 暴露范围 | 调用只能落在**已暴露的 card/agent 集合**内（§3.4） |
-| 权限策略 | 外部触发的 session 用**显式传入**的权限规则集（**可配置**：程序生成 / 配置文件 / 用户输入皆可），默认对危险工具 `deny`（`agent.DefaultInboundPermissions`，可用 `WithInboundPermissions` 放宽），**不用** client 级 `ApproveAll`；`ask` 走 §5.4 的 HITL（**已定，见 A4**） |
-| 工作区隔离 | `WorkspaceResolver` 把 (调用方身份, contextId) 映射到工作区（`Directory` / `Root` / `Permissions`）；复用既有 `Project` / `Directory` / `Location` / `Sandboxes`。`Factory` 按 `Workspace` 落会话；`turn` 复用按 `agentID + contextID` 作用域 |
-| 禁止隐式提权 | A2A metadata **不允许**覆盖 agent / model / permission |
+| Exposure scope | A call can only land within the **set of exposed cards/agents** (§3.4) |
+| Permission policy | An externally triggered session uses an **explicitly supplied** permission ruleset (**configurable**: program-generated / config file / user input, all acceptable), defaulting to `deny` for dangerous tools (`agent.DefaultInboundPermissions`, relaxable with `WithInboundPermissions`), **not** the client-level `ApproveAll`; `ask` goes through §5.4's HITL (**decided, see A4**) |
+| Workspace isolation | `WorkspaceResolver` maps (caller identity, contextId) to a workspace (`Directory` / `Root` / `Permissions`); reuses the existing `Project` / `Directory` / `Location` / `Sandboxes`. The `Factory` creates the session per `Workspace`; `turn` reuse is scoped by `agentID + contextID` |
+| No implicit privilege escalation | A2A metadata **may not** override agent / model / permission |
 
-### 5.6 Turn：A2A task 的持久化载体（core 一等实体）
+### 5.6 Turn: the persistence carrier for an A2A task (a core first-class entity)
 
-`GetTask` / `ListTasks` / `SubscribeToTask` 的协议逻辑由 **a2a-go 的 handler 负责**；我们要做的是**实现 `a2asrv/taskstore.Store`**，把它落到 core 的 `turn`（+ 事件）。所以本节不设计「任务查询」，只设计「A2A task ↔ 我们的持久化」的映射。
+The protocol logic of `GetTask` / `ListTasks` / `SubscribeToTask` is handled by **a2a-go's handler**; what we must do is **implement `a2asrv/taskstore.Store`** and land it on core's `turn` (+ events). So this section does not design "task queries", only the mapping of "A2A task ↔ our persistence".
 
-**问题定位**：A2A `taskId` 对应「一轮 turn」，而 turn 在 SDK 里原本没有独立的 durable 行。本地 subagent 从不需要这样的记录，是因为它的 `task_id` 恰好**就是**子会话 id（`resolveChildSession` 直接 `store.Get(TaskID)`）——task 落在了一个已有主键上。远程把 **turn** 暴露成可寻址 id，才多出这份状态。
+**Problem localization**: an A2A `taskId` corresponds to "one turn", but a turn originally had no independent durable row in the SDK. A local subagent never needed such a record because its `task_id` happens to **be** the child session id (`resolveChildSession` directly does `store.Get(TaskID)`) — the task lands on an existing primary key. Only exposing a **turn** as an addressable id remotely creates this extra state.
 
-**方案 C（已定）**：把 `turn` 提升为 **core 的一等 durable 实体**，本地与远程 subagent 共用，而不是为 A2A 加一张协议专属的 `session_task` 表。
+**Option C (decided)**: promote `turn` to a **core first-class durable entity**, shared by local and remote subagents, rather than adding an A2A-specific `session_task` table.
 
 ```text
 turn
-  id                 text PRIMARY KEY   -- 入向时即 A2A taskId
-  session_id         text NOT NULL      -- 即 contextId
-  parent_turn_id     text               -- 本地/远程 subagent 子轮 → 父轮
-  input_id           text               -- 触发本轮的 session_input（锚点）
+  id                 text PRIMARY KEY   -- the A2A taskId when inbound
+  session_id         text NOT NULL      -- i.e. contextId
+  parent_turn_id     text               -- a local/remote subagent child turn → parent turn
+  input_id           text               -- the session_input that triggered this turn (anchor)
   state              text NOT NULL      -- running | awaiting_input | completed | failed | canceled | rejected
-  pending_request_id text               -- awaiting_input 时的 permission/question request
+  pending_request_id text               -- the permission/question request while awaiting_input
   agent / model      text
-  anchor_seq         integer            -- 起始事件序号（历史/artifact 边界）
-  end_seq            integer            -- 终止事件序号（未终态为 NULL）
-  metadata           text               -- 协议附加（远端 taskId / contextId 映射）
+  anchor_seq         integer            -- starting event sequence (history/artifact boundary)
+  end_seq            integer            -- ending event sequence (NULL if not terminal)
+  metadata           text               -- protocol extras (remote taskId / contextId mapping)
   time_created / time_updated integer
-  索引：(session_id, time_created)、(state)
+  indexes: (session_id, time_created), (state)
 ```
 
-要点：
+Key points:
 
-- **映射**：`contextId ↔ session_id`、`taskId ↔ turn.id`；
-- **一套实体、两种用法**：本地 subagent 的每一轮、A2A 入向的每个 task、A2A 出向的镜像子轮，都落同一条 `turn`；`parent_turn_id` 表达委派层级，从而消除「本地不需要、远程需要」的不对称；
-- **持久化**：`turn` 是 core 概念（`schema` + `core/database` 建表），由 coordinator 在轮开始 / 挂起 / 终止时维护；`GetTask`·`ListTasks`·`SubscribeToTask` 由 a2a-go handler 负责，我们实现 `a2asrv/taskstore.Store` 读写它（可作事件的投影，对齐既有 `session_message`）；
-- **`input-required` 的落点**是 turn 的 `awaiting_input`（见 §5.4），不是 session 状态；
-- **命名注意**：`task` 工具的 `task_id` 仍是子会话 id（≈ context），**不是** turn；A2A 的 `taskId` 才对应 `turn.id`。二者不可混用；
-- **不引入协议专属的 `session_task`**：那既与 subagent `task` 工具撞名，又把「turn」这件事错误地记成「session 的 task」。
+- **Mapping**: `contextId ↔ session_id`, `taskId ↔ turn.id`;
+- **One entity, two uses**: every local subagent turn, every A2A inbound task, and every A2A outbound mirrored child turn lands in the same `turn` row; `parent_turn_id` expresses the delegation hierarchy, eliminating the asymmetry of "not needed locally, needed remotely";
+- **Persistence**: `turn` is a core concept (`schema` + `core/database` table creation), maintained by the coordinator at turn start / suspend / termination; `GetTask`·`ListTasks`·`SubscribeToTask` are handled by the a2a-go handler, and we implement `a2asrv/taskstore.Store` to read/write it (it can be a projection of events, aligned with the existing `session_message`);
+- **The landing point of `input-required`** is the turn's `awaiting_input` (see §5.4), not session state;
+- **Naming caveat**: the `task` tool's `task_id` is still the child session id (≈ context), **not** a turn; only A2A's `taskId` corresponds to `turn.id`. The two must not be conflated;
+- **No A2A-specific `session_task`**: that would both collide in name with the subagent `task` tool and wrongly record "a turn" as "a session's task".
 
-> **关于迁移**：SDK 尚未发布，**不做版本化迁移**。直接在 `core/database/migration.go` 增删/修改建表语句；本地与 examples 下的旧开发库（`.data`）删除重建即可。
+> **On migration**: the SDK has not been released, so **no versioned migrations**. Directly add/remove/modify table statements in `core/database/migration.go`; old development databases (`.data`) locally and under examples can be deleted and recreated.
 
-→ **决策见 §10.1 A8（已定：方案 C）。**
+→ **Decision in §10.1 A8 (decided: option C).**
 
-### 5.7 长任务与心跳
+### 5.7 Long tasks and heartbeat
 
-SDK 的一轮可能跑很久（多 step 工具循环），客户端/网关会有超时。分三层，**尽量继承 `a2a-go`，不自造**：
+An SDK turn may run for a long time (a multi-step tool loop), and clients/gateways will time out. There are three layers; **prefer inheriting `a2a-go` and do not invent**.
 
-1. **传输层 keep-alive（a2a-go 已有）**：`a2asrv.WithTransportKeepAlive(interval)` 打开 SSE 心跳——JSON-RPC（`jsonrpc.go`）与 HTTP+JSON（`rest.go`）的流式响应会起 `time.Ticker`，每 interval 调 `SSEWriter.WriteKeepAlive`，防止 API 网关断开空闲连接。**默认关闭（0）**。我们只需把宿主配置透传到这个 option（或走 `a2a.WithNativeOptions`），**不自己实现心跳**。
-2. **语义层进度**：把 `StepStarted` / `ToolProgress` 映射为 `TaskStatusUpdateEvent{working}`，让客户端/应用看到「还在跑」。这是**可选**的进度表达，与传输层 keep-alive 是两回事。**Progress 只更新 status，不写 artifact**（不污染输出）。
-3. **断连 / 超长任务（a2a-go 已有）**：`a2asrv.WithPushNotifications(store, sender)` 提供 webhook 推送（`a2asrv/push`，默认 in-memory store）；客户端可断连后由服务端推送 task 更新。本期不作为依赖（§2.2），但机制现成。
+1. **Transport-level keep-alive (already in a2a-go)**: `a2asrv.WithTransportKeepAlive(interval)` enables an SSE heartbeat — the streaming responses of JSON-RPC (`jsonrpc.go`) and HTTP+JSON (`rest.go`) start a `time.Ticker` that calls `SSEWriter.WriteKeepAlive` each interval, preventing API gateways from dropping idle connections. **Off by default (0)**. We only need to pass the host's configuration through to this option (or via `a2a.WithNativeOptions`), **without implementing heartbeat ourselves**.
+2. **Semantic-level progress**: map `StepStarted` / `ToolProgress` to `TaskStatusUpdateEvent{working}` so the client/application sees "still running". This is an **optional** progress expression, distinct from transport-level keep-alive. **Progress updates only the status and does not write artifacts** (no output pollution).
+3. **Disconnect / very long tasks (already in a2a-go)**: `a2asrv.WithPushNotifications(store, sender)` provides webhook push (`a2asrv/push`, in-memory store by default); the client may disconnect and receive task updates pushed by the server. Not treated as a dependency this cycle (§2.2), but the mechanism is ready.
 
-> 另有 `a2asrv/workqueue` 的 `Heartbeater`（`HeartbeatInterval` / `Heartbeat`）——那是**集群模式下 work item 租约**的心跳，与客户端 keep-alive 无关，仅做分布式 executor 时相关。
+> There is also `a2asrv/workqueue`'s `Heartbeater` (`HeartbeatInterval` / `Heartbeat`) — that is the heartbeat for **work item leases in cluster mode**, unrelated to client keep-alive, and relevant only when implementing a distributed executor.
 
 ---
 
-## 6. 出向（Client）设计
+## 6. Outbound (Client) design
 
-### 6.0 职责边界：a2aclient 提供什么 / 我们实现什么
+### 6.0 Responsibility boundary: what a2aclient provides / what we implement
 
-出向**基于 `a2a-go/v2/a2aclient`**，同样不重复造轮子：
+The outbound path is **built on `a2a-go/v2/a2aclient`**, likewise not reinventing the wheel:
 
-| 能力 | 归属 | 挂载点 |
+| Capability | Owner | Mount point |
 |---|---|---|
-| card 解析 / 传输选择（JSON-RPC / REST）/ 凭据 | **a2a-go**（继承） | `NewFromCard` / `NewFromEndpoints` / `Factory` + `auth` |
-| 协议操作：`SendMessage` / `SendStreamingMessage` / `GetTask` / `ListTasks` / `CancelTask` / `SubscribeToTask` / push config / `GetExtendedAgentCard` | **a2a-go**（继承） | `a2aclient.Client` 的方法 |
-| 拦截器 / 日志 | **a2a-go**（配置） | `CallInterceptor` |
-| **SDK 事件 ⇄ A2A 事件转换** | **我们** | 核心工作量（§4） |
-| **backend 集成**（`A2ARunner`、镜像子会话、`turn`） | **我们** | §3.3 / §6.1 |
-| **上下文导出、HITL 桥接、取消策略** | **我们** | §6.2 |
+| card resolution / transport selection (JSON-RPC / REST) / credentials | **a2a-go** (inherited) | `NewFromCard` / `NewFromEndpoints` / `Factory` + `auth` |
+| Protocol operations: `SendMessage` / `SendStreamingMessage` / `GetTask` / `ListTasks` / `CancelTask` / `SubscribeToTask` / push config / `GetExtendedAgentCard` | **a2a-go** (inherited) | Methods on `a2aclient.Client` |
+| Interceptors / logging | **a2a-go** (configured) | `CallInterceptor` |
+| **SDK event ⇄ A2A event conversion** | **we** | The core workload (§4) |
+| **backend integration** (`A2ARunner`, mirrored child session, `turn`) | **we** | §3.3 / §6.1 |
+| **context export, HITL bridging, cancel policy** | **we** | §6.2 |
 
-### 6.1 唯一机制：带 A2A backend 的 agent
+### 6.1 The only mechanism: an agent with an A2A backend
 
-出向**不设独立的接入形态**。远端 A2A agent 在语义上就是一个 agent（有 `contextId`/多轮/HITL/流式事件），因此与本地 agent 走同一机制：`schema.AgentInfo` 携带 `backend = A2A`，由 runner 按 backend 分派（§3.3）。它自然获得两种表象——**默认（自然）用法是子 agent**，**把它当主 agent 是扩展用法**：
+The outbound path **has no separate integration form**. A remote A2A agent is semantically just an agent (with `contextId`/multi-turn/HITL/streaming events), so it uses the same mechanism as a local agent: `schema.AgentInfo` carries `backend = A2A`, and the runner dispatches by backend (§3.3). It naturally gains two presentations — **the default (natural) use is as a subagent**, and **using it as a primary agent is an extension**:
 
-| 表象 | 如何产生 | 成本 |
+| Presentation | How it arises | Cost |
 |---|---|---|
-| **子 agent** | 出现在 `task` 的 `subagent_type` 列表（`SubagentTypes` 按 `Mode != primary` 过滤），由 `task` 委派 | 零改动：`task.go` / `runTask` / `SubagentTypes` 全不动 |
-| **主 agent** | `CreateSession(Agent: <远端 agent id>)` | 零成本：backend 是 agent 的属性 |
+| **Subagent** | Appears in `task`'s `subagent_type` list (`SubagentTypes` filters by `Mode != primary`) and is delegated by `task` | Zero changes: `task.go` / `runTask` / `SubagentTypes` all untouched |
+| **Primary agent** | `CreateSession(Agent: <remote agent id>)` | Zero cost: the backend is an attribute of the agent |
 
-实现要点见 §3.3：**不要**在 `runTask` 里分叉，而是在 coordinator 的 drain 上按 agent 的 backend 分派，让远端 agent 拥有真实的镜像子会话。直接收益是 `task` 工具、`SubagentTypes`、进度事件、深度限制、权限派生、hooks 继承全部零改动。
+Implementation points are in §3.3: **do not** fork in `runTask`; instead dispatch on the coordinator's drain by the agent's backend, so the remote agent gets a real mirrored child session. The direct benefit is that the `task` tool, `SubagentTypes`, progress events, depth limit, permission derivation, and hooks inheritance are all unchanged.
 
-**为什么不做「工具形态」**（曾经的 `a2a.NewRemoteTool`，已废弃）：
+**Why not a "tool form"** (the former `a2a.NewRemoteTool`, now removed):
 
-| 维度 | Tool | 远端 agent |
+| Dimension | Tool | Remote agent |
 |---|---|---|
-| 多轮 / 上下文 | 无（每次独立） | `contextId ↔ sessionID` 原生 |
-| HITL（`input-required`） | 无，只能退化为失败或提示 | 与 `permission.asked` / `question.asked` 同构，可 park/resume |
-| 流式保真 | 只有 `ToolContext.Progress` 一个粗通道 | 完整事件流镜像进子会话 |
-| `task_id` 续跑 | 无 | 天然复用 |
-| 深度 / 权限派生 / hooks / abort | 全部另造 | 全部复用 |
-| 实现 | 与 `A2ARunner` 重复一套 card/协议/转换逻辑 | 单一 backend，`a2a/client` 作为内部依赖 |
+| Multi-turn / context | None (independent each time) | `contextId ↔ sessionID` natively |
+| HITL (`input-required`) | None; can only degrade to failure or a hint | Isomorphic to `permission.asked` / `question.asked`; can park/resume |
+| Streaming fidelity | Only one coarse channel, `ToolContext.Progress` | The full event stream is mirrored into the child session |
+| `task_id` resume | None | Naturally reused |
+| depth / permission derivation / hooks / abort | All would have to be rebuilt | All reused |
+| Implementation | Duplicates a set of card/protocol/conversion logic with `A2ARunner` | A single backend, with `a2a/client` as an internal dependency |
 
-把有状态的对等 agent 循环压进同步函数调用，必然丢失多轮、HITL 与事件保真度，并形成一条默认就会被选中的**有损路径**，与 §3.3「用法一致」的目标相悖。唯一「像 tool」的窄场景（纯无状态单问单答）用**单轮子会话**表达即可，无需单列形态。
+Compressing a stateful peer-agent loop into a synchronous function call necessarily loses multi-turn, HITL and event fidelity, and forms a **lossy path** that would be selected by default, contradicting §3.3's goal of "usage consistency". The only narrow "tool-like" scenario (purely stateless single request/response) is expressed with a **single-turn child session**, without a separate form.
 
-→ **A1 / A2 / A7 均已定（§10.1）。**
+→ **A1 / A2 / A7 are all decided (§10.1).**
 
-### 6.2 映射细节
+### 6.2 Mapping details
 
-**发什么**（= A6）
+**What to send** (= A6)
 
-- 委派（子 agent 形态）：发 `task` 的 prompt；主 agent 形态：发首条 message；
-- 需要文件 / 结构化输入时**显式作为 part 带上**（text / data / file），**绝不**隐式把本地路径塞进文本；远端 file part 由它的入向适配落盘（§4.2）；
-- 续跑同一 task 时带 `taskId` / `contextId`（§4.7）；
-- SDK 有 durable（镜像）子会话，能精确知道已发过什么，只发**新增**输入；不必像 ADK 那样回推「远端缺哪些事件」（§4.7）。
+- Delegation (subagent form): send the `task` prompt; primary-agent form: send the first message;
+- When files / structured input are needed, **carry them explicitly as parts** (text / data / file), **never** implicitly stuffing local paths into text; a remote file part is spooled by its inbound adaptation (§4.2);
+- When resuming the same task, carry `taskId` / `contextId` (§4.7);
+- The SDK has a durable (mirrored) child session and knows exactly what has been sent, so it sends only **new** input; unlike ADK it need not push back "which events the remote is missing" (§4.7).
 
-**收回什么**
+**What to take back**
 
-- 远端 artifact → `TextDelta`（保证 UI 实时）；
-- 远端 tool call data part → 降级为 `ToolProgress` 或结构化日志，**不要伪装成本地 `ToolCalled`**（否则本地权限 / 审计 / hooks 会把远端工具调用误判成自己的）；
-- `thought` metadata → `ReasoningDelta`。
+- Remote artifact → `TextDelta` (keeps the UI real-time);
+- Remote tool call data part → downgraded to `ToolProgress` or a structured log; **do not disguise it as a local `ToolCalled`** (otherwise local permissions / auditing / hooks would mistake the remote tool call for their own);
+- `thought` metadata → `ReasoningDelta`.
 
-**远端 input-required → 本地**
+**Remote input-required → local**
 
-- 默认：映射为本地 `QuestionRequest`（走既有 `OnQuestion` 通路），挂起的 turn park 住，用户应答后经 `Reply` 续发（镜像子会话 §3.3 + 挂起 §5.4）；
-- 若远端在纯单向委派中提出而本地无人应答：退化为一次失败 + 提示文本，让本地模型自己决定是否用 `question` 工具问用户；
-- **与 ADK 服务端互通**：远端若用 long-running `function_call` 表达 input-required，本地应答必须以 `function_response`（带 `taskId` / `contextId`）回发（§4.7）。
+- Default: map to a local `QuestionRequest` (through the existing `OnQuestion` path), the parked turn blocks, and after the user answers it resumes via `Reply` (mirrored child session §3.3 + park §5.4);
+- If the remote raises it during pure one-way delegation and no one is available locally to answer: degrade to a failure + hint text, letting the local model decide whether to ask the user with the `question` tool;
+- **Interop with an ADK server**: if the remote expresses input-required with a long-running `function_call`, the local answer must be sent back as a `function_response` (with `taskId` / `contextId`) (§4.7).
 
-→ **D2 已定。**
+→ **D2 decided.**
 
-**取消与清理**
+**Cancel and cleanup**
 
-- 本地 `Session.Abort()` / ctx 取消 → 远端 `CancelTask`。ADK 的 `cleanupRemoteTask` 有完整参考：仅在「最后一个事件非终态」且不是 input-required 时取消，超时 5 秒；
-- 本地 `Session.Close()` → 检查并收敛所有未终态的远端 task；
-- 远端 task 处于 `input-required` 且本地正常结束 → 不取消（保持可续跑）。
+- Local `Session.Abort()` / ctx cancellation → remote `CancelTask`. ADK's `cleanupRemoteTask` is a complete reference: cancel only when "the last event is non-terminal" and it is not input-required, with a 5-second timeout;
+- Local `Session.Close()` → check and converge all non-terminal remote tasks;
+- A remote task in `input-required` with the local side ending normally → do not cancel (keeps it resumable).
 
-**Card 解析的二次利用**
+**Secondary use of card resolution**
 
-拿到 card 后除了连客户端，还要榨出信息。这与 §2.2 的「最小能力适配」是一体的：A2A 的能力是**声明 + 发现**（服务端在 AgentCard 单方面声明，客户端读取后适配），没有双向协商回环。两端都应按此最小集实现。
+After fetching the card, besides connecting the client, extract information from it. This is integral to §2.2's "minimal capability adaptation": A2A's capabilities are **declared + discovered** (the server unilaterally declares in the AgentCard, and the client adapts after reading), with no bidirectional negotiation loop. Both ends should implement this minimal set.
 
-| Card 字段 | 用途 |
+| Card field | Use |
 |---|---|
-| `description` | 子 agent / 主 agent 的描述 |
-| `skills` | 远端 agent 的能力描述；**不据此拆出多个子 agent**（一 card = 一 agent，§3.4） |
-| `capabilities.streaming` | 远端是否支持流式；据此选 `SendStreamingMessage`，不支持则退化为 `SendMessage`（见下方注） |
-| `defaultInputModes/OutputModes` | 决定是否需要附件落盘 / 文本兜底 |
-| `capabilities.pushNotifications` | 是否可配置推送（本期不作为依赖） |
-| `capabilities.extensions[]` | `required=true` 且不支持 → 拒绝；否则安全忽略 |
-| `protocolVersion` | 兼容判断；跨实现互操作（SDK↔ADK-go）靠它 |
-| `securitySchemes` / `securityRequirements` | 从中选用本 SDK 支持的认证方案 |
+| `description` | The subagent / primary-agent description |
+| `skills` | The remote agent's capability description; **do not split it into multiple subagents** (one card = one agent, §3.4) |
+| `capabilities.streaming` | Whether the remote supports streaming; choose `SendStreamingMessage` accordingly, or degrade to `SendMessage` if not (see the note below) |
+| `defaultInputModes/OutputModes` | Decides whether attachment spooling / text fallback is needed |
+| `capabilities.pushNotifications` | Whether push is configurable (not a dependency this cycle) |
+| `capabilities.extensions[]` | `required=true` and unsupported → reject; otherwise safely ignore |
+| `protocolVersion` | Compatibility judgment; cross-implementation interop (SDK↔ADK-go) relies on it |
+| `securitySchemes` / `securityRequirements` | Choose an auth scheme this SDK supports |
 
-> **传输方式的选择（与 ADK v2 的有意偏离）**：ADK v2 由**本地运行模式**（`StreamingMode`）决定发 `SendMessage` 还是 `SendStreamingMessage`，**不读取 card 的 `capabilities.streaming`**（`agent/remoteagent/v2/a2a_agent.go:292`；其测试 card 虽声明 `Streaming: true`，分支只看本地模式）。本 SDK 没有等价的本地模式开关，改为**以 card 能力为准**：声明支持流式则用 `SendStreamingMessage`，否则退化为 `SendMessage`；若本地请求流式而服务端声明不支持，按 A2A 的 `UnsupportedOperationError` 处理（§3.3.4 Capability Validation）。这是有意选择，不是照搬 ADK。
+> **Transport selection (an intentional deviation from ADK v2)**: ADK v2 decides whether to send `SendMessage` or `SendStreamingMessage` based on the **local running mode** (`StreamingMode`), and **does not read the card's `capabilities.streaming`** (`agent/remoteagent/v2/a2a_agent.go:292`; although its test card declares `Streaming: true`, the branch only looks at the local mode). This SDK has no equivalent local mode switch, so it instead **defers to card capabilities**: if streaming is declared, use `SendStreamingMessage`, otherwise degrade to `SendMessage`; if the local side requests streaming while the server declares no support, handle it per A2A's `UnsupportedOperationError` (§3.3.4 Capability Validation). This is a deliberate choice, not a copy of ADK.
 
-服务端（入向）同样必须发布**准确**的 `capabilities`：支持流式则 `streaming=true`，未实现推送则 `pushNotifications=false`，并给出 `defaultInputModes/OutputModes` 与 `protocolVersion`（§5.1 `CardBuilder`）。
+The server (inbound) must likewise publish **accurate** `capabilities`: `streaming=true` if streaming is supported, `pushNotifications=false` if push is not implemented, and provide `defaultInputModes/OutputModes` and `protocolVersion` (§5.1 `CardBuilder`).
 
 ---
 
-## 7. Phase 0：需要先动的 SDK 侧前置改造
+## 7. Phase 0: SDK-side prerequisites to change first
 
-A2A 落地前必须先做的 **SDK 侧改造**（`turn`、backend 分派偏通用；暴露标记是 A2A 特有）：
+**SDK-side changes** that must be made before A2A lands (`turn` and backend dispatch are fairly general; the exposure marker is A2A-specific):
 
-| 改动 | 位置 | 为什么必须 |
+| Change | Location | Why it is required |
 |---|---|---|
-| core 一等 `turn` 实体 + 生命周期记录（含 `awaiting_input`） | `schema` / `core/database` 建表 / coordinator | 本地/远程 subagent 共用；A2A `taskId` = `turn.id`，支撑 `taskstore.Store`（供 a2a-go 的 `GetTask`）与重启恢复；session busy/idle 由活动 turn 派生 |
-| agent **backend** 字段 + drain 分派点 | `schema.AgentInfo` / `client.go`（`AgentConfig`）/ `runtime.go`（`buildRunner`） | 出向（子 agent 形态）的前提；**复用现有 `runner.SessionRunner`，不新增 `AgentRunner` 抽象**；`task.go` / `task_run.go` 不改（§3.3） |
-| 「是否可被 A2A 调用」标记与 AgentCard 生成 | `CardBuilder` + agent 元信息（`Expose`） | 决定哪些 agent 各提供一个 card URL；避免把内部 agent 暴露出去（§3.4） |
+| Core first-class `turn` entity + lifecycle recording (including `awaiting_input`) | `schema` / `core/database` table creation / coordinator | Shared by local/remote subagents; the A2A `taskId` = `turn.id`, supporting `taskstore.Store` (for a2a-go's `GetTask`) and restart recovery; session busy/idle derived from the active turn |
+| agent **backend** field + drain dispatch point | `schema.AgentInfo` / `client.go` (`AgentConfig`) / `runtime.go` (`buildRunner`) | The prerequisite for outbound (subagent form); **reuse the existing `runner.SessionRunner`, do not add an `AgentRunner` abstraction**; `task.go` / `task_run.go` unchanged (§3.3) |
+| "Can be called by A2A" marker and AgentCard generation | `CardBuilder` + agent metadata (`Expose`) | Decides which agents each provide a card URL; avoids exposing internal agents (§3.4) |
 
 ---
 
-## 8. 路线图与验收
+## 8. Roadmap and acceptance
 
-| Phase | 内容 | 验收 | 状态 |
+| Phase | Content | Acceptance | Status |
 |---|---|---|---|
-| 0 | §7 的三项前置改造（permission/question 事件映射已就绪，不在其中） | 现有测试全绿；新增 turn 状态测试 | ✅ `turn` schema + 表 + `TurnStore`；`AgentInfo.Backend`/`Expose`；backend 分派（`runner.Backends`） |
-| 1 | `a2a/` 类型 + `a2a/client`（card 解析、`SendMessage` / `SendStreamingMessage`、取消）+ 后端适配 + drain 分派（子 agent 形态） | 远端 agent 能经 `task` 被本地模型委派；超时 / 取消 / 错误路径全测 | ✅ `a2a/client` + `a2a/a2ago` + `a2aBackend`；`TestRemoteA2AAgentAsMainAgent` / `AsSubagent` / `ReusesRemoteSessionAcrossTurns` |
-| 2 | `a2a/server` 入向 MVP（`Executor` + `taskstore.Store` + card + `http.Handler`，输入输出全文本） | SDK↔SDK 端到端：A2A 客户端发消息拿到 completed task + artifact | ✅ `a2a/server`；`TestServerSendStreamingMessage` / `GetTask` / `DerivesCardEndpointFromRequest` |
-| 3 | HITL 闭环（挂起 + resume）、多轮 context、重启恢复（降级重建，§5.4） | permission / question 往返测试；重启后降级恢复测试 | ✅ `TestServerInputRequiredRoundTrip` / `TestExecutorRebuildsAfterRestart` / `TestServerRestartRebuildsParkedTurn` |
-| 4 | part 级保真（tool trace、thought、usage、file diff） | **与 ADK-go 对打**的互操作测试（跨实现验证协议保真度） | ✅ 入向 thought/`function_call`/`function_response`/`file_diff`/`usage`；出向 provider-executed tool trace、HITL `function_response`。**跨实现测试：`examples/adka2a`（独立模块，adk-go 服务端）+ `examples/chat` 的 `TestAdkA2AInterop`（SDK 客户端 ↔ ADK 服务端）** |
-| 5 | 生产化：`WorkspaceResolver`、认证（配置 a2a-go）、keep-alive（配置 a2a-go）、限流（配置 a2a-go 的 limiter）、artifact 外置钩子 | 多租户隔离测试；`go test -race` 全绿 | ✅ `WorkspaceResolver`、`ArtifactExternalizer`、`Options.NativeOptions`（认证/限流/push 透传）、`Options.KeepAlive`；`TestExecutorResolvesWorkspace` / `ExternalizesArtifact` / `ServerAcceptsNativeOptions`；`-race` 全绿 |
+| 0 | The three prerequisites from §7 (permission/question event mapping was already ready, not listed) | Existing tests green; new turn-state tests | ✅ `turn` schema + table + `TurnStore`; `AgentInfo.Backend`/`Expose`; backend dispatch (`runner.Backends`) |
+| 1 | `a2a/` types + `a2a/client` (card resolution, `SendMessage` / `SendStreamingMessage`, cancel) + backend adaptation + drain dispatch (subagent form) | A remote agent can be delegated by the local model via `task`; timeout / cancel / error paths all tested | ✅ `a2a/client` + `a2a/a2ago` + `a2aBackend`; `TestRemoteA2AAgentAsMainAgent` / `AsSubagent` / `ReusesRemoteSessionAcrossTurns` |
+| 2 | `a2a/server` inbound MVP (`Executor` + `taskstore.Store` + card + `http.Handler`, input/output all text) | SDK↔SDK end-to-end: an A2A client sends a message and gets a completed task + artifact | ✅ `a2a/server`; `TestServerSendStreamingMessage` / `GetTask` / `DerivesCardEndpointFromRequest` |
+| 3 | HITL loop (park + resume), multi-turn context, restart recovery (fallback rebuild, §5.4) | permission / question round-trip tests; post-restart fallback recovery test | ✅ `TestServerInputRequiredRoundTrip` / `TestExecutorRebuildsAfterRestart` / `TestServerRestartRebuildsParkedTurn` |
+| 4 | part-level fidelity (tool trace, thought, usage, file diff) | **Interop tests against ADK-go** (cross-implementation verification of protocol fidelity) | ✅ inbound thought/`function_call`/`function_response`/`file_diff`/`usage`; outbound provider-executed tool trace, HITL `function_response`. **Cross-implementation tests: `examples/adka2a` (a separate module, adk-go server) + `examples/chat`'s `TestAdkA2AInterop` (SDK client ↔ ADK server)** |
+| 5 | Productionization: `WorkspaceResolver`, auth (configure a2a-go), keep-alive (configure a2a-go), rate limiting (configure a2a-go's limiter), artifact externalization hook | Multi-tenant isolation tests; `go test -race` green | ✅ `WorkspaceResolver`, `ArtifactExternalizer`, `Options.NativeOptions` (auth/rate-limit/push pass-through), `Options.KeepAlive`; `TestExecutorResolvesWorkspace` / `ExternalizesArtifact` / `ServerAcceptsNativeOptions`; `-race` green |
 
-> 说明：Phase 1 未新增独立 `A2ARunner` 抽象，而是复用 `runner.SessionRunner` 的 LLM 接缝（`route.LLMClient`）——见 §3.3。Phase 4 的「与 ADK-go 对打」跨实现测试已落地：`examples/adka2a`（adk-go 服务端，独立 Go module）由 `examples/chat` 的 `TestAdkA2AInterop` 经 SDK 的 A2A 客户端访问。
+> Note: Phase 1 did not add a separate `A2ARunner` abstraction, but reused `runner.SessionRunner`'s LLM seam (`route.LLMClient`) — see §3.3. Phase 4's "sparring against ADK-go" cross-implementation test has landed: `examples/adka2a` (an adk-go server, a separate Go module) is reached by `examples/chat`'s `TestAdkA2AInterop` through the SDK's A2A client.
 >
-> 收口：§4.2/§5.3 入向附件落盘、§6.2 出向取消/清理、§5.6/A8 `turn` 全字段（含本地轮次与 `parent_turn_id`）、§5.3 入向 steer、§4.7 出向远端 `taskId` 续跑均已在实现中补齐。
+> Close-out: §4.2/§5.3 inbound attachment spooling, §6.2 outbound cancel/cleanup, §5.6/A8 all `turn` fields (including local turns and `parent_turn_id`), §5.3 inbound steer, and §4.7 outbound remote `taskId` resume have all been filled in by the implementation.
 
-**测试矩阵**参考 adk-go 的 A2A 测试（`a2a_e2e_test.go` + `*_compat_test.go` 场景命名），覆盖：
+The **test matrix** references adk-go's A2A tests (`a2a_e2e_test.go` + `*_compat_test.go` scenario naming), covering:
 
-`input-required`、`multi-hop input-required`、`input-required cancellation`、`cleanup propagation`、`single-hop final response`、`streaming success`、`streaming error`、`session reuse`、`callbacks`、`converters`、`custom part converter`、`error on card resolution`、`error on server error`。
-
----
-
-## 9. 风险
-
-**无架构级风险。** A2A 是标准协议，互操作由协议正确性保证；安全由 §5.5 消解；语义损失是 §4.6 的已知降级；文档已同步（`AGENTS.md` 包架构表、`docs/DESIGN.md` §4 包结构与 A2A 说明）；`turn` 一等化是已定成本（A8）。
-
-唯一要靠测试兜底的是**并发正确性**（挂起 + 落库 + 事件分发）——这属于**实现质量**问题（任何并发代码都存在），不是设计风险：用 `go test -race` + `testing/synctest` 覆盖，Phase 0 先建 turn 状态模型，恢复路径参考 ADK `HandleInputRequired`。
-
-其余项不是风险（说明，避免过度担忧）：
-
-- **互操作**：由协议正确性保证。§4.2 采用 `adk_*` 约定只是**保真增强**（让 tool trace / thought 在对端可还原），不在协议内；即便漂移，未知 data part 会被 ADK 优雅降级为文本，**不影响核心互操作**。
-- **安全**（远端触发本机代码执行）：由 §5.5 消解——认证继承 a2a-go、授权默认对危险工具 `deny`、工作区隔离、禁止 metadata 提权。是**配置面**。
-- **语义损失**：§4.6 的**已知降级**。
-- **文档一致性**：已同步 `AGENTS.md` 与 `docs/DESIGN.md`（包架构表 / 包结构 / A2A 说明）。
-- **`turn` 一等化**：已定方案 C 的**成本**（A8）。
+`input-required`, `multi-hop input-required`, `input-required cancellation`, `cleanup propagation`, `single-hop final response`, `streaming success`, `streaming error`, `session reuse`, `callbacks`, `converters`, `custom part converter`, `error on card resolution`, `error on server error`.
 
 ---
 
-## 10. 决策清单（已全部收敛）
+## 9. Risks
 
-### 10.1 架构级决策（A 系列）
+**No architectural-level risk.** A2A is a standard protocol; interoperability is guaranteed by protocol correctness; security is resolved by §5.5; semantic loss is the known degradation of §4.6; the documentation is synced (`AGENTS.md` package architecture table, `docs/DESIGN.md` §4 package structure and the A2A note); promoting `turn` to first-class is a decided cost (A8).
 
-| ID | 问题 | 决策 |
-|---|---|---|
-| A1 | 远端 agent 的实现位 | 落在「session 执行后端」——新增 `A2ARunner` 实现 `runner.SessionRunner`，coordinator drain 按 agent backend 分派；**不**在 `runTask` / `task` 工具层分叉（§3.3）；**出向不设独立「工具形态」**（§6.1） |
-| A2 | 远端子 agent 是否创建本地镜像子会话 | 是。一致性来自「两种后端共享同一套 session 语义」，而非两套实现互相对齐（§3.3） |
-| A3 | 暴露模型 | 显式 expose 声明决定哪些 agent 各自提供一个 card URL（**一 card = 一 agent**）（§3.4） |
-| A4 | 被外部直接调用的暴露 agent 的权限 | 用该 agent 自身、由 server 定义的规则集（无父可派生）；多租户时按调用方身份收敛。**权限只需「可配置」**——程序生成 / 配置文件 / 用户输入皆可，SDK 不关心来源；**默认对危险工具 `deny`**，宿主显式放宽。`DeriveSubagentSessionPermission` 不适用（§3.4 / §5.5） |
-| A5 | 远端 usage / model 在事件与 progress 中如何表达 | `publishTaskProgress` 的 `model` 允许为空或取 card 声明的值；`Usage` / `StepEnded` 可缺失，UI 需容忍 |
-| A6 | 本地上下文如何导出给远端 | **调用方显式给定**——`task` 的 prompt / 首条 message，文件作为 part 显式带上；我们转成 A2A text/data/file part，**绝不**隐式塞本地路径。远端 file part 由**它的**入向适配落盘（§4.2）；增量沿用 ADK `toMissingRemoteSessionParts` 思路（只发上次远端响应后的事件） |
-| A7 | 远端调用的权限 action | **复用 `task` action**（子 agent 形态与本地一致；resource = 远端 agent id，可精细控制）。主 agent 形态不经 `task`，由宿主建会话负责（§3.3 / §6.1） |
-| A8 | A2A task 的映射与持久化 | **方案 C**：`contextId ↔ sessionID`、`taskId ↔ turn.id`；`turn` 升为 **core 一等 durable 实体**，本地/远程 subagent 共用，不设协议专属 `session_task` 表（§4.1 / §5.6） |
+The only thing that needs test coverage is **concurrency correctness** (parking + persistence + event dispatch) — that is an **implementation-quality** concern (present in any concurrent code), not a design risk: cover it with `go test -race` + `testing/synctest`; Phase 0 builds the turn state model first, and the recovery path references ADK's `HandleInputRequired`.
 
-### 10.2 实现级决策（D 系列）
+The remaining items are not risks (stated to avoid over-worrying):
 
-| ID | 问题 | 决策 |
-|---|---|---|
-| D1 | HITL 路线 | 唯一设计 = 挂起 + resume（在线）；parked turn 不可达（重启 / 非 sticky）时降级为重建一轮——不是二选一（§5.4） |
-| D2 | 远端 input-required 如何本地化 | 映射为本地 `QuestionRequest`（走既有 `OnQuestion`，park/resume）；纯单向委派无人应答时退化为失败 + 提示；与 ADK 互通时按 §4.7 回 `function_response`。**不**映射为本地 `permission`（本地权限不覆盖远端内部调用） |
-| D3 | 已终态 task 收到新消息 | 拒绝——A2A spec 规定终态 task 不再接受消息（`UnsupportedOperationError`）（§5.3） |
-| D4 | 依赖策略 | 只支持 `github.com/a2aproject/a2a-go/v2` 单版本（不兼容 v0.x），经 `a2a/a2ago/` 薄适配层隔离 |
-| D5 | artifact 粒度 | 只做 per-turn 流式追加 + `lastChunk`，放弃 ADK 双模式（§4.5） |
+- **Interop**: guaranteed by protocol correctness. §4.2's adoption of the `adk_*` conventions is only a **fidelity enhancement** (letting tool trace / thought be restorable on the peer), not part of the protocol; even if it drifts, unknown data parts are gracefully degraded to text by ADK, **without affecting core interoperability**.
+- **Security** (a remote triggering local code execution): resolved by §5.5 — auth inherited from a2a-go, authorization denying dangerous tools by default, workspace isolation, and prohibiting metadata privilege escalation. It is a **configuration surface**.
+- **Semantic loss**: the **known degradation** of §4.6.
+- **Documentation consistency**: `AGENTS.md` and `docs/DESIGN.md` are already synced (package architecture table / package structure / A2A note).
+- **Promoting `turn` to first-class**: the **cost** of the decided option C (A8).
 
 ---
 
-## 附录 A：与 adk-go `adka2a` 的对照
+## 10. Decision list (all converged)
 
-| 维度 | adk-go | go-agent-sdk（本文） |
+### 10.1 Architectural decisions (A series)
+
+| ID | Question | Decision |
 |---|---|---|
-| session 语义 | 无状态 runner + `SessionService`，`contextId = sessionID` | durable SQLite session，`contextId = sessionID` |
-| `input-required` | 专门造 long-running tool 协议；本轮结束，下轮重跑 | 直接桥接既有 `permission.asked` / `question.asked` + `Reply` |
-| 挂起能力 | 无（只有重放） | 有（轮内阻塞 + park/resume） |
-| artifact 粒度 | 双模式（per-run / per-event），partial 需擦除 | 单一 per-turn 追加 + 封口 |
-| 出向形态 | 只有 `remoteagent.NewA2A`（一等 agent） | 同为「带 A2A backend 的 agent」，经 `task` 表现为子 agent，并可作主 agent（无独立 tool 形态） |
-| 流式选择 | 由本地 `StreamingMode` 决定，不读 card `capabilities.streaming`（`a2a_agent.go:292`） | 以 card `capabilities.streaming` 为准，不支持则退化为非流式（§6.2） |
-| 版本策略 | v0.3.15 + v2.2.1 双版本共存 | 只引 v2 单版本 |
-| HITL 编码 | long-running `function_call` / `function_response`（`adk_is_long_running`） | 桥接 `permission.asked` / `question.asked`；对 ADK 客户端按 §4.7 用同款 `function_call` 编码 |
-| task 持久化 | a2a task 存 a2a-go 的 task store，session 存 `SessionService` | core 一等 `turn`（`taskId = turn.id`），实现 a2a-go 的 `taskstore.Store`（A8） |
-| server 接线 | 由 launcher 提供 A2A server（`adka2a` Executor） | 返回 `http.Handler`，宿主自挂 |
-| 安全模型 | `userID` 来自 `CallContext`，未强调工作区隔离 | 权限规则集 + 工作区隔离 + 默认不信任 |
+| A1 | The implementation site of a remote agent | Falls in the "session execution backend" — add an `A2ARunner` implementing `runner.SessionRunner`, with the coordinator drain dispatching by agent backend; do **not** fork at the `runTask` / `task`-tool layer (§3.3); **the outbound path has no separate "tool form"** (§6.1) |
+| A2 | Whether a remote subagent creates a local mirrored child session | Yes. Consistency comes from "the two backends sharing the same session semantics", not from two implementations aligning with each other (§3.3) |
+| A3 | Exposure model | An explicit expose declaration decides which agents each provide a card URL (**one card = one agent**) (§3.4) |
+| A4 | Permissions of an exposed agent called directly from outside | Use the agent's own ruleset defined by the server (no parent to derive from); in multi-tenant cases narrow by caller identity. **Permissions only need to be "configurable"** — program-generated / config file / user input are all acceptable, and the SDK does not care about the source; **deny dangerous tools by default**, with the host explicitly relaxing it. `DeriveSubagentSessionPermission` does not apply (§3.4 / §5.5) |
+| A5 | How remote usage / model are expressed in events and progress | `publishTaskProgress`'s `model` may be empty or take the value declared by the card; `Usage` / `StepEnded` may be missing, and the UI must tolerate that |
+| A6 | How local context is exported to the remote | **Explicitly given by the caller** — the `task` prompt / first message, with files carried explicitly as parts; we convert to A2A text/data/file parts and **never** implicitly stuff in local paths. A remote file part is spooled by **its** inbound adaptation (§4.2); for increments, follow ADK's `toMissingRemoteSessionParts` idea (send only events since the last remote response) |
+| A7 | The permission action for a remote call | **Reuse the `task` action** (consistent with local for the subagent form; resource = remote agent id, allowing fine control). The primary-agent form does not go through `task`; the host that creates the session is responsible (§3.3 / §6.1) |
+| A8 | Mapping and persistence of an A2A task | **Option C**: `contextId ↔ sessionID`, `taskId ↔ turn.id`; `turn` is promoted to a **core first-class durable entity**, shared by local/remote subagents, with no A2A-specific `session_task` table (§4.1 / §5.6) |
 
-可复用的思路（值得参考但不照抄）：part 类型标记的 data part 编码方式、`cleanupRemoteTask` 的取消判定、card skills 的生成方式（ADK 把工具 / 子 agent 都列为 skill，协议上成立；是否启用是策略，见 §3.4）、e2e 测试矩阵。
+### 10.2 Implementation-level decisions (D series)
+
+| ID | Question | Decision |
+|---|---|---|
+| D1 | HITL route | The only design = park + resume (online); when a parked turn is unreachable (restart / non-sticky), fall back to rebuilding a turn — not a choice between two (§5.4) |
+| D2 | How to localize a remote input-required | Map to a local `QuestionRequest` (through the existing `OnQuestion`, park/resume); during pure one-way delegation with no one to answer, degrade to failure + hint; when interoperating with ADK, reply with `function_response` per §4.7. Do **not** map to a local `permission` (local permissions do not cover remote internal calls) |
+| D3 | A terminal task receiving a new message | Reject — the A2A spec says a terminal task no longer accepts messages (`UnsupportedOperationError`) (§5.3) |
+| D4 | Dependency strategy | Support only the single version `github.com/a2aproject/a2a-go/v2` (not compatible with v0.x), isolated by the thin `a2a/a2ago/` adapter layer |
+| D5 | Artifact granularity | Only per-turn streaming append + `lastChunk`; drop ADK's dual modes (§4.5) |
+
+---
+
+## Appendix A: comparison with adk-go `adka2a`
+
+| Dimension | adk-go | go-agent-sdk (this document) |
+|---|---|---|
+| session semantics | stateless runner + `SessionService`, `contextId = sessionID` | durable SQLite session, `contextId = sessionID` |
+| `input-required` | a purpose-built long-running tool protocol; end this turn, rerun next turn | directly bridges the existing `permission.asked` / `question.asked` + `Reply` |
+| suspend capability | none (replay only) | yes (in-turn blocking + park/resume) |
+| artifact granularity | dual modes (per-run / per-event), partial must be erased | a single per-turn append + close |
+| outbound form | only `remoteagent.NewA2A` (a first-class agent) | likewise "an agent with an A2A backend", surfacing via `task` as a subagent and usable as a primary agent (no separate tool form) |
+| streaming selection | decided by the local `StreamingMode`, not reading the card's `capabilities.streaming` (`a2a_agent.go:292`) | defers to the card's `capabilities.streaming`, degrading to non-streaming if unsupported (§6.2) |
+| version strategy | dual-version coexistence v0.3.15 + v2.2.1 | only the single version v2 |
+| HITL encoding | long-running `function_call` / `function_response` (`adk_is_long_running`) | bridges `permission.asked` / `question.asked`; for an ADK client uses the same `function_call` encoding per §4.7 |
+| task persistence | a2a tasks go to a2a-go's task store, sessions to `SessionService` | a core first-class `turn` (`taskId = turn.id`), implementing a2a-go's `taskstore.Store` (A8) |
+| server wiring | the launcher provides the A2A server (`adka2a` Executor) | returns an `http.Handler`, mounted by the host |
+| security model | `userID` from `CallContext`, workspace isolation not emphasized | permission ruleset + workspace isolation + untrusted by default |
+
+Reusable ideas (worth referencing but not copying): the data-part encoding style for typing parts, `cleanupRemoteTask`'s cancel determination, and the card skills generation approach (ADK lists tools / subagents all as skills, which is protocol-valid; whether to enable it is policy, see §3.4), plus the e2e test matrix.
