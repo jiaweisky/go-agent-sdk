@@ -1,0 +1,45 @@
+# Example a2aserve configuration. Copy to a2aserve.yaml (git-ignored) and edit.
+#
+# Every field can also be set as a CLI flag (which overrides this file), except
+# credentials and auth, which live only here. No environment variables are read.
+#
+#   a2aserve --config a2aserve.yaml
+
+listen: 127.0.0.1:9099            # bind loopback by default
+# baseURL: ""                     # optional; the A2A server's public base URL (cards)
+
+root: /absolute/path/to/state     # REQUIRED: SDK state directory (absolute; ~ is not expanded)
+# workingDirectory: .             # project the agent operates on (default: process cwd)
+
+# configDirs:                     # agents/skills loaded from markdown files
+#   - ./agents
+
+model: deepseek-flash             # REQUIRED: model id sent to the provider
+protocol: openai-compatible-chat  # REQUIRED: openai-compatible-chat | openai-chat | openai-responses | anthropic-messages | gemini | bedrock-converse
+modelBaseURL: https://api.deepseek.com  # model API base URL; empty uses the protocol default
+
+credentials:                      # REQUIRED: the only place a secret is read
+  apiKey: <your-deepseek-api-key> #   bearer/header protocols
+  # aws:                          #   Amazon Bedrock (SigV4), instead of apiKey
+  #   region: us-east-1
+  #   accessKeyId: <id>
+  #   secretAccessKey: <secret>
+  #   sessionToken: <token>       #   optional
+
+agents: [build]                   # existing agent names to expose
+# cards:                          # optional per-agent card overrides
+#   build: { name: Build Agent, description: "..." }
+
+# contextLimit: 128000            # optional; drives automatic compaction
+# outputLimit: 8192               # optional
+# inboundPermissions:             # default: SDK deny-by-default ruleset
+#   - { action: bash, resource: "*", effect: deny }
+keepAlive: 15s
+
+# auth:                           # optional; when set, the RPC endpoints require a bearer token
+#   bearer: <token>
+# allowInsecure: false            # required to bind a non-loopback address without auth
+
+# tls:                            # optional; serve HTTPS when both are set
+#   certFile: /etc/a2aserve/tls.crt
+#   keyFile: /etc/a2aserve/tls.key

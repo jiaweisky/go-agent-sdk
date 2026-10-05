@@ -15,3 +15,6 @@ examples/*/.data/
 
 # A2A inbound attachments (written under the workspace by the server)
 .a2a/
+
+# Local a2aserve config (contains credentials); see cmd/a2aserve/a2aserve.example.yaml
+a2aserve.yaml

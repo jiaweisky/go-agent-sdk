@@ -33,6 +33,10 @@ Flags (each overrides the config file; a repeatable flag replaces the file's lis
 
 ## Config file
 
+A complete annotated example lives at
+[`a2aserve.example.yaml`](a2aserve.example.yaml); copy it to `a2aserve.yaml`
+(git-ignored) and edit. The essentials:
+
 ```yaml
 listen: 127.0.0.1:9099
 baseURL: ""                         # optional; the A2A server's public base URL (cards)
