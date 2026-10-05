@@ -692,6 +692,22 @@ func TestEventRollbackOnProjectorPanic(t *testing.T) {
 	}
 }
 
+func TestEventListenerPanicReported(t *testing.T) {
+	var reported error
+	events := newTestEvent(t, EventConfig{OnError: func(err error) { reported = err }})
+	if _, err := events.Listen(func(schema.EventPayload) error {
+		panic("listener boom")
+	}); err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	if _, err := events.Publish(eventTestMessage, map[string]any{"text": "x"}, nil); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if reported == nil {
+		t.Fatal("expected the listener panic to be reported through OnError")
+	}
+}
+
 func TestEventSubscriptionStopsOnContextCancel(t *testing.T) {
 	events := newTestEvent(t, EventConfig{})
 	ctx, cancel := context.WithCancel(context.Background())

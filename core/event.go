@@ -106,6 +106,9 @@ type EventConfig struct {
 	Location            *schema.LocationRef
 	Durable             map[string]schema.EventDefinition
 	BeforeAggregateRead func(aggregateID string) error
+	// OnError reports a listener that panicked; the panic is recovered either
+	// way. Nil ignores it.
+	OnError func(error)
 }
 
 type Event interface {
@@ -912,7 +915,10 @@ func (s *eventService) runListener(listener EventListener, event schema.EventPay
 	// A panicking listener must never unwind into the publisher's goroutine
 	// (which may be a session turn): recover for durable and live events alike.
 	defer func() {
-		if recover() != nil {
+		if value := recover(); value != nil {
+			if s.cfg.OnError != nil {
+				s.cfg.OnError(fmt.Errorf("event listener panic: %v", value))
+			}
 			err = nil
 		}
 	}()

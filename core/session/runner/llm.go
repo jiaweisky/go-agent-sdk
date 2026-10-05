@@ -85,6 +85,9 @@ type LLMRunner struct {
 	// server (for example an A2A task store); the runner then records no turn
 	// of its own. Nil means every session is local.
 	InboundSessions func(sessionID schema.SessionID) bool
+	// OnError reports turn bookkeeping errors that do not fail the turn. Nil
+	// ignores them.
+	OnError func(error)
 
 	compaction *session.Compaction
 	turns      *session.TurnStore
@@ -440,6 +443,13 @@ type turnHandle struct {
 
 // beginTurn opens a turn for a local drain. An inbound A2A task owns its
 // session's turn (the task store maintains it), so nothing is opened then.
+// reportError forwards a background error to the configured reporter.
+func (r *LLMRunner) reportError(err error) {
+	if err != nil && r.OnError != nil {
+		r.OnError(err)
+	}
+}
+
 func (r *LLMRunner) beginTurn(sessionID schema.SessionID) *turnHandle {
 	if r.turns == nil {
 		return nil
@@ -451,6 +461,7 @@ func (r *LLMRunner) beginTurn(sessionID schema.SessionID) *turnHandle {
 	}
 	existing, err := r.turns.ActiveForSession(sessionID)
 	if err != nil {
+		r.reportError(err)
 		return nil
 	}
 	if existing != nil && existing.Metadata[schema.TurnMetaOwner] == schema.TurnOwnerA2A {
@@ -458,8 +469,10 @@ func (r *LLMRunner) beginTurn(sessionID schema.SessionID) *turnHandle {
 	}
 
 	now := time.Now().UnixMilli()
-	anchor, _ := session.LatestMessageSeq(r.DB, sessionID)
-	inputID, _ := session.LatestInputID(r.DB, sessionID)
+	anchor, anchorErr := session.LatestMessageSeq(r.DB, sessionID)
+	r.reportError(anchorErr)
+	inputID, inputErr := session.LatestInputID(r.DB, sessionID)
+	r.reportError(inputErr)
 	info := schema.TurnInfo{
 		SessionID:   sessionID,
 		State:       schema.TurnStateRunning,
@@ -479,12 +492,14 @@ func (r *LLMRunner) beginTurn(sessionID schema.SessionID) *turnHandle {
 		info.ID = existing.ID
 		info.TimeCreated = existing.TimeCreated
 		if err := r.turns.Update(info); err != nil {
+			r.reportError(err)
 			return nil
 		}
 	} else {
 		info.ID = schema.NewTurnID()
 		info.ParentTurnID = r.parentTurn(sessionID)
 		if err := r.turns.Create(info); err != nil {
+			r.reportError(err)
 			return nil
 		}
 	}
@@ -539,7 +554,7 @@ func (r *LLMRunner) finishTurn(handle *turnHandle, runErr *error) {
 	info.State = state
 	info.EndSeq = &end
 	info.TimeUpdated = time.Now().UnixMilli()
-	_ = r.turns.Update(info)
+	r.reportError(r.turns.Update(info))
 
 	r.tracker.mu.Lock()
 	delete(r.tracker.active, handle.info.SessionID)

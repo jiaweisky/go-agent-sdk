@@ -85,6 +85,9 @@ type ClientOptions struct {
 	// OnPanic is called when a user event handler panics; the panic is
 	// recovered either way. Nil ignores it.
 	OnPanic func(PanicInfo)
+	// OnError reports background errors that do not fail a turn: turn
+	// bookkeeping and event-listener panics. Nil ignores them.
+	OnError func(error)
 	// SubagentDepth limits nested subagent (task) recursion. Defaults to 1.
 	SubagentDepth int
 	// Shell overrides the shell used by the bash tool. Empty uses the platform

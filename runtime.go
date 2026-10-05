@@ -78,6 +78,7 @@ type runtime struct {
 	mcpToolsUnsub func()
 
 	onPanic func(PanicInfo)
+	onError func(error)
 }
 
 // pluginToolEntry is one runtime registration of an application tool. Entries
@@ -502,10 +503,15 @@ func resolveRuntimePaths(opts *ClientOptions) (directory, home, root string, err
 
 // initRuntimeState creates the event log, registers its projectors and records
 // the project location the session tables reference.
-func initRuntimeState(db *database.Database, directory string) (core.Event, core.Git, *core.Location, error) {
+func initRuntimeState(
+	db *database.Database,
+	directory string,
+	onError func(error),
+) (core.Event, core.Git, *core.Location, error) {
 	events := core.NewEvent(core.EventConfig{
 		DB:      db.DB,
 		Durable: schema.Durable(schema.SessionEventDurableDefinitions),
+		OnError: onError,
 	})
 	if err := core.RegisterSessionProjectors(events); err != nil {
 		return nil, core.Git{}, nil, err
@@ -537,7 +543,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db.Close()
 		return nil, err
 	}
-	events, git, location, err := initRuntimeState(db, directory)
+	events, git, location, err := initRuntimeState(db, directory, opts.OnError)
 	if err != nil {
 		return fail(err)
 	}
@@ -583,6 +589,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		reference:     references,
 		cancel:        cancel,
 		onPanic:       opts.OnPanic,
+		onError:       opts.OnError,
 	}
 	rt.buildBuiltins(opts, global, locale)
 	rt.buildRunner(opts, git, global, locale)
@@ -629,6 +636,7 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		Snapshots:         snapshotterFor(r.snapshot),
 		DB:                r.db,
 		InboundSessions:   r.isInbound,
+		OnError:           r.onError,
 	})
 	r.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
 		r.publishSessionStatus(id, schema.SessionStatusBusy{Type: "busy"})
