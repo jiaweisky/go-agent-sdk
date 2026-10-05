@@ -884,7 +884,7 @@ func (g *gitImpl) Preview(input GitTreePreviewInput) ([]FileDiff, error) {
 	g.locks.WithLock(string(input.Repository.GitDirectory), func() {
 		index := filepath.Join(string(input.Repository.GitDirectory), "preview-"+randomHex()+".index")
 		env := map[string]string{"GIT_INDEX_FILE": index}
-		defer Remove(index)
+		defer func() { _ = Remove(index) }()
 
 		run := func(args []string, stdin ...string) (*gitResult, error) {
 			var stdinBytes []byte

@@ -248,11 +248,7 @@ func MakeWebFetch(deps WebFetchDeps) *Def[WebFetchInput, WebFetchOutput, WebFetc
 		Input:       WebFetchInputSchema,
 		Output:      WebFetchOutputSchema,
 		ToModelOutput: func(input WebFetchInput, output any) []Content {
-			var out WebFetchOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
-			return []Content{TextContent{Text: out.Output}}
+			return []Content{TextContent{Text: DecodeStructured[WebFetchOutput](output).Output}}
 		},
 		Execute: func(execCtx context.Context, input WebFetchInput, ctx Context) (WebFetchOutput, error) {
 			result, err := executeWebFetch(deps, execCtx, input, ctx)

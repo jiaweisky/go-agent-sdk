@@ -42,11 +42,6 @@ func bedrockFrame(eventType, messageType, payload string) []byte {
 	return append(frame, msgCRC[:]...)
 }
 
-func bedrockTestHeaders(t *testing.T) []byte {
-	t.Helper()
-	return bedrockHeaders([][2]string{{":event-type", "contentBlockDelta"}, {":message-type", "event"}})
-}
-
 func TestParseEventStreamHeaders(t *testing.T) {
 	headers := bedrockHeaders([][2]string{
 		{":event-type", "contentBlockDelta"},

@@ -500,9 +500,7 @@ func (r *textPageReader) consume(input string) bool {
 		r.pending = ""
 		r.discard = false
 		text = text[index+1:]
-		if strings.HasSuffix(current, "\r") {
-			current = current[:len(current)-1]
-		}
+		current = strings.TrimSuffix(current, "\r")
 		if !r.appendLine(current) {
 			return false
 		}
@@ -569,10 +567,7 @@ func (r *textPageReader) run(file *os.File, first []byte) error {
 		r.pending += tail
 	}
 	if r.pending != "" {
-		value := r.pending
-		if strings.HasSuffix(value, "\r") {
-			value = value[:len(value)-1]
-		}
+		value := strings.TrimSuffix(r.pending, "\r")
 		r.appendLine(value)
 	}
 	return nil

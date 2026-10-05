@@ -296,6 +296,20 @@ func decodeAndValidate(input any, target any, schemas ...*jsonschema6.Schema) er
 	return nil
 }
 
+// DecodeStructured normalizes a structured output value into T via a JSON
+// round trip. A value that does not encode to T yields T's zero value.
+func DecodeStructured[T any](output any) T {
+	var out T
+	b, err := json.Marshal(output)
+	if err != nil {
+		return out
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return out
+	}
+	return out
+}
+
 // ToToolContent converts tool content into the event-facing representation.
 func ToToolContent(content []Content) []schema.ToolContent {
 	result := make([]schema.ToolContent, 0, len(content))

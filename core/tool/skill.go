@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -127,11 +126,7 @@ func MakeSkill(deps SkillToolDeps) *Def[SkillInput, SkillOutput, SkillOutput] {
 		Input:       SkillInputSchema,
 		Output:      SkillOutputSchema,
 		ToModelOutput: func(input SkillInput, output any) []Content {
-			var out SkillOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
-			return []Content{TextContent{Text: out.Output}}
+			return []Content{TextContent{Text: DecodeStructured[SkillOutput](output).Output}}
 		},
 		Execute: func(execCtx context.Context, input SkillInput, ctx Context) (SkillOutput, error) {
 			if err := execCtx.Err(); err != nil {

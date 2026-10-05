@@ -417,7 +417,7 @@ func mapPermissionEvent(payload schema.EventPayload) (Event, bool) {
 		if !ok {
 			return nil, false
 		}
-		return PermissionReplied{SessionID: data.SessionID, RequestID: data.RequestID, Reply: data.Reply}, true
+		return PermissionReplied(data), true
 	}
 	return nil, false
 }
@@ -451,13 +451,13 @@ func mapQuestionEvent(payload schema.EventPayload) (Event, bool) {
 		if !ok {
 			return nil, false
 		}
-		return QuestionReplied{SessionID: data.SessionID, RequestID: data.RequestID, Answers: data.Answers}, true
+		return QuestionReplied(data), true
 	case schema.QuestionEventRejected.Type:
 		data, ok := decodeEvent[questionRejectedData](payload)
 		if !ok {
 			return nil, false
 		}
-		return QuestionRejected{SessionID: data.SessionID, RequestID: data.RequestID}, true
+		return QuestionRejected(data), true
 	}
 	return nil, false
 }

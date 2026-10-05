@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -168,11 +167,7 @@ func MakeTask(deps TaskToolDeps) *tool.Def[TaskInput, TaskOutput, TaskOutput] {
 		Input:       TaskInputSchema,
 		Output:      TaskOutputSchema,
 		ToModelOutput: func(input TaskInput, output any) []tool.Content {
-			var out TaskOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
-			return []tool.Content{tool.TextContent{Text: renderTaskOutput(out)}}
+			return []tool.Content{tool.TextContent{Text: renderTaskOutput(tool.DecodeStructured[TaskOutput](output))}}
 		},
 		Execute: func(execCtx context.Context, input TaskInput, ctx tool.Context) (TaskOutput, error) {
 			if input.Background != nil && *input.Background {

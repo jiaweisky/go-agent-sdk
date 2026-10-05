@@ -398,10 +398,7 @@ func NewToolDefinition(input any) ToolDefinition {
 	case *ToolDefinition:
 		return *v
 	case ToolDefinitionInput:
-		return ToolDefinition{
-			Name: v.Name, Description: v.Description, InputSchema: v.InputSchema,
-			OutputSchema: v.OutputSchema, Cache: v.Cache, Metadata: v.Metadata, Native: v.Native,
-		}
+		return ToolDefinition(v)
 	default:
 		return ToolDefinition{}
 	}

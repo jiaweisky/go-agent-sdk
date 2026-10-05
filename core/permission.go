@@ -407,7 +407,7 @@ func (s *permissionService) rejectReply(existing *permissionPending, input Permi
 		return item.request.SessionID == existing.request.SessionID
 	})
 	for _, item := range victims {
-		s.cfg.Events.PublishReplied(item.request.SessionID, item.request.ID, PermissionReplyReject)
+		_ = s.cfg.Events.PublishReplied(item.request.SessionID, item.request.ID, PermissionReplyReject)
 		item.done <- &PermissionDeclinedError{}
 	}
 	return nil
@@ -425,7 +425,7 @@ func (s *permissionService) approveRemembered() error {
 		return s.rememberedAllows(item, rememberedRules)
 	})
 	for _, item := range approved {
-		s.cfg.Events.PublishReplied(item.request.SessionID, item.request.ID, PermissionReplyAlways)
+		_ = s.cfg.Events.PublishReplied(item.request.SessionID, item.request.ID, PermissionReplyAlways)
 		item.done <- nil
 	}
 	return nil

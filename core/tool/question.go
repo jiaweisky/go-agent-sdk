@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
@@ -90,10 +89,7 @@ func MakeQuestion(deps QuestionDeps) *Def[QuestionInput, QuestionOutput, Questio
 		Input:       QuestionInputSchema,
 		Output:      QuestionOutputSchema,
 		ToModelOutput: func(input QuestionInput, output any) []Content {
-			var out QuestionOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
+			out := DecodeStructured[QuestionOutput](output)
 			return []Content{TextContent{Text: QuestionToModelOutput(input.Questions, out.Answers)}}
 		},
 		Execute: func(execCtx context.Context, input QuestionInput, ctx Context) (QuestionOutput, error) {

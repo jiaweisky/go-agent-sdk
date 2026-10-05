@@ -9,6 +9,52 @@ linters:
   # `standard` is errcheck, govet, ineffassign, staticcheck and unused.
   # Pinned explicitly so a global config cannot change the default set.
   default: standard
+  settings:
+    errcheck:
+      # Ignoring these results is idiomatic and the error is not actionable
+      # in context (typically a deferred cleanup or a write to a writer whose
+      # failure is surfaced elsewhere).
+      exclude-functions:
+        - (io.Closer).Close
+        - (io.ReadCloser).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+        - (*os.File).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - os.RemoveAll
+        - os.Rename
+    staticcheck:
+      # Keep the correctness checks (SA); drop the stylistic families
+      # (stylecheck ST, quickfix QF).
+      checks:
+        - all
+        - -ST*
+        - -QF*
+    govet:
+      # The inline analyzer only suggests shortening constant references; it
+      # adds noise without catching defects.
+      disable:
+        - inline
+  exclusions:
+    rules:
+      # Test code may ignore errors from setup/cleanup calls.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # Cleanup/close/rollback results are ignored throughout; the error is not
+      # actionable in context.
+      - linters:
+          - errcheck
+        text: Error return value of .*(Close|Rollback|Remove|Rename)
+      # MCP logging and roots are deprecated pending migration (SEP-2577); the
+      # calls remain functional during the deprecation window.
+      - path: mcp/client\.go
+        linters:
+          - staticcheck
+        text: SA1019
 
 issues:
   # Report every finding, so results do not depend on golangci-lint's

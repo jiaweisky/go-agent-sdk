@@ -71,16 +71,6 @@ func (s *fakeSession) RejectQuestion(string) error          { return nil }
 func (s *fakeSession) Abort()                               {}
 func (s *fakeSession) Close() error                         { s.closed = true; return nil }
 
-func eventSeq(events []Event) iter.Seq2[Event, error] {
-	return func(yield func(Event, error) bool) {
-		for _, event := range events {
-			if !yield(event, nil) {
-				return
-			}
-		}
-	}
-}
-
 type fakeFactory struct {
 	session *fakeSession
 	last    SessionRequest

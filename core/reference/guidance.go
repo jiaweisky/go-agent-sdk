@@ -50,7 +50,7 @@ func (g *Guidance) Load() (systemcontext.SystemContext, error) {
 		if item.Description == nil {
 			continue
 		}
-		available = append(available, Summary{Name: item.Name, Path: item.Path, Description: item.Description})
+		available = append(available, Summary(item))
 	}
 	sort.Slice(available, func(i, j int) bool { return util.CompareLocale(available[i].Name, available[j].Name, g.locale) < 0 })
 	if len(available) == 0 {

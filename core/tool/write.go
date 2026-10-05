@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
@@ -68,11 +67,7 @@ func MakeWrite(deps WriteDeps) *Def[WriteInput, WriteOutput, WriteOutput] {
 		Input:  WriteInputSchema,
 		Output: WriteOutputSchema,
 		ToModelOutput: func(input WriteInput, output any) []Content {
-			var out WriteOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
-			return []Content{TextContent{Text: WriteToModelOutput(out)}}
+			return []Content{TextContent{Text: WriteToModelOutput(DecodeStructured[WriteOutput](output))}}
 		},
 		Execute: func(execCtx context.Context, input WriteInput, ctx Context) (WriteOutput, error) {
 			if err := execCtx.Err(); err != nil {

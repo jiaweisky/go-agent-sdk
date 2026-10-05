@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -76,11 +75,7 @@ func MakeApplyPatch(deps ApplyPatchDeps) *Def[ApplyPatchInput, ApplyPatchOutput,
 		Input:  ApplyPatchInputSchema,
 		Output: ApplyPatchOutputSchema,
 		ToModelOutput: func(input ApplyPatchInput, output any) []Content {
-			var out ApplyPatchOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
-			return []Content{TextContent{Text: ApplyPatchToModelOutput(out)}}
+			return []Content{TextContent{Text: ApplyPatchToModelOutput(DecodeStructured[ApplyPatchOutput](output))}}
 		},
 		Execute: func(execCtx context.Context, input ApplyPatchInput, ctx Context) (ApplyPatchOutput, error) {
 			if err := execCtx.Err(); err != nil {

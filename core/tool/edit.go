@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -68,10 +67,7 @@ func MakeEdit(deps EditDeps) *Def[EditInput, EditOutput, EditOutput] {
 		Input:  EditInputSchema,
 		Output: EditOutputSchema,
 		ToModelOutput: func(input EditInput, output any) []Content {
-			var out EditOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
+			out := DecodeStructured[EditOutput](output)
 			return []Content{TextContent{Text: EditToModelOutput(out, input.OldString, input.NewString)}}
 		},
 		Execute: func(execCtx context.Context, input EditInput, ctx Context) (EditOutput, error) {

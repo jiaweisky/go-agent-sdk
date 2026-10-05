@@ -1302,7 +1302,7 @@ func toolCallPart(event llmschema.LLMEvent) llmschema.ToolCallPart {
 func compactionEntries(entries []session.HistoryEntry) []session.CompactionEntry {
 	result := make([]session.CompactionEntry, len(entries))
 	for i, entry := range entries {
-		result[i] = session.CompactionEntry{Seq: entry.Seq, Message: entry.Message}
+		result[i] = session.CompactionEntry(entry)
 	}
 	return result
 }

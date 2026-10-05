@@ -28,7 +28,6 @@ const redacted = "<redacted>"
 var sensitiveNameRE = regexp.MustCompile(`(?i)authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|credential|signature|x-amz-signature`)
 var shortQueryNameRE = regexp.MustCompile(`(?i)^(key|sig)$`)
 var sensitiveBodyFieldSource = `authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|credential|signature|x-amz-signature|key`
-var sensitiveBodyFieldRE = regexp.MustCompile(`(?i)(?:` + sensitiveBodyFieldSource + `)`)
 var redactJSONFieldRE = regexp.MustCompile(`("(?:` + sensitiveBodyFieldSource + `)"\s*:\s*)"[^"]*"`)
 var redactQueryFieldRE = regexp.MustCompile(`((?:` + sensitiveBodyFieldSource + `)=)[^&\s"]+`)
 

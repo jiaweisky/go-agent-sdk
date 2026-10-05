@@ -2,7 +2,6 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -97,10 +96,7 @@ func MakeBash(deps BashDeps) *Def[BashInput, BashOutput, BashStructuredOutput] {
 		Output:     BashOutputSchema,
 		Structured: BashStructuredOutputSchema,
 		ToStructuredOutput: func(input BashInput, output any) (BashStructuredOutput, error) {
-			var out BashOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
+			out := DecodeStructured[BashOutput](output)
 			return BashStructuredOutput{
 				Exit:      out.Exit,
 				Truncated: out.Truncated,
@@ -108,10 +104,7 @@ func MakeBash(deps BashDeps) *Def[BashInput, BashOutput, BashStructuredOutput] {
 			}, nil
 		},
 		ToModelOutput: func(input BashInput, output any) []Content {
-			var out BashOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
+			out := DecodeStructured[BashOutput](output)
 			return []Content{
 				TextContent{Text: out.Output},
 				TextContent{Text: BashModelOutput(out)},

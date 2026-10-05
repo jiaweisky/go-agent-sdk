@@ -71,11 +71,7 @@ func MakeTodoWrite(deps TodoWriteDeps) *Def[TodoWriteInput, TodoWriteOutput, Tod
 		Input:       TodoWriteInputSchema,
 		Output:      TodoWriteOutputSchema,
 		ToModelOutput: func(input TodoWriteInput, output any) []Content {
-			var out TodoWriteOutput
-			if b, err := json.Marshal(output); err == nil {
-				json.Unmarshal(b, &out)
-			}
-			return []Content{TextContent{Text: TodoWriteToModelOutput(out)}}
+			return []Content{TextContent{Text: TodoWriteToModelOutput(DecodeStructured[TodoWriteOutput](output))}}
 		},
 		Execute: func(execCtx context.Context, input TodoWriteInput, ctx Context) (TodoWriteOutput, error) {
 			if err := execCtx.Err(); err != nil {
@@ -99,7 +95,7 @@ func MakeTodoWrite(deps TodoWriteDeps) *Def[TodoWriteInput, TodoWriteOutput, Tod
 			if err := deps.Todos.Update(rootschema.SessionID(ctx.SessionID), input.Todos); err != nil {
 				return TodoWriteOutput{}, failure("Unable to update todos", err)
 			}
-			return TodoWriteOutput{Todos: input.Todos}, nil
+			return TodoWriteOutput(input), nil
 		},
 	})
 }
