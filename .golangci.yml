@@ -1,0 +1,17 @@
+# golangci-lint configuration.
+#
+# Committing this file makes `make golangci` reproducible: without it,
+# golangci-lint falls back to the developer's global config (or its built-in
+# defaults), so the set of rules depends on the machine.
+version: "2"
+
+linters:
+  # `standard` is errcheck, govet, ineffassign, staticcheck and unused.
+  # Pinned explicitly so a global config cannot change the default set.
+  default: standard
+
+issues:
+  # Report every finding, so results do not depend on golangci-lint's
+  # default truncation.
+  max-issues-per-linter: 0
+  max-same-issues: 0
