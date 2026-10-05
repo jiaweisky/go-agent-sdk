@@ -1,0 +1,82 @@
+go-agent-sdk
+Copyright (c) 2026 The go-agent-sdk Authors
+Licensed under the MIT License (see LICENSE).
+
+This product includes software developed by third parties. The sections below
+list the components and their licenses. Where a license requires that a copy of
+the license text be distributed with the software, that text is provided under
+LICENSES/ or in the file named in the section.
+
+================================================================================
+1. Upstream project (source port)
+================================================================================
+
+This software is a Go source port of opencode
+(https://github.com/anomalyco/opencode), Copyright (c) 2025 opencode, which is
+licensed under the MIT License. A verbatim copy of the upstream license is
+provided in LICENSE-opencode.
+
+================================================================================
+2. Separate example module: examples/adka2a
+================================================================================
+
+examples/adka2a is a standalone Go module and is NOT part of the SDK's
+dependency graph; it exists only to demonstrate A2A interoperability. Its direct
+dependencies are:
+
+  - google.golang.org/adk (adk-go)  Apache License 2.0
+  - google.golang.org/genai         Apache License 2.0
+  - github.com/a2aproject/a2a-go/v2 Apache License 2.0
+
+These are consumed as libraries through their public APIs; no source from them
+is copied into the SDK. The full transitive graph is recorded in
+examples/adka2a/go.sum; generate its report with:
+    (cd examples/adka2a && go-licenses report ./...)
+
+================================================================================
+3. Third-party Go modules bundled by the SDK
+================================================================================
+
+The modules below are reachable from the SDK packages (28 modules). Each
+module's authoritative license text ships with the module; this list can be
+regenerated with:
+    go-licenses report ./...
+
+Apache License 2.0
+  - github.com/a2aproject/a2a-go/v2
+  - github.com/santhosh-tekuri/jsonschema/v6
+
+MIT License
+  - github.com/bmatcuk/doublestar
+  - github.com/dustin/go-humanize
+  - github.com/funnyfactor/mimetype
+  - github.com/google/jsonschema-go
+  - github.com/mattn/go-isatty
+  - github.com/ncruces/go-strftime
+  - github.com/segmentio/asm
+  - github.com/segmentio/encoding
+
+MIT License and Apache License 2.0 (dual / transition terms)
+  - github.com/modelcontextprotocol/go-sdk  (see its LICENSE for the
+    MIT-to-Apache-2.0 transition terms)
+  - gopkg.in/yaml.v3
+
+BSD 3-Clause License
+  - github.com/google/uuid
+  - github.com/remyoudompheng/bigfft
+  - github.com/yosida95/uritemplate/v3
+  - golang.org/x/image
+  - golang.org/x/mod
+  - golang.org/x/net
+  - golang.org/x/oauth2
+  - golang.org/x/sync
+  - golang.org/x/sys
+  - golang.org/x/term
+  - golang.org/x/text
+  - golang.org/x/time
+  - modernc.org/libc
+  - modernc.org/mathutil
+  - modernc.org/memory
+  - modernc.org/sqlite
+
+A copy of the Apache License 2.0 is provided in LICENSES/Apache-2.0.txt.
