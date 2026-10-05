@@ -1,165 +1,165 @@
 # go-agent-sdk — Coding Agent Reference
 
-## 项目文档
+## Project documentation
 
-- **`docs/DESIGN.md`** — 架构设计、模块详细设计、MVP 范围、SDK 公开 API（**项目范围与公开 API 以本文档为准**）
-- **`docs/PORTING-STRATEGY.md`** — TS/Effect → Go 的移植策略与决策树
-- **`docs/DESIGN-A2A.md`** — A2A 协议支持的分册设计（草案）。A2A 在 opencode 中**无 TS 对应物**，属 Go 专属能力，不适用上面的移植规则
+- **`docs/DESIGN.md`** — architecture design, detailed module design, MVP scope, SDK public API (**project scope and public API are governed by this document**)
+- **`docs/PORTING-STRATEGY.md`** — the TS/Effect → Go porting strategy and decision trees
+- **`docs/DESIGN-A2A.md`** — the sub-volume design for A2A protocol support (draft). A2A has **no TS counterpart** in opencode; it is a Go-specific capability and the porting rules above do not apply
 
-## 文档中的 Go 代码
+## Go code in the documents
 
-两文档中的 Go 代码仅为示意，函数签名、类型定义、错误处理等细节**以 opencode 的 TypeScript 源码为准**。移植时请对照 opencode 对应文件的完整逻辑。
+The Go code in both documents is illustrative only; details such as function signatures, type definitions and error handling are **governed by opencode's TypeScript source**. When porting, compare against the full logic of the corresponding opencode file.
 
-## 移植规则
+## Porting rules
 
-### 对齐目标：以 v2 core 为准
+### Alignment target: v2 core
 
-**对齐目标是 v2 core（`packages/core/src/`）**：Go 的行为与结构应对齐 v2 core；v2 core 尚未实现或未定义的部分（包括它源码里的 TODO）默认**不自行发挥**，等 v2 落地再跟。
+**The alignment target is v2 core (`packages/core/src/`)**: Go's behavior and structure should align with v2 core; for parts v2 core has not yet implemented or defined (including TODOs in its source), by default **do not improvise** — wait for v2 to land and follow it.
 
-**需要对 V1 对齐的部分属于例外**：必须先与用户专门讨论并确认，再记入下方「例外清单」。判定信号参考「移植范围」一节的 legacy 信号。
+**Parts that require V1 alignment are exceptions**: they must first be discussed and confirmed with the user, then recorded in the "exception list" below. For judgment signals, refer to the legacy signals in the "Porting scope" section.
 
-**例外清单**：
-- **V1 对齐**（v2 core 没有、但已实现）：`task` 工具与子会话（`task.go` / `task_run.go`）、自动标题生成（`TitleConfig` / `ensureTitle`）。
-- **v2 范围内刻意排除**：`websearch` 工具——v2 core `tool/websearch.ts` 已实现并注册，但 MVP 内置工具范围限定为 11 个（见 `docs/DESIGN.md`）。
+**Exception list**:
+- **V1 alignment** (not in v2 core, but implemented): the `task` tool and child sessions (`task.go` / `task_run.go`), and automatic title generation (`TitleConfig` / `ensureTitle`).
+- **Deliberately excluded within v2 scope**: the `websearch` tool — v2 core `tool/websearch.ts` is implemented and registered, but the MVP's built-in tool scope is limited to 11 (see `docs/DESIGN.md`).
 
-### 移植范围：legacy / v1 代码默认不移植
+### Porting scope: legacy / v1 code is not ported by default
 
-默认只移植 **v2 core**（`packages/core/src/`）。**legacy / v1 代码默认不移植**，除非确认它是 v2 core 的必需依赖——此时**先与用户确认**再动手。
+By default port only **v2 core** (`packages/core/src/`). **legacy / v1 code is not ported by default**, unless it is confirmed to be a necessary dependency of v2 core — in which case **confirm with the user first** before starting.
 
-判定为 legacy 的信号（满足其一即可）：
-- 位于 `packages/opencode/src/session/`（v1 CLI 编排层）
-- 导入 v1 模块：`v1/`、`SessionV1`、`ConfigV1`、`MessageV2`、`SessionProcessor`、`Plugin`、legacy `Provider`、`EventV2Bridge`、`RuntimeFlags`、`InstanceState` 等
-- 面向 opencode CLI 的 HTTP handler / `app-runtime`
+Signals that something is legacy (any one suffices):
+- It lives in `packages/opencode/src/session/` (the v1 CLI orchestration layer)
+- It imports v1 modules: `v1/`, `SessionV1`, `ConfigV1`, `MessageV2`, `SessionProcessor`, `Plugin`, legacy `Provider`, `EventV2Bridge`, `RuntimeFlags`, `InstanceState`, etc.
+- It is an HTTP handler / `app-runtime` aimed at the opencode CLI
 
-示例：`packages/core/src/session/compaction.ts`（v2，移植）vs `packages/opencode/src/session/compaction.ts`（v1 legacy，不移植，仅因复用 core 的 `buildPrompt` 而依赖前者）。
+Example: `packages/core/src/session/compaction.ts` (v2, port) vs `packages/opencode/src/session/compaction.ts` (v1 legacy, do not port; it depends on the former only because it reuses core's `buildPrompt`).
 
-> 注意：`packages/opencode/src/` 下的**工具类**（如 `tool/json-schema.ts`）不属于 legacy，仍按需移植。
+> Note: **utility modules** under `packages/opencode/src/` (such as `tool/json-schema.ts`) are not legacy and are still ported as needed.
 
-### CLI 基础设施：不照搬，改用 SDK 原生窄输入
+### CLI infrastructure: do not copy; use SDK-native narrow inputs
 
-opencode 中**面向 CLI 的基础设施模块默认不照搬移植**，例如 `catalog`（models.dev 模型目录 + provider 注册表）、`credential`（`auth.json` 凭据存储）、`integration`（OAuth 连接流程/存储）等。
+In opencode, **CLI-facing infrastructure modules are not ported as-is by default**, for example `catalog` (the models.dev model catalog + provider registry), `credential` (`auth.json` credential storage), `integration` (the OAuth connection flow/storage), etc.
 
-判定信号（满足其一即可）：
-- 职责是「数据源 / 持久化 / OAuth / DI 服务」，而非 agent 循环的纯逻辑
-- 依赖 Effect `Context.Service` + `Layer`（DI node）而本身没有实质算法
+Judgment signals (any one suffices):
+- Its responsibility is "data source / persistence / OAuth / DI service" rather than the pure logic of the agent loop
+- It depends on Effect's `Context.Service` + `Layer` (DI node) without having substantial algorithms itself
 
-做法：**只移植其纯转换逻辑**，把数据源换成 SDK 原生窄输入（构造器注入）。
-- 例：`session/runner/model.ts` 的 `fromCatalogModel` / `withDefaults` / `withVariant` 只依赖 `schema.ModelInfo` + API key + `llm` 的 route/protocol/Auth。移植时用「`ModelInfo` provider + API key」构造器替代 `Catalog.Service` / `Integration.Service` / `Credential.Value`，不必移植三个服务。
-- 参考：docs/DESIGN.md 公开 API 直接传 `Protocol`（协议 id）+ `Credentials`（`schema.Credential`）+ `Model`，SDK 走 `llm/protocols` 注册表 + `llm/route`，不引入 catalog/credential/integration。
+Approach: **port only its pure transformation logic**, replacing the data source with an SDK-native narrow input (constructor injection).
+- Example: `session/runner/model.ts`'s `fromCatalogModel` / `withDefaults` / `withVariant` depend only on `schema.ModelInfo` + an API key + `llm`'s route/protocol/Auth. When porting, use a "`ModelInfo` provider + API key" constructor in place of `Catalog.Service` / `Integration.Service` / `Credential.Value`; there is no need to port the three services.
+- Reference: `docs/DESIGN.md`'s public API directly takes a `Protocol` (protocol id) + `Credentials` (`schema.Credential`) + `Model`, and the SDK goes through the `llm/protocols` registry + `llm/route`, introducing no catalog/credential/integration.
 
-若确认某基础设施确实是必需依赖，**先与用户确认**再移植。
+If some piece of infrastructure is confirmed to be a truly necessary dependency, **confirm with the user first** before porting it.
 
-### 动手前必须读完整个 TS 源文件
+### Read the entire TS source file before starting
 
-之前犯过错误：`events.ts` 有 618 行，只读了前半部分（类型定义）就开始写，遗漏了后半部分（状态机、LLMResponse namespace）的 15+ 个方法。**每个文件必须完整读完再动手**，包括：
-- 类型定义（struct/interface）
-- 所有导出函数和方法
-- namespace 中的静态方法
-- 私有辅助函数（可能影响公共 API 设计）
+A mistake was made before: `events.ts` has 618 lines, and only the first half (type definitions) was read before starting to write, missing the 15+ methods in the second half (the state machine, the LLMResponse namespace). **Every file must be read completely before starting**, including:
+- Type definitions (struct/interface)
+- All exported functions and methods
+- Static methods in namespaces
+- Private helper functions (which may affect the public API design)
 
-### 同包符号命名：模块名前缀
+### Same-package symbol naming: module-name prefix
 
-TS 每个文件是独立 module（自带命名空间）；Go 一个包只有一个命名空间。当 `packages/<pkg>/src/` 下多个平铺文件进入**同一个 Go 包**时，重名符号会冲突，需用模块名前缀区分：
+Each TS file is a separate module (with its own namespace); a Go package has only one namespace. When multiple flat files under `packages/<pkg>/src/` enter the **same Go package**, same-named symbols collide and must be distinguished with a module-name prefix:
 
-- 导出符号：**PascalCase 前缀** —— `OpenAIChatProtocol`、`OpenAIResponsesHTTPRoute`、`FileMutationTarget`、`LocationMutationTarget`、`PermissionRule`
-- 非导出符号：**camelCase 前缀** —— `openaiChatBody`、`openaiResponsesParserState`、`anthropicMessagesImageMIMEs`
-- 已带前缀的符号不重复加（如 `OpenAIChatDefaultBaseURL` 保持）
+- Exported symbols: **PascalCase prefix** — `OpenAIChatProtocol`, `OpenAIResponsesHTTPRoute`, `FileMutationTarget`, `LocationMutationTarget`, `PermissionRule`
+- Unexported symbols: **camelCase prefix** — `openaiChatBody`, `openaiResponsesParserState`, `anthropicMessagesImageMIMEs`
+- Symbols that already carry a prefix do not get another one (e.g. `OpenAIChatDefaultBaseURL` stays as-is)
 
-典型场景：`llm/protocols/`（5 个协议）、`core/`（file-mutation / location-mutation / permission / ...）、`schema/`（event / location / permission / project / ...）。
+Typical scenarios: `llm/protocols/` (5 protocols), `core/` (file-mutation / location-mutation / permission / ...), `schema/` (event / location / permission / project / ...).
 
-### 移植工作流
+### Porting workflow
 
-移植某个 TS 文件时：
+When porting a TS file:
 
-1. **完整读完**目标 TS 文件（见上）
-2. **分析依赖**：列出它 import 的所有 TS 模块（含传递依赖）
-3. **逐个与 Go 实现对比**：
-   - 已实现 → **逐行**对照 TS 源码核对逻辑一致性（不只是签名），发现差异就修复
-   - 未实现 → 记为待移植
-4. **按依赖顺序移植**：先移植未实现的依赖（依赖根/叶子优先），最后移植目标文件
-5. **用 todo 列表跟踪**所有 review（对比）和移植任务；每完成一项就更新状态
+1. **Read the target TS file completely** (see above)
+2. **Analyze dependencies**: list all TS modules it imports (including transitive dependencies)
+3. **Compare each against the Go implementation**:
+   - Already implemented → compare **line by line** against the TS source to verify logical consistency (not just signatures); fix any differences found
+   - Not implemented → record it as to-be-ported
+4. **Port in dependency order**: port unimplemented dependencies first (dependency roots/leaves first), and the target file last
+5. **Track all review (comparison) and porting tasks with a todo list**; update the status as each item is completed
 
-**不要**：跳过依赖直接写目标文件；只对比签名而忽略实现逻辑。
+**Do not**: skip dependencies and write the target file directly; compare only signatures while ignoring implementation logic.
 
-## Go 版本
+## Go version
 
-Go 1.27.1，以下特性可放心使用：
-- `iter.Seq` / `iter.Seq2` — 替代 Effect Stream
-- 泛型方法 — `func (List[E]) Map[R any](...)`
-- 泛型类型别名 — `type StringMap[V any] = map[string]V`
-- `weak` 包 — 弱引用缓存
-- `os.Root` — 安全目录访问
-- `testing/synctest` — 测试并发行为
+Go 1.27.1; the following features are safe to use:
+- `iter.Seq` / `iter.Seq2` — replaces Effect Stream
+- Generic methods — `func (List[E]) Map[R any](...)`
+- Generic type aliases — `type StringMap[V any] = map[string]V`
+- `weak` package — weak-reference caching
+- `os.Root` — safe directory access
+- `testing/synctest` — testing concurrent behavior
 - `new(expression)` — `new(ReadParams{Name: "foo"})`
 
-## 关键移植决策速查
+## Key porting decisions quick reference
 
-| TS/Effect 模式 | Go 方案 |
+| TS/Effect pattern | Go approach |
 |---|---|
-| `Effect<T, E>` / `yield*` | `(T, error)` + 显式传参 |
+| `Effect<T, E>` / `yield*` | `(T, error)` + explicit argument passing |
 | `Stream<T, E>` | `iter.Seq2[T, error]` |
 | `Schema.Struct({...})` + `Schema.optional` | Go struct + json tag + `*T` |
-| `type E = A \| B \| C` (≤4, 结构差异大) | marker interface + type switch |
-| `type E = A \| B \| C` (5-10, 字段重叠) | tagged struct + 构造器 |
-| `type E = A \| B \| C` (>10, JSON 持久化) | `json.RawMessage` + 延迟分发 |
-| `Context.Tag` + `Layer` | 构造器注入 |
-| 同目录多个 TS module 平铺进一个 Go 包 | 模块名前缀区分符号（`OpenAIChatProtocol` / `openaiChatBody`） |
-| `Route<Body, Prepared>` | `llm/route/` struct + `any` 类型擦除 |
-| `WeakMap<AnyTool, Runtime>` | 泛型 `Def[Input, Output, Structured]` + `Tool` 接口 |
-| `Schema.Codec` | `santhosh-tekuri/jsonschema/v6` 验证 |
-| 工具 schema（`Schema.Struct` 等） | `jsonschema.Schema` 类型化 AST：`Model()` 发给模型 + `Validation()` 校验 |
-| MCP（`@modelcontextprotocol/sdk`） | 官方 Go SDK `github.com/modelcontextprotocol/go-sdk` |
-| CLI 的 env/XDG 默认（`global.ts`、`flag.ts`） | **刻意偏离**：库不读 `XDG_*` 等宿主 env（只保留 `$HOME`/`COMSPEC`/`LC_*` 这类宿主事实）；状态目录由**必填**的 `ClientOptions.Root` 派生（`core.NewGlobal(root, home)` 纯函数），配置由 `ConfigDirs` 显式声明 |
+| `type E = A \| B \| C` (≤4, large structural differences) | marker interface + type switch |
+| `type E = A \| B \| C` (5-10, overlapping fields) | tagged struct + constructors |
+| `type E = A \| B \| C` (>10, JSON persistence) | `json.RawMessage` + deferred dispatch |
+| `Context.Tag` + `Layer` | constructor injection |
+| Multiple TS modules in one directory flattened into one Go package | distinguish symbols with a module-name prefix (`OpenAIChatProtocol` / `openaiChatBody`) |
+| `Route<Body, Prepared>` | `llm/route/` struct + `any` type erasure |
+| `WeakMap<AnyTool, Runtime>` | generic `Def[Input, Output, Structured]` + `Tool` interface |
+| `Schema.Codec` | `santhosh-tekuri/jsonschema/v6` validation |
+| Tool schema (`Schema.Struct`, etc.) | typed `jsonschema.Schema` AST: `Model()` sent to the model + `Validation()` for validation |
+| MCP (`@modelcontextprotocol/sdk`) | the official Go SDK `github.com/modelcontextprotocol/go-sdk` |
+| CLI env/XDG defaults (`global.ts`, `flag.ts`) | **deliberate deviation**: the library does not read host env such as `XDG_*` (keeping only host facts like `$HOME`/`COMSPEC`/`LC_*`); the state directory is derived from the **required** `ClientOptions.Root` (`core.NewGlobal(root, home)` is a pure function), and configuration is declared explicitly by `ConfigDirs` |
 
-## 包架构
+## Package architecture
 
-Go 目录**直接镜像 opencode 的 TS monorepo 包结构**，不使用 `pkg/` 或 `internal/`。每个顶层目录对应 TS 的一个 package：
+Go directories **directly mirror opencode's TS monorepo package structure**, without using `pkg/` or `internal/`. Each top-level directory corresponds to one TS package:
 
 ```
 go-agent-sdk/                       opencode TS
-├── *.go          模块根包 agent：高层公开 API（对标 copilot-sdk/go，无 TS 对应目录）
+├── *.go          module root package agent: high-level public API (modeled on copilot-sdk/go, no corresponding TS dir)
 │   Client / Session / Send / On / DefineTool / Hooks / Permission
 ├── llm/          ← packages/llm/src/        (@opencode-ai/llm)
-│   ├── schema/     LLMRequest, LLMEvent, LLMError, ID 类型
+│   ├── schema/     LLMRequest, LLMEvent, LLMError, ID types
 │   ├── route/      Route, Protocol, Endpoint, Auth, Framing, Executor, Transport
-│   ├── protocols/  各 provider 线协议（平铺：openai_chat.go, openai_responses.go, ...）
-│   │   └── utils/   协议通用工具
+│   ├── protocols/  per-provider wire protocols (flat: openai_chat.go, openai_responses.go, ...)
+│   │   └── utils/   protocol shared utilities
 │   ├── provider/   Provider facades (openai, anthropic, openrouter, ...)
-│   └── utils/      通用工具 (record)
+│   └── utils/      general utilities (record)
 ├── core/         ← packages/core/src/        (@opencode-ai/core)
 │   ├── database/   SQLite + migrations
-│   ├── effect/     Effect 运行时工具 (keyed-mutex)
+│   ├── effect/     Effect runtime utilities (keyed-mutex)
 │   ├── project/    Project schema + directories
-│   ├── tool/       工具框架 (tool, registry, write, ...)
-│   └── util/       通用工具 (wildcard, hash)
-├── mcp/          ← packages/opencode/src/mcp/  (MCP client + 适配)
-├── a2a/          A2A（Agent2Agent）协议支持（无 TS 对应物，Go 专属能力）
-│   ├── client/     出向薄接口（SDK 自有类型，不泄漏 a2a-go）
-│   ├── a2ago/      出向的 a2a-go 适配实现（唯一 import a2a-go 的出向层）
-│   └── server/     入向：AgentExecutor + taskstore.Store + AgentCard + http.Handler
-├── defs/         从显式 ConfigDirs 加载 agent/skill 定义（无 CLI 发现）
-│   ├── config/     {agent,agents}/**/*.md、{mode,modes}/*.md 解析
-│   └── skill/      {skill,skills}/**/SKILL.md 扫描
+│   ├── tool/       tool framework (tool, registry, write, ...)
+│   └── util/       general utilities (wildcard, hash)
+├── mcp/          ← packages/opencode/src/mcp/  (MCP client + adapter)
+├── a2a/          A2A (Agent2Agent) protocol support (no TS counterpart; Go-specific)
+│   ├── client/     outbound thin interface (SDK's own types, does not leak a2a-go)
+│   ├── a2ago/      the outbound a2a-go adapter (the only outbound layer importing a2a-go)
+│   └── server/     inbound: AgentExecutor + taskstore.Store + AgentCard + http.Handler
+├── defs/         load agent/skill definitions from explicit ConfigDirs (no CLI discovery)
+│   ├── config/     parse {agent,agents}/**/*.md, {mode,modes}/*.md
+│   └── skill/      scan {skill,skills}/**/SKILL.md
 └── schema/       ← packages/schema/src/      (@opencode-ai/schema)
 ```
 
-- `jsonschema/` 是 Go 专属的类型化 JSON Schema AST（对标 Effect `Schema`），供 `core/tool` 定义工具 schema，无 TS 对应目录
-- `a2a/` 同属 Go 专属能力（**无 TS 对应目录**），不适用「只移植 v2 core」规则；设计与决策见 `docs/DESIGN-A2A.md`。只依赖 `github.com/a2aproject/a2a-go/v2` 单版本，a2a-go 类型不越过 `a2a/a2ago/` 与 `a2a/server/` 边界进入公开 API
-- 全部为公开包，无需 `internal/`
-- `packages/<pkg>/src/` 下的平铺文件进入 `<pkg>/` 包根目录；子目录成为子包
-- Effect 的 `Context.Tag` + `Layer`（DI）不移植，改用构造器注入
+- `jsonschema/` is a Go-specific typed JSON Schema AST (modeled on Effect `Schema`), used by `core/tool` to define tool schemas; no corresponding TS directory
+- `a2a/` is likewise a Go-specific capability (**no corresponding TS directory**) and the "port v2 core only" rule does not apply; see `docs/DESIGN-A2A.md` for design and decisions. It depends only on the single version `github.com/a2aproject/a2a-go/v2`, and a2a-go types do not cross the `a2a/a2ago/` and `a2a/server/` boundaries into the public API
+- All packages are public; no `internal/` is needed
+- Flat files under `packages/<pkg>/src/` go into the `<pkg>/` package root; subdirectories become subpackages
+- Effect's `Context.Tag` + `Layer` (DI) is not ported; constructor injection is used instead
 
-## 目录/文件名对齐 opencode
+## Directory/file name alignment with opencode
 
-规则：
-- `packages/<pkg>/src/<path>/<name>.ts` → `<pkg>/<path>/<name>.go`，**kebab-case → snake_case**，目录层级不变
-- 目录下的 `index.ts` 若需移植（含实现）→ `<pkg>/<path>/<目录名>.go`；纯 barrel（只 re-export）不移植，因为 Go 没有 re-export
+Rules:
+- `packages/<pkg>/src/<path>/<name>.ts` → `<pkg>/<path>/<name>.go`, **kebab-case → snake_case**, keeping the directory hierarchy
+- A directory's `index.ts`, if it needs porting (contains implementation) → `<pkg>/<path>/<directory-name>.go`; a pure barrel (re-export only) is not ported, because Go has no re-export
 
 | opencode TS | Go |
 |---|---|
 | `packages/llm/src/route/client.ts` | `llm/route/client.go` |
 | `packages/llm/src/schema/messages.ts` | `llm/schema/messages.go` |
-| `packages/llm/src/protocols/openai-chat.ts` | `llm/protocols/openai_chat.go`（同包平铺，符号加协议前缀） |
+| `packages/llm/src/protocols/openai-chat.ts` | `llm/protocols/openai_chat.go` (flat in the same package; symbols get a protocol prefix) |
 | `packages/llm/src/protocols/utils/tool-stream.ts` | `llm/protocols/utils/tool_stream.go` |
 | `packages/core/src/file-mutation.ts` | `core/file_mutation.go` |
 | `packages/core/src/location-mutation.ts` | `core/location_mutation.go` |
@@ -169,12 +169,12 @@ go-agent-sdk/                       opencode TS
 | `packages/core/src/util/wildcard.ts` | `core/util/wildcard.go` |
 | `packages/core/src/project/directories.ts` | `core/project/directories.go` |
 | `packages/schema/src/identifier.ts` | `schema/identifier.go` |
-| `packages/opencode/src/id/id.ts` | 不移植（`schema/identifier.go` 已提供 ID 生成） |
+| `packages/opencode/src/id/id.ts` | not ported (`schema/identifier.go` already provides ID generation) |
 
-**易错点：**
-- 平铺文件不要建同名子包：`core/src/file-mutation.ts` → `core/file_mutation.go`（package `core`），**不是** `core/filemutation/filemutation.go`
-- 同一 Go 包内类型名会冲突，用模块名前缀区分（如 `FileMutationTarget` vs `LocationMutationTarget`、`OpenAIChatProtocol` vs `OpenAIResponsesProtocol`）
-- `packages/opencode/src/tool/json-schema.ts` **不移植**：它只服务 CLI 工具 schema 的 `$ref` 内联，Go 侧没有消费者。工具框架只有 `core/tool`
-- `packages/core/src/effect/app-node.ts`、`layer-node.ts` 是 Effect DI 基础设施，不移植
-- Go 无循环依赖；TS module 循环（如 `protocols/` ↔ `protocols/utils/`）需重构打破（如把 `utils` 反向依赖的 `ValidateMedia` 移入 `utils`）
-- `packages/llm/src/route/transport/index.ts` 的 `Transport`/`TransportRuntime`/`TransportPrepareInput` 放在 `llm/route/transport.go`（package `route`），因为 `transport` 包反向依赖 `route`（`Framing`），放进 `transport/` 会循环
+**Common pitfalls:**
+- Do not create a same-named subpackage for a flat file: `core/src/file-mutation.ts` → `core/file_mutation.go` (package `core`), **not** `core/filemutation/filemutation.go`
+- Type names collide within the same Go package; distinguish them with a module-name prefix (e.g. `FileMutationTarget` vs `LocationMutationTarget`, `OpenAIChatProtocol` vs `OpenAIResponsesProtocol`)
+- `packages/opencode/src/tool/json-schema.ts` is **not ported**: it only serves `$ref` inlining for CLI tool schemas, and there is no consumer on the Go side. The tool framework is only `core/tool`
+- `packages/core/src/effect/app-node.ts` and `layer-node.ts` are Effect DI infrastructure and are not ported
+- Go has no circular dependencies; a TS module cycle (e.g. `protocols/` ↔ `protocols/utils/`) must be refactored away (e.g. move `ValidateMedia`, which `utils` reverse-depends on, into `utils`)
+- `packages/llm/src/route/transport/index.ts`'s `Transport`/`TransportRuntime`/`TransportPrepareInput` go in `llm/route/transport.go` (package `route`), because the `transport` package reverse-depends on `route` (`Framing`) and putting them in `transport/` would create a cycle
