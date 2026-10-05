@@ -33,7 +33,12 @@ $(BIN)/a2aserve$(EXE): $(GO_SOURCES) go.mod go.sum
 	@mkdir -p $(BIN)
 	$(GO) build -o $@ ./cmd/a2aserve
 
+# Run the A2A server. Uses the git-ignored local config; override with
+# CONFIG=path (see cmd/a2aserve/a2aserve.example.yaml). Serves until Ctrl+C.
+CONFIG ?= cmd/a2aserve/a2aserve.yaml
+
 a2aserve: $(BIN)/a2aserve$(EXE)
+	$(BIN)/a2aserve$(EXE) --config $(CONFIG)
 
 $(BIN)/%$(EXE): $(GO_SOURCES) go.mod go.sum
 	@mkdir -p $(BIN)

@@ -8,6 +8,8 @@ flags; **no environment variables are read**.
 
 ```sh
 a2aserve --config a2aserve.yaml
+# or, from the repo root: build and run with cmd/a2aserve/a2aserve.yaml
+make a2aserve                 # override the path with CONFIG=path
 # or flags only (credentials still need the file)
 a2aserve --root ~/.go-agent-sdk --model deepseek-flash \
   --protocol openai-compatible-chat --model-base-url https://api.deepseek.com \
