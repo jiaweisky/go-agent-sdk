@@ -12,3 +12,6 @@
 
 # Example state (see examples/internal/util.Client)
 examples/*/.data/
+
+# A2A inbound attachments (written under the workspace by the server)
+.a2a/

@@ -87,6 +87,17 @@ type Request struct {
 	// Response, when set, answers the function call a remote task parked at
 	// input-required, so an ADK server can match the reply by call id.
 	Response *Response
+	// Files are attachments sent as A2A file parts.
+	Files []FileAttachment
+}
+
+// FileAttachment is a file sent with a message. When Data is set it is sent as
+// a raw part; otherwise URI is sent as a file reference.
+type FileAttachment struct {
+	MIME string
+	Name string
+	Data []byte
+	URI  string
 }
 
 // Response answers a park. CallID and Name echo the remote function_call; Text

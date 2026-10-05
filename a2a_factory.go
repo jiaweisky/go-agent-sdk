@@ -205,7 +205,8 @@ func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string,
 	if len(req.Files) == 0 {
 		return req.Prompt, nil
 	}
-	dir := filepath.Join(string(s.session.client.rt.location.Directory), ".a2a", "attachments", turnID)
+	root := filepath.Join(string(s.session.client.rt.location.Directory), ".a2a")
+	dir := filepath.Join(root, "attachments", turnID)
 	var builder strings.Builder
 	builder.WriteString(req.Prompt)
 	builder.WriteString("\n\n[attachments]")
@@ -213,6 +214,9 @@ func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string,
 		switch {
 		case len(file.Data) > 0:
 			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return "", fmt.Errorf("write attachment: %w", err)
+			}
+			if err := ensureA2AIgnore(root); err != nil {
 				return "", fmt.Errorf("write attachment: %w", err)
 			}
 			path := filepath.Join(dir, filepath.Base(file.Name))
@@ -225,6 +229,17 @@ func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string,
 		}
 	}
 	return builder.String(), nil
+}
+
+// ensureA2AIgnore drops a .gitignore inside the .a2a directory so attachments
+// are not captured by git or the snapshot service (which honors repo ignores),
+// without touching the project's own .gitignore or leaving the workspace.
+func ensureA2AIgnore(root string) error {
+	path := filepath.Join(root, ".gitignore")
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	return os.WriteFile(path, []byte("*\n"), 0o644)
 }
 
 func (s *a2aSession) Resume(ctx context.Context, turnID string) iter.Seq2[server.Event, error] {

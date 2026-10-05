@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -60,11 +61,7 @@ func messageFiles(message *a2a.Message) []File {
 	var files []File
 	for _, part := range message.Parts {
 		if raw := part.Raw(); len(raw) > 0 {
-			name := part.Filename
-			if name == "" {
-				name = "attachment"
-			}
-			files = append(files, File{Name: name, MIME: part.MediaType, Data: raw})
+			files = append(files, File{Name: attachmentName(part.Filename, part.MediaType), MIME: part.MediaType, Data: raw})
 			continue
 		}
 		if url := part.URL(); url != "" {
@@ -76,6 +73,65 @@ func messageFiles(message *a2a.Message) []File {
 		}
 	}
 	return files
+}
+
+// attachmentName derives a safe file name for an inbound attachment, appending
+// an extension from the media type when the sender supplied none, so the file
+// reads back as the right kind.
+func attachmentName(name, mediaType string) string {
+	base := filepath.Base(name)
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		base = "attachment"
+	}
+	if filepath.Ext(base) == "" {
+		base += attachmentExtension(mediaType)
+	}
+	return base
+}
+
+// attachmentExtension maps a media type to a file extension, or "" when the
+// type is not recognized.
+func attachmentExtension(mediaType string) string {
+	mime := strings.ToLower(strings.TrimSpace(mediaType))
+	if semi := strings.IndexByte(mime, ';'); semi >= 0 {
+		mime = strings.TrimSpace(mime[:semi])
+	}
+	switch mime {
+	case "image/png":
+		return ".png"
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/bmp":
+		return ".bmp"
+	case "image/tiff":
+		return ".tiff"
+	case "application/pdf":
+		return ".pdf"
+	case "application/json":
+		return ".json"
+	case "text/plain":
+		return ".txt"
+	case "text/markdown":
+		return ".md"
+	case "text/csv":
+		return ".csv"
+	case "audio/mpeg", "audio/mp3":
+		return ".mp3"
+	case "audio/wav":
+		return ".wav"
+	case "audio/ogg":
+		return ".ogg"
+	case "video/mp4":
+		return ".mp4"
+	case "video/webm":
+		return ".webm"
+	default:
+		return ""
+	}
 }
 
 // questionAnswersFromMessage extracts answer labels from a reply message.

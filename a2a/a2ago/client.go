@@ -75,6 +75,9 @@ func (c *goClient) Card() client.Card { return c.card }
 func (c *goClient) Send(ctx context.Context, req client.Request) iter.Seq2[client.Event, error] {
 	return func(yield func(client.Event, error) bool) {
 		parts := []*a2a.Part{a2a.NewTextPart(req.Prompt)}
+		for _, file := range req.Files {
+			parts = append(parts, filePart(file))
+		}
 		if req.Response != nil {
 			parts = append(parts, functionResponsePart(*req.Response))
 		}
@@ -119,6 +122,17 @@ func (c *goClient) Send(ctx context.Context, req client.Request) iter.Seq2[clien
 func (c *goClient) Cancel(ctx context.Context, taskID string) error {
 	_, err := c.inner.CancelTask(ctx, &a2a.CancelTaskRequest{ID: a2a.TaskID(taskID)})
 	return err
+}
+
+// filePart encodes an attachment as an A2A file part: raw bytes when present,
+// otherwise a file reference URL.
+func filePart(file client.FileAttachment) *a2a.Part {
+	if len(file.Data) > 0 {
+		return &a2a.Part{Content: a2a.Raw(file.Data), MediaType: file.MIME, Filename: file.Name}
+	}
+	part := a2a.NewFileURLPart(a2a.URL(file.URI), file.MIME)
+	part.Filename = file.Name
+	return part
 }
 
 // functionResponsePart encodes a reply to a remote function_call, so an ADK

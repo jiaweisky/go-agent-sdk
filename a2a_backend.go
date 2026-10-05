@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"iter"
 	"strings"
@@ -107,6 +108,10 @@ func (l *a2aBackend) Stream(
 		return func(yield func(llmschema.LLMEvent, error) bool) { yield(llmschema.LLMEvent{}, err) }, nil
 	}
 	sessionID, turnID := requestTurn(req)
+	send, err := l.firstRequest(req, sessionID)
+	if err != nil {
+		return func(yield func(llmschema.LLMEvent, error) bool) { yield(llmschema.LLMEvent{}, err) }, nil
+	}
 	return func(yield func(llmschema.LLMEvent, error) bool) {
 		out := &a2aStream{yield: yield, sessionID: sessionID, turnID: turnID}
 		if !out.stepStart() {
@@ -115,7 +120,6 @@ func (l *a2aBackend) Stream(
 		// A remote turn may park at input-required; the local user's answer
 		// resumes it. Each leg is a separate streaming request carrying the
 		// remote task id.
-		send := l.firstRequest(req, sessionID)
 		for {
 			next, outcome, legErr := l.runLeg(ctx, remote, send, out)
 			if legErr != nil {
@@ -190,16 +194,21 @@ func requestTurn(req *llmschema.LLMRequest) (sessionID, turnID string) {
 }
 
 // firstRequest builds the opening request, resuming a remote task a previous
-// turn recorded as parked.
-func (l *a2aBackend) firstRequest(req *llmschema.LLMRequest, sessionID string) client.Request {
-	start := client.Request{Prompt: lastUserText(req), ContextID: sessionID}
+// turn recorded as parked. It carries the latest user message's text and any
+// attached media.
+func (l *a2aBackend) firstRequest(req *llmschema.LLMRequest, sessionID string) (client.Request, error) {
+	files, err := lastUserFiles(req)
+	if err != nil {
+		return client.Request{}, err
+	}
+	start := client.Request{Prompt: lastUserText(req), ContextID: sessionID, Files: files}
 	if l.backends.loadTask != nil {
 		if taskID, contextID, ok := l.backends.loadTask(sessionID); ok {
 			start.TaskID = taskID
 			start.ContextID = contextID
 		}
 	}
-	return start
+	return start, nil
 }
 
 // resumeRequest answers a parked remote function call, echoing its call id so
@@ -408,4 +417,68 @@ func lastUserText(req *llmschema.LLMRequest) string {
 		return builder.String()
 	}
 	return ""
+}
+
+// lastUserFiles returns the media attached to the last user message, decoded
+// and ready to send to the remote as A2A file parts.
+func lastUserFiles(req *llmschema.LLMRequest) ([]client.FileAttachment, error) {
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		message := req.Messages[i]
+		if message.Role != llmschema.RoleUser {
+			continue
+		}
+		var files []client.FileAttachment
+		for _, part := range message.Content {
+			media, ok := part.(llmschema.MediaPart)
+			if !ok {
+				continue
+			}
+			file, err := attachmentFromMedia(media)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, file)
+		}
+		return files, nil
+	}
+	return nil, nil
+}
+
+// attachmentFromMedia converts a request media part into an A2A attachment.
+func attachmentFromMedia(media llmschema.MediaPart) (client.FileAttachment, error) {
+	file := client.FileAttachment{MIME: media.MediaType}
+	if media.Filename != nil {
+		file.Name = *media.Filename
+	}
+	switch data := media.Data.(type) {
+	case []byte:
+		file.Data = data
+	case string:
+		decoded, err := decodeAttachment(data)
+		if err != nil {
+			return client.FileAttachment{}, err
+		}
+		file.Data = decoded
+	default:
+		return client.FileAttachment{}, fmt.Errorf("a2a: unsupported attachment data type %T", media.Data)
+	}
+	return file, nil
+}
+
+// decodeAttachment decodes a PromptFileAttachment URI payload: a data URL or
+// bare base64.
+func decodeAttachment(data string) ([]byte, error) {
+	if rest, ok := strings.CutPrefix(data, "data:"); ok {
+		if comma := strings.IndexByte(rest, ','); comma >= 0 {
+			data = rest[comma+1:]
+		}
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
+		return decoded, nil
+	}
+	decoded, err := base64.RawStdEncoding.DecodeString(data)
+	if err != nil {
+		return nil, fmt.Errorf("a2a: decode attachment: %w", err)
+	}
+	return decoded, nil
 }

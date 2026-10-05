@@ -33,3 +33,23 @@ func TestPermissionReplyFromMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestAttachmentName(t *testing.T) {
+	cases := []struct {
+		name string
+		mime string
+		want string
+	}{
+		{"photo", "image/png", "photo.png"},
+		{"photo.jpg", "image/png", "photo.jpg"},
+		{"", "image/jpeg", "attachment.jpg"},
+		{"../evil", "image/png", "evil.png"},
+		{"/", "image/png", "attachment.png"},
+		{"doc", "application/octet-stream", "doc"},
+	}
+	for _, tc := range cases {
+		if got := attachmentName(tc.name, tc.mime); got != tc.want {
+			t.Errorf("attachmentName(%q, %q) = %q, want %q", tc.name, tc.mime, got, tc.want)
+		}
+	}
+}
