@@ -45,9 +45,10 @@ Based on the above design, the first version (MVP) implements the following core
 | Provider facade (preset base URLs for OpenRouter / xAI / Azure / Cloudflare / GitHub Copilot / Google / Bedrock) | Protocols and facades are implemented; the `agent` layer uses `Protocol` + `ModelInfo`, and facades are only for callers using the `llm` package directly (see §5.4) |
 | `bash` advanced features (tree-sitter, arity, background tasks, progress stream) | See the TODO in `core/tool/bash.go` |
 | `edit` advanced features (fuzzy match, formatter, watcher, snapshot, LSP) | See the TODO in `core/tool/edit.go` |
-| `apply_patch` move and atomic rollback | See the TODO in `core/tool/apply_patch.go` |
 | credential / catalog / integration services | CLI infrastructure; the SDK uses narrow input instead (see AGENTS.md) |
 | `weak` package, `os.Root` and other security features | To be hardened later |
+
+> `apply_patch` supports neither moves nor atomic rollback because v2 core does not either — `packages/core/src/tool/apply-patch.ts` rejects moves and says "Moves and atomic rollback are not supported yet". The Go port matches it, so this is parity, not a deferred feature.
 
 > Implemented (previously listed as "deferred" in early documents, now landed): MCP integration (§8), Skill system (§9), Config frontmatter loading (`defs/config`), context compaction (§6), Steer/Queue input, Plugin (narrowed, §7.3), Reference service, `task` subagents (§6.3).
 
