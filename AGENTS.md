@@ -137,6 +137,7 @@ go-agent-sdk/                       opencode TS
 │   ├── client/     outbound thin interface (SDK's own types, does not leak a2a-go)
 │   ├── a2ago/      the outbound a2a-go adapter (the only outbound layer importing a2a-go)
 │   └── server/     inbound: AgentExecutor + taskstore.Store + AgentCard + http.Handler
+├── server/       HTTP/SSE API for non-Go hosts (no TS counterpart; Go-specific)
 ├── defs/         load agent/skill definitions from explicit ConfigDirs (no CLI discovery)
 │   ├── config/     parse {agent,agents}/**/*.md, {mode,modes}/*.md
 │   └── skill/      scan {skill,skills}/**/SKILL.md
@@ -145,8 +146,9 @@ go-agent-sdk/                       opencode TS
 
 - `jsonschema/` is a Go-specific typed JSON Schema AST (modeled on Effect `Schema`), used by `core/tool` to define tool schemas; no corresponding TS directory
 - `a2a/` is likewise a Go-specific capability (**no corresponding TS directory**) and the "port v2 core only" rule does not apply; see `docs/DESIGN-A2A.md` for design and decisions. It depends only on the single version `github.com/a2aproject/a2a-go/v2`, and a2a-go types do not cross the `a2a/a2ago/` and `a2a/server/` boundaries into the public API
+- `server/` is a Go-specific capability (**no corresponding TS directory**): a language-agnostic HTTP/SSE API so non-Go hosts (e.g. a Python/Node WeCom bot) can drive the SDK across a process boundary; see `docs/DESIGN-HTTP.md`. Its *shape* is modeled on `packages/server` + `packages/protocol`, but it is not a port: it uses `net/http` with plain Go structs, keeps `jsonschema` confined to `core/tool`, and deliberately does **not** do schema-first/OpenAPI codegen (no generated SDK)
 - All packages are public; no `internal/` is needed
-- `cmd/` holds standalone commands rather than SDK packages (no TS counterpart); `cmd/a2aserve` runs an A2A server over the SDK
+- `cmd/` holds standalone commands rather than SDK packages (no TS counterpart); `cmd/a2aserve` runs an A2A server, `cmd/agentserve` runs the HTTP API
 - Flat files under `packages/<pkg>/src/` go into the `<pkg>/` package root; subdirectories become subpackages
 - Effect's `Context.Tag` + `Layer` (DI) is not ported; constructor injection is used instead
 

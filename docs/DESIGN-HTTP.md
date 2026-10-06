@@ -17,7 +17,9 @@
 | 2026-10-06 | Detailed review against the SDK source: durable vs live-only events + per-session stream merge, per-session prompt worker, session-handle lifecycle/concurrency, HITL semantics (permission vs question), error model, OpenAPI, config/validation |
 | 2026-10-06 | Whole-document consistency passes; `cmd/agentserve` scope; decision list consolidated (D1–D19) |
 | 2026-10-06 | Adopted the `AGENTS.md` "align with opencode v2" principle — §16 reframed as required alignment work (SDK changes allowed) instead of shims; `/message` full + `/context` active; resume **merges** inbound over stored (D19), with `a2aFactory.ResumeSession` landed on merge (test in `a2a_backend_test.go`) |
-| 2026-10-06 | Whole-document review: consolidated the change log; renumber `§1.0`→`§1.1`; §11 now specifies a **schema-first** API (one `jsonschema` source drives route registration + runtime validation + OpenAPI), mirroring opencode's Effect-Schema endpoints |
+| 2026-10-06 | Whole-document review: consolidated the change log; renumber `§1.0`→`§1.1` |
+| 2026-10-06 | §11 decision (after cost/benefit): **no schema-first / generated-SDK pipeline** — SSE isn't OpenAPI-expressible and the consumer set is small; the contract is this document plus a hand-written reference client, with OpenAPI as optional discovery only. Dropped B2, demoted B1 to recommended |
+| 2026-10-06 | Cleanup after that decision: `baseURL` is documented as optional-doc-only; the `bad_request` source is "JSON decode / validation" (no schema pipeline) |
 
 ---
 
@@ -82,7 +84,7 @@ the authoritative endpoint list and §5.5 names the dropped groups.
 | opencode concept | go-agent-sdk equivalent |
 |---|---|
 | `packages/server` (Effect `HttpApi` handlers) | new `server/` package (hand-rolled `net/http`) |
-| `packages/protocol` (route groups; Effect schemas) | folded into `server/`; the contract is served as OpenAPI instead of Effect schemas (§11) |
+| `packages/protocol` (route groups; Effect schemas) | folded into `server/`; the wire contract is documented here, with an optional OpenAPI document (§11) |
 | `GET /api/health` / `/api/agent` / `/api/skill` | same (inventory reads; `/api/agent` is filtered to the allow-list, §5.1) |
 | session CRUD + `switchAgent` / `switchModel` / `compact` / `interrupt` / `wait` / `revert` | same, over `Client` / `Session` |
 | `GET /api/session/:id/message` and `/context` | both, aligning v2: `/message` = full, `/context` = active context (needs a new full-message read, §5.2 / §16 B4) |
@@ -107,8 +109,9 @@ the authoritative endpoint list and §5.5 names the dropped groups.
    session, send a prompt, stream assistant/tool/event output, answer
    permission/question prompts, and abort — the *client* needs no Go code (only
    the server process does).
-2. **Stable, codegen-friendly wire contract.** An OpenAPI document is served so
-   Python/Node/Java clients can be generated.
+2. **Stable, documented wire contract.** The endpoints, payloads, SSE frames and
+   event shapes are specified here (and optionally as a served OpenAPI document),
+   so a client can be written against them.
 3. **Same semantics as in-process.** Durable sessions; turns serialized per
    session; subagent events visible; hold-and-reply HITL; reconnection with
    durable replay.
@@ -158,7 +161,7 @@ server/                         HTTP API (Go-specific; no direct TS counterpart,
 ├── errors.go                   error envelope + SDK error → status mapping
 ├── sse.go                      SSE writer, heartbeat, wire event envelope
 ├── wire.go                     request/response DTOs
-└── openapi.go                  OpenAPI 3.1 document + /doc viewer
+└── openapi.go                  optional OpenAPI document + /doc viewer (hand-maintained)
 cmd/agentserve/                 standalone command (YAML + flags, no env), like cmd/a2aserve
 ```
 
@@ -195,8 +198,8 @@ type Options struct {
     // scheme (bearer/basic) are defined in §8.1.
     Auth *Auth
 
-    // BaseURL is the public base URL advertised as the OpenAPI servers[0].url.
-    // Empty leaves the document server-less.
+    // BaseURL is the public base URL, used only by the optional OpenAPI document
+    // (§11). Empty leaves that document server-less.
     BaseURL string
 
     // Agents is the allow-list of agent names the API may create/use (§12.4).
@@ -659,16 +662,15 @@ type wireLocation struct {
 (we do not mutate the shared schema's marshaling — the same applies to
 `schema.LocationRef`).
 
-**Event `data` is the contract foreign clients parse, so it cannot be
-`any`-only.** Today `schema.EventDefinition.Schema` holds only field **names**
-with `nil` values (e.g. `session.next.text.delta` →
-`{sessionID, assistantMessageID, textID, delta, timestamp}`) — a porting gap
-(§16 B2): v2 defines these with real schemas. The SDK will carry the field
-schemas, and the server derives the typed event union from them and emits it into
-the OpenAPI document, so a generated client gets a typed `data` per `type`.
-`type` values include the `session.next.*` family (e.g.
-`session.next.shell.started`, `session.next.step.ended`), `todo.updated`,
-`session.status`, and the `permission.v2.*` / `question.v2.*` / `mcp.*` families.
+**Event `data` is `any` on the wire; clients parse it by `type`.** The shape is
+not schema-validated and there is no typed event union or generated client (§11).
+The field names are declared by `schema.EventDefinition.Schema` (e.g.
+`session.next.text.delta` →
+`{sessionID, assistantMessageID, textID, delta, timestamp}`) and the high-level
+`agent.Event` union documents their meaning. `type` values include the
+`session.next.*` family (e.g. `session.next.shell.started`,
+`session.next.step.ended`), `todo.updated`, `session.status`, and the
+`permission.v2.*` / `question.v2.*` / `mcp.*` families.
 
 ---
 
@@ -931,7 +933,7 @@ fields are request-specific context (`sessionID`, `requestID`, `field`, `ref`).
 
 | `error` | Status | SDK source |
 |---|---|---|
-| `bad_request` | 400 | JSON decode / schema / unknown agent |
+| `bad_request` | 400 | JSON decode / validation / unknown agent |
 | `unauthorized` | 401 | missing/invalid credential |
 | `forbidden` | 403 | agent outside the `agents` allow-list (§12.4) |
 | `not_found` | 404 | session / message / interaction request missing; unknown path |
@@ -954,69 +956,48 @@ Two cases sit outside the table:
   error cannot use this envelope: it arrives as an `event: error` frame and the
   stream closes (§6.3). Clients must handle both error shapes.
 
-**Blocker: SDK errors are mostly untyped.** Some are sentinels
-(`session.ErrStopped`, `ErrSessionBusy`), but several failures the mapping needs
-are plain `fmt.Errorf` strings — "unknown agent: X" (`CreateSession`),
-"session not found: X" (`ResumeSession`, `revertSession`) — so they can only be
-classified by string matching, which is brittle. Before this phase lands, the
-root package must expose typed/sentinel errors (e.g. `ErrUnknownAgent`,
-`ErrSessionNotFound`) and the server maps those (§16 B1). String matching is not
-acceptable; this is an SDK alignment task, not a shim.
+**SDK errors are mixed.** Some are sentinels (`session.ErrStopped`,
+`ErrSessionBusy`); others are plain `fmt.Errorf` strings — "unknown agent: X"
+(`CreateSession`), "session not found: X" (`ResumeSession`, `revertSession`). The
+mapping classifies what it can by error type and falls back to matching those few
+known strings. Adding typed errors (`ErrUnknownAgent`, `ErrSessionNotFound`) is a
+recommended SDK improvement, not a blocker (§16 B1).
 
 ---
 
-## 11. OpenAPI and client generation
+## 11. Wire contract and clients
 
-The whole point is other-language clients, so the API will ship a
-machine-readable contract:
+**The contract is this document.** Every endpoint, request/response body, SSE
+frame and event type is specified above. Optionally the server also serves a
+hand-maintained OpenAPI document (`GET /openapi.json`, plus an optional `/doc`
+viewer) purely for discovery — it is not a code-generation source.
 
-- `GET /openapi.json` — an OpenAPI document for every route (3.1; fall back to
-  3.0 when a target generator needs it).
-- `GET /doc` — a minimal viewer (optional; a CDN-hosted Swagger/Redoc page, so it
-  is off unless enabled).
+**We are deliberately not doing opencode's schema-first pipeline.** opencode
+defines each route as an Effect `Schema` and generates its client from
+`OpenApi.fromApi(...)`. We considered the Go analogue and rejected it as **not
+cost-effective**:
 
-**The schema is the definition; OpenAPI is derived.** This mirrors opencode,
-where each route is an Effect `Schema` endpoint and `OpenApi.fromApi(...)`
-generates the document. In Go the schema source is the existing typed
-`jsonschema` AST (the same machinery `core/tool` uses): each endpoint declares
-its `params` / `query` / `payload` / `success` / `error` as `*jsonschema.Schema`
-(a response DTO's schema via `SchemaForType`, `tool.go`). One registration table
-then drives **all three** from that single source:
+- **SSE — the core value — is not expressible in OpenAPI**, so a generated client
+  still needs hand-written streaming code.
+- The consumer set is small and known (first: a Python/Node client for the WeCom
+  bot), so a hand-written client is cheaper than building the machinery.
+- Go has no Effect-Schema equivalent; matching opencode would mean extending
+  `jsonschema` with `$defs`/`$ref` **and** `oneOf`/`discriminator`, typing ~40
+  event schemas, and writing an OpenAPI emitter — a large build for a need a
+  few-hundred-line client covers.
 
-- **route registration** (`http.ServeMux`),
-- **runtime validation** — the request is checked with `Schema.Validation()` /
-  `jsonschema.CompileValidation` and rejected `400` on mismatch (the same code
-  path as the model path, so there is no separate hand-written decoder),
-- **OpenAPI emission** — `Schema.Model()` projects to JSON Schema, which OpenAPI
-  3.1 embeds directly.
+Consequences:
 
-Because the schema is emitted from the same source the server validates and
-serves, the path/method **and** the request/response shapes cannot drift.
-
-The document also carries the cross-cutting pieces a generated client needs:
-
-- `info` (`title`, `version`) and `servers[0].url` from `Options.BaseURL`
-  (omitted when `BaseURL` is empty, leaving a server-less spec);
-- `securitySchemes` and a global `security` requirement **when `Options.Auth` is
-  set** (the scheme is whichever `Auth.Scheme` selects), with `Options.Public`
-  routes marked `security: []`;
-- a stable `operationId` per route, so generated client method names do not
-  churn between releases;
-- the error envelope (§10) as the default error response, so errors deserialize
-  to a typed shape.
-
-Two limits to call out:
-
-- **SSE is not expressible in OpenAPI.** The event routes are documented as a
-  `text/event-stream` response with the `wireEvent` schema attached as prose; a
-  generated client cannot get a typed stream and must consume SSE manually.
-- **Event `data` schemas require an SDK alignment first.** `EventDefinition.Schema`
-  holds `nil` placeholders today (§16 B2); v2 defines these with real schemas.
-  The SDK must carry them before the spec's event union can be generated (§6.4) —
-  a prerequisite of this phase, not a by-product.
-
-Python/Node/Java clients are generated from the finished spec with standard
-tooling.
+- The server uses `net/http` and plain Go structs (json tags) for encode/decode;
+  `jsonschema` stays confined to the **tool** framework.
+- **No typed event union and no generated SDK**; event `data` is documented by
+  `type` (§6.4) and mapped to a discriminated DTO in the client, if that client
+  wants one.
+- A **hand-written reference client** (Python/Node, under `examples/`) covering
+  `session → prompt → SSE → permission reply` doubles as the WeCom integration
+  template.
+- If the consumer set ever grows (Go/Java/many clients), schema-first can be
+  revisited.
 
 ---
 
@@ -1041,7 +1022,7 @@ to `agentserve.yaml`, which is git-ignored). The complete field set:
 | YAML key | Type | Default | Required | Meaning |
 |---|---|---|---|---|
 | `listen` | string | `127.0.0.1:8787` | no | HTTP listen address `host:port` |
-| `baseURL` | string | `""` | no | Public base URL; emitted as the OpenAPI `servers[0].url`. Empty leaves the spec server-less |
+| `baseURL` | string | `""` | no | Public base URL, used only by the optional OpenAPI document (§11). Empty leaves it server-less |
 | `root` | string | — | **yes** | SDK state directory (`ClientOptions.Root`); the only state location |
 | `workingDirectory` | string | process cwd | no | Project/worktree root (agent tools operate here) |
 | `configDirs` | []string | `[]` | no | Agent/skill markdown directories (`ClientOptions.ConfigDirs`) |
@@ -1256,10 +1237,10 @@ expressible here: a host that needs them embeds the SDK directly
 |---|---|
 | 0 | `server/` skeleton: `New`/`Handler`, health, error envelope (recover + 404/405 normalisation), auth, CORS. Add `Client.EventStream`, `GetSession`, `WaitSession`, and sentinel errors. **Hold mode deferred to Phase 3** (below). |
 | 1 | Sessions + messages: CRUD, prompt (per-session worker), interrupt, compact, wait, switch agent/model/title; `agents` allow-list enforcement; the request/response wire DTOs; **SDK full-message read** for `/message` + `/context` (B4). |
-| 2 | Event SSE: global `/api/event`, merged replay+live `/api/session/{id}/event`, heartbeat, the `wireEvent` envelope; **SDK typed event schemas** (B2). |
+| 2 | Event SSE: global `/api/event`, merged replay+live `/api/session/{id}/event`, heartbeat, the `wireEvent` envelope. |
 | 3 | Interactions: enable `HoldInteractions(true)` in `New`, plus permission/question list/get/reply/reject + timeout policy (via live stream/polling). |
-| 4 | OpenAPI document (including typed event `data` schemas) + `cmd/agentserve` (YAML + flags, graceful shutdown). |
-| 5 | Cross-language interop test: a small Python client (and/or Node) driving a real session end-to-end, including a permission round-trip and an SSE reconnect. |
+| 4 | Optional hand-maintained OpenAPI document + `cmd/agentserve` (YAML + flags, graceful shutdown). |
+| 5 | Hand-written reference client (Python/Node, `examples/`) driving a real session end-to-end, including a permission round-trip and an SSE reconnect — the WeCom integration template. |
 
 Every phase ships `httptest`-based tests (auth, error mapping, worker
 serialization, SSE replay/dedup, HITL); Phase 5 adds the foreign-client
@@ -1284,11 +1265,11 @@ routes must land together with it).
 | D5 | Bearer auth by default (Basic optional); no env | Service-to-service foreign SDKs; SDK philosophy; consistent with `a2a/server.Security` |
 | D6 | Server holds interactions (`HoldInteractions(true)`) with a timeout fallback | Required to surface prompts; timeout prevents a wedged turn |
 | D7 | No `location` scoping; one `Client` per handler | The SDK `Client` is already bound to one project/root |
-| D8 | Ship OpenAPI + generate foreign clients | The explicit goal is language-agnostic integration |
+| D8 | Document the wire contract and ship a **hand-written** reference client (no generated SDK) | SSE isn't OpenAPI-expressible and the consumer set is small (§11) |
 | D9 | Expose `Client.EventStream()`; add `GetSession`/`WaitSession` | Adapters need the raw bus; the two read helpers keep read paths from attaching handles |
 | D10 | One prompt **worker per session** (not one goroutine per prompt) | `Send` is session-scoped; concurrent `Send`s can strand a queued prompt |
 | D11 | Per-session stream = durable replay **merged with** live filtered | Deltas and HITL are live-only; replay alone carries no output and no asks |
-| D12 | Event `data` schemas are part of the OpenAPI contract | Foreign clients must parse typed payloads, not `any` |
+| D12 | Event `data` is documented by `type`, not typed via OpenAPI | No codegen; the client parses per the documented field lists (§6.4, §11) |
 | D13 | One shared `*Session` handle per session, shared by the worker and transient ops; the lock guards only creation/eviction, never the turn; evicted when idle | Each handle installs an event subscription (a permanent cache leaks one per session), and holding the lock across a turn would block `/interrupt` (§7) |
 | D14 | The `agents` allow-list is the API-level authorization, separate from the tool permission system | "Which agent may be used" ≠ "which tools a turn may run" (§8.3, §12.4) |
 | D15 | Lifecycle order `Server.Close()` → `http.Server.Shutdown` → `Client.Close()` | Live SSE keeps `Shutdown` waiting; cancel the streams first (§13) |
@@ -1301,23 +1282,20 @@ routes must land together with it).
 
 ## 16. Alignment tasks and decisions
 
-These are **required work to align with opencode v2** (the `AGENTS.md` target),
-with the TS counterpart cited for each — not open questions, and **SDK changes
-are expected** wherever v2 already defines the behaviour (the project should take
-the architecturally correct route rather than shim around the SDK). The
-Go-specific surface (inbound permissions, `agents` allow-list, HITL timeouts,
-bind policy) has no TS counterpart; its policy choices are called out below.
+Items where opencode v2 has a counterpart, cited per item. Align where it adds
+value; not every v2 feature is needed here — e.g. **typed event schemas existed
+only to drive code generation, which we dropped (§11)**, so they are no longer
+listed. The Go-specific surface (inbound permissions, `agents` allow-list, HITL
+timeouts, bind policy) has no TS counterpart; its policy choices are called out
+below.
 
 ### Align with v2
 
-- **B1. Typed errors.** v2 uses tagged error classes carrying `httpApiStatus`
-  (`packages/protocol/src/errors.ts`); the SDK must expose typed/sentinel errors
-  so HTTP mapping is not string-based (§10). *Blocks error mapping.*
-- **B2. Typed event `data`.** v2 defines events with real schemas
-  (`Event.define({ schema: Schema.Struct({…}) })`,
-  `packages/schema/src/event.ts`); the Go `EventDefinition.Schema` must carry the
-  field schemas instead of today's `nil` placeholders, and the server derives the
-  event union from them. *Blocks the OpenAPI event schemas (§6.4, §11).*
+- **B1. Typed errors (recommended).** v2 uses tagged error classes carrying
+  `httpApiStatus` (`packages/protocol/src/errors.ts`). The SDK mixes sentinels
+  with plain `fmt.Errorf` strings; adding typed errors (`ErrUnknownAgent`,
+  `ErrSessionNotFound`) makes the HTTP mapping exact instead of partly
+  string-based (§10). *Not blocking.*
 - **B3. Prompt id.** v2's `session.prompt` accepts an optional `id` and returns
   `SessionInput.Admitted`, with `ConflictError` on duplicates; adopt the same.
 - **B4. Messages vs context.** v2 exposes both `session.messages` (full) and
