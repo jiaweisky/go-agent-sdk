@@ -11,7 +11,6 @@ type flags struct {
 	fs                  *flag.FlagSet
 	config              string
 	listen              string
-	baseURL             string
 	root                string
 	workingDir          string
 	model               string
@@ -34,7 +33,6 @@ func newFlags() *flags {
 	f := &flags{fs: flag.NewFlagSet("agentserve", flag.ContinueOnError)}
 	f.fs.StringVar(&f.config, "config", "", "path to a YAML config file")
 	f.fs.StringVar(&f.listen, "listen", "", "listen address host:port (default 127.0.0.1:8787)")
-	f.fs.StringVar(&f.baseURL, "base-url", "", "public base URL (OpenAPI servers)")
 	f.fs.StringVar(&f.root, "root", "", "SDK state directory (required)")
 	f.fs.StringVar(&f.workingDir, "working-dir", "", "project/worktree root (default: process cwd)")
 	f.fs.StringVar(&f.model, "model", "", "default model id (required)")
@@ -62,9 +60,6 @@ func (f *flags) apply(cfg *config) {
 	f.fs.Visit(func(fl *flag.Flag) { set[fl.Name] = true })
 	if set["listen"] {
 		cfg.Listen = f.listen
-	}
-	if set["base-url"] {
-		cfg.BaseURL = f.baseURL
 	}
 	if set["root"] {
 		cfg.Root = f.root

@@ -22,8 +22,6 @@ type Options struct {
 	// Auth, when set, requires a credential on every /api route except Public.
 	// Nil disables authentication (loopback use).
 	Auth *Auth
-	// BaseURL is the public base URL, used only by the optional OpenAPI document.
-	BaseURL string
 	// Agents is the allow-list of agent names the API may create/use. Empty
 	// allows every registered agent.
 	Agents []string

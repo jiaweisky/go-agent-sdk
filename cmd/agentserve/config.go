@@ -18,7 +18,6 @@ import (
 // file, then CLI flags. No environment variables are read.
 type config struct {
 	Listen           string            `yaml:"listen"`
-	BaseURL          string            `yaml:"baseURL"`
 	Root             string            `yaml:"root"`
 	WorkingDirectory string            `yaml:"workingDirectory"`
 	ConfigDirs       []string          `yaml:"configDirs"`

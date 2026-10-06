@@ -20,6 +20,7 @@
 | 2026-10-06 | Whole-document review: consolidated the change log; renumber `§1.0`→`§1.1` |
 | 2026-10-06 | §11 decision (after cost/benefit): **no schema-first / generated-SDK pipeline** — SSE isn't OpenAPI-expressible and the consumer set is small; the contract is this document plus a hand-written reference client, with OpenAPI as optional discovery only. Dropped B2, demoted B1 to recommended |
 | 2026-10-06 | Cleanup after that decision: `baseURL` is documented as optional-doc-only; the `bad_request` source is "JSON decode / validation" (no schema pipeline) |
+| 2026-10-06 | Dropped OpenAPI entirely (a hand-maintained spec would drift with no codegen consumer) and the Python/Node client deliverable (that client belongs in the consumer's repo); this repo ships the Go server plus a Go end-to-end test |
 
 ---
 
@@ -84,7 +85,7 @@ the authoritative endpoint list and §5.5 names the dropped groups.
 | opencode concept | go-agent-sdk equivalent |
 |---|---|
 | `packages/server` (Effect `HttpApi` handlers) | new `server/` package (hand-rolled `net/http`) |
-| `packages/protocol` (route groups; Effect schemas) | folded into `server/`; the wire contract is documented here, with an optional OpenAPI document (§11) |
+| `packages/protocol` (route groups; Effect schemas) | folded into `server/`; the wire contract is documented here (§11) |
 | `GET /api/health` / `/api/agent` / `/api/skill` | same (inventory reads; `/api/agent` is filtered to the allow-list, §5.1) |
 | session CRUD + `switchAgent` / `switchModel` / `compact` / `interrupt` / `wait` / `revert` | same, over `Client` / `Session` |
 | `GET /api/session/:id/message` and `/context` | both, aligning v2: `/message` = full, `/context` = active context (needs a new full-message read, §5.2 / §16 B4) |
@@ -110,8 +111,7 @@ the authoritative endpoint list and §5.5 names the dropped groups.
    permission/question prompts, and abort — the *client* needs no Go code (only
    the server process does).
 2. **Stable, documented wire contract.** The endpoints, payloads, SSE frames and
-   event shapes are specified here (and optionally as a served OpenAPI document),
-   so a client can be written against them.
+   event shapes are specified here, so a client can be written against them.
 3. **Same semantics as in-process.** Durable sessions; turns serialized per
    session; subagent events visible; hold-and-reply HITL; reconnection with
    durable replay.
@@ -160,8 +160,7 @@ server/                         HTTP API (Go-specific; no direct TS counterpart,
 ├── cors.go                     CORS middleware
 ├── errors.go                   error envelope + SDK error → status mapping
 ├── sse.go                      SSE writer, heartbeat, wire event envelope
-├── wire.go                     request/response DTOs
-└── openapi.go                  optional OpenAPI document + /doc viewer (hand-maintained)
+└── wire.go                     request/response DTOs
 cmd/agentserve/                 standalone command (YAML + flags, no env), like cmd/a2aserve
 ```
 
@@ -197,10 +196,6 @@ type Options struct {
     // listed in Public. Nil disables authentication (loopback use). Type and
     // scheme (bearer/basic) are defined in §8.1.
     Auth *Auth
-
-    // BaseURL is the public base URL, used only by the optional OpenAPI document
-    // (§11). Empty leaves that document server-less.
-    BaseURL string
 
     // Agents is the allow-list of agent names the API may create/use (§12.4).
     // Empty allows every registered agent; cmd/agentserve always passes a
@@ -257,7 +252,6 @@ across three destinations; only the middle column is `server.Options`:
 | Config key(s) | Destination |
 |---|---|
 | `listen`, `tls`, `allowInsecure` | `cmd/agentserve` process (socket / HTTPS / bind policy), not `Options` |
-| `baseURL` | `Options.BaseURL` (OpenAPI `servers`) |
 | `auth.bearer` / `auth.username`+`auth.password` | `Options.Auth` (§8.1) |
 | `cors` | `Options.CORS` |
 | `inboundPermissions` | `Options.InboundPermissions` |
@@ -774,8 +768,7 @@ type Auth struct {
   Bearer` (or `Basic realm="..."`).
 - `Options.Public` lists unauthenticated routes (typically only `/api/health`);
   entries match the request path **exactly** (no prefix matching), so a public
-  route cannot accidentally expose a subtree. `/openapi.json` and `/doc` require
-  auth unless added there.
+  route cannot accidentally expose a subtree.
 - Auth is header-based with **no cookies**, so CSRF is not applicable; keep it
   that way (do not move to cookie sessions without adding CSRF protection).
 - CORS preflight (`OPTIONS`) is answered by the CORS middleware and never reaches
@@ -971,35 +964,34 @@ recommended SDK improvement, not a blocker (§16 B1).
 
 ## 11. Wire contract and clients
 
-**The contract is this document.** Every endpoint, request/response body, SSE
-frame and event type is specified above. Optionally the server also serves a
-hand-maintained OpenAPI document (`GET /openapi.json`, plus an optional `/doc`
-viewer) purely for discovery — it is not a code-generation source.
+**The contract is this document**, plus the code and the end-to-end test in
+`server/server_test.go`. There is **no OpenAPI document and no generated SDK**:
+a hand-maintained spec with no code-generation consumer would only drift from the
+handlers.
 
-**We are deliberately not doing opencode's schema-first pipeline.** opencode
+**We deliberately did not copy opencode's schema-first pipeline.** opencode
 defines each route as an Effect `Schema` and generates its client from
-`OpenApi.fromApi(...)`. We considered the Go analogue and rejected it as **not
-cost-effective**:
+`OpenApi.fromApi(...)`. We rejected the Go analogue as **not cost-effective**:
 
 - **SSE — the core value — is not expressible in OpenAPI**, so a generated client
   still needs hand-written streaming code.
-- The consumer set is small and known (first: a Python/Node client for the WeCom
-  bot), so a hand-written client is cheaper than building the machinery.
+- The consumer set is small and known (first: a Python/Node WeCom bot), and **that
+  client belongs in the consumer's repo, not here** — this repo ships the Go
+  server and a Go example/test, not another language's SDK.
 - Go has no Effect-Schema equivalent; matching opencode would mean extending
   `jsonschema` with `$defs`/`$ref` **and** `oneOf`/`discriminator`, typing ~40
   event schemas, and writing an OpenAPI emitter — a large build for a need a
-  few-hundred-line client covers.
+  small hand-written client covers.
 
 Consequences:
 
 - The server uses `net/http` and plain Go structs (json tags) for encode/decode;
   `jsonschema` stays confined to the **tool** framework.
 - **No typed event union and no generated SDK**; event `data` is documented by
-  `type` (§6.4) and mapped to a discriminated DTO in the client, if that client
-  wants one.
-- A **hand-written reference client** (Python/Node, under `examples/`) covering
-  `session → prompt → SSE → permission reply` doubles as the WeCom integration
-  template.
+  `type` (§6.4) and each consumer maps it however it likes.
+- To exercise the API end to end, this repo provides a Go example/test that
+  drives `session → prompt → SSE → permission reply`; the WeCom bot, in another
+  language, consumes the same wire contract.
 - If the consumer set ever grows (Go/Java/many clients), schema-first can be
   revisited.
 
@@ -1026,7 +1018,6 @@ to `agentserve.yaml`, which is git-ignored). The complete field set:
 | YAML key | Type | Default | Required | Meaning |
 |---|---|---|---|---|
 | `listen` | string | `127.0.0.1:8787` | no | HTTP listen address `host:port` |
-| `baseURL` | string | `""` | no | Public base URL, used only by the optional OpenAPI document (§11). Empty leaves it server-less |
 | `root` | string | — | **yes** | SDK state directory (`ClientOptions.Root`); the only state location |
 | `workingDirectory` | string | process cwd | no | Project/worktree root (agent tools operate here) |
 | `configDirs` | []string | `[]` | no | Agent/skill markdown directories (`ClientOptions.ConfigDirs`) |
@@ -1072,7 +1063,6 @@ to `agentserve.yaml`, which is git-ignored). The complete field set:
 
 ```yaml
 listen: 127.0.0.1:8787
-baseURL: ""                       # optional; the OpenAPI servers[0].url
 root: ~/.go-agent-sdk             # required
 workingDirectory: /srv/project
 configDirs: [/srv/project/.agents]
@@ -1112,7 +1102,6 @@ repeatable flag replaces the file's list. **Secret fields have no flags**
 |---|---|---|
 | `--config <path>` | — | YAML config file |
 | `--listen <host:port>` | `listen` | Listen address |
-| `--base-url <url>` | `baseURL` | Public base URL (OpenAPI `servers`) |
 | `--root <dir>` | `root` | SDK state directory (required) |
 | `--working-dir <dir>` | `workingDirectory` | Project root (default: cwd) |
 | `--config-dir <dir>` | `configDirs` | Agent/skill dir (repeatable) |
@@ -1188,7 +1177,7 @@ which subagents a turn may delegate to does so through `InboundPermissions`
 ### 12.5 Lifecycle
 
 `agentserve` builds the `Client`, wires `server.New(client, opts)` with the
-derived `Options` (`Auth`, `BaseURL`, `Agents`, `CORS`, `InboundPermissions`,
+derived `Options` (`Auth`, `Agents`, `CORS`, `InboundPermissions`,
 `InteractionTimeout`, `InteractionFallback`, `KeepAlive`, `SubscriberCapacity`,
 `Public`), then on `SIGINT`/`SIGTERM`: `Server.Close()` (cancels SSE subscribers
 and signals workers) → `httpServer.Shutdown(ctx)` (now completes; still bounded
@@ -1243,18 +1232,18 @@ expressible here: a host that needs them embeds the SDK directly
 | 1 | Sessions + messages: CRUD, prompt (per-session worker), interrupt, compact, wait, switch agent/model/title; `agents` allow-list enforcement; the request/response wire DTOs; **SDK full-message read** for `/message` + `/context` (B4). |
 | 2 | Event SSE: global `/api/event`, merged replay+live `/api/session/{id}/event`, heartbeat, the `wireEvent` envelope. |
 | 3 | Interactions: enable `HoldInteractions(true)` in `New`, plus permission/question list/get/reply/reject + timeout policy (via live stream/polling). |
-| 4 | Optional hand-maintained OpenAPI document + `cmd/agentserve` (YAML + flags, graceful shutdown). |
-| 5 | Hand-written reference client (Python/Node, `examples/`) driving a real session end-to-end, including a permission round-trip and an SSE reconnect — the WeCom integration template. |
+| 4 | `cmd/agentserve` (YAML + flags, graceful shutdown). |
+| 5 | Go end-to-end example/test driving a real session (`session → prompt → SSE → permission round-trip → reconnect`). |
 
 Every phase ships `httptest`-based tests (auth, error mapping, worker
-serialization, SSE replay/dedup, HITL); Phase 5 adds the foreign-client
-end-to-end.
+serialization, SSE replay/dedup, HITL); Phase 5 adds the full end-to-end
+round-trip.
 
 > **Status:** Phases 0–3 and the `cmd/agentserve` command (Phase 4) are
 > implemented in `server/` and `cmd/agentserve/`; the SDK additions are
 > `Client.EventStream` / `GetSession` / `WaitSession` / `SessionHistory` and the
-> `ErrUnknownAgent` / `ErrSessionNotFound` sentinels. The optional OpenAPI
-> document and the hand-written reference client remain.
+> `ErrUnknownAgent` / `ErrSessionNotFound` sentinels. Phase 5's end-to-end
+> coverage lives in `server/server_test.go`.
 
 **Sequencing note.** `New` sets `HoldInteractions(true)` (§9), which parks every
 `ask` until a reply arrives. Until the interaction routes exist (Phase 3),
@@ -1275,7 +1264,7 @@ routes must land together with it).
 | D5 | Bearer auth by default (Basic optional); no env | Service-to-service foreign SDKs; SDK philosophy; consistent with `a2a/server.Security` |
 | D6 | Server holds interactions (`HoldInteractions(true)`) with a timeout fallback | Required to surface prompts; timeout prevents a wedged turn |
 | D7 | No `location` scoping; one `Client` per handler | The SDK `Client` is already bound to one project/root |
-| D8 | Document the wire contract and ship a **hand-written** reference client (no generated SDK) | SSE isn't OpenAPI-expressible and the consumer set is small (§11) |
+| D8 | Document the wire contract here; **no OpenAPI document and no generated SDK** | SSE isn't OpenAPI-expressible, a hand-maintained spec would drift, and the consumer's client belongs in its own repo (§11) |
 | D9 | Expose `Client.EventStream()`; add `GetSession`/`WaitSession` | Adapters need the raw bus; the two read helpers keep read paths from attaching handles |
 | D10 | One prompt **worker per session** (not one goroutine per prompt) | `Send` is session-scoped; concurrent `Send`s can strand a queued prompt |
 | D11 | Per-session stream = durable replay **merged with** live filtered | Deltas and HITL are live-only; replay alone carries no output and no asks |

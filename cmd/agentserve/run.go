@@ -57,7 +57,6 @@ func run(ctx context.Context, cfg config) error {
 	}
 	srv, err := server.New(client, server.Options{
 		Auth:                auth,
-		BaseURL:             cfg.BaseURL,
 		Agents:              cfg.Agents,
 		CORS:                cfg.CORS,
 		InboundPermissions:  cfg.permissionRuleset(),
