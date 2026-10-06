@@ -115,6 +115,32 @@ func fetchCard(t *testing.T, baseURL string) *a2a.AgentCard {
 	return &card
 }
 
+// TestServerServesAggregateCards guards the discovery endpoint that returns all
+// exposed agents' cards as a JSON array, the shape CodeBuddy's
+// CODEBUDDY_REMOTE_AGENTS_URL expects.
+func TestServerServesAggregateCards(t *testing.T) {
+	ts, _ := newServer(t)
+
+	response, err := http.Get(ts.URL + server.DiscoveryPath)
+	if err != nil {
+		t.Fatalf("get cards: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("cards status: %d", response.StatusCode)
+	}
+	var cards []a2a.AgentCard
+	if err := json.NewDecoder(response.Body).Decode(&cards); err != nil {
+		t.Fatalf("decode cards: %v", err)
+	}
+	if len(cards) != 1 {
+		t.Fatalf("cards = %d, want 1", len(cards))
+	}
+	if got := cards[0].SupportedInterfaces; len(got) != 1 || got[0].URL != ts.URL+"/agents/build/" {
+		t.Fatalf("interfaces = %v, want 1 at %s", got, ts.URL+"/agents/build/")
+	}
+}
+
 // TestServerRequiresBearerToken guards that the RPC endpoint is gated while the
 // discovery card stays public and declares the scheme.
 func TestServerRequiresBearerToken(t *testing.T) {

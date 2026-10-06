@@ -71,6 +71,7 @@ func run(ctx context.Context, cfg config) error {
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: srv.Handler()}
 	fmt.Fprintf(os.Stderr, "a2aserve: listening on %s\n", cfg.Listen)
 	fmt.Fprintf(os.Stderr, "a2aserve: card at %s/.well-known/agent-card.json\n", logBaseURL(cfg))
+	fmt.Fprintf(os.Stderr, "a2aserve: agent cards at %s%s\n", logBaseURL(cfg), server.DiscoveryPath)
 
 	serveErr := make(chan error, 1)
 	go func() {

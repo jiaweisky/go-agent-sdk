@@ -33,6 +33,22 @@ Flags (each overrides the config file; a repeatable flag replaces the file's lis
 | `--agent <name>` | agent to expose (repeatable, default `build`) |
 | `--allow-insecure` | allow a non-loopback bind without auth |
 
+## Client access (CodeBuddy)
+
+Point a CodeBuddy client at the server's discovery endpoint to use the exposed
+agents. `/.well-known/agents.json` returns every agent's card as a JSON array,
+which is the shape `CODEBUDDY_REMOTE_AGENTS_URL` expects:
+
+```sh
+CODEBUDDY_A2A_OUTBOUND_ENABLED=1 \
+CODEBUDDY_REMOTE_AGENTS_URL=http://127.0.0.1:9099/.well-known/agents.json \
+codebuddy
+```
+
+The A2A-standard `/.well-known/agent-card.json` (first agent) and the per-agent
+`/agents/<name>/.well-known/agent-card.json` paths also work for standard
+clients. Both discovery paths are public even when `auth.bearer` gates RPC.
+
 ## Config file
 
 A complete annotated example lives at

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -57,6 +58,13 @@ type Server struct {
 	exposed []schema.AgentInfo
 }
 
+// DiscoveryPath serves every exposed agent's card as a JSON array. CodeBuddy's
+// CODEBUDDY_REMOTE_AGENTS_URL discovery source expects exactly that shape (a
+// top-level array or {"cards":[...]}), which the A2A-standard well-known path —
+// a single card — does not provide. The well-known path stays single (see
+// Handler); this is an additive, non-standard endpoint.
+const DiscoveryPath = "/.well-known/agents.json"
+
 // New builds a server for the exposed agents in Options.Agents.
 func New(opts Options) (*Server, error) {
 	if opts.Factory == nil {
@@ -97,6 +105,9 @@ func (s *Server) Handler() http.Handler {
 	// The default well-known path serves the first exposed agent so a client
 	// that only knows the host can discover it.
 	mux.Handle("/.well-known/agent-card.json", s.cardHandler(s.exposed[0]))
+	// The aggregate path lists every exposed agent for discovery sources that
+	// want all cards at once (e.g. CodeBuddy's CODEBUDDY_REMOTE_AGENTS_URL).
+	mux.Handle(DiscoveryPath, s.cardsHandler())
 	return mux
 }
 
@@ -118,6 +129,26 @@ func (s *Server) cardHandler(info schema.AgentInfo) http.Handler {
 	inner := a2asrv.NewAgentCardHandler(producer)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		inner.ServeHTTP(w, r.WithContext(withRequest(r.Context(), r)))
+	})
+}
+
+// cardsHandler serves every exposed agent's card as a JSON array. Each card's
+// endpoint is resolved from the request's own origin (or the configured
+// BaseURL), exactly like the single-card handler, so the URLs stay correct
+// behind a proxy.
+func (s *Server) cardsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		ctx := withRequest(r.Context(), r)
+		cards := make([]*a2a.AgentCard, 0, len(s.exposed))
+		for _, info := range s.exposed {
+			cards = append(cards, buildCard(info, s.cardEndpoint(ctx, info), s.opts.Security))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(cards)
 	})
 }
 
