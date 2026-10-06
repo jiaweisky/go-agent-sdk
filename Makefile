@@ -16,11 +16,11 @@ endif
 
 EXAMPLES := chat tool notesmcp a2aserver
 BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(EXAMPLES)))
-CMDS := a2aserve
+CMDS := a2aserve agentserve
 CMD_BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(CMDS)))
 GO_SOURCES := $(shell find . -name '*.go' -not -path './bin/*')
 
-.PHONY: all examples cmds chat a2aserver a2aserve fmt fmt-check vet test lint golangci clean
+.PHONY: all examples cmds chat a2aserver a2aserve agentserve fmt fmt-check vet test lint golangci clean
 
 all: examples cmds
 
@@ -39,6 +39,17 @@ CONFIG ?= cmd/a2aserve/a2aserve.yaml
 
 a2aserve: $(BIN)/a2aserve$(EXE)
 	$(BIN)/a2aserve$(EXE) --config $(CONFIG)
+
+# Build the HTTP API server command.
+$(BIN)/agentserve$(EXE): $(GO_SOURCES) go.mod go.sum
+	@mkdir -p $(BIN)
+	$(GO) build -o $@ ./cmd/agentserve
+
+# Run the HTTP API server (see cmd/agentserve/agentserve.example.yaml).
+AGENTSERVE_CONFIG ?= cmd/agentserve/agentserve.yaml
+
+agentserve: $(BIN)/agentserve$(EXE)
+	$(BIN)/agentserve$(EXE) --config $(AGENTSERVE_CONFIG)
 
 $(BIN)/%$(EXE): $(GO_SOURCES) go.mod go.sum
 	@mkdir -p $(BIN)

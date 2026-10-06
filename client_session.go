@@ -37,7 +37,7 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, cfg *Sessi
 		return nil, err
 	}
 	if stored == nil {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 	sessionRules, err := c.overrideStoredPermissions(sessionID, stored, cfg.Permissions)
 	if err != nil {
@@ -109,9 +109,16 @@ func (c *Client) sessionByID(id string) *Session {
 }
 
 // SessionMessages returns the stored messages of any session, including
-// subagent child sessions.
+// subagent child sessions. It is the active context (messages after the last
+// compaction); use SessionHistory for the full transcript.
 func (c *Client) SessionMessages(sessionID string) ([]schema.SessionMessage, error) {
 	return c.rt.store.Context(schema.SessionID(sessionID))
+}
+
+// SessionHistory returns every stored message of any session, ignoring
+// compaction and the context-epoch baseline (the full transcript).
+func (c *Client) SessionHistory(sessionID string) ([]schema.SessionMessage, error) {
+	return c.rt.store.Messages(schema.SessionID(sessionID))
 }
 
 // ListSessions returns the sessions in the client's project, newest first,

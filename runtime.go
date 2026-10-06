@@ -372,7 +372,7 @@ func (r *runtime) revertSession(sessionID schema.SessionID) (*schema.SessionInfo
 		return nil, err
 	}
 	if stored == nil {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 	return stored, nil
 }

@@ -363,7 +363,7 @@ func (c *Client) deriveAgent(
 ) (*schema.AgentInfo, bool, error) {
 	base := c.rt.agents.Get(schema.AgentID(agentID))
 	if base == nil {
-		return nil, false, fmt.Errorf("unknown agent: %s", agentID)
+		return nil, false, fmt.Errorf("%w: %s", ErrUnknownAgent, agentID)
 	}
 	startContext, err := runSessionStartHook(cfg, sessionID, agentID, modelID)
 	if err != nil {

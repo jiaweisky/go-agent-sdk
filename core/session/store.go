@@ -35,6 +35,16 @@ func (s *Store) Context(sessionID schema.SessionID) ([]schema.SessionMessage, er
 	return Load(s.db, sessionID)
 }
 
+// Messages returns every stored message for a session, ignoring compaction and
+// the context-epoch baseline (the full transcript, for HTTP hosts).
+func (s *Store) Messages(sessionID schema.SessionID) ([]schema.SessionMessage, error) {
+	rows, err := messageRows(s.db, sessionID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	return decodeMessageRows(rows)
+}
+
 // RunnerContext returns the messages after a baseline sequence.
 func (s *Store) RunnerContext(sessionID schema.SessionID, baselineSeq int64) ([]schema.SessionMessage, error) {
 	return LoadForRunner(s.db, sessionID, baselineSeq)

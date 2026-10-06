@@ -33,7 +33,7 @@ func (c *Client) ForkSession(ctx context.Context, sessionID, messageID string) (
 		return nil, err
 	}
 	if stored == nil {
-		return nil, fmt.Errorf("session not found: %s", sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 	cfg := &SessionConfig{Agent: baseAgentID(agentIDOf(stored)), Title: forkedTitle(stored.Title)}
 	if stored.Model != nil {

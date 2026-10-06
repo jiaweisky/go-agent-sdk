@@ -296,6 +296,10 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (schema.Sessi
 // WaitSession blocks until the session is idle or timeout elapses, and reports
 // whether it is idle (matching the /wait response, §5.2).
 func (c *Client) WaitSession(ctx context.Context, sessionID string, timeout time.Duration) (bool, error)
+
+// SessionHistory returns the full transcript (every session_message row,
+// ignoring compaction); SessionMessages stays the active context. Backs B4.
+func (c *Client) SessionHistory(sessionID string) ([]schema.SessionMessage, error)
 ```
 
 The per-session event stream (§5.4) is composed by the server from
@@ -354,7 +358,7 @@ it to a reduced DTO (`name`, `description`).
 | POST | `/api/session/{sessionID}/interrupt` | `Session.Abort` | `204` |
 | POST | `/api/session/{sessionID}/compact` | `Session.Compact` | `{"data":{"compacted":bool}}` |
 | POST | `/api/session/{sessionID}/wait?timeout=` | `WaitSession` (bounded) | `200 {"data":{"idle":bool}}` |
-| GET | `/api/session/{sessionID}/message` | full projected messages (new SDK read, §16 B4) | `{"data":[Message]}` |
+| GET | `/api/session/{sessionID}/message` | `SessionHistory` (full transcript, §16 B4) | `{"data":[Message]}` |
 | GET | `/api/session/{sessionID}/context` | active context (`SessionMessages`, post-compaction) | `{"data":[Message]}` |
 | GET | `/api/session/{sessionID}/event?after=` | `EventStream()` (replay+live, §5.4) | SSE |
 | POST | `/api/session/{sessionID}/revert/stage` | `Session.RevertStage` | `{"data":RevertState}` |
@@ -1246,6 +1250,12 @@ Every phase ships `httptest`-based tests (auth, error mapping, worker
 serialization, SSE replay/dedup, HITL); Phase 5 adds the foreign-client
 end-to-end.
 
+> **Status:** Phases 0–3 and the `cmd/agentserve` command (Phase 4) are
+> implemented in `server/` and `cmd/agentserve/`; the SDK additions are
+> `Client.EventStream` / `GetSession` / `WaitSession` / `SessionHistory` and the
+> `ErrUnknownAgent` / `ErrSessionNotFound` sentinels. The optional OpenAPI
+> document and the hand-written reference client remain.
+
 **Sequencing note.** `New` sets `HoldInteractions(true)` (§9), which parks every
 `ask` until a reply arrives. Until the interaction routes exist (Phase 3),
 enabling hold would wedge a turn with no way out — so Phases 0–2 run with the
@@ -1299,8 +1309,9 @@ below.
 - **B3. Prompt id.** v2's `session.prompt` accepts an optional `id` and returns
   `SessionInput.Admitted`, with `ConflictError` on duplicates; adopt the same.
 - **B4. Messages vs context.** v2 exposes both `session.messages` (full) and
-  `session.context` (post-compaction); add a full-message read and expose both
-  endpoints (today `/message` is the active context only).
+  `session.context` (post-compaction); `/message` returns the full transcript and
+  `/context` the active context. *Landed: `Client.SessionHistory` /
+  `Store.Messages`.*
 - **B6. `session.active` / `session.history` endpoints.** v2 exposes a
   running-session list and a finite durable-event page; this draft omits both.
   The history page is a one-shot `Durable` read (bounded, unlike the SSE stream);

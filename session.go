@@ -167,7 +167,7 @@ func (s *Session) requireSession() (*schema.SessionInfo, error) {
 		return nil, err
 	}
 	if stored == nil {
-		return nil, fmt.Errorf("session not found: %s", s.id)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, s.id)
 	}
 	return stored, nil
 }

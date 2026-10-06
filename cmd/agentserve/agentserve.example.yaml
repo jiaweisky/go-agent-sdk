@@ -1,0 +1,34 @@
+# agentserve configuration. Copy to agentserve.yaml (git-ignored) and edit.
+# No environment variables are read; credentials and the auth token live only
+# here. See docs/DESIGN-HTTP.md 12.
+listen: 127.0.0.1:8787
+baseURL: ""                       # optional; used by the optional OpenAPI document
+root: ~/.go-agent-sdk             # required; the SDK state directory
+workingDirectory: /srv/project
+configDirs: [/srv/project/.agents]
+model: deepseek-flash             # required
+protocol: openai-compatible-chat  # required
+modelBaseURL: https://api.deepseek.com
+credentials:                      # required; the only secret source (no env)
+  apiKey: sk-...                  # or credentials.aws: { region, accessKeyId, secretAccessKey, sessionToken }
+contextLimit: 128000
+outputLimit: 8192
+subagentDepth: 1
+titleAuto: false
+agents: [build]                   # allow-list of usable agents
+auth:
+  bearer: <token>                 # optional; required for non-loopback binds
+inboundPermissions:               # REPLACES the SDK deny-by-default (not additive)
+  - { action: bash, resource: "*", effect: deny }
+  - { action: write, resource: "*", effect: deny }
+  - { action: edit, resource: "*", effect: deny }
+interactionTimeout: 5m            # optional HITL fallback
+interactionFallback: reject
+subscriberCapacity: 256
+keepAlive: 15s
+publicRoutes: [/api/health]
+cors: []                          # extra browser origins
+# tls:                            # optional; serve HTTPS when both are set
+#   certFile: /etc/agentserve/tls.crt
+#   keyFile: /etc/agentserve/tls.key
+allowInsecure: false
