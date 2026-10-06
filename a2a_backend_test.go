@@ -620,3 +620,28 @@ func TestA2ABackendSurfacesRemoteFailure(t *testing.T) {
 		t.Fatal("remote failure was not surfaced as a provider error")
 	}
 }
+
+// TestMergePermissionRules guards the resume merge: the overlay is appended so it
+// wins on conflict, duplicates are dropped (idempotent), and empty inputs pass
+// through.
+func TestMergePermissionRules(t *testing.T) {
+	allow := schema.PermissionRule{Action: "read", Resource: "*", Effect: schema.PermissionEffectAllow}
+	deny := schema.PermissionRule{Action: "bash", Resource: "*", Effect: schema.PermissionEffectDeny}
+
+	base := schema.PermissionRuleset{allow}
+	inbound := schema.PermissionRuleset{deny}
+
+	merged := mergePermissionRules(base, inbound)
+	if len(merged) != 2 || merged[0] != allow || merged[1] != deny {
+		t.Fatalf("merged = %v, want [allow deny] (overlay last)", merged)
+	}
+	if again := mergePermissionRules(merged, inbound); len(again) != 2 {
+		t.Fatalf("re-merge grew the ruleset: %v", again)
+	}
+	if got := mergePermissionRules(nil, inbound); len(got) != 1 || got[0] != deny {
+		t.Fatalf("nil base = %v, want [deny]", got)
+	}
+	if got := mergePermissionRules(base, nil); len(got) != 1 || got[0] != allow {
+		t.Fatalf("nil overlay = %v, want [allow]", got)
+	}
+}

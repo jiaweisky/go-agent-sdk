@@ -91,18 +91,62 @@ func (f *a2aFactory) CreateSession(ctx context.Context, req server.SessionReques
 	return &a2aSession{session: session, turns: map[string]*a2aTurn{}}, nil
 }
 
-// ResumeSession implements server.Factory.
+// ResumeSession implements server.Factory. The inbound/workspace ruleset is
+// merged over the session's stored rules rather than replacing them, so a
+// session a host created in-process keeps its own policy while still being
+// constrained by the inbound rules.
 func (f *a2aFactory) ResumeSession(
 	ctx context.Context,
 	sessionID string,
 	workspace server.Workspace,
 ) (server.Session, error) {
-	session, err := f.client.ResumeSession(ctx, sessionID, &SessionConfig{Permissions: f.permissionsFor(workspace)})
+	inbound := f.permissionsFor(workspace)
+	stored, err := f.client.rt.store.Get(schema.SessionID(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	rules := inbound
+	if stored != nil {
+		rules = mergePermissionRules(permissionRulesOf(stored), inbound)
+	}
+	session, err := f.client.ResumeSession(ctx, sessionID, &SessionConfig{Permissions: rules})
 	if err != nil {
 		return nil, err
 	}
 	f.client.rt.markInbound(schema.SessionID(session.ID()))
 	return &a2aSession{session: session, turns: map[string]*a2aTurn{}}, nil
+}
+
+// mergePermissionRules appends the overlay rules not already present in base, so
+// the result is idempotent (re-merging the same overlay does not grow the
+// ruleset) and the overlay wins on conflict, since evaluation takes the last
+// matching rule.
+func mergePermissionRules(base, overlay schema.PermissionRuleset) schema.PermissionRuleset {
+	if len(overlay) == 0 {
+		return base
+	}
+	if len(base) == 0 {
+		return overlay
+	}
+	merged := make(schema.PermissionRuleset, 0, len(base)+len(overlay))
+	merged = append(merged, base...)
+	for _, rule := range overlay {
+		if !containsPermissionRule(merged, rule) {
+			merged = append(merged, rule)
+		}
+	}
+	return merged
+}
+
+// containsPermissionRule reports whether rules already contains an identical
+// rule (Action, Resource, Effect).
+func containsPermissionRule(rules schema.PermissionRuleset, rule schema.PermissionRule) bool {
+	for _, existing := range rules {
+		if existing == rule {
+			return true
+		}
+	}
+	return false
 }
 
 // permissionsFor picks the ruleset a session runs under: the resolved
