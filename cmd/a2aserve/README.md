@@ -62,9 +62,8 @@ agents: [build]                     # existing agent names to expose
 #     name: Build Agent
 #     description: "An autonomous coding agent that maintains the files under the working directory."
 #     version: "1.0.0"
-#     documentationUrl: https://example.com/build-agent
-#     iconUrl: https://example.com/icon.png
-#     provider: { organization: Acme, url: https://acme.dev }
+#     documentationUrl: https://github.com/jiaweisky/go-agent-sdk
+#     provider: { organization: jiaweisky, url: https://github.com/jiaweisky }
 #     skills:                         # id must be a real capability (tool/subagent/skill)
 #       - { id: read, name: Read,    description: "Read a file.", tags: [files] }
 #       - { id: bash, name: Shell,   description: "Run a command.", tags: [shell] }

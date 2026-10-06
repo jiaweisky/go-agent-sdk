@@ -27,18 +27,28 @@ credentials:                      # REQUIRED: the only place a secret is read
   #   sessionToken: <token>       #   optional
 
 agents: [build]                   # existing agent names to expose
-# cards:                          # optional per-agent AgentCard overrides
-#   build:
-#     name: Build Agent
-#     description: "An autonomous coding agent that maintains the files under the working directory."
-#     version: "1.0.0"
-#     documentationUrl: https://example.com/build-agent
-#     iconUrl: https://example.com/icon.png
-#     provider: { organization: Acme, url: https://acme.dev }
-#     skills:                       # id must be a real capability (tool/subagent/skill)
-#       - { id: read, name: Read,  description: "Read a file.", tags: [files] }
-#       - { id: bash, name: Shell, description: "Run a command.", tags: [shell] }
-#       - { id: general, name: General subagent, tags: [subagent] }
+cards:                          # optional per-agent card overrides (advertised over A2A)
+  build:                        # key must be an exposed agent name
+    name: Build Agent
+    description: "An autonomous coding agent that maintains the go-agent-sdk project: it reads, writes, edits and patches files, runs build/test commands, and searches the codebase, subject to the configured inbound permissions."
+    version: "1.0.0"
+    documentationUrl: https://github.com/jiaweisky/go-agent-sdk
+    provider: { organization: jiaweisky, url: https://github.com/jiaweisky }
+    skills:                     # id must be a real capability of the agent (tool/subagent/skill)
+      - { id: read,        name: Read,        description: "Read a file or paged text (images too).", tags: [files] }
+      - { id: write,       name: Write,       description: "Write content to one file.",             tags: [files] }
+      - { id: edit,        name: Edit,        description: "Replace an exact string in a file.",     tags: [files] }
+      - { id: apply_patch, name: Apply patch, description: "Apply an add/update/delete patch.",      tags: [files] }
+      - { id: glob,        name: Find files,  description: "Find files by glob pattern.",            tags: [search] }
+      - { id: grep,        name: Search,      description: "Search file contents by regex.",         tags: [search] }
+      - { id: bash,        name: Shell,       description: "Run a shell command.",                   tags: [shell] }
+      - { id: webfetch,    name: Fetch URL,   description: "Fetch a URL as text/markdown/HTML.",     tags: [web] }
+      - { id: question,    name: Ask,         description: "Ask the user a question.",               tags: [interaction] }
+      - { id: todowrite,   name: Todos,       description: "Maintain the task list.",                tags: [planning] }
+      - { id: skill,       name: Load skill,  description: "Load a specialized skill.",              tags: [knowledge] }
+      - { id: task,        name: Delegate,    description: "Delegate work to a subagent.",           tags: [subagent] }
+      - { id: general,     name: General subagent, description: "Delegate multi-step research/execution.", tags: [subagent] }
+      - { id: explore,     name: Explore subagent, description: "Delegate fast codebase exploration.",     tags: [subagent] }
 
 # contextLimit: 128000            # optional; drives automatic compaction
 # outputLimit: 8192               # optional
