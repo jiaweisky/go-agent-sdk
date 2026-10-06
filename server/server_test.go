@@ -260,24 +260,15 @@ func TestPromptTurnEvents(t *testing.T) {
 	_ = json.NewDecoder(resp.Body).Decode(&created)
 	resp.Body.Close()
 
-	// open the per-session stream, then prompt; the turn's text should stream.
-	done := make(chan struct{})
+	// Prompt from a goroutine (plain http, so no t.Fatalf off the test
+	// goroutine), after a short delay so the SSE subscription is in place;
+	// assert the streamed text on the test goroutine.
 	go func() {
-		defer close(done)
-		readSSE(t, ts, "/api/session/"+created.Data.ID+"/event", "hello world")
+		time.Sleep(100 * time.Millisecond)
+		resp, err := http.Post(ts.URL+"/api/session/"+created.Data.ID+"/prompt", "application/json", strings.NewReader(`{"prompt":"hi"}`))
+		if err == nil {
+			resp.Body.Close()
+		}
 	}()
-	// give the stream a moment to subscribe before prompting
-	time.Sleep(100 * time.Millisecond)
-
-	resp = doJSON(t, http.MethodPost, ts.URL+"/api/session/"+created.Data.ID+"/prompt", `{"prompt":"hi"}`, nil)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("prompt status = %d", resp.StatusCode)
-	}
-
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("did not observe the turn's text on the session stream")
-	}
+	readSSE(t, ts, "/api/session/"+created.Data.ID+"/event", "hello world")
 }

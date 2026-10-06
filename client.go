@@ -437,7 +437,7 @@ type AgentTool struct {
 func (c *Client) AgentTools(agentID string, permissions schema.PermissionRuleset) ([]AgentTool, error) {
 	info := c.rt.agents.Get(schema.AgentID(agentID))
 	if info == nil {
-		return nil, fmt.Errorf("unknown agent %q", agentID)
+		return nil, fmt.Errorf("%w: %q", ErrUnknownAgent, agentID)
 	}
 	registry, err := c.rt.newSessionRegistry(info, permissions, nil)
 	if err != nil {
