@@ -110,7 +110,25 @@ func (c config) isLoopback() bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// validate runs every check in order, returning the first failure.
 func (c config) validate() error {
+	checks := []func() error{
+		c.validateRequired,
+		c.validateCredentials,
+		c.validateAuth,
+		c.validateLimits,
+		c.validatePermissions,
+		c.validateHTTP,
+	}
+	for _, check := range checks {
+		if err := check(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c config) validateRequired() error {
 	switch {
 	case c.Root == "":
 		return errors.New("root is required (the SDK state directory)")
@@ -123,11 +141,21 @@ func (c config) validate() error {
 	case c.Credentials.APIKey == "" && c.Credentials.AWS == nil:
 		return errors.New("credentials must set apiKey or aws")
 	}
-	if aws := c.Credentials.AWS; aws != nil {
-		if aws.Region == "" || aws.AccessKeyID == "" || aws.SecretAccessKey == "" {
-			return errors.New("aws credentials require region, accessKeyId and secretAccessKey")
-		}
+	return nil
+}
+
+func (c config) validateCredentials() error {
+	aws := c.Credentials.AWS
+	if aws == nil {
+		return nil
 	}
+	if aws.Region == "" || aws.AccessKeyID == "" || aws.SecretAccessKey == "" {
+		return errors.New("aws credentials require region, accessKeyId and secretAccessKey")
+	}
+	return nil
+}
+
+func (c config) validateAuth() error {
 	if c.Auth != nil {
 		hasBasic := c.Auth.Username != "" && c.Auth.Password != ""
 		if c.Auth.Bearer == "" && !hasBasic {
@@ -137,9 +165,17 @@ func (c config) validate() error {
 	if !c.isLoopback() && !c.AllowInsecure && c.Auth == nil {
 		return errors.New("refusing to bind a non-loopback address without auth; set auth.bearer, bind loopback, or allowInsecure")
 	}
-	if c.InteractionFallback != "" && c.InteractionFallback != "reject" && c.InteractionFallback != "allow" {
-		return errors.New("interactionFallback must be reject or allow")
+	return nil
+}
+
+func (c config) validateLimits() error {
+	if c.ContextLimit < 0 || c.OutputLimit < 0 || c.SubagentDepth < 0 || c.SubscriberCapacity < 0 {
+		return errors.New("limits must not be negative")
 	}
+	return nil
+}
+
+func (c config) validatePermissions() error {
 	for _, rule := range c.InboundPermissions {
 		switch schema.PermissionEffect(rule.Effect) {
 		case schema.PermissionEffectAllow, schema.PermissionEffectDeny, schema.PermissionEffectAsk:
@@ -147,8 +183,12 @@ func (c config) validate() error {
 			return fmt.Errorf("inboundPermissions: unknown effect %q", rule.Effect)
 		}
 	}
-	if c.ContextLimit < 0 || c.OutputLimit < 0 || c.SubagentDepth < 0 || c.SubscriberCapacity < 0 {
-		return errors.New("limits must not be negative")
+	return nil
+}
+
+func (c config) validateHTTP() error {
+	if c.InteractionFallback != "" && c.InteractionFallback != "reject" && c.InteractionFallback != "allow" {
+		return errors.New("interactionFallback must be reject or allow")
 	}
 	if c.TLS != nil && (c.TLS.CertFile == "" || c.TLS.KeyFile == "") {
 		return errors.New("tls requires both certFile and keyFile")

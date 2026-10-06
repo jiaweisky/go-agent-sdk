@@ -1,10 +1,6 @@
 package server
 
-import (
-	"net/http"
-
-	"github.com/jiaweisky/go-agent-sdk/schema"
-)
+import "net/http"
 
 func (s *Server) handleAgentList(w http.ResponseWriter, r *http.Request) {
 	all := s.client.Agents().All()
@@ -48,12 +44,7 @@ func (s *Server) handleToolList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "agent query parameter is required")
 		return
 	}
-	if s.client.Agents().Get(schema.AgentID(agentID)) == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "unknown agent: "+agentID)
-		return
-	}
-	if !s.allowed(agentID) {
-		writeError(w, http.StatusForbidden, "forbidden", "agent not allowed: "+agentID)
+	if !s.requireAgent(w, agentID) {
 		return
 	}
 	tools, err := s.client.AgentTools(agentID, s.inbound)

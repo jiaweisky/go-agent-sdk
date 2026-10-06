@@ -9,18 +9,29 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
+// beginEventStream opens an SSE response, installs the heartbeat and writes the
+// server.connected frame. It returns false when the stream could not be opened.
+func (s *Server) beginEventStream(w http.ResponseWriter, r *http.Request) (*sseWriter, context.Context, context.CancelFunc, bool) {
+	sw, ok := openSSE(w)
+	if !ok {
+		return nil, nil, nil, false
+	}
+	ctx, cancel := s.streamContext(r)
+	startHeartbeat(ctx, sw, s.opts.KeepAlive)
+	if sw.event(connectedEvent()) != nil {
+		cancel()
+		return nil, nil, nil, false
+	}
+	return sw, ctx, cancel, true
+}
+
 // handleEvent streams every live event (all sessions, including subagents).
 func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
-	sw, ok := openSSE(w)
+	sw, ctx, cancel, ok := s.beginEventStream(w, r)
 	if !ok {
 		return
 	}
-	ctx, cancel := s.streamContext(r)
 	defer cancel()
-	startHeartbeat(ctx, sw, s.opts.KeepAlive)
-	if sw.event(connectedEvent()) != nil {
-		return
-	}
 	for ev, err := range s.client.EventStream().AllBounded(ctx, s.opts.SubscriberCapacity) {
 		if err != nil {
 			_ = sw.errorFrame("subscriber_overflow", s.opts.SubscriberCapacity)
@@ -49,16 +60,11 @@ func (s *Server) handleSessionEvent(w http.ResponseWriter, r *http.Request) {
 		}
 		after = value
 	}
-	sw, ok := openSSE(w)
+	sw, ctx, cancel, ok := s.beginEventStream(w, r)
 	if !ok {
 		return
 	}
-	ctx, cancel := s.streamContext(r)
 	defer cancel()
-	startHeartbeat(ctx, sw, s.opts.KeepAlive)
-	if sw.event(connectedEvent()) != nil {
-		return
-	}
 	s.streamSessionEvents(ctx, sw, id, after)
 }
 

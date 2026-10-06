@@ -20,30 +20,32 @@ func (s *Server) handleSessionPermissionList(w http.ResponseWriter, r *http.Requ
 	writeData(w, http.StatusOK, permissionDTOs(s.client.Permission().ForSession(id)))
 }
 
-func (s *Server) handleSessionPermissionGet(w http.ResponseWriter, r *http.Request) {
+// pendingPermission returns the pending permission request owned by the path
+// session, writing 404 and returning nil otherwise.
+func (s *Server) pendingPermission(w http.ResponseWriter, r *http.Request) *agent.PermissionRequest {
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
 		s.writeSDKError(w, err)
-		return
+		return nil
 	}
 	req := s.client.Permission().Get(r.PathValue("requestID"))
 	if req == nil || req.SessionID != id {
 		writeError(w, http.StatusNotFound, "not_found", "permission request not found")
+		return nil
+	}
+	return req
+}
+
+func (s *Server) handleSessionPermissionGet(w http.ResponseWriter, r *http.Request) {
+	req := s.pendingPermission(w, r)
+	if req == nil {
 		return
 	}
 	writeData(w, http.StatusOK, fromPermissionRequest(*req))
 }
 
 func (s *Server) handleSessionPermissionReply(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
-		return
-	}
-	requestID := r.PathValue("requestID")
-	req := s.client.Permission().Get(requestID)
-	if req == nil || req.SessionID != id {
-		writeError(w, http.StatusNotFound, "not_found", "permission request not found")
+	if s.pendingPermission(w, r) == nil {
 		return
 	}
 	var body struct {
@@ -60,7 +62,7 @@ func (s *Server) handleSessionPermissionReply(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err := s.client.Permission().Reply(agent.PermissionReplyInput{
-		RequestID: requestID, Reply: agent.PermissionReply(body.Reply), Message: body.Message,
+		RequestID: r.PathValue("requestID"), Reply: agent.PermissionReply(body.Reply), Message: body.Message,
 	}); err != nil {
 		s.writeSDKError(w, err)
 		return

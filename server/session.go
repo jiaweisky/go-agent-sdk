@@ -23,12 +23,24 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 		s.writeSDKError(w, err)
 		return
 	}
-	order := r.URL.Query().Get("order")
-	search := strings.ToLower(r.URL.Query().Get("search"))
-	limit := parseInt(r.URL.Query().Get("limit"), defaultSessionLimit)
+	query := r.URL.Query()
+	order := query.Get("order")
+	search := strings.ToLower(query.Get("search"))
+	limit := parseInt(query.Get("limit"), defaultSessionLimit)
 	if limit <= 0 || limit > maxSessionLimit {
 		limit = defaultSessionLimit
 	}
+	sessions = selectSessions(sessions, search, order, limit)
+	out := make([]sessionInfoDTO, 0, len(sessions))
+	for _, item := range sessions {
+		out = append(out, fromRootSessionInfo(item))
+	}
+	writeData(w, http.StatusOK, out)
+}
+
+// selectSessions filters by a case-insensitive title substring, orders by
+// timeUpdated (desc unless order is "asc") and truncates to limit.
+func selectSessions(sessions []agent.SessionInfo, search, order string, limit int) []agent.SessionInfo {
 	if search != "" {
 		filtered := sessions[:0]
 		for _, item := range sessions {
@@ -38,19 +50,17 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 		}
 		sessions = filtered
 	}
-	if order == "asc" {
-		sort.SliceStable(sessions, func(i, j int) bool { return sessions[i].TimeUpdated < sessions[j].TimeUpdated })
-	} else {
-		sort.SliceStable(sessions, func(i, j int) bool { return sessions[i].TimeUpdated > sessions[j].TimeUpdated })
-	}
+	ascending := order == "asc"
+	sort.SliceStable(sessions, func(i, j int) bool {
+		if ascending {
+			return sessions[i].TimeUpdated < sessions[j].TimeUpdated
+		}
+		return sessions[i].TimeUpdated > sessions[j].TimeUpdated
+	})
 	if len(sessions) > limit {
 		sessions = sessions[:limit]
 	}
-	out := make([]sessionInfoDTO, 0, len(sessions))
-	for _, item := range sessions {
-		out = append(out, fromRootSessionInfo(item))
-	}
-	writeData(w, http.StatusOK, out)
+	return sessions
 }
 
 type createSessionRequest struct {
@@ -72,12 +82,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "agent is required")
 		return
 	}
-	if s.client.Agents().Get(schema.AgentID(agentID)) == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "unknown agent: "+agentID)
-		return
-	}
-	if !s.allowed(agentID) {
-		writeError(w, http.StatusForbidden, "forbidden", "agent not allowed: "+agentID)
+	if !s.requireAgent(w, agentID) {
 		return
 	}
 	handle, err := s.client.CreateSession(r.Context(), &agent.SessionConfig{
@@ -88,12 +93,12 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := handle.ID()
-	info, err := s.client.GetSession(r.Context(), id)
+	info, infoErr := s.client.GetSession(r.Context(), id)
 	// The session row persists; drop the handle so an unused session keeps no
 	// event subscription.
 	_ = handle.Close()
-	if err != nil {
-		s.writeSDKError(w, err)
+	if infoErr != nil {
+		s.writeSDKError(w, infoErr)
 		return
 	}
 	writeData(w, http.StatusOK, fromSchemaSessionInfo(info))
@@ -121,17 +126,7 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	// A parked permission/question ask cannot be released by Abort; reject them
 	// so the worker can drain before we delete the rows.
 	s.rejectPending(id)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		e := s.entry(id)
-		e.mu.Lock()
-		busy := e.worker != nil
-		e.mu.Unlock()
-		if !busy || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	s.drainWorker(id, 5*time.Second)
 	s.evict(id)
 	if err := s.client.DeleteSession(r.Context(), id); err != nil {
 		s.writeSDKError(w, err)
@@ -147,21 +142,10 @@ func (s *Server) handleSessionSetAgent(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if s.client.Agents().Get(schema.AgentID(body.Agent)) == nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "unknown agent: "+body.Agent)
+	if !s.requireAgent(w, body.Agent) {
 		return
 	}
-	if !s.allowed(body.Agent) {
-		writeError(w, http.StatusForbidden, "forbidden", "agent not allowed: "+body.Agent)
-		return
-	}
-	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
-		return h.SetAgent(body.Agent)
-	}); err != nil {
-		s.writeSDKError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	s.mutate(w, r, func(h *agent.Session) error { return h.SetAgent(body.Agent) })
 }
 
 func (s *Server) handleSessionSetModel(w http.ResponseWriter, r *http.Request) {
@@ -178,13 +162,7 @@ func (s *Server) handleSessionSetModel(w http.ResponseWriter, r *http.Request) {
 		variant := schema.ModelVariantID(*body.Variant)
 		ref.Variant = &variant
 	}
-	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
-		return h.SetModel(ref)
-	}); err != nil {
-		s.writeSDKError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	s.mutate(w, r, func(h *agent.Session) error { return h.SetModel(ref) })
 }
 
 func (s *Server) handleSessionSetTitle(w http.ResponseWriter, r *http.Request) {
@@ -194,13 +172,7 @@ func (s *Server) handleSessionSetTitle(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
-		return h.SetTitle(body.Title)
-	}); err != nil {
-		s.writeSDKError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	s.mutate(w, r, func(h *agent.Session) error { return h.SetTitle(body.Title) })
 }
 
 type promptRequest struct {
@@ -309,24 +281,27 @@ func (s *Server) handleSessionWait(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSessionMessage(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.client.GetSession(r.Context(), r.PathValue("sessionID")); err != nil {
-		s.writeSDKError(w, err)
-		return
-	}
-	messages, err := s.client.SessionHistory(r.PathValue("sessionID"))
-	if err != nil {
-		s.writeSDKError(w, err)
-		return
-	}
-	writeData(w, http.StatusOK, messages)
+	s.writeSessionMessages(w, r, s.client.SessionHistory)
 }
 
 func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.client.GetSession(r.Context(), r.PathValue("sessionID")); err != nil {
+	s.writeSessionMessages(w, r, s.client.SessionMessages)
+}
+
+// writeSessionMessages verifies the session exists, reads its messages with
+// read (History for the full transcript, Messages for the active context) and
+// writes them.
+func (s *Server) writeSessionMessages(
+	w http.ResponseWriter,
+	r *http.Request,
+	read func(string) ([]schema.SessionMessage, error),
+) {
+	id := r.PathValue("sessionID")
+	if _, err := s.client.GetSession(r.Context(), id); err != nil {
 		s.writeSDKError(w, err)
 		return
 	}
-	messages, err := s.client.SessionMessages(r.PathValue("sessionID"))
+	messages, err := read(id)
 	if err != nil {
 		s.writeSDKError(w, err)
 		return
@@ -364,23 +339,37 @@ func (s *Server) handleSessionRevertGet(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleSessionRevertClear(w http.ResponseWriter, r *http.Request) {
-	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
-		return h.RevertClear()
-	}); err != nil {
+	s.mutate(w, r, func(h *agent.Session) error { return h.RevertClear() })
+}
+
+func (s *Server) handleSessionRevertCommit(w http.ResponseWriter, r *http.Request) {
+	s.mutate(w, r, func(h *agent.Session) error { return h.RevertCommit() })
+}
+
+// mutate runs fn against the session's handle and writes 204 on success, or
+// maps the error. It is the shared shape for the session state changes that
+// return no content.
+func (s *Server) mutate(w http.ResponseWriter, r *http.Request, fn func(*agent.Session) error) {
+	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), fn); err != nil {
 		s.writeSDKError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleSessionRevertCommit(w http.ResponseWriter, r *http.Request) {
-	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
-		return h.RevertCommit()
-	}); err != nil {
-		s.writeSDKError(w, err)
-		return
+// drainWorker waits, up to timeout, for a session's worker to finish.
+func (s *Server) drainWorker(id string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for {
+		e := s.entry(id)
+		e.mu.Lock()
+		busy := e.worker != nil
+		e.mu.Unlock()
+		if !busy || time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) evict(id string) {

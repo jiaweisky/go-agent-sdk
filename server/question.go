@@ -26,30 +26,32 @@ func (s *Server) handleSessionQuestionList(w http.ResponseWriter, r *http.Reques
 	writeData(w, http.StatusOK, questionDTOs(requests))
 }
 
-func (s *Server) handleSessionQuestionGet(w http.ResponseWriter, r *http.Request) {
+// pendingQuestion returns the pending question request owned by the path
+// session, writing 404 and returning nil otherwise.
+func (s *Server) pendingQuestion(w http.ResponseWriter, r *http.Request) *agent.QuestionRequest {
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
 		s.writeSDKError(w, err)
-		return
+		return nil
 	}
 	req := s.client.Question().Get(r.PathValue("requestID"))
 	if req == nil || req.SessionID != id {
 		writeError(w, http.StatusNotFound, "not_found", "question request not found")
+		return nil
+	}
+	return req
+}
+
+func (s *Server) handleSessionQuestionGet(w http.ResponseWriter, r *http.Request) {
+	req := s.pendingQuestion(w, r)
+	if req == nil {
 		return
 	}
 	writeData(w, http.StatusOK, fromQuestionRequest(*req))
 }
 
 func (s *Server) handleSessionQuestionReply(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
-		return
-	}
-	requestID := r.PathValue("requestID")
-	req := s.client.Question().Get(requestID)
-	if req == nil || req.SessionID != id {
-		writeError(w, http.StatusNotFound, "not_found", "question request not found")
+	if s.pendingQuestion(w, r) == nil {
 		return
 	}
 	var body struct {
@@ -58,7 +60,7 @@ func (s *Server) handleSessionQuestionReply(w http.ResponseWriter, r *http.Reque
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if err := s.client.Question().Reply(requestID, body.Answers); err != nil {
+	if err := s.client.Question().Reply(r.PathValue("requestID"), body.Answers); err != nil {
 		s.writeSDKError(w, err)
 		return
 	}
@@ -66,18 +68,10 @@ func (s *Server) handleSessionQuestionReply(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleSessionQuestionReject(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
+	if s.pendingQuestion(w, r) == nil {
 		return
 	}
-	requestID := r.PathValue("requestID")
-	req := s.client.Question().Get(requestID)
-	if req == nil || req.SessionID != id {
-		writeError(w, http.StatusNotFound, "not_found", "question request not found")
-		return
-	}
-	if err := s.client.Question().Reject(requestID); err != nil {
+	if err := s.client.Question().Reject(r.PathValue("requestID")); err != nil {
 		s.writeSDKError(w, err)
 		return
 	}

@@ -225,6 +225,20 @@ func (s *Server) defaultAgent() string {
 	return string(core.AgentDefaultID)
 }
 
+// requireAgent validates that name is a registered, allowed agent. It writes
+// the error response and returns false otherwise.
+func (s *Server) requireAgent(w http.ResponseWriter, name string) bool {
+	if s.client.Agents().Get(schema.AgentID(name)) == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "unknown agent: "+name)
+		return false
+	}
+	if !s.allowed(name) {
+		writeError(w, http.StatusForbidden, "forbidden", "agent not allowed: "+name)
+		return false
+	}
+	return true
+}
+
 // attach returns the shared handle for a session, resuming it once if needed.
 // The inbound ruleset is merged over the session's stored rules.
 func (s *Server) attach(ctx context.Context, sessionID string) (*agent.Session, error) {
