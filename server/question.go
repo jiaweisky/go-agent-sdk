@@ -14,7 +14,7 @@ func (s *Server) handleQuestionList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessionQuestionList(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	var requests []agent.QuestionRequest
@@ -29,7 +29,7 @@ func (s *Server) handleSessionQuestionList(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleSessionQuestionGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	req := s.client.Question().Get(r.PathValue("requestID"))
@@ -43,7 +43,7 @@ func (s *Server) handleSessionQuestionGet(w http.ResponseWriter, r *http.Request
 func (s *Server) handleSessionQuestionReply(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	requestID := r.PathValue("requestID")
@@ -59,7 +59,7 @@ func (s *Server) handleSessionQuestionReply(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := s.client.Question().Reply(requestID, body.Answers); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -68,7 +68,7 @@ func (s *Server) handleSessionQuestionReply(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleSessionQuestionReject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	requestID := r.PathValue("requestID")
@@ -78,7 +78,7 @@ func (s *Server) handleSessionQuestionReject(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := s.client.Question().Reject(requestID); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

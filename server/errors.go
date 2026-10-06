@@ -4,7 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
 	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
@@ -35,8 +38,9 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, apiError{Error: code, Message: message})
 }
 
-// writeSDKError maps an SDK error to an HTTP status.
-func writeSDKError(w http.ResponseWriter, err error) {
+// writeSDKError maps an SDK error to an HTTP status. Internal causes are logged
+// (with a short ref echoed to the client) and never leaked.
+func (s *Server) writeSDKError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, agent.ErrSessionNotFound), errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
@@ -47,8 +51,19 @@ func writeSDKError(w http.ResponseWriter, err error) {
 	case errors.Is(err, coresession.ErrStopped):
 		writeError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
 	default:
-		writeError(w, http.StatusInternalServerError, "internal", "unexpected server error")
+		ref := newErrorRef()
+		if s.onError != nil {
+			s.onError(fmt.Errorf("ref=%s: %w", ref, err))
+		}
+		writeJSON(w, http.StatusInternalServerError, apiError{
+			Error: "internal", Message: "unexpected server error. Check server logs for details.", Ref: ref,
+		})
 	}
+}
+
+// newErrorRef returns a short opaque id correlating a redacted 500 with its log.
+func newErrorRef() string {
+	return "err_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 }
 
 // decodeJSON reads a request body into v, returning false (and a 400) on error.

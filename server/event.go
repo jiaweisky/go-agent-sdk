@@ -37,7 +37,7 @@ func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessionEvent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	after := -1
@@ -110,17 +110,43 @@ func (s *Server) streamSessionEvents(ctx context.Context, sw *sseWriter, id stri
 		close(out)
 	}()
 
-	seen := map[string]bool{}
+	seen := newRecentIDs(4096)
 	for ev := range out {
-		key := string(ev.ID)
-		if key != "" {
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
+		if key := string(ev.ID); key != "" && seen.add(key) {
+			continue
 		}
 		if sw.event(toWireEvent(ev)) != nil {
 			return
 		}
 	}
+}
+
+// recentIDs is a bounded FIFO set used to de-duplicate the overlap between the
+// durable replay leg and the live leg without unbounded memory growth. The two
+// legs differ only near the replay/live boundary, so a bounded window suffices.
+type recentIDs struct {
+	capacity int
+	order    []string
+	set      map[string]struct{}
+	next     int
+}
+
+func newRecentIDs(capacity int) *recentIDs {
+	return &recentIDs{capacity: capacity, set: make(map[string]struct{}, capacity)}
+}
+
+// add records id and reports whether it was already present.
+func (r *recentIDs) add(id string) bool {
+	if _, ok := r.set[id]; ok {
+		return true
+	}
+	if len(r.order) < r.capacity {
+		r.order = append(r.order, id)
+	} else {
+		delete(r.set, r.order[r.next])
+		r.order[r.next] = id
+		r.next = (r.next + 1) % r.capacity
+	}
+	r.set[id] = struct{}{}
+	return false
 }

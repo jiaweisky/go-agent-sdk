@@ -20,7 +20,7 @@ const (
 func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 	sessions, err := s.client.ListSessions(r.Context())
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	order := r.URL.Query().Get("order")
@@ -84,7 +84,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		Agent: agentID, Model: body.Model, Title: body.Title, Permissions: s.inbound,
 	})
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	id := handle.ID()
@@ -93,7 +93,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	// event subscription.
 	_ = handle.Close()
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	writeData(w, http.StatusOK, fromSchemaSessionInfo(info))
@@ -102,7 +102,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 	info, err := s.client.GetSession(r.Context(), r.PathValue("sessionID"))
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	writeData(w, http.StatusOK, fromSchemaSessionInfo(info))
@@ -111,7 +111,7 @@ func (s *Server) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	_ = s.withHandle(r.Context(), id, func(h *agent.Session) error {
@@ -134,7 +134,7 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	s.evict(id)
 	if err := s.client.DeleteSession(r.Context(), id); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -158,7 +158,7 @@ func (s *Server) handleSessionSetAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
 		return h.SetAgent(body.Agent)
 	}); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -181,7 +181,7 @@ func (s *Server) handleSessionSetModel(w http.ResponseWriter, r *http.Request) {
 	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
 		return h.SetModel(ref)
 	}); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -197,7 +197,7 @@ func (s *Server) handleSessionSetTitle(w http.ResponseWriter, r *http.Request) {
 	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
 		return h.SetTitle(body.Title)
 	}); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -224,14 +224,14 @@ func (s *Server) handleSessionPrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	if body.Delivery == "steer" {
 		if err := s.withHandle(r.Context(), id, func(h *agent.Session) error {
 			return h.Steer(body.Prompt)
 		}); err != nil {
-			writeSDKError(w, err)
+			s.writeSDKError(w, err)
 			return
 		}
 	} else {
@@ -243,7 +243,7 @@ func (s *Server) handleSessionPrompt(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessionInterrupt(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
 	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	_ = s.withHandle(r.Context(), id, func(h *agent.Session) error {
@@ -279,7 +279,7 @@ func (s *Server) handleSessionCompact(w http.ResponseWriter, r *http.Request) {
 		return compactErr
 	})
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	writeData(w, http.StatusOK, map[string]any{"compacted": compacted})
@@ -302,7 +302,7 @@ func (s *Server) handleSessionWait(w http.ResponseWriter, r *http.Request) {
 	}
 	idle, err := s.client.WaitSession(r.Context(), r.PathValue("sessionID"), timeout)
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	writeData(w, http.StatusOK, map[string]any{"idle": idle})
@@ -310,12 +310,12 @@ func (s *Server) handleSessionWait(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSessionMessage(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.client.GetSession(r.Context(), r.PathValue("sessionID")); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	messages, err := s.client.SessionHistory(r.PathValue("sessionID"))
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	writeData(w, http.StatusOK, messages)
@@ -323,12 +323,12 @@ func (s *Server) handleSessionMessage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.client.GetSession(r.Context(), r.PathValue("sessionID")); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	messages, err := s.client.SessionMessages(r.PathValue("sessionID"))
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	writeData(w, http.StatusOK, messages)
@@ -348,7 +348,7 @@ func (s *Server) handleSessionRevertStage(w http.ResponseWriter, r *http.Request
 		return stageErr
 	})
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	writeData(w, http.StatusOK, state)
@@ -357,7 +357,7 @@ func (s *Server) handleSessionRevertStage(w http.ResponseWriter, r *http.Request
 func (s *Server) handleSessionRevertGet(w http.ResponseWriter, r *http.Request) {
 	info, err := s.client.GetSession(r.Context(), r.PathValue("sessionID"))
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	writeData(w, http.StatusOK, info.Revert)
@@ -367,7 +367,7 @@ func (s *Server) handleSessionRevertClear(w http.ResponseWriter, r *http.Request
 	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
 		return h.RevertClear()
 	}); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -377,7 +377,7 @@ func (s *Server) handleSessionRevertCommit(w http.ResponseWriter, r *http.Reques
 	if err := s.withHandle(r.Context(), r.PathValue("sessionID"), func(h *agent.Session) error {
 		return h.RevertCommit()
 	}); err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

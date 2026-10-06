@@ -21,6 +21,7 @@
 | 2026-10-06 | §11 decision (after cost/benefit): **no schema-first / generated-SDK pipeline** — SSE isn't OpenAPI-expressible and the consumer set is small; the contract is this document plus a hand-written reference client, with OpenAPI as optional discovery only. Dropped B2, demoted B1 to recommended |
 | 2026-10-06 | Cleanup after that decision: `baseURL` is documented as optional-doc-only; the `bad_request` source is "JSON decode / validation" (no schema pipeline) |
 | 2026-10-06 | Dropped OpenAPI entirely (a hand-maintained spec would drift with no codegen consumer) and the Python/Node client deliverable (that client belongs in the consumer's repo); this repo ships the Go server plus a Go end-to-end test |
+| 2026-10-06 | Implementation refinements: internal 500s are logged with a `ref` (`Options.OnError`); per-session stream dedup is bounded; `/api/session` list documented as omitting `model` |
 
 ---
 
@@ -388,10 +389,10 @@ Requests:
 { "messageID": "msg_…" }         // this SDK has no `files` option on RevertStage
 ```
 
-`SessionInfo`: `id`, `title`, `agent`, `model`, `directory`, `parentID`
-(non-empty for a subagent child session), `timeCreated`, `timeUpdated`. `model`
-is read from the session row (the root `SessionInfo` omits it), so a client can
-confirm the active model after `POST …/model`.
+`SessionInfo`: `id`, `title`, `agent`, `directory`, `parentID` (non-empty for a
+subagent child session), `timeCreated`, `timeUpdated`, and `model`. `model` is
+present on `GET /api/session/{id}` (read from the session row); the `/api/session`
+list omits it, since the list query does not load it (`ListSessions`).
 
 Notes:
 

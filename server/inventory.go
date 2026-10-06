@@ -28,7 +28,7 @@ func (s *Server) handleAgentList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSkillList(w http.ResponseWriter, r *http.Request) {
 	skills, err := s.client.Skills().List()
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	out := make([]skillInfoDTO, 0, len(skills))
@@ -58,7 +58,7 @@ func (s *Server) handleToolList(w http.ResponseWriter, r *http.Request) {
 	}
 	tools, err := s.client.AgentTools(agentID, s.inbound)
 	if err != nil {
-		writeSDKError(w, err)
+		s.writeSDKError(w, err)
 		return
 	}
 	out := make([]toolInfoDTO, 0, len(tools))

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -44,6 +45,9 @@ type Options struct {
 	KeepAlive time.Duration
 	// Public lists route patterns that skip Auth.
 	Public []string
+	// OnError reports internal handler errors that become a redacted 500. Nil
+	// logs them to stderr.
+	OnError func(error)
 }
 
 // Server exposes one agent.Client over HTTP.
@@ -54,6 +58,7 @@ type Server struct {
 	inbound   schema.PermissionRuleset
 	ctx       context.Context
 	cancel    context.CancelFunc
+	onError   func(error)
 	closeOnce sync.Once
 
 	mu      sync.Mutex
@@ -107,10 +112,15 @@ func New(client *agent.Client, opts Options) (*Server, error) {
 		inbound = agent.DefaultInboundPermissions()
 	}
 
+	onError := opts.OnError
+	if onError == nil {
+		onError = func(err error) { log.Printf("server: %v", err) }
+	}
 	s := &Server{
 		client:  client,
 		opts:    opts,
 		inbound: inbound,
+		onError: onError,
 		entries: map[string]*sessionEntry{},
 	}
 	if len(opts.Agents) > 0 {
