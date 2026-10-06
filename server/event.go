@@ -73,7 +73,12 @@ func (s *Server) streamSessionEvents(ctx context.Context, sw *sseWriter, id stri
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for ev := range s.client.EventStream().AllBounded(mergeCtx, s.opts.SubscriberCapacity) {
+		for ev, err := range s.client.EventStream().AllBounded(mergeCtx, s.opts.SubscriberCapacity) {
+			if err != nil {
+				_ = sw.errorFrame("subscriber_overflow", s.opts.SubscriberCapacity)
+				cancel()
+				return
+			}
 			if eventSessionID(ev) != id {
 				continue
 			}

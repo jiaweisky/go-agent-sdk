@@ -118,6 +118,9 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 		h.Abort()
 		return nil
 	})
+	// A parked permission/question ask cannot be released by Abort; reject them
+	// so the worker can drain before we delete the rows.
+	s.rejectPending(id)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		e := s.entry(id)
@@ -247,13 +250,24 @@ func (s *Server) handleSessionInterrupt(w http.ResponseWriter, r *http.Request) 
 		h.Abort()
 		return nil
 	})
-	// Abort cannot release a parked permission ask; reject them explicitly.
-	for _, req := range s.client.Permission().ForSession(id) {
+	// Abort cannot release a parked permission ask; reject pending interactions.
+	s.rejectPending(id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// rejectPending declines every pending permission and rejects every pending
+// question for a session, so a parked turn can drain.
+func (s *Server) rejectPending(sessionID string) {
+	for _, req := range s.client.Permission().ForSession(sessionID) {
 		_ = s.client.Permission().Reply(agent.PermissionReplyInput{
 			RequestID: req.ID, Reply: agent.PermissionReplyReject,
 		})
 	}
-	w.WriteHeader(http.StatusNoContent)
+	for _, req := range s.client.Question().List() {
+		if req.SessionID == sessionID {
+			_ = s.client.Question().Reject(req.ID)
+		}
+	}
 }
 
 func (s *Server) handleSessionCompact(w http.ResponseWriter, r *http.Request) {
@@ -277,6 +291,11 @@ func (s *Server) handleSessionWait(w http.ResponseWriter, r *http.Request) {
 		parsed, err := time.ParseDuration(raw)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", "invalid timeout")
+			return
+		}
+		if parsed <= 0 {
+			// A non-positive timeout must not mean "wait forever" (D3).
+			writeError(w, http.StatusBadRequest, "bad_request", "timeout must be positive")
 			return
 		}
 		timeout = parsed
