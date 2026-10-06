@@ -57,6 +57,26 @@ func TestExposeAgentsCardOverride(t *testing.T) {
 	}
 }
 
+func TestExposeAgentsValidatesSkills(t *testing.T) {
+	client := newTestClient(t)
+	if _, err := exposeAgents(client, []string{"build"}, map[string]cardConfig{
+		"build": {Skills: []skillConfig{{ID: "not-a-capability"}}},
+	}); err == nil {
+		t.Fatal("expected an unknown skill id to be rejected")
+	}
+
+	exposed, err := exposeAgents(client, []string{"build"}, map[string]cardConfig{
+		"build": {Skills: []skillConfig{{ID: "read", Name: "Read files", Tags: []string{"files"}}}},
+	})
+	if err != nil {
+		t.Fatalf("exposeAgents: %v", err)
+	}
+	expose := exposed[0].Expose
+	if expose == nil || len(expose.Skills) != 1 || expose.Skills[0].ID != "read" || expose.Skills[0].Name != "Read files" {
+		t.Fatalf("expose = %+v", expose)
+	}
+}
+
 func TestRunServesCard(t *testing.T) {
 	addr := freeAddr(t)
 	cfg := defaultConfig()

@@ -40,10 +40,33 @@ type config struct {
 	AllowInsecure bool `yaml:"allowInsecure"`
 }
 
-// cardConfig overrides an exposed agent's card name and description.
+// cardConfig overrides an exposed agent's AgentCard.
 type cardConfig struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name             string          `yaml:"name"`
+	Description      string          `yaml:"description"`
+	Version          string          `yaml:"version"`
+	DocumentationURL string          `yaml:"documentationUrl"`
+	IconURL          string          `yaml:"iconUrl"`
+	Provider         *providerConfig `yaml:"provider"`
+	Skills           []skillConfig   `yaml:"skills"`
+}
+
+// providerConfig identifies the organization offering the agent.
+type providerConfig struct {
+	Organization string `yaml:"organization"`
+	URL          string `yaml:"url"`
+}
+
+// skillConfig advertises one capability. ID must name a real capability of the
+// agent (a tool, subagent or skill); the rest is the human-readable layer.
+type skillConfig struct {
+	ID          string   `yaml:"id"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Tags        []string `yaml:"tags"`
+	Examples    []string `yaml:"examples"`
+	InputModes  []string `yaml:"inputModes"`
+	OutputModes []string `yaml:"outputModes"`
 }
 
 // tlsConfig enables HTTPS when both files are set.

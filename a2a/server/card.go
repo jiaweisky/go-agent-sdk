@@ -15,18 +15,38 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 	if info.Description != nil {
 		description = *info.Description
 	}
+	version := "1.0.0"
+	var documentationURL, iconURL string
+	var provider *a2a.AgentProvider
+	var skills []a2a.AgentSkill
 	if info.Expose != nil {
-		if info.Expose.Name != "" {
-			name = info.Expose.Name
+		expose := info.Expose
+		if expose.Name != "" {
+			name = expose.Name
 		}
-		if info.Expose.Description != "" {
-			description = info.Expose.Description
+		if expose.Description != "" {
+			description = expose.Description
 		}
+		if expose.Version != "" {
+			version = expose.Version
+		}
+		documentationURL = expose.DocumentationURL
+		iconURL = expose.IconURL
+		if expose.Provider != nil {
+			provider = &a2a.AgentProvider{Org: expose.Provider.Organization, URL: expose.Provider.URL}
+		}
+		skills = cardSkills(expose.Skills)
+	}
+	if len(skills) == 0 {
+		skills = []a2a.AgentSkill{{ID: string(info.ID), Name: name, Description: description, Tags: []string{"agent"}}}
 	}
 	card := &a2a.AgentCard{
-		Name:        name,
-		Description: description,
-		Version:     "1.0.0",
+		Name:             name,
+		Description:      description,
+		Version:          version,
+		DocumentationURL: documentationURL,
+		IconURL:          iconURL,
+		Provider:         provider,
 		Capabilities: a2a.AgentCapabilities{
 			Streaming: true,
 		},
@@ -34,12 +54,7 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 		// tool can ingest. Output: assistant text and structured (data) parts.
 		DefaultInputModes:  []string{"text/plain", "application/json", "image/png", "image/jpeg", "image/gif", "image/webp"},
 		DefaultOutputModes: []string{"text/plain", "application/json"},
-		Skills: []a2a.AgentSkill{{
-			ID:          string(info.ID),
-			Name:        name,
-			Description: description,
-			Tags:        []string{"agent"},
-		}},
+		Skills:             skills,
 	}
 	if endpoint != "" {
 		card.SupportedInterfaces = []*a2a.AgentInterface{
@@ -47,13 +62,37 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 		}
 	}
 	if security != nil {
-		name := a2a.SecuritySchemeName(security.securitySchemeName())
+		scheme := a2a.SecuritySchemeName(security.securitySchemeName())
 		card.SecuritySchemes = a2a.NamedSecuritySchemes{
-			name: a2a.HTTPAuthSecurityScheme{Scheme: "Bearer"},
+			scheme: a2a.HTTPAuthSecurityScheme{Scheme: "Bearer"},
 		}
 		card.SecurityRequirements = a2a.SecurityRequirementsOptions{
-			{name: a2a.SecuritySchemeScopes{}},
+			{scheme: a2a.SecuritySchemeScopes{}},
 		}
 	}
 	return card
+}
+
+// cardSkills maps configured skills to card skills, defaulting a name to its ID.
+func cardSkills(skills []schema.AgentSkill) []a2a.AgentSkill {
+	if len(skills) == 0 {
+		return nil
+	}
+	out := make([]a2a.AgentSkill, 0, len(skills))
+	for _, skill := range skills {
+		name := skill.Name
+		if name == "" {
+			name = skill.ID
+		}
+		out = append(out, a2a.AgentSkill{
+			ID:          skill.ID,
+			Name:        name,
+			Description: skill.Description,
+			Tags:        skill.Tags,
+			Examples:    skill.Examples,
+			InputModes:  skill.InputModes,
+			OutputModes: skill.OutputModes,
+		})
+	}
+	return out
 }

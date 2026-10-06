@@ -57,8 +57,18 @@ credentials:                        # required; the only secret source (no env)
   #   secretAccessKey: ...
   #   sessionToken: ...             # optional
 agents: [build]                     # existing agent names to expose
-cards:                              # optional per-agent card overrides
-  build: { name: Build Agent, description: "..." }
+# cards:                            # optional per-agent AgentCard overrides
+#   build:
+#     name: Build Agent
+#     description: "An autonomous coding agent that maintains the files under the working directory."
+#     version: "1.0.0"
+#     documentationUrl: https://example.com/build-agent
+#     iconUrl: https://example.com/icon.png
+#     provider: { organization: Acme, url: https://acme.dev }
+#     skills:                         # id must be a real capability (tool/subagent/skill)
+#       - { id: read, name: Read,    description: "Read a file.", tags: [files] }
+#       - { id: bash, name: Shell,   description: "Run a command.", tags: [shell] }
+#       - { id: general, name: General subagent, tags: [subagent] }
 contextLimit: 128000                # optional; drives automatic compaction
 outputLimit: 8192                   # optional
 inboundPermissions:                 # default: SDK deny-by-default ruleset
@@ -107,6 +117,31 @@ DeepSeek `deepseek-flash` over each protocol it exposes:
 An unknown name is an error. Only listed agents are exposed; each gets its own
 card at `/agents/<name>/.well-known/agent-card.json` (the first is also served at
 `/.well-known/agent-card.json`).
+
+## AgentCard
+
+`cards.<agent>` fills the `AgentCard` advertised over A2A:
+
+| Field | Meaning |
+|---|---|
+| `name`, `description` | Card identity / capability summary (describe what the agent does, not how it is implemented) |
+| `version` | Card version (default `1.0.0`) |
+| `documentationUrl`, `iconUrl` | Optional links |
+| `provider` | `{ organization, url }` |
+| `skills` | Advertised capabilities |
+
+Each `skills[].id` **must name a real capability of the agent** — a tool, a
+delegatable subagent, or a loaded skill. Startup fails otherwise, so the card
+cannot advertise something the program cannot do. `name`/`description`/`tags`/
+`examples`/`inputModes`/`outputModes` are the human-readable layer; `name`
+defaults to the id. When `skills` is omitted the card falls back to a single
+skill derived from the agent.
+
+Skills are **descriptive**: they never grant capability. Execution always uses
+the program's tools/subagents under the inbound permission ruleset, which is the
+only gate. The server-derived fields you cannot override (they must stay
+truthful) are `supportedInterfaces`, `capabilities.streaming`,
+`defaultInputModes`/`defaultOutputModes`, and `securitySchemes` (from `auth`).
 
 ## Security
 

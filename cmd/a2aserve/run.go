@@ -12,6 +12,7 @@ import (
 	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/a2a/server"
 	"github.com/jiaweisky/go-agent-sdk/schema"
+	"golang.org/x/text/language"
 )
 
 // shutdownTimeout bounds graceful shutdown.
@@ -94,7 +95,8 @@ func run(ctx context.Context, cfg config) error {
 }
 
 // exposeAgents marks each named existing agent exposed and returns its info.
-// cards optionally overrides an agent's card name/description.
+// cards optionally overrides an agent's card; every skill id is validated
+// against the agent's real capabilities.
 func exposeAgents(client *agent.Client, names []string, cards map[string]cardConfig) ([]schema.AgentInfo, error) {
 	exposed := make([]schema.AgentInfo, 0, len(names))
 	for _, name := range names {
@@ -103,8 +105,10 @@ func exposeAgents(client *agent.Client, names []string, cards map[string]cardCon
 		}
 		expose := &schema.AgentExpose{}
 		if override, ok := cards[name]; ok {
-			expose.Name = override.Name
-			expose.Description = override.Description
+			if err := validateSkills(client, name, override.Skills); err != nil {
+				return nil, err
+			}
+			applyCard(expose, override)
 		}
 		if err := client.RegisterAgent(name, agent.AgentConfig{Expose: expose}); err != nil {
 			return nil, fmt.Errorf("expose agent %q: %w", name, err)
@@ -112,6 +116,79 @@ func exposeAgents(client *agent.Client, names []string, cards map[string]cardCon
 		exposed = append(exposed, *client.Agents().Get(schema.AgentID(name)))
 	}
 	return exposed, nil
+}
+
+// applyCard copies a card override into an AgentExpose.
+func applyCard(expose *schema.AgentExpose, card cardConfig) {
+	expose.Name = card.Name
+	expose.Description = card.Description
+	expose.Version = card.Version
+	expose.DocumentationURL = card.DocumentationURL
+	expose.IconURL = card.IconURL
+	if card.Provider != nil {
+		expose.Provider = &schema.AgentProvider{
+			Organization: card.Provider.Organization,
+			URL:          card.Provider.URL,
+		}
+	}
+	expose.Skills = make([]schema.AgentSkill, 0, len(card.Skills))
+	for _, skill := range card.Skills {
+		expose.Skills = append(expose.Skills, schema.AgentSkill{
+			ID:          skill.ID,
+			Name:        skill.Name,
+			Description: skill.Description,
+			Tags:        skill.Tags,
+			Examples:    skill.Examples,
+			InputModes:  skill.InputModes,
+			OutputModes: skill.OutputModes,
+		})
+	}
+}
+
+// validateSkills rejects a card skill whose id is not a real capability of the
+// agent, so the card cannot advertise something the program cannot do.
+func validateSkills(client *agent.Client, agentID string, skills []skillConfig) error {
+	if len(skills) == 0 {
+		return nil
+	}
+	ids, err := capabilityIDs(client, agentID)
+	if err != nil {
+		return err
+	}
+	for _, skill := range skills {
+		if skill.ID == "" {
+			return fmt.Errorf("agent %q: card skill requires an id", agentID)
+		}
+		if !ids[skill.ID] {
+			return fmt.Errorf("agent %q: card skill %q is not one of its capabilities", agentID, skill.ID)
+		}
+	}
+	return nil
+}
+
+// capabilityIDs returns the ids of an agent's capabilities: its tools,
+// delegatable subagents and loaded skills.
+func capabilityIDs(client *agent.Client, agentID string) (map[string]bool, error) {
+	ids := map[string]bool{}
+	tools, err := client.AgentTools(agentID, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, tool := range tools {
+		ids[tool.Name] = true
+	}
+	allowAll := schema.PermissionRuleset{{Action: "*", Resource: "*", Effect: schema.PermissionEffectAllow}}
+	for _, subagent := range agent.SubagentTypes(client.Agents(), allowAll, language.English) {
+		ids[string(subagent.ID)] = true
+	}
+	skills, err := client.Skills().List()
+	if err != nil {
+		return nil, err
+	}
+	for _, skill := range skills {
+		ids[skill.Name] = true
+	}
+	return ids, nil
 }
 
 // credentialProvider returns the configured credential. The server runs one

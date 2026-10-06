@@ -91,6 +91,35 @@ type AgentExpose struct {
 	Name string `json:"name,omitempty"`
 	// Description overrides the card description.
 	Description string `json:"description,omitempty"`
+	// Version is the card version. Defaults to "1.0.0".
+	Version string `json:"version,omitempty"`
+	// DocumentationURL and IconURL are optional card links.
+	DocumentationURL string `json:"documentationUrl,omitempty"`
+	IconURL          string `json:"iconUrl,omitempty"`
+	// Provider identifies the organization offering the agent.
+	Provider *AgentProvider `json:"provider,omitempty"`
+	// Skills are the capabilities advertised on the card. Each ID must name a
+	// real capability of the agent (a tool, subagent or skill); when empty the
+	// card falls back to a single skill derived from the agent.
+	Skills []AgentSkill `json:"skills,omitempty"`
+}
+
+// AgentProvider identifies the organization that provides an exposed agent.
+type AgentProvider struct {
+	Organization string `json:"organization,omitempty"`
+	URL          string `json:"url,omitempty"`
+}
+
+// AgentSkill is a capability an exposed agent advertises on its card.
+type AgentSkill struct {
+	// ID names the underlying capability (a tool, subagent or skill ID).
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Examples    []string `json:"examples,omitempty"`
+	InputModes  []string `json:"inputModes,omitempty"`
+	OutputModes []string `json:"outputModes,omitempty"`
 }
 
 // AgentInfoEmpty is an empty agent info, with its maps initialized.

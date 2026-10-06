@@ -41,3 +41,26 @@ func TestBuildCardDeclaresSecurityScheme(t *testing.T) {
 		t.Fatalf("securitySchemes = %v, want none without security", card.SecuritySchemes)
 	}
 }
+
+func TestBuildCardRendersExposeMetadata(t *testing.T) {
+	info := schema.AgentInfo{ID: schema.AgentID("build"), Expose: &schema.AgentExpose{
+		Name:             "Build Agent",
+		Version:          "2.0.0",
+		DocumentationURL: "https://example.com/doc",
+		IconURL:          "https://example.com/icon.png",
+		Provider:         &schema.AgentProvider{Organization: "Acme", URL: "https://acme.dev"},
+		Skills: []schema.AgentSkill{{
+			ID: "read", Name: "Read", Description: "Read files", Tags: []string{"files"}, Examples: []string{"read a file"},
+		}},
+	}}
+	card := buildCard(info, "", nil)
+	if card.Version != "2.0.0" || card.DocumentationURL != "https://example.com/doc" || card.IconURL != "https://example.com/icon.png" {
+		t.Fatalf("card = %+v", card)
+	}
+	if card.Provider == nil || card.Provider.Org != "Acme" || card.Provider.URL != "https://acme.dev" {
+		t.Fatalf("provider = %+v", card.Provider)
+	}
+	if len(card.Skills) != 1 || card.Skills[0].ID != "read" || card.Skills[0].Name != "Read" || card.Skills[0].Tags[0] != "files" {
+		t.Fatalf("skills = %+v", card.Skills)
+	}
+}

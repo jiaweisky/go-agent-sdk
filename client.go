@@ -425,6 +425,32 @@ func (c *Client) Agents() *core.Agent {
 	return c.rt.agents
 }
 
+// AgentTool is a tool an agent can use, as seen by an embedding host.
+type AgentTool struct {
+	Name        string
+	Description string
+}
+
+// AgentTools returns the tools an agent can use under extra permission rules
+// (its own rules merged with permissions). It is the tool half of an agent's
+// capability surface, so hosts can advertise exactly what the agent exposes.
+func (c *Client) AgentTools(agentID string, permissions schema.PermissionRuleset) ([]AgentTool, error) {
+	info := c.rt.agents.Get(schema.AgentID(agentID))
+	if info == nil {
+		return nil, fmt.Errorf("unknown agent %q", agentID)
+	}
+	registry, err := c.rt.newSessionRegistry(info, permissions, nil)
+	if err != nil {
+		return nil, err
+	}
+	definitions := registry.Materialize(core.PermissionMerge(info.Permissions, permissions)).Definitions
+	tools := make([]AgentTool, 0, len(definitions))
+	for _, definition := range definitions {
+		tools = append(tools, AgentTool{Name: definition.Name, Description: definition.Description})
+	}
+	return tools, nil
+}
+
 // Permission returns the pending-permission surface. Requests are pending only
 // while their turn is held; see HoldInteractions.
 func (c *Client) Permission() PermissionClient {
