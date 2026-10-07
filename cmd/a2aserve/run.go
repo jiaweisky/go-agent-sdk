@@ -28,10 +28,11 @@ func run(ctx context.Context, cfg config) error {
 		ConfigDirs:       cfg.ConfigDirs,
 		Model:            cfg.Model,
 		Protocol:         schema.ProtocolID(cfg.Protocol),
-		ModelInfo:        serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS),
+		ModelInfo:        serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS, cfg.InputModalities),
 		Credentials:      serveconfig.CredentialProvider(cfg.Credentials),
 		ContextLimit:     cfg.ContextLimit,
 		OutputLimit:      cfg.OutputLimit,
+		DropErroredTurns: cfg.DropErroredTurns,
 	})
 	if err != nil {
 		return err

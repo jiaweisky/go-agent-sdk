@@ -57,6 +57,15 @@ const (
 	ModelToolSchemaMoonshot ModelToolSchemaCompatibility = "moonshot"
 )
 
+// ModelCapabilities lists a model's input and output modalities (for example
+// "text", "image", "audio", "video", "pdf"), mirroring the model catalog's
+// modalities. An empty Input means the model's media support is not declared,
+// so only the protocol's wire support constrains it.
+type ModelCapabilities struct {
+	Input  []string `json:"input,omitempty"`
+	Output []string `json:"output,omitempty"`
+}
+
 // ModelCompatibility records the schema shapes a model requires.
 type ModelCompatibility struct {
 	ToolSchema *ModelToolSchemaCompatibility `json:"toolSchema,omitempty"`
@@ -77,15 +86,19 @@ type ModelSchema interface {
 	// has none.
 	GetRouteDefaults() *ModelDefaults
 	GetCompatibility() *ModelCompatibility
+	// GetCapabilities returns the model's input/output modalities, or nil when
+	// they are not declared.
+	GetCapabilities() *ModelCapabilities
 }
 
-// Model is a concrete model: its identity, defaults and compatibility. It
-// implements ModelSchema.
+// Model is a concrete model: its identity, defaults, compatibility and
+// capabilities. It implements ModelSchema.
 type Model struct {
 	ID            ModelID             `json:"id"`
 	Provider      ProviderID          `json:"provider"`
 	Defaults      *ModelDefaults      `json:"defaults,omitempty"`
 	Compatibility *ModelCompatibility `json:"compatibility,omitempty"`
+	Capabilities  *ModelCapabilities  `json:"capabilities,omitempty"`
 }
 
 // ModelID returns the model's id.
@@ -103,6 +116,9 @@ func (m Model) GetRouteDefaults() *ModelDefaults { return nil }
 // GetCompatibility returns the model's compatibility.
 func (m Model) GetCompatibility() *ModelCompatibility { return m.Compatibility }
 
+// GetCapabilities returns the model's input/output modalities.
+func (m Model) GetCapabilities() *ModelCapabilities { return m.Capabilities }
+
 // ModelID implements ModelSchema as a bare model id: only the id is known.
 func (m ModelID) ModelID() ModelID { return m }
 
@@ -118,12 +134,16 @@ func (m ModelID) GetRouteDefaults() *ModelDefaults { return nil }
 // GetCompatibility returns nil: a bare id carries no compatibility.
 func (m ModelID) GetCompatibility() *ModelCompatibility { return nil }
 
+// GetCapabilities returns nil: a bare id carries no capabilities.
+func (m ModelID) GetCapabilities() *ModelCapabilities { return nil }
+
 // ModelInput is the input form of a Model.
 type ModelInput struct {
 	ID            string
 	Provider      string
 	Defaults      *ModelDefaults
 	Compatibility *ModelCompatibility
+	Capabilities  *ModelCapabilities
 }
 
 // NewModel builds a model from input.
@@ -133,12 +153,14 @@ func NewModel(input ModelInput) Model {
 		Provider:      ProviderID(input.Provider),
 		Defaults:      input.Defaults,
 		Compatibility: input.Compatibility,
+		Capabilities:  input.Capabilities,
 	}
 }
 
 // ModelUpdate applies the set fields of patch and returns the updated model.
 func ModelUpdate(m Model, patch ModelInput) Model {
-	if patch.ID == "" && patch.Provider == "" && patch.Defaults == nil && patch.Compatibility == nil {
+	if patch.ID == "" && patch.Provider == "" && patch.Defaults == nil &&
+		patch.Compatibility == nil && patch.Capabilities == nil {
 		return m
 	}
 	r := m
@@ -153,6 +175,9 @@ func ModelUpdate(m Model, patch ModelInput) Model {
 	}
 	if patch.Compatibility != nil {
 		r.Compatibility = patch.Compatibility
+	}
+	if patch.Capabilities != nil {
+		r.Capabilities = patch.Capabilities
 	}
 	return r
 }

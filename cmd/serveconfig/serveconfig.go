@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -156,14 +157,36 @@ func CredentialProvider(creds Credentials) agent.CredentialProvider {
 
 // ModelInfoProvider returns an SDK model-info provider. When baseURL is empty,
 // Bedrock derives the endpoint from the AWS region and every other protocol
-// uses its route's built-in endpoint.
-func ModelInfoProvider(protocol, baseURL string, aws *AWS) agent.ModelInfoProvider {
+// uses its route's built-in endpoint. inputModalities, when set, declares the
+// model's accepted input modalities ("text", "image", "audio", "video", "pdf");
+// media outside them is omitted from requests instead of failing.
+func ModelInfoProvider(protocol, baseURL string, aws *AWS, inputModalities []string) agent.ModelInfoProvider {
 	if baseURL == "" && protocol == "bedrock-converse" && aws != nil {
 		baseURL = fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", aws.Region)
 	}
 	return func(id string) (schema.ModelInfo, error) {
-		return agent.NewModelInfo(schema.ProtocolID(protocol), id, baseURL, schema.ModelLimit{})
+		info, err := agent.NewModelInfo(schema.ProtocolID(protocol), id, baseURL, schema.ModelLimit{})
+		if err != nil {
+			return schema.ModelInfo{}, err
+		}
+		if len(inputModalities) > 0 {
+			info.Capabilities.Input = inputModalities
+		}
+		return info, nil
 	}
+}
+
+// InputModalityNames are the model input modalities a host may declare.
+var InputModalityNames = []string{"text", "image", "audio", "video", "pdf"}
+
+// ValidateInputModalities rejects unknown modality names.
+func ValidateInputModalities(modalities []string) error {
+	for _, modality := range modalities {
+		if !slices.Contains(InputModalityNames, modality) {
+			return fmt.Errorf("unknown input modality %q (text, image, audio, video, pdf)", modality)
+		}
+	}
+	return nil
 }
 
 // StringList is a repeatable string flag.

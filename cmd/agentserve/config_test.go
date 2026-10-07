@@ -20,6 +20,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.InteractionFallback != "reject" {
 		t.Fatalf("interactionFallback = %q", cfg.InteractionFallback)
 	}
+	if !cfg.DropErroredTurns {
+		t.Fatal("dropErroredTurns should default to true for the server")
+	}
 }
 
 func TestLoadExampleConfig(t *testing.T) {
@@ -178,5 +181,17 @@ func TestValidateNonLoopbackNeedsAuth(t *testing.T) {
 	cfg.Listen = "0.0.0.0:8787"
 	if err := cfg.validate(); err == nil {
 		t.Fatal("expected non-loopback without auth to be rejected")
+	}
+}
+
+func TestInputModalitiesValidation(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.InputModalities = []string{"text", "image"}
+	if err := cfg.validateModalities(); err != nil {
+		t.Fatalf("valid modalities: %v", err)
+	}
+	cfg.InputModalities = []string{"hologram"}
+	if err := cfg.validateModalities(); err == nil {
+		t.Fatal("an unknown modality should be rejected")
 	}
 }

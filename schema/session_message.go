@@ -26,6 +26,12 @@ type SessionMessageUnknownError struct {
 	Message string `json:"message"`
 }
 
+// SessionMessageErrorProvider marks an assistant failure the provider rejected
+// (an invalid request, a content-policy refusal, and the like). Other failures
+// — an interrupt or a declined tool — carry other types. DropErroredTurns only
+// excludes provider rejections, since those recur on every later turn.
+const SessionMessageErrorProvider = "provider"
+
 type SessionMessageCache struct {
 	Read  float64 `json:"read"`
 	Write float64 `json:"write"`

@@ -1269,3 +1269,187 @@ func TestPermissionRoundTrip(t *testing.T) {
 		t.Fatal("turn did not resume after the permission reply")
 	}
 }
+
+func TestUnsupportedAttachmentDoesNotWedgeSession(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	id := createSession(t, ts)
+
+	body := `{"prompt":"read this file","files":[{"uri":"data:application/pdf;base64,JVBERi0=","mime":"application/pdf","name":"x.pdf"}]}`
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", body, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("prompt status = %d, want 202", resp.StatusCode)
+	}
+	waitIdle(t, ts, id)
+
+	// A follow-up prompt must still complete: the unsupported attachment is
+	// omitted from the request, not left to poison every later turn.
+	resp = doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"say hi"}`, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("follow-up status = %d, want 202", resp.StatusCode)
+	}
+	waitIdle(t, ts, id)
+
+	resp = doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/message", "", nil)
+	defer resp.Body.Close()
+	var page struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	assistants := 0
+	for _, m := range page.Data {
+		if m["type"] == "assistant" {
+			assistants++
+		}
+	}
+	if assistants < 2 {
+		t.Fatalf("assistant messages = %d, want 2 (unsupported attachment wedged the session)", assistants)
+	}
+}
+
+func TestInvalidAttachmentPayloadDoesNotWedgeSession(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	id := createSession(t, ts)
+
+	// A supported MIME with a malformed payload must not fail the turn (and,
+	// because the message is persisted, must not wedge every later turn).
+	body := `{"prompt":"describe","files":[{"uri":"not-base64!","mime":"image/png","name":"x.png"}]}`
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", body, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("prompt status = %d, want 202", resp.StatusCode)
+	}
+	waitIdle(t, ts, id)
+
+	resp = doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"say hi"}`, nil)
+	resp.Body.Close()
+	waitIdle(t, ts, id)
+
+	resp = doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/message", "", nil)
+	defer resp.Body.Close()
+	var page struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	assistants := 0
+	for _, m := range page.Data {
+		if m["type"] == "assistant" {
+			assistants++
+		}
+	}
+	if assistants < 2 {
+		t.Fatalf("assistant messages = %d, want 2 (invalid payload wedged the session)", assistants)
+	}
+}
+
+// mediaRejectingLLM models a provider that rejects any request carrying media
+// (like DeepSeek rejecting an invalid image), and otherwise replies.
+type mediaRejectingLLM struct{ stubLLM }
+
+func (mediaRejectingLLM) Stream(_ context.Context, req *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+	for _, message := range req.Messages {
+		for _, part := range message.Content {
+			if _, ok := part.(llmschema.MediaPart); ok {
+				return nil, &llmschema.LLMError{
+					Module: "test", Method: "stream",
+					Reason: llmschema.NewInvalidRequestReason("provider rejected media"),
+				}
+			}
+		}
+	}
+	return fakeLLM{reply: "ok"}.Stream(context.Background(), req)
+}
+
+func TestDropErroredTurnsRecoversFromRejectedMedia(t *testing.T) {
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), LLM: mediaRejectingLLM{},
+		DropErroredTurns: true,
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	srv, err := New(context.Background(), client, Options{OnError: func(error) {}})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	id := createSession(t, ts)
+	// A valid image (passes the gate) that the provider rejects, then a plain
+	// prompt. The queue is serialized, so the second turn runs after the first
+	// fails.
+	body := `{"prompt":"look","files":[{"uri":"data:image/png;base64,aGVsbG8=","mime":"image/png","name":"x.png"}]}`
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", body, nil)
+	resp.Body.Close()
+	waitIdle(t, ts, id)
+	resp = doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"say hi"}`, nil)
+	resp.Body.Close()
+	waitIdle(t, ts, id)
+
+	// The second turn must have completed with the stub's reply, proving the
+	// errored media turn is excluded from the context rather than wedging the
+	// session.
+	resp = doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/message", "", nil)
+	defer resp.Body.Close()
+	var page struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	replied := false
+	for _, m := range page.Data {
+		if m["type"] != "assistant" || m["error"] != nil {
+			continue
+		}
+		if content, ok := m["content"].([]any); ok && len(content) > 0 {
+			replied = true
+		}
+	}
+	if !replied {
+		t.Fatal("no successful assistant turn after the rejected-media turn; session wedged")
+	}
+}
+
+// TestWaitAccountsForAcceptedPrompt guards that /wait does not report idle for a
+// prompt the server has accepted but whose turn has not yet reached the SDK
+// coordinator (the worker only calls Send after the request returns).
+func TestWaitAccountsForAcceptedPrompt(t *testing.T) {
+	release := make(chan struct{})
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), LLM: blockingLLM{release: release},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	ts := serveClient(t, client, Options{})
+	id := createSession(t, ts)
+
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"hi"}`, nil)
+	resp.Body.Close()
+	wait := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/wait?timeout=1s", "", nil)
+	defer wait.Body.Close()
+	var body struct {
+		Data struct {
+			Idle bool `json:"idle"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(wait.Body).Decode(&body); err != nil {
+		t.Fatalf("wait decode: %v", err)
+	}
+	close(release)
+	if body.Data.Idle {
+		t.Fatal("wait reported idle for an accepted prompt whose turn had not finished")
+	}
+}

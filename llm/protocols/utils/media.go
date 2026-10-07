@@ -93,6 +93,26 @@ func validateBase64(route, base64Str string) error {
 	return nil
 }
 
+// MediaModality maps a media MIME type to its catalog modality: "image",
+// "audio", "video", "text" or "pdf". Anything unrecognized maps to the MIME
+// itself, so no two distinct types collide.
+func MediaModality(mime string) string {
+	switch m := strings.ToLower(mime); {
+	case strings.HasPrefix(m, "image/"):
+		return "image"
+	case strings.HasPrefix(m, "audio/"):
+		return "audio"
+	case strings.HasPrefix(m, "video/"):
+		return "video"
+	case strings.HasPrefix(m, "text/"):
+		return "text"
+	case m == "application/pdf":
+		return "pdf"
+	default:
+		return m
+	}
+}
+
 // ValidateToolFile checks a tool file result's type and size.
 func ValidateToolFile(
 	route string,

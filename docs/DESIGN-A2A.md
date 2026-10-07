@@ -400,6 +400,8 @@ A2A natively has only **text / file / data** part kinds and does not define "too
 | Inbound non-text part (raw bytes / file URL) | File part | Raw parts are spooled into the workspace (`<workdir>/.a2a/attachments/<turnID>/`); a missing extension is derived from `MediaType` so the read tool recognizes the kind. URL parts are referenced (not fetched). |
 | Other structured data | Data part; ADK wraps unrecognized data as a `<a2a_datapart_json>…</a2a_datapart_json>` text/plain | Guarantees round-trip fidelity |
 
+Inbound media never reaches the model as a native media part: spooling turns it into a workspace path the read tool consumes, so an unsupported inbound MIME cannot break the turn. Media that does reach the request (for example an image the read tool emits) is subject to the same model-capability gate as the HTTP prompt: the context builder omits media the protocol or model cannot carry and substitutes a short text note (see `docs/DESIGN-HTTP.md` §5.2), so no attachment can wedge a session.
+
 ### 4.3 Metadata naming conventions
 
 A2A has no standard metadata key space. For interoperability, **shared keys reuse ADK's key names**; SDK-specific keys use their own prefix. **Hand-written strings are forbidden everywhere**; go through constants. Basis: `server/adka2a/v2/metadata.go`.
@@ -502,7 +504,7 @@ After this section we write only the "we" parts; rows marked **a2a-go** only exp
 - **HTTP dependencies use only the standard library `net/http`**; protocol bindings use the handlers provided by `a2a-go/v2/a2asrv` (`NewStaticAgentCardHandler` / `NewJSONRPCHandler`, which are themselves `http.Handler`). **Do not introduce a third-party router / server framework** (adk-go's `gorilla/mux` is just its launcher's composition choice).
 - The SDK **does not start a server, bind a port, or read env** itself: the host takes the `http.Handler` and mounts it on its own `http.Server`; tests use `httptest`.
 - Do not do adk-go's `launcher`-style tight coupling of the server with a startup method. Rationale: consistent with the SDK's long-standing philosophy of "narrow input, no env reading, no default location" (`Root` required, `ConfigDirs` explicit), and it makes embedding in an existing HTTP service simple.
-- The repository also ships a command, `cmd/a2aserve`, that serves one workspace: it parses a YAML config file and CLI flags (no environment variables), assembles the client, factory, task store and `Handler()`, and runs an `http.Server` with graceful shutdown. It is an application, not part of the SDK API.
+- The repository also ships a command, `cmd/a2aserve`, that serves one workspace: it parses a YAML config file and CLI flags (no environment variables), assembles the client, factory, task store and `Handler()`, and runs an `http.Server` with graceful shutdown. It is an application, not part of the SDK API. Like `cmd/agentserve` it defaults `dropErroredTurns: true`: a remote client cannot run the interactive revert dance, so a turn the provider rejected (`error.type: "provider"`) is excluded from later request contexts, and a message the provider keeps rejecting cannot wedge the session (interrupts and declines are kept; see `docs/DESIGN-HTTP.md` §5.2).
 
 ### 5.3 A turn's lifecycle and message semantics
 

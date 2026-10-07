@@ -47,7 +47,7 @@ func buildClient(cfg config) (*agent.Client, error) {
 		ConfigDirs:       cfg.ConfigDirs,
 		Model:            cfg.Model,
 		Protocol:         schema.ProtocolID(cfg.Protocol),
-		ModelInfo:        serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS),
+		ModelInfo:        serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS, cfg.InputModalities),
 		Credentials:      serveconfig.CredentialProvider(cfg.Credentials),
 		ContextLimit:     cfg.ContextLimit,
 		OutputLimit:      cfg.OutputLimit,
@@ -59,6 +59,7 @@ func buildClient(cfg config) (*agent.Client, error) {
 		auto := true
 		clientOpts.Title = &agent.TitleConfig{Auto: &auto}
 	}
+	clientOpts.DropErroredTurns = cfg.DropErroredTurns
 	mcpServers, err := cfg.mcpServers()
 	if err != nil {
 		return nil, err

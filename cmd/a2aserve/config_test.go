@@ -16,6 +16,22 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Agents) != 1 || cfg.Agents[0] != "build" {
 		t.Fatalf("agents = %v", cfg.Agents)
 	}
+	if !cfg.DropErroredTurns {
+		t.Fatal("dropErroredTurns should default to true for the server")
+	}
+}
+
+func TestLoadExampleConfig(t *testing.T) {
+	cfg := defaultConfig()
+	if err := serveconfig.Load("a2aserve.example.yaml", &cfg); err != nil {
+		t.Fatalf("load example: %v", err)
+	}
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate example: %v", err)
+	}
+	if len(cfg.InputModalities) != 2 || cfg.InputModalities[0] != "text" || cfg.InputModalities[1] != "image" {
+		t.Fatalf("inputModalities = %v, want [text image]", cfg.InputModalities)
+	}
 }
 
 func TestLoadConfigOverDefaults(t *testing.T) {
@@ -154,5 +170,16 @@ func TestPermissionRuleset(t *testing.T) {
 	}
 	if serveconfig.PermissionRuleset(nil) != nil {
 		t.Fatal("empty config should yield nil (use SDK default)")
+	}
+}
+
+func TestInputModalitiesValidation(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.InputModalities = []string{"text", "image"}
+	if err := serveconfig.ValidateInputModalities(cfg.InputModalities); err != nil {
+		t.Fatalf("valid modalities: %v", err)
+	}
+	if err := serveconfig.ValidateInputModalities([]string{"hologram"}); err == nil {
+		t.Fatal("an unknown modality should be rejected")
 	}
 }

@@ -59,7 +59,7 @@ func TestToLLMMessagesOmitsEmptyAssistantTurns(t *testing.T) {
 				ProviderMetadata: providerMetadata(map[string]map[string]any{"anthropic": {"signature": "sig_1"}}),
 			},
 		}),
-	}, model)
+	}, model, nil)
 
 	ids := make([]string, len(messages))
 	for i, message := range messages {
@@ -88,7 +88,7 @@ func TestToLLMMessagesMapsTopLevelTypes(t *testing.T) {
 		schema.SessionMessageCompaction{
 			ID: "msg_compaction", Type: "compaction", Reason: "auto", Summary: "Earlier work", Recent: "Recent work",
 		},
-	}, model)
+	}, model, nil)
 
 	roles := make([]llmschema.MessageRole, len(messages))
 	for i, message := range messages {
@@ -171,7 +171,7 @@ func TestToLLMMessagesReplaysToolMedia(t *testing.T) {
 				Structured: map[string]any{}, Error: schema.SessionMessageUnknownError{Type: "unknown", Message: "Denied"},
 			}),
 		}),
-	}, model)
+	}, model, nil)
 
 	roles := []llmschema.MessageRole{messages[0].Role, messages[1].Role}
 	if want := []llmschema.MessageRole{llmschema.RoleAssistant, llmschema.RoleTool}; !reflect.DeepEqual(roles, want) {
@@ -242,7 +242,7 @@ func TestToLLMMessagesRestoresEncryptedReasoning(t *testing.T) {
 					}),
 				},
 			}),
-	}, model)
+	}, model, nil)
 	want := []llmschema.ContentPart{
 		llmschema.ReasoningPart{Type: "reasoning", Text: "Think", ProviderMetadata: llmschema.ProviderMetadata{
 			"openai": {"itemId": "rs_1", "reasoningEncryptedContent": "encrypted-state"},
@@ -277,7 +277,7 @@ func TestToLLMMessagesDropsMetadataFromFailedTurn(t *testing.T) {
 		})
 	failed.Error = &schema.SessionMessageUnknownError{Type: "unknown", Message: "Provider turn interrupted"}
 
-	messages := ToLLMMessages([]schema.SessionMessage{failed}, model)
+	messages := ToLLMMessages([]schema.SessionMessage{failed}, model, nil)
 	want := []llmschema.ContentPart{
 		llmschema.ReasoningPart{Type: "reasoning", Text: "Partial thought"},
 		llmschema.NewToolCallPart(llmschema.ToolCallPartInput{
@@ -336,7 +336,7 @@ func TestToLLMMessagesDropsMetadataAfterModelSwitch(t *testing.T) {
 				},
 			},
 		}),
-	}, model)
+	}, model, nil)
 
 	wantContent := []llmschema.ContentPart{
 		llmschema.NewTextContent("Visible thought"),
@@ -370,5 +370,83 @@ func TestToLLMMessagesDropsMetadataAfterModelSwitch(t *testing.T) {
 		got, _ := json.MarshalIndent(messages[1].Content, "", "  ")
 		want, _ := json.MarshalIndent(wantTool, "", "  ")
 		t.Fatalf("tool content mismatch\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestToLLMMessagesDegradesUnsupportedMedia(t *testing.T) {
+	model := runnerTestModel()
+	modelRef := schema.ModelRef{ID: "model", ProviderID: "provider"}
+	name := "shot.png"
+	file := schema.PromptFileAttachment{URI: "data:image/png;base64,aGVsbG8=", Mime: "image/png", Name: &name}
+	reject := func(string, string) bool { return false }
+	allow := func(string, string) bool { return true }
+
+	user := schema.SessionMessageUser{
+		ID: "msg_user", Type: "user", Text: "look",
+		Files: []schema.PromptFileAttachment{file},
+	}
+
+	rejected := ToLLMMessages([]schema.SessionMessage{user}, model, reject)
+	assertMessages(t, rejected, []llmschema.Message{llmschema.NewMessage(llmschema.MessageInput{
+		ID:   "msg_user",
+		Role: llmschema.RoleUser,
+		Content: []llmschema.ContentPart{
+			llmschema.NewTextContent("look"),
+			llmschema.NewTextContent(omittedMediaNote("shot.png", "image/png")),
+		},
+	})})
+
+	accepted := ToLLMMessages([]schema.SessionMessage{user}, model, allow)
+	assertMessages(t, accepted, []llmschema.Message{llmschema.NewMessage(llmschema.MessageInput{
+		ID:   "msg_user",
+		Role: llmschema.RoleUser,
+		Content: []llmschema.ContentPart{
+			llmschema.NewTextContent("look"),
+			llmschema.MediaPart{Type: "media", MediaType: "image/png", Data: "data:image/png;base64,aGVsbG8=", Filename: &name},
+		},
+	})})
+
+	toolMessage := runnerAssistant("msg_tool", modelRef, []schema.SessionMessageAssistantContent{
+		schema.SessionMessageAssistantTool{
+			Type: "tool", ID: "call-1", Name: "read",
+			State: schema.SessionMessageToolStateCompleted{
+				Status: "completed", Input: map[string]any{"path": "shot.png"}, Structured: map[string]any{},
+				Content: schema.ToolContents{
+					schema.ToolFileContent{Type: "file", URI: "data:image/png;base64,aGVsbG8=", Mime: "image/png", Name: &name},
+				},
+			},
+		},
+	})
+	got := ToLLMMessages([]schema.SessionMessage{toolMessage}, model, reject)
+	assertMessages(t, got[1:], []llmschema.Message{llmschema.MessageTool(llmschema.NewToolResultPart(llmschema.ToolResultPartInput{
+		ID: "call-1", Name: "read",
+		Result: llmschema.ToolResultValue{Type: "text", Value: omittedMediaNote("shot.png", "image/png")},
+	}))})
+}
+
+func TestDropErroredTurns(t *testing.T) {
+	modelRef := schema.ModelRef{ID: "model", ProviderID: "provider"}
+	ok := runnerAssistant("msg_a1", modelRef, []schema.SessionMessageAssistantContent{
+		schema.SessionMessageAssistantText{Type: "text", ID: "t1", Text: "ok"},
+	})
+	rejected := runnerAssistant("msg_a2", modelRef, nil)
+	rejected.Error = &schema.SessionMessageUnknownError{Type: schema.SessionMessageErrorProvider, Message: "boom"}
+	interrupted := runnerAssistant("msg_a3", modelRef, nil)
+	interrupted.Error = &schema.SessionMessageUnknownError{Type: "unknown", Message: "Provider turn interrupted"}
+
+	messages := []schema.SessionMessage{
+		schema.SessionMessageUser{ID: "msg_u1", Type: "user", Text: "first"},
+		ok,
+		schema.SessionMessageUser{ID: "msg_u2", Type: "user", Text: "second"},
+		rejected,
+		schema.SessionMessageUser{ID: "msg_u3", Type: "user", Text: "third"},
+		interrupted,
+	}
+	got := dropErroredTurns(messages)
+	// The provider-rejected turn (u2 + a2) is dropped; the interrupted turn
+	// (u3 + a3) is kept.
+	want := []schema.SessionMessage{messages[0], messages[1], messages[4], messages[5]}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dropErroredTurns kept %d messages, want %d", len(got), len(want))
 	}
 }

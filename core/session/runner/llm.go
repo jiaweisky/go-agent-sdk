@@ -18,6 +18,8 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
 	"github.com/jiaweisky/go-agent-sdk/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/llm"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols"
+	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
 	"github.com/jiaweisky/go-agent-sdk/llm/route"
 	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
 	"github.com/jiaweisky/go-agent-sdk/schema"
@@ -88,6 +90,9 @@ type LLMRunner struct {
 	// OnError reports turn bookkeeping errors that do not fail the turn. Nil
 	// ignores them.
 	OnError func(error)
+	// DropErroredTurns excludes a turn that ended in error from later request
+	// contexts, so a persistently rejected message cannot wedge the session.
+	DropErroredTurns bool
 
 	compaction *session.Compaction
 	turns      *session.TurnStore
@@ -768,12 +773,16 @@ func (r *LLMRunner) prepareTurnAttempt(
 	if err != nil {
 		return nil, err
 	}
+	contextMessages := contextMessagesOf(entries)
+	if r.DropErroredTurns {
+		contextMessages = dropErroredTurns(contextMessages)
+	}
 	request := buildTurnRequest(
 		sessionID,
 		agent,
 		stored,
 		system,
-		contextMessagesOf(entries),
+		contextMessages,
 		model,
 		isLastStep,
 		toolMaterialization,
@@ -919,6 +928,42 @@ func contextMessagesOf(entries []session.HistoryEntry) []schema.SessionMessage {
 	return result
 }
 
+// dropErroredTurns removes each turn the provider rejected — the turn's user
+// message through the errored assistant message — from the request context. The
+// messages stay in the transcript; only the model stops seeing them, so a
+// message the provider keeps rejecting cannot wedge the session. Interrupts and
+// declined tools are not dropped: they are not provider rejections and must not
+// erase the user's prompt.
+func dropErroredTurns(messages []schema.SessionMessage) []schema.SessionMessage {
+	drop := make([]bool, len(messages))
+	turnStart := -1 // index of the current turn's user message, if any
+	for i, message := range messages {
+		switch m := message.(type) {
+		case schema.SessionMessageUser:
+			turnStart = i
+		case schema.SessionMessageAssistant:
+			if m.Error == nil || m.Error.Type != schema.SessionMessageErrorProvider {
+				continue
+			}
+			start := i
+			if turnStart >= 0 {
+				start = turnStart
+			}
+			for j := start; j <= i; j++ {
+				drop[j] = true
+			}
+			turnStart = -1
+		}
+	}
+	kept := messages[:0:0]
+	for i, message := range messages {
+		if !drop[i] {
+			kept = append(kept, message)
+		}
+	}
+	return kept
+}
+
 // buildTurnRequest assembles the provider request for one attempt.
 func buildTurnRequest(
 	sessionID schema.SessionID,
@@ -942,7 +987,7 @@ func buildTurnRequest(
 	if system.Baseline != "" {
 		systemParts = append(systemParts, llmschema.NewSystemPart(system.Baseline))
 	}
-	messages := ToLLMMessages(contextMessages, model)
+	messages := ToLLMMessages(contextMessages, model, turnMediaSupport(model, agent))
 	if isLastStep {
 		messages = append(messages, llmschema.MessageAssistant(MaxStepsPrompt))
 	}
@@ -960,6 +1005,34 @@ func buildTurnRequest(
 		ToolChoice:      toolChoice(isLastStep),
 		Metadata:        map[string]any{RequestMetaSessionID: string(sessionID), RequestMetaAgentID: string(agent.ID)},
 	})
+}
+
+// turnMediaSupport derives the media filter for a turn: a media part is kept
+// only if the protocol can carry its MIME type, the model accepts its modality,
+// and its payload is well-formed. Anything else is omitted from the request
+// (replaced by a text note) instead of failing the turn. A remote A2A backend
+// carries arbitrary file parts, so it is not filtered by the local protocol.
+func turnMediaSupport(model route.Model, agent core.AgentSelection) mediaSupport {
+	if info := agent.Info; info != nil && info.Backend != nil && info.Backend.Type == schema.AgentBackendA2A {
+		return nil
+	}
+	protocol := model.Route.Protocol
+	entry, ok := protocols.LookupProtocol(protocol)
+	if !ok {
+		return nil
+	}
+	var input []string
+	if caps := model.GetCapabilities(); caps != nil {
+		input = caps.Input
+	}
+	routeName := string(protocol)
+	return func(mime, data string) bool {
+		if !protocols.MediaAllowed(protocol, input, mime) {
+			return false
+		}
+		_, err := utils.ValidateMedia(routeName, llmschema.MediaPart{Type: "media", MediaType: mime, Data: data}, entry.MediaMIMEs)
+		return err == nil
+	}
 }
 
 // sessionHeaders carries the per-session routing headers every provider request
@@ -1192,7 +1265,7 @@ func (a *turnAttempt) handleProviderFailure(streamErr error) error {
 	}); err != nil {
 		return err
 	}
-	return a.withPublication(func() error { return a.publisher.FailAssistant(llmFailure.Reason.Message) })
+	return a.withPublication(func() error { return a.publisher.FailAssistantProvider(llmFailure.Reason.Message) })
 }
 
 func (a *turnAttempt) collectToolErrors() []error {

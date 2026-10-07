@@ -20,6 +20,8 @@ type config struct {
 	Model              string                       `yaml:"model"`
 	Protocol           string                       `yaml:"protocol"`
 	ModelBaseURL       string                       `yaml:"modelBaseURL"`
+	InputModalities    []string                     `yaml:"inputModalities"`
+	DropErroredTurns   bool                         `yaml:"dropErroredTurns"`
 	Credentials        serveconfig.Credentials      `yaml:"credentials"`
 	Agents             []string                     `yaml:"agents"`
 	Cards              map[string]cardConfig        `yaml:"cards"`
@@ -74,6 +76,10 @@ func defaultConfig() config {
 		Listen:    "127.0.0.1:9099",
 		Agents:    []string{"build"},
 		KeepAlive: "15s",
+		// A remote A2A client cannot run the interactive revert dance, so the
+		// server self-heals by default: a turn that ends in error is excluded from
+		// later contexts. Set dropErroredTurns: false to opt out.
+		DropErroredTurns: true,
 	}
 }
 
@@ -109,6 +115,9 @@ func (c config) validate() error {
 		return errors.New("tls requires both certFile and keyFile")
 	}
 	if _, err := c.keepAliveDuration(); err != nil {
+		return err
+	}
+	if err := serveconfig.ValidateInputModalities(c.InputModalities); err != nil {
 		return err
 	}
 	return nil

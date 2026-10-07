@@ -17,6 +17,8 @@ root: /absolute/path/to/state     # REQUIRED: SDK state directory (absolute; ~ i
 model: deepseek-flash             # REQUIRED: model id sent to the provider
 protocol: openai-compatible-chat  # REQUIRED: openai-compatible-chat | openai-chat | openai-responses | anthropic-messages | gemini | bedrock-converse
 modelBaseURL: https://api.deepseek.com  # model API base URL; empty uses the protocol default
+inputModalities: [text, image]    # optional: input modalities the model accepts (text/image/audio/video/pdf). DeepSeek accepts text and images; media outside these is omitted from requests
+dropErroredTurns: true            # server default: exclude a turn that ended in error from later contexts (prevents a rejected message from wedging the session); false = opt out
 
 credentials:                      # REQUIRED: the only place a secret is read
   apiKey: <your-deepseek-api-key> #   bearer/header protocols

@@ -101,6 +101,13 @@ type ClientOptions struct {
 	Compaction *CompactionConfig
 	// Title controls automatic session title generation. Nil keeps it disabled.
 	Title *TitleConfig
+	// DropErroredTurns excludes a turn that ended in error (its user message and
+	// assistant output) from later request contexts, so a message the provider
+	// keeps rejecting — an invalid attachment, for example — cannot wedge the
+	// session. The messages stay in the transcript; only the model stops seeing
+	// them. Intended for headless automation; an interactive host should keep it
+	// false and let the user revert instead.
+	DropErroredTurns bool
 }
 
 // TitleConfig controls automatic session title generation. The SDK runs the

@@ -86,6 +86,19 @@ func documentMIMESet() map[string]struct{} {
 	return m
 }
 
+// BedrockMediaMIMEs returns the MIME types Bedrock Converse can carry: images
+// and documents.
+func BedrockMediaMIMEs() []string {
+	values := make([]string, 0, len(imageFormats)+len(documentFormats))
+	for mime := range imageFormats {
+		values = append(values, mime)
+	}
+	for mime := range documentFormats {
+		values = append(values, mime)
+	}
+	return values
+}
+
 // BedrockLower converts a media part into the Bedrock block that carries it.
 func BedrockLower(part schema.MediaPart) (any, error) {
 	mime := strings.ToLower(part.MediaType)

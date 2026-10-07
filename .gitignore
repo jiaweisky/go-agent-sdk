@@ -16,8 +16,9 @@ examples/*/.data/
 # A2A inbound attachments (written under the workspace by the server)
 .a2a/
 
-# Local a2aserve config (contains credentials); see cmd/a2aserve/a2aserve.example.yaml
+# Local serve configs (contain credentials); see the *.example.yaml templates
 a2aserve.yaml
+agentserve.yaml
 
 # Built command binaries at the repo root (never commit)
 /a2aserve

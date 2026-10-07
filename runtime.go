@@ -641,6 +641,7 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		DB:                r.db,
 		InboundSessions:   r.isInbound,
 		OnError:           r.onError,
+		DropErroredTurns:  opts.DropErroredTurns,
 	})
 	r.coord = session.NewCoordinator(func(ctx context.Context, id schema.SessionID, force bool) error {
 		r.publishSessionStatus(id, schema.SessionStatusBusy{Type: "busy"})

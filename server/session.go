@@ -316,12 +316,43 @@ func (s *Server) handleSessionWait(w http.ResponseWriter, r *http.Request) {
 		}
 		timeout = parsed
 	}
-	idle, err := s.client.WaitSession(r.Context(), r.PathValue("sessionID"), timeout)
+	id := r.PathValue("sessionID")
+	if !s.requireSession(w, r) {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	// WaitSession only sees the SDK coordinator, which stays idle until the
+	// prompt worker calls Session.Send. Wait for the worker to drain first, or a
+	// prompt accepted moments ago would report idle before its turn started.
+	for s.workerBusy(id) {
+		if !time.Now().Before(deadline) {
+			writeData(w, http.StatusOK, map[string]any{"idle": false})
+			return
+		}
+		time.Sleep(waitWorkerPollInterval)
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		writeData(w, http.StatusOK, map[string]any{"idle": false})
+		return
+	}
+	idle, err := s.client.WaitSession(r.Context(), id, remaining)
 	if err != nil {
 		s.writeSDKError(w, err)
 		return
 	}
 	writeData(w, http.StatusOK, map[string]any{"idle": idle})
+}
+
+// waitWorkerPollInterval is how often /wait checks the session worker.
+const waitWorkerPollInterval = 20 * time.Millisecond
+
+// workerBusy reports whether a session has a prompt worker draining its queue.
+func (s *Server) workerBusy(id string) bool {
+	e := s.entry(id)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.worker != nil
 }
 
 // handleSessionMessage serves the full transcript as a paged page.

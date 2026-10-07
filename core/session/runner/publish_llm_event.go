@@ -177,6 +177,16 @@ func (p *LLMEventPublisher) Flush() error {
 
 // FailAssistant marks the assistant message as failed.
 func (p *LLMEventPublisher) FailAssistant(message string) error {
+	return p.failAssistant(message, "unknown")
+}
+
+// FailAssistantProvider marks the assistant message as failed by a provider
+// rejection, which DropErroredTurns excludes from later contexts.
+func (p *LLMEventPublisher) FailAssistantProvider(message string) error {
+	return p.failAssistant(message, schema.SessionMessageErrorProvider)
+}
+
+func (p *LLMEventPublisher) failAssistant(message, kind string) error {
 	if p.assistantFailed {
 		return nil
 	}
@@ -193,7 +203,7 @@ func (p *LLMEventPublisher) FailAssistant(message string) error {
 		"sessionID":          p.input.SessionID,
 		"timestamp":          time.Now().UnixMilli(),
 		"assistantMessageID": assistantID,
-		"error":              schema.SessionMessageUnknownError{Type: "unknown", Message: message},
+		"error":              schema.SessionMessageUnknownError{Type: kind, Message: message},
 	})
 	return err
 }
@@ -544,7 +554,7 @@ func (p *LLMEventPublisher) publishStepFinish(event llmschema.LLMEvent, _ []stri
 
 func (p *LLMEventPublisher) publishProviderError(event llmschema.LLMEvent, _ []string) error {
 	p.providerFailed = true
-	return p.FailAssistant(event.Message)
+	return p.FailAssistantProvider(event.Message)
 }
 
 type llmSettledOutput struct {

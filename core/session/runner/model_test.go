@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/llm/route"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
@@ -69,6 +70,54 @@ func TestFromCatalogModelOpenAI(t *testing.T) {
 		"custom_extension": map[string]any{"enabled": true},
 	}) {
 		t.Fatalf("body = %+v", body)
+	}
+}
+
+func TestTurnMediaSupportGatesProtocolModelAndPayload(t *testing.T) {
+	info := runnerModelInfo(schema.ModelAPI{
+		Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+	}, nil)
+	info.Capabilities.Input = nil // protocol-only: exercise the wire set and payload
+	model, err := FromCatalogModel(info, schema.Credential{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	accept := turnMediaSupport(model, core.AgentSelection{})
+	if !accept("image/png", "data:image/png;base64,aGVsbG8=") {
+		t.Fatal("a valid image should be accepted")
+	}
+	if accept("application/pdf", "data:application/pdf;base64,JVBERi0=") {
+		t.Fatal("a document the protocol cannot carry should be rejected")
+	}
+	if accept("image/png", "notbase64!!!") {
+		t.Fatal("a malformed payload should be rejected")
+	}
+
+	info.Capabilities.Input = []string{"text"} // model declares no image support
+	textOnly, err := FromCatalogModel(info, schema.Credential{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if turnMediaSupport(textOnly, core.AgentSelection{})("image/png", "data:image/png;base64,aGVsbG8=") {
+		t.Fatal("a text-only model should reject an image")
+	}
+
+	a2a := core.AgentSelection{Info: &schema.AgentInfo{Backend: &schema.AgentBackend{Type: schema.AgentBackendA2A}}}
+	if turnMediaSupport(model, a2a) != nil {
+		t.Fatal("an A2A backend carries arbitrary file parts and should not be filtered")
+	}
+}
+
+func TestFromCatalogModelCarriesCapabilities(t *testing.T) {
+	resolved, err := FromCatalogModel(runnerModelInfo(schema.ModelAPI{
+		Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+	}, nil), schema.Credential{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	caps := resolved.GetCapabilities()
+	if caps == nil || !reflect.DeepEqual(caps.Input, []string{"text"}) {
+		t.Fatalf("capabilities = %+v, want input [text]", caps)
 	}
 }
 

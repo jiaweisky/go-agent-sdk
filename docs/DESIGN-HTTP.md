@@ -27,7 +27,9 @@
 | 2026-10-06 | P3 landed: opaque pagination cursors on `/api/session` + `/message` (S1) and a `references` config section in `cmd/agentserve` (S3); added `SessionMessage.SessionMessageID` |
 | 2026-10-06 | Phase 5: `examples/httpclient` (runnable Go client) + permission round-trip and interaction-timeout tests; design doc marked Phases 0–5 complete |
 | 2026-10-06 | Unified lifecycle: `server.New(ctx, client, opts)` derives the server lifetime from the host context; both commands share `serveconfig.Serve` (cancel SSE → bounded `Shutdown`, force-close on timeout → `Client.Close`); graceful-shutdown test + reference/subagent/MCP materialization tests |
-| 2026-10-06 | Review: an async prompt failure is reported through `Options.OnError` (it was silently dropped); corrected §6.1, which had claimed an `ErrorEvent` on the event stream — the SDK publishes bus events only |
+| 2026-10-06 | Review: an async prompt failure is reported through `Options.OnError` (it was silently dropped); corrected §6.1 — a failed turn is observable via the durable `session.next.step.failed` bus event (the Go-level `ErrorEvent` is not a bus event) |
+| 2026-10-06 | Servers self-heal by default: `dropErroredTurns: true` in both commands (the SDK default stays `false`); only provider rejections (`error.type: "provider"`) are dropped — interrupts/declines are kept. Fixed `GET /wait` to wait for the prompt worker, so an accepted prompt is not reported idle before its turn starts |
+| 2026-10-06 | Model media capabilities: `ModelInfo.Capabilities.Input` now flows into the request, the context builder omits media the protocol/model cannot carry (text note, never a failed turn), and `inputModalities` is configurable in both commands |
 
 ---
 
@@ -105,7 +107,7 @@ the authoritative endpoint list and §5.5 names the dropped groups.
 | location-scoped routes (`location` query) | **dropped**: one `Client` = one project/root |
 | provider / model catalog (models.dev) + credential / integration (OAuth) routes | **dropped**: the host supplies `Protocol` + credentials; `catalog`/`credential`/`integration` are not ported (`AGENTS.md`) |
 | `pty` / `project-copy` / `reference` / `fs` / `command` routes | **dropped** (§5.5) |
-| `session.active` / `session.history` routes | **pending alignment (B6)**: v2 has both; this draft omits them (running state is observable via `session.status`, replay via `/event`) |
+| `session.active` / `session.history` routes | same, aligning v2 (B6): `/api/session/active` and `/api/session/{id}/history` (§5.2) |
 
 ---
 
@@ -437,15 +439,38 @@ Notes:
 - **`/wait` is the only blocking route.** Every other state change returns
   immediately (D3). `/wait?timeout=` (default **30s**) blocks until the session
   is idle or the timeout elapses, then returns `{"data":{"idle":true|false}}` — a
-  busy-but-timed-out session is a normal result, not an error. It exists for
-  clients that cannot hold SSE and prefer a bounded poll; other clients use
-  `/event` + `session.status`.
+  busy-but-timed-out session is a normal result, not an error. It first waits for
+  the server's per-session prompt worker to drain, then for the SDK coordinator,
+  so a prompt accepted moments ago is never reported idle before its turn starts.
+  It exists for clients that cannot hold SSE and prefer a bounded poll; other
+  clients use `/event` + `session.status`.
 - **Prompt admission is asynchronous.** The `202` acknowledges the server queue,
   not SDK admission; the resulting `messageID` arrives as the durable
   `session.next.prompt.admitted` event on `/api/event` or during replay (§5.4).
 - **Prompt `delivery`.** `steer` maps to `Session.Steer`, which takes only prompt
   text — `files` are ignored there (attach them with `queue`). An unrecognised
   `delivery` value is rejected `400`, not silently treated as `queue`.
+- **Unsendable attachments are omitted, not fatal.** A `files` entry is dropped
+  from the provider request and replaced by a short text note when its MIME is
+  outside the protocol's wire support, its modality is outside the model's
+  `ModelInfo.Capabilities.Input`, or its payload is malformed/oversized. The
+  turn still completes, so a single attachment can never wedge the session;
+  because the decision is per turn, switching to a model that accepts the type
+  re-includes it. The model's modalities come from `ModelInfo.Capabilities`,
+  wired by the host (or the command's `inputModalities`, §12.1); an empty set
+  means "use the protocol's wire support". A remote A2A backend (§1.2) carries
+  arbitrary file parts and is not filtered by this protocol rule.
+- **Provider-rejected turns.** A message the provider rejects at request time —
+  an image it considers invalid, say — is persisted, so every later turn would
+  re-send it and fail. A remote client cannot run the interactive revert dance,
+  so **the server self-heals by default**: a turn the provider rejected
+  (`error.type: "provider"`) is excluded from later request contexts
+  (`dropErroredTurns: true`, the command default), and the transcript still keeps
+  it. Interrupts and declined tools are **not** dropped — they are not provider
+  rejections and must not erase the user's prompt. The SDK default is the opposite
+  (keep; recover via `POST …/revert/stage` + `/revert/commit`, or delete the
+  session) for library and opencode-CLI callers; set `dropErroredTurns: false` to
+  restore that behavior on a server.
 - **Revert needs snapshots.** `revert/stage` / `clear` / `commit` depend on the
   snapshot service; on a project without snapshots they fail (map to `503`).
   `GET …/revert` returns `null` when nothing is staged.
@@ -574,9 +599,10 @@ GET  /api/session/{id}/event    ──► SSE: durable replay + live (separate c
   run.
 - A prompt whose `Send` fails (e.g. an admission or model error) does not kill
   the worker: the worker reports it through `Options.OnError` and continues with
-  the next prompt. The event stream carries only bus events, so the SDK publishes
-  no dedicated error frame for a failed turn; a connected client observes the turn
-  ending without its expected completion.
+  the next prompt. A connected client also learns of the failure from the durable
+  `session.next.step.failed` event on the stream (and from the assistant message's
+  `error` field on `/message`); a provider rejection carries
+  `error.type: "provider"`.
 - **A parked turn blocks the queue.** When the running turn parks on a
   permission/question ask (§9), the worker is blocked inside `Send`, so any
   prompts queued behind it wait until the ask is resolved (reply, the
@@ -1040,6 +1066,7 @@ to `agentserve.yaml`, which is git-ignored). The complete field set:
 | `model` | string | — | **yes** | Default model id |
 | `protocol` | string | — | **yes** | Wire protocol id, e.g. `openai-responses` |
 | `modelBaseURL` | string | protocol default | no | Model API base URL (non-default hosts); for `bedrock-converse` derived from `credentials.aws.region` when empty |
+| `inputModalities` | []string | `[]` | no | Input modalities the model accepts (`text`/`image`/`audio`/`video`/`pdf`); media outside them is omitted from requests (§5.2) |
 | `credentials.apiKey` | string | — | yes\* | Bearer/header protocol API key (secret) |
 | `credentials.aws.region` | string | — | yes\* | Bedrock region |
 | `credentials.aws.accessKeyId` | string | — | yes\* | Bedrock access key (secret) |
@@ -1049,6 +1076,7 @@ to `agentserve.yaml`, which is git-ignored). The complete field set:
 | `outputLimit` | int | `0` | no | Model output budget (tokens) |
 | `subagentDepth` | int | `1` | no | Max nested `task` subagent recursion (`0` = default, i.e. 1) |
 | `titleAuto` | bool | `false` | no | Auto-generate session titles via the `title` agent |
+| `dropErroredTurns` | bool | `true` | no | Exclude a provider-rejected turn (`error.type: "provider"`) from later contexts, so a persistently rejected message cannot wedge the session; interrupts/declines are kept (§5.2). The server defaults to `true` (a remote client cannot run the revert dance); `false` restores opencode-CLI behavior |
 | `agents` | []string | `[build]` | no | **Allow-list** of agent names the API may create/use (see 12.4) |
 | `auth.bearer` | string | — | no\*\* | Bearer token required on all routes except `publicRoutes` (secret) |
 | `auth.username` | string | `opencode` | no | Basic-auth username (alternative to bearer; secret with password) |
@@ -1085,6 +1113,7 @@ configDirs: [/srv/project/.agents]
 model: deepseek-flash             # required
 protocol: openai-compatible-chat  # required
 modelBaseURL: https://api.deepseek.com
+inputModalities: [text, image]    # optional; what the model accepts (DeepSeek: text + image)
 credentials:                      # required; the only secret source (no env)
   apiKey: sk-...                  # or credentials.aws: { region, accessKeyId, secretAccessKey, sessionToken }
 contextLimit: 128000
@@ -1124,8 +1153,10 @@ repeatable flag replaces the file's list. **Secret fields have no flags**
 | `--model <id>` | `model` | Default model (required) |
 | `--protocol <id>` | `protocol` | Wire protocol (required) |
 | `--model-base-url <url>` | `modelBaseURL` | Model API base URL |
+| `--input-modality <m>` | `inputModalities` | Model input modality (repeatable) |
 | `--subagent-depth <n>` | `subagentDepth` | Max nested `task` subagent depth |
 | `--title-auto` | `titleAuto` | Enable automatic session titles |
+| `--drop-errored-turns[=false]` | `dropErroredTurns` | Exclude errored turns from later contexts (server default `true`) |
 | `--agent <name>` | `agents` | Usable agent (repeatable) |
 | `--interaction-timeout <dur>` | `interactionTimeout` | HITL fallback timeout |
 | `--interaction-fallback <v>` | `interactionFallback` | `reject` \| `allow` |
@@ -1343,6 +1374,14 @@ below.
 - **S3. MCP / references config.** v2's config/service model covers MCP and
   references. *Landed: `cmd/agentserve` has `mcp` (local/remote) and `references`
   (local/git) sections.*
+- **B7. Model media capability.** v2 knows a model's accepted modalities from the
+  catalog (`modalities.input`) and gates attachments on them. *Landed: the SDK
+  carries `ModelInfo.Capabilities` into the request and, at context assembly,
+  omits media the protocol or model cannot carry (replaced with a text note)
+  instead of failing the turn — so an unsupported attachment can never wedge a
+  session, and switching models re-evaluates it. The catalog is not ported
+  (`AGENTS.md`): the host supplies capabilities, and both commands expose
+  `inputModalities` for that.*
 
 ### Go-specific (no TS counterpart)
 
@@ -1352,3 +1391,9 @@ below.
 - **G2. HTTP default ruleset.** *Decided*: keep the shared
   `DefaultInboundPermissions` unchanged for parity with A2A (reads, `webfetch`,
   `task` allowed — no extra `webfetch` deny). A host tightens explicitly (§8.3).
+- **G3. Errored-turn recovery.** *Decided*: the command servers default
+  `dropErroredTurns: true`. A remote client cannot run the interactive revert
+  dance, so the server self-heals by excluding a **provider-rejected** turn
+  (`error.type: "provider"`) from later request contexts (§5.2); interrupts and
+  declined tools are kept. The SDK default stays `false` for library and
+  opencode-CLI callers. Both commands expose the switch to opt out.

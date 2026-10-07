@@ -8,12 +8,14 @@ configDirs: [/srv/project/.agents]
 model: deepseek-flash             # required
 protocol: openai-compatible-chat  # required
 modelBaseURL: https://api.deepseek.com
+inputModalities: [text, image]    # optional; input modalities the model accepts (text/image/audio/video/pdf). DeepSeek accepts text and images; media outside these is omitted from requests
 credentials:                      # required; the only secret source (no env)
   apiKey: sk-...                  # or credentials.aws: { region, accessKeyId, secretAccessKey, sessionToken }
 contextLimit: 128000
 outputLimit: 8192
 subagentDepth: 1
 titleAuto: false
+dropErroredTurns: true             # server default: exclude a turn that ended in error from later contexts (prevents a rejected message from wedging the session); false = opencode-CLI behavior (recover via revert)
 agents: [build]                   # allow-list of usable agents
 auth:
   bearer: <token>                 # optional; required for non-loopback binds

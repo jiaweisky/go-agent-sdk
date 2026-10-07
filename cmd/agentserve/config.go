@@ -22,11 +22,13 @@ type config struct {
 	Model            string                  `yaml:"model"`
 	Protocol         string                  `yaml:"protocol"`
 	ModelBaseURL     string                  `yaml:"modelBaseURL"`
+	InputModalities  []string                `yaml:"inputModalities"`
 	Credentials      serveconfig.Credentials `yaml:"credentials"`
 	ContextLimit     int                     `yaml:"contextLimit"`
 	OutputLimit      int                     `yaml:"outputLimit"`
 	SubagentDepth    int                     `yaml:"subagentDepth"`
 	TitleAuto        bool                    `yaml:"titleAuto"`
+	DropErroredTurns bool                    `yaml:"dropErroredTurns"`
 	Agents           []string                `yaml:"agents"`
 
 	Auth                *authConfig                  `yaml:"auth"`
@@ -163,6 +165,10 @@ func defaultConfig() config {
 		Agents:              []string{"build"},
 		KeepAlive:           "15s",
 		InteractionFallback: "reject",
+		// A remote client cannot run the interactive revert dance, so the server
+		// self-heals by default: a turn that ends in error is excluded from later
+		// contexts. Set dropErroredTurns: false for opencode-CLI-style behavior.
+		DropErroredTurns: true,
 	}
 }
 
@@ -173,6 +179,7 @@ func (c config) validate() error {
 		c.validateCredentials,
 		c.validateAuth,
 		c.validateLimits,
+		c.validateModalities,
 		c.validatePermissions,
 		c.validateMCP,
 		c.validateReferences,
@@ -232,6 +239,10 @@ func (c config) validateLimits() error {
 		return errors.New("limits must not be negative")
 	}
 	return nil
+}
+
+func (c config) validateModalities() error {
+	return serveconfig.ValidateInputModalities(c.InputModalities)
 }
 
 func (c config) validatePermissions() error {

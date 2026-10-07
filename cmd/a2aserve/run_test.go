@@ -137,7 +137,7 @@ func TestModelInfoProviderBedrockEndpoint(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Protocol = "bedrock-converse"
 	cfg.Credentials = serveconfig.Credentials{AWS: &serveconfig.AWS{Region: "eu-west-1", AccessKeyID: "AK", SecretAccessKey: "SK"}}
-	info, err := serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS)("anthropic.claude-3-5-sonnet")
+	info, err := serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS, nil)("anthropic.claude-3-5-sonnet")
 	if err != nil {
 		t.Fatalf("modelInfoProvider: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestModelInfoProviderExplicitBaseURL(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Protocol = "openai-compatible-chat"
 	cfg.ModelBaseURL = "https://api.deepseek.com"
-	info, err := serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS)("deepseek-flash")
+	info, err := serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS, nil)("deepseek-flash")
 	if err != nil {
 		t.Fatalf("modelInfoProvider: %v", err)
 	}

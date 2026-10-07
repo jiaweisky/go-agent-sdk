@@ -17,8 +17,10 @@ type flags struct {
 	model               string
 	protocol            string
 	modelBase           string
+	inputModalities     serveconfig.StringList
 	subagentDepth       int
 	titleAuto           bool
+	dropErroredTurns    bool
 	configDirs          serveconfig.StringList
 	agents              serveconfig.StringList
 	interactionTimeout  string
@@ -39,8 +41,10 @@ func newFlags() *flags {
 	f.fs.StringVar(&f.model, "model", "", "default model id (required)")
 	f.fs.StringVar(&f.protocol, "protocol", "", "wire protocol id, e.g. openai-responses (required)")
 	f.fs.StringVar(&f.modelBase, "model-base-url", "", "model API base URL (protocol default when empty)")
+	f.fs.Var(&f.inputModalities, "input-modality", "model input modality, repeatable (text/image/audio/video/pdf)")
 	f.fs.IntVar(&f.subagentDepth, "subagent-depth", 0, "max nested task subagent recursion")
 	f.fs.BoolVar(&f.titleAuto, "title-auto", false, "enable automatic session titles")
+	f.fs.BoolVar(&f.dropErroredTurns, "drop-errored-turns", false, "exclude errored turns from later contexts (default true; use =false to disable)")
 	f.fs.Var(&f.configDirs, "config-dir", "agent/skill config directory (repeatable)")
 	f.fs.Var(&f.agents, "agent", "usable agent name (repeatable)")
 	f.fs.StringVar(&f.interactionTimeout, "interaction-timeout", "", "HITL fallback timeout, e.g. 5m")
@@ -77,11 +81,17 @@ func (f *flags) apply(cfg *config) {
 	if set["model-base-url"] {
 		cfg.ModelBaseURL = f.modelBase
 	}
+	if set["input-modality"] {
+		cfg.InputModalities = f.inputModalities
+	}
 	if set["subagent-depth"] {
 		cfg.SubagentDepth = f.subagentDepth
 	}
 	if set["title-auto"] {
 		cfg.TitleAuto = f.titleAuto
+	}
+	if set["drop-errored-turns"] {
+		cfg.DropErroredTurns = f.dropErroredTurns
 	}
 	if set["config-dir"] {
 		cfg.ConfigDirs = f.configDirs

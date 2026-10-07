@@ -35,6 +35,7 @@ type RouteModelInput struct {
 	Provider      string
 	Defaults      *schema.ModelDefaults
 	Compatibility *schema.ModelCompatibility
+	Capabilities  *schema.ModelCapabilities
 }
 
 // RoutePatch overrides parts of a route; a nil or empty field keeps the current
@@ -174,6 +175,7 @@ func routeModel(ri makeTransportInput, r Route, input RouteModelInput) (Model, e
 			Provider:      prov,
 			Defaults:      input.Defaults,
 			Compatibility: input.Compatibility,
+			Capabilities:  input.Capabilities,
 		}),
 		Route: r,
 	}, nil

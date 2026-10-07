@@ -9,19 +9,21 @@ import (
 // flags holds the CLI options. Values are zero by default; only flags the user
 // actually set are applied over the config file (see apply).
 type flags struct {
-	fs            *flag.FlagSet
-	config        string
-	listen        string
-	baseURL       string
-	root          string
-	workingDir    string
-	model         string
-	protocol      string
-	modelBase     string
-	keepAlive     string
-	configDirs    serveconfig.StringList
-	agents        serveconfig.StringList
-	allowInsecure bool
+	fs               *flag.FlagSet
+	config           string
+	listen           string
+	baseURL          string
+	root             string
+	workingDir       string
+	model            string
+	protocol         string
+	modelBase        string
+	inputModalities  serveconfig.StringList
+	keepAlive        string
+	configDirs       serveconfig.StringList
+	agents           serveconfig.StringList
+	dropErroredTurns bool
+	allowInsecure    bool
 }
 
 func newFlags() *flags {
@@ -34,9 +36,11 @@ func newFlags() *flags {
 	f.fs.StringVar(&f.model, "model", "", "default model id (required)")
 	f.fs.StringVar(&f.protocol, "protocol", "", "wire protocol id, e.g. openai-responses (required)")
 	f.fs.StringVar(&f.modelBase, "model-base-url", "", "model API base URL (protocol default when empty)")
+	f.fs.Var(&f.inputModalities, "input-modality", "model input modality, repeatable (text/image/audio/video/pdf)")
 	f.fs.StringVar(&f.keepAlive, "keep-alive", "", "SSE keep-alive interval, e.g. 15s")
 	f.fs.Var(&f.configDirs, "config-dir", "agent/skill config directory (repeatable)")
 	f.fs.Var(&f.agents, "agent", "agent name to expose (repeatable)")
+	f.fs.BoolVar(&f.dropErroredTurns, "drop-errored-turns", false, "exclude errored turns from later contexts (default true; use =false to disable)")
 	f.fs.BoolVar(&f.allowInsecure, "allow-insecure", false, "allow binding a non-loopback address without auth")
 	return f
 }
@@ -70,6 +74,9 @@ func (f *flags) apply(cfg *config) {
 	if set["model-base-url"] {
 		cfg.ModelBaseURL = f.modelBase
 	}
+	if set["input-modality"] {
+		cfg.InputModalities = f.inputModalities
+	}
 	if set["keep-alive"] {
 		cfg.KeepAlive = f.keepAlive
 	}
@@ -78,6 +85,9 @@ func (f *flags) apply(cfg *config) {
 	}
 	if set["agent"] {
 		cfg.Agents = f.agents
+	}
+	if set["drop-errored-turns"] {
+		cfg.DropErroredTurns = f.dropErroredTurns
 	}
 	if set["allow-insecure"] {
 		cfg.AllowInsecure = f.allowInsecure

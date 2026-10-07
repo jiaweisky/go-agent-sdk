@@ -146,7 +146,20 @@ func FromCatalogModel(model schema.ModelInfo, credential schema.Credential) (rou
 	}
 	return runnerModelWithDefaults(model, entry.Route).
 		With(route.RoutePatch{Auth: runnerProtocolAuth(entry, credential)}).
-		Model(route.RouteModelInput{ID: runnerModelAPIID(model)})
+		Model(route.RouteModelInput{
+			ID:           runnerModelAPIID(model),
+			Capabilities: runnerModelCapabilities(model),
+		})
+}
+
+// runnerModelCapabilities converts a catalog model's capabilities to the llm
+// schema form, or nil when none are declared.
+func runnerModelCapabilities(model schema.ModelInfo) *llmschema.ModelCapabilities {
+	caps := model.Capabilities
+	if len(caps.Input) == 0 && len(caps.Output) == 0 {
+		return nil
+	}
+	return &llmschema.ModelCapabilities{Input: caps.Input, Output: caps.Output}
 }
 
 // runnerProtocolAuth applies the credential using the protocol's auth scheme.
