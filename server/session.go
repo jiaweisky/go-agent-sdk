@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,23 +25,22 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
-	order := query.Get("order")
-	search := strings.ToLower(query.Get("search"))
-	limit := parseInt(query.Get("limit"), defaultSessionLimit)
-	if limit <= 0 || limit > maxSessionLimit {
-		limit = defaultSessionLimit
-	}
-	sessions = selectSessions(sessions, search, order, limit)
-	out := make([]sessionInfoDTO, 0, len(sessions))
-	for _, item := range sessions {
+	sessions = filterSortSessions(sessions, strings.ToLower(query.Get("search")), query.Get("order"))
+	limit := clampLimit(parseInt(query.Get("limit"), defaultSessionLimit), defaultSessionLimit, maxSessionLimit)
+	page := paginate(sessions, func(item agent.SessionInfo) string { return item.ID }, decodeCursor(query.Get("cursor")), limit)
+	out := make([]sessionInfoDTO, 0, len(page.Items))
+	for _, item := range page.Items {
 		out = append(out, fromRootSessionInfo(item))
 	}
-	writeData(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data":   out,
+		"cursor": map[string]any{"previous": nullable(page.Previous), "next": nullable(page.Next)},
+	})
 }
 
-// selectSessions filters by a case-insensitive title substring, orders by
-// timeUpdated (desc unless order is "asc") and truncates to limit.
-func selectSessions(sessions []agent.SessionInfo, search, order string, limit int) []agent.SessionInfo {
+// filterSortSessions filters by a case-insensitive title substring and orders by
+// timeUpdated (desc unless order is "asc").
+func filterSortSessions(sessions []agent.SessionInfo, search, order string) []agent.SessionInfo {
 	if search != "" {
 		filtered := sessions[:0]
 		for _, item := range sessions {
@@ -57,9 +57,6 @@ func selectSessions(sessions []agent.SessionInfo, search, order string, limit in
 		}
 		return sessions[i].TimeUpdated > sessions[j].TimeUpdated
 	})
-	if len(sessions) > limit {
-		sessions = sessions[:limit]
-	}
 	return sessions
 }
 
@@ -327,18 +324,33 @@ func (s *Server) handleSessionWait(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, map[string]any{"idle": idle})
 }
 
+// handleSessionMessage serves the full transcript as a paged page.
 func (s *Server) handleSessionMessage(w http.ResponseWriter, r *http.Request) {
-	s.writeSessionMessages(w, r, s.client.SessionHistory)
+	s.writeSessionMessagesPage(w, r, s.client.SessionHistory)
 }
 
+// handleSessionContext serves the whole active context (no paging).
 func (s *Server) handleSessionContext(w http.ResponseWriter, r *http.Request) {
-	s.writeSessionMessages(w, r, s.client.SessionMessages)
+	id := r.PathValue("sessionID")
+	if !s.requireSession(w, r) {
+		return
+	}
+	messages, err := s.client.SessionMessages(id)
+	if err != nil {
+		s.writeSDKError(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, messages)
 }
 
-// writeSessionMessages verifies the session exists, reads its messages with
-// read (History for the full transcript, Messages for the active context) and
-// writes them.
-func (s *Server) writeSessionMessages(
+const (
+	defaultMessageLimit = 50
+	maxMessageLimit     = 200
+)
+
+// writeSessionMessagesPage reads messages with read and returns one ordered
+// page with cursors. order is "asc" (default, chronological) or "desc".
+func (s *Server) writeSessionMessagesPage(
 	w http.ResponseWriter,
 	r *http.Request,
 	read func(string) ([]schema.SessionMessage, error),
@@ -352,7 +364,18 @@ func (s *Server) writeSessionMessages(
 		s.writeSDKError(w, err)
 		return
 	}
-	writeData(w, http.StatusOK, messages)
+	query := r.URL.Query()
+	if query.Get("order") == "desc" {
+		slices.Reverse(messages)
+	}
+	limit := clampLimit(parseInt(query.Get("limit"), defaultMessageLimit), defaultMessageLimit, maxMessageLimit)
+	page := paginate(messages,
+		func(m schema.SessionMessage) string { return string(m.SessionMessageID()) },
+		decodeCursor(query.Get("cursor")), limit)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data":   page.Items,
+		"cursor": map[string]any{"previous": nullable(page.Previous), "next": nullable(page.Next)},
+	})
 }
 
 func (s *Server) handleSessionRevertStage(w http.ResponseWriter, r *http.Request) {

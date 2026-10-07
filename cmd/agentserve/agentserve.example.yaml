@@ -37,6 +37,15 @@ cors: []                          # extra browser origins
 #     type: remote
 #     url: https://mcp.example.com/mcp
 #     headers: { Authorization: "Bearer <token>" }
+# references:                     # optional named reference sources
+#   - name: docs
+#     type: local
+#     path: /srv/docs
+#     description: Product docs
+#   - name: lib
+#     type: git
+#     repository: https://github.com/example/lib
+#     branch: main
 # tls:                            # optional; serve HTTPS when both are set
 #   certFile: /etc/agentserve/tls.crt
 #   keyFile: /etc/agentserve/tls.key

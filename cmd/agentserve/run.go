@@ -66,6 +66,11 @@ func buildClient(cfg config) (*agent.Client, error) {
 		return nil, err
 	}
 	clientOpts.MCP = mcpServers
+	references, err := cfg.referenceSources()
+	if err != nil {
+		return nil, err
+	}
+	clientOpts.References = references
 	return agent.NewClient(clientOpts)
 }
 

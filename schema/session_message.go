@@ -232,4 +232,14 @@ func (SessionMessageCompaction) SessionMessageType() string { return "compaction
 // SessionMessage is one stored message.
 type SessionMessage interface {
 	SessionMessageType() string
+	SessionMessageID() MessageID
 }
+
+func (m SessionMessageAgentSwitched) SessionMessageID() MessageID { return m.ID }
+func (m SessionMessageModelSwitched) SessionMessageID() MessageID { return m.ID }
+func (m SessionMessageUser) SessionMessageID() MessageID          { return m.ID }
+func (m SessionMessageSynthetic) SessionMessageID() MessageID     { return m.ID }
+func (m SessionMessageSystem) SessionMessageID() MessageID        { return m.ID }
+func (m SessionMessageShell) SessionMessageID() MessageID         { return m.ID }
+func (m SessionMessageAssistant) SessionMessageID() MessageID     { return m.ID }
+func (m SessionMessageCompaction) SessionMessageID() MessageID    { return m.ID }

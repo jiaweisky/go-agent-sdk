@@ -7,6 +7,7 @@ import (
 
 	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
+	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/mcp"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
@@ -40,7 +41,66 @@ type config struct {
 	TLS           *serveconfig.TLS `yaml:"tls"`
 	AllowInsecure bool             `yaml:"allowInsecure"`
 
-	MCP []mcpConfig `yaml:"mcp"`
+	MCP        []mcpConfig       `yaml:"mcp"`
+	References []referenceConfig `yaml:"references"`
+}
+
+// referenceConfig configures one named reference source (local path or git
+// repository) injected into the system context.
+type referenceConfig struct {
+	Name        string `yaml:"name"`
+	Type        string `yaml:"type"` // local | git
+	Path        string `yaml:"path"`
+	Repository  string `yaml:"repository"`
+	Branch      string `yaml:"branch"`
+	Description string `yaml:"description"`
+	Hidden      *bool  `yaml:"hidden"`
+}
+
+// referenceSources converts the configured references for the client.
+func (c config) referenceSources() (map[string]core.ReferenceSource, error) {
+	if len(c.References) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]core.ReferenceSource, len(c.References))
+	for _, ref := range c.References {
+		if ref.Name == "" {
+			return nil, errors.New("references: each requires a name")
+		}
+		switch ref.Type {
+		case "local":
+			if ref.Path == "" {
+				return nil, fmt.Errorf("reference %s: local requires path", ref.Name)
+			}
+			out[ref.Name] = schema.ReferenceLocalSource{
+				Type: "local", Path: schema.AbsolutePath(ref.Path),
+				Description: optionalString(ref.Description), Hidden: ref.Hidden,
+			}
+		case "git":
+			if ref.Repository == "" {
+				return nil, fmt.Errorf("reference %s: git requires repository", ref.Name)
+			}
+			source := schema.ReferenceGitSource{
+				Type: "git", Repository: ref.Repository,
+				Description: optionalString(ref.Description), Hidden: ref.Hidden,
+			}
+			if ref.Branch != "" {
+				branch := ref.Branch
+				source.Branch = &branch
+			}
+			out[ref.Name] = source
+		default:
+			return nil, fmt.Errorf("reference %s: unknown type %q (local or git)", ref.Name, ref.Type)
+		}
+	}
+	return out, nil
+}
+
+func optionalString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // mcpConfig configures one MCP server (local stdio or remote StreamableHTTP).
@@ -115,6 +175,7 @@ func (c config) validate() error {
 		c.validateLimits,
 		c.validatePermissions,
 		c.validateMCP,
+		c.validateReferences,
 		c.validateHTTP,
 	}
 	for _, check := range checks {
@@ -201,6 +262,11 @@ func (c config) validateMCP() error {
 		}
 	}
 	return nil
+}
+
+func (c config) validateReferences() error {
+	_, err := c.referenceSources()
+	return err
 }
 
 func (c config) validateHTTP() error {

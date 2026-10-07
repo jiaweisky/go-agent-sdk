@@ -106,6 +106,33 @@ func TestMCPConfig(t *testing.T) {
 	}
 }
 
+func TestReferenceSources(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.References = []referenceConfig{
+		{Name: "docs", Type: "local", Path: "/srv/docs", Description: "d"},
+		{Name: "lib", Type: "git", Repository: "https://github.com/example/lib", Branch: "main"},
+	}
+	sources, err := cfg.referenceSources()
+	if err != nil {
+		t.Fatalf("referenceSources: %v", err)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("sources = %d", len(sources))
+	}
+	if sources["docs"].ReferenceSourceType() != "local" {
+		t.Fatalf("docs type = %q", sources["docs"].ReferenceSourceType())
+	}
+	if sources["lib"].ReferenceSourceType() != "git" {
+		t.Fatalf("lib type = %q", sources["lib"].ReferenceSourceType())
+	}
+
+	bad := defaultConfig()
+	bad.References = []referenceConfig{{Name: "x", Type: "local"}}
+	if _, err := bad.referenceSources(); err == nil {
+		t.Fatal("expected local without path to be rejected")
+	}
+}
+
 func TestValidateNonLoopbackNeedsAuth(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Root = "/tmp/x"

@@ -610,6 +610,43 @@ func TestDeleteWhileRunning(t *testing.T) {
 	}
 }
 
+func TestSessionPagination(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	for i := 0; i < 3; i++ {
+		createSession(t, ts)
+	}
+
+	resp := doJSON(t, http.MethodGet, ts.URL+"/api/session?limit=2", "", nil)
+	var first struct {
+		Data   []sessionInfoDTO `json:"data"`
+		Cursor struct {
+			Next string `json:"next"`
+		} `json:"cursor"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&first); err != nil {
+		t.Fatalf("page1 decode: %v", err)
+	}
+	resp.Body.Close()
+	if len(first.Data) != 2 || first.Cursor.Next == "" {
+		t.Fatalf("page1 = %d items, next=%q", len(first.Data), first.Cursor.Next)
+	}
+
+	resp = doJSON(t, http.MethodGet, ts.URL+"/api/session?limit=2&cursor="+first.Cursor.Next, "", nil)
+	var second struct {
+		Data []sessionInfoDTO `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&second); err != nil {
+		t.Fatalf("page2 decode: %v", err)
+	}
+	resp.Body.Close()
+	if len(second.Data) != 1 {
+		t.Fatalf("page2 = %d items, want 1", len(second.Data))
+	}
+	if second.Data[0].ID == first.Data[0].ID || second.Data[0].ID == first.Data[1].ID {
+		t.Fatal("page2 overlapped page1")
+	}
+}
+
 func TestErrorMapping(t *testing.T) {
 	srv, err := New(newTestClient(t), Options{OnError: func(error) {}})
 	if err != nil {

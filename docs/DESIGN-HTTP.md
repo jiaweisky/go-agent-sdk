@@ -24,6 +24,7 @@
 | 2026-10-06 | Implementation refinements: internal 500s are logged with a `ref` (`Options.OnError`); per-session stream dedup is bounded; `/api/session` list documented as omitting `model` |
 | 2026-10-06 | Landed §16 items: B3 prompt `id` (idempotent admission, `MessageOptions.ID`), B6 `GET /api/session/active` + `GET /api/session/{id}/history` (`Client.ActiveSessions` / `SessionEvents`), S3 `mcp` config in `cmd/agentserve` |
 | 2026-10-06 | Contract finish + tests: typed-error mapping completed (snapshot-unavailable → 503, revert message-not-found → 404); `model`/`revert/stage` 400 validation; basic-auth username defaults to `opencode`; regression tests (CORS, basic auth, wait timeout, delete-while-running, replay, error mapping) |
+| 2026-10-06 | P3 landed: opaque pagination cursors on `/api/session` + `/message` (S1) and a `references` config section in `cmd/agentserve` (S3); added `SessionMessage.SessionMessageID` |
 
 ---
 
@@ -344,7 +345,7 @@ it to a reduced DTO (`name`, `description`).
 
 | Method | Path | SDK call | Response |
 |---|---|---|---|
-| GET | `/api/session` | `ListSessions` + server-side `search`/`limit`/`order` | `{"data":[SessionInfo]}` |
+| GET | `/api/session` | `ListSessions` + `search`/`order`/`limit`/`cursor` | `{"data":[SessionInfo],"cursor":{…}}` |
 | POST | `/api/session` | `CreateSession` | `{"data":SessionInfo}` |
 | GET | `/api/session/active` | `ActiveSessions` | `{"data":{sessionID:{"type":"running"}}}` |
 | GET | `/api/session/{sessionID}` | `GetSession` | `{"data":SessionInfo}` |
@@ -356,7 +357,7 @@ it to a reduced DTO (`name`, `description`).
 | POST | `/api/session/{sessionID}/interrupt` | `Session.Abort` | `204` |
 | POST | `/api/session/{sessionID}/compact` | `Session.Compact` | `{"data":{"compacted":bool}}` |
 | POST | `/api/session/{sessionID}/wait?timeout=` | `WaitSession` (bounded) | `200 {"data":{"idle":bool}}` |
-| GET | `/api/session/{sessionID}/message` | `SessionHistory` (full transcript, §16 B4) | `{"data":[Message]}` |
+| GET | `/api/session/{sessionID}/message` | `SessionHistory` (full transcript), paged | `{"data":[Message],"cursor":{…}}` |
 | GET | `/api/session/{sessionID}/context` | active context (`SessionMessages`, post-compaction) | `{"data":[Message]}` |
 | GET | `/api/session/{sessionID}/history?after=&limit=` | `SessionEvents` (finite durable page) | `{"data":[Event],"hasMore":bool}` |
 | GET | `/api/session/{sessionID}/event?after=` | `EventStream()` (replay+live, §5.4) | SSE |
@@ -401,21 +402,21 @@ list omits it, since the list query does not load it (`ListSessions`).
 
 Notes:
 
-- **No paging yet.** `ListSessions` / `SessionMessages` return the full set; the
-  server applies `search`/`limit`/`order` in memory. Opaque cursors are an open
-  question (§16 S1), not part of this draft's response shape.
-- **`/message` vs `/context` (align v2).** opencode exposes both
-  `session.messages` (full projected messages) and `session.context` (active
-  context after the last compaction). This SDK currently has only the active-
-  context read (`Store.Context`, `core/session/history.go`), so aligning requires
-  a **new full-message read** (§16 B4); `/message` returns that, `/context`
-  returns the active context. Pre-compaction turns are otherwise recoverable only
-  as durable *events* (`/event?after=0`).
-- **`GET /api/session` query semantics.** `limit` (default 50, max 200) and
-  `order` (`asc` | `desc` by `timeUpdated`, default `desc`) are applied in memory
-  by the server, because `ListSessions` returns everything newest-first.
-  `search` is a **case-insensitive substring match on `title`**. No opaque cursor
-  (see the paging note below).
+- **Paging (`/api/session`, `/message`).** Both return
+  `{"data":[…], "cursor":{"previous":…,"next":…}}`, where each cursor is opaque
+  (base64url of an anchor `{id, direction}`). Pass `?cursor=<next>` to continue
+  forward or `?cursor=<previous>` to move back; a missing/invalid cursor starts
+  at the beginning, and an anchor whose item was deleted falls back to the near
+  edge. `limit`: `/api/session` default 50 / max 200, `/message` default 50 / max
+  200. `/context` is **not** paged (it is the whole active context).
+- **`/message` vs `/context` (align v2).** `/message` is the full transcript
+  (`SessionHistory`), paged oldest-first by default (`?order=desc` reverses);
+  `/context` is the active context after the last compaction (`SessionMessages`).
+  Pre-compaction turns are otherwise recoverable as durable *events*
+  (`/event?after=0`).
+- **`GET /api/session` query semantics.** `order` (`asc` | `desc` by
+  `timeUpdated`, default `desc`) and `search` (a case-insensitive substring match
+  on `title`) are applied in memory, because `ListSessions` returns everything.
 - **Unknown sessions 404.** Sub-resources that would otherwise return empty
   results (`/message`, `/event`) first verify the session exists (`GetSession`)
   and return `404`; `ListSessions`/`GetSession` cover the non-existent case, so a
@@ -1195,11 +1196,11 @@ on live SSE streams (§13).
 ### 12.6 Out of scope for the command
 
 The YAML/flag surface covers the SDK's **data** inputs (model, credentials,
-agent/skill dirs, permissions, HTTP) and an **`mcp`** section (local/remote
-servers), aligning with v2's config model (§16 S3). Reference *sources* are still
-deferred. The genuinely **code-only** extension points, `Plugins` and custom
-`Tools`, are not expressible here: a host that needs them embeds the SDK directly
-(`agent.NewClient`) and mounts `server.Handler()` itself.
+agent/skill dirs, permissions, HTTP), an **`mcp`** section (local/remote servers)
+and a **`references`** section (local/git sources), aligning with v2's config
+model (§16 S3). The genuinely **code-only** extension points, `Plugins` and
+custom `Tools`, are not expressible here: a host that needs them embeds the SDK
+directly (`agent.NewClient`) and mounts `server.Handler()` itself.
 
 ---
 
@@ -1279,7 +1280,7 @@ routes must land together with it).
 | D14 | The `agents` allow-list is the API-level authorization, separate from the tool permission system | "Which agent may be used" ≠ "which tools a turn may run" (§8.3, §12.4) |
 | D15 | Lifecycle order `Server.Close()` → `http.Server.Shutdown` → `Client.Close()` | Live SSE keeps `Shutdown` waiting; cancel the streams first (§13) |
 | D16 | Uniform error envelope: stable `error` code + HTTP status, mapped centrally; post-start SSE errors are `event: error` frames | One shape for clients; sentinel SDK errors make the mapping non-stringly (§10) |
-| D17 | `cmd/agentserve` configures data inputs and has an `mcp` section (align v2); `references` still deferred, `Plugins`/`Tools` stay code-only | MCP/references are data (§16 S3); plugins/tools are Go code (§12.6) |
+| D17 | `cmd/agentserve` configures data inputs plus `mcp` and `references` sections (align v2); `Plugins`/`Tools` stay code-only | MCP/references are data (§16 S3); plugins/tools are Go code (§12.6) |
 | D18 | `inboundPermissions`, when set, **replaces** the SDK deny-by-default ruleset (it is then *merged* over a session's stored rules on resume — D19) | Matches `cmd/a2aserve`'s `WithInboundPermissions`; no surprising implicit merge *of the default* (§12.1) |
 | D19 | HTTP `ResumeSession` **merges** `InboundPermissions` over the stored session rules (not substituting) | Enforces the API ruleset on every externally driven session without discarding the host's per-session policy (§7) |
 
@@ -1314,14 +1315,15 @@ below.
   running-session list and a finite durable-event page. *Landed:
   `Client.ActiveSessions` → `GET /api/session/active`; `Client.SessionEvents`
   (one-shot `ReadAfter`) → `GET /api/session/{id}/history`.*
-- **S1. Paging.** v2 uses opaque `SessionsCursor` / message cursors; implement
-  the same (replacing this draft's full-list + `limit` ≤ 200).
+- **S1. Paging.** v2 uses opaque session / message cursors. *Landed: opaque
+  `{id,direction}` cursors on `/api/session` and `/message`
+  (`cursor.previous`/`cursor.next`).*
 - **S2. CORS / `?auth_token`.** v2 accepts `?auth_token` on all routes and ships
   loopback CORS (`packages/server/src/middleware/authorization.ts`); keep both —
   do not drop browser support.
-- **S3. MCP / references config.** v2's config/service model covers MCP (and
-  references). *MCP landed: `cmd/agentserve` has an `mcp` section; reference
-  sources are still deferred.*
+- **S3. MCP / references config.** v2's config/service model covers MCP and
+  references. *Landed: `cmd/agentserve` has `mcp` (local/remote) and `references`
+  (local/git) sections.*
 
 ### Go-specific (no TS counterpart)
 
