@@ -9,9 +9,11 @@ import (
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -737,6 +739,87 @@ func TestSessionPagination(t *testing.T) {
 	}
 	if second.Data[0].ID == first.Data[0].ID || second.Data[0].ID == first.Data[1].ID {
 		t.Fatal("page2 overlapped page1")
+	}
+}
+
+// capturingLLM records the last request so a test can inspect the model context.
+type capturingLLM struct {
+	mu    sync.Mutex
+	last  *llmschema.LLMRequest
+	reply string
+}
+
+func (c *capturingLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
+	return nil, nil
+}
+
+func (c *capturingLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
+	return nil, nil
+}
+
+func (c *capturingLLM) Stream(_ context.Context, req *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+	c.mu.Lock()
+	c.last = req
+	c.mu.Unlock()
+	events := []llmschema.LLMEvent{
+		llmschema.NewStepStart(0),
+		llmschema.NewTextStart("t1"),
+		llmschema.NewTextDelta("t1", c.reply),
+		llmschema.NewTextEnd("t1"),
+		llmschema.NewStepFinish(0, llmschema.ReasonStop),
+		llmschema.NewFinish(llmschema.ReasonStop),
+	}
+	return func(yield func(llmschema.LLMEvent, error) bool) {
+		for _, event := range events {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+func (c *capturingLLM) system() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.last == nil {
+		return ""
+	}
+	var parts []string
+	for _, part := range c.last.System {
+		parts = append(parts, part.Text)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// TestReferencesMaterialized checks a configured reference reaches the model's
+// system context (the reference guidance is injected into the prompt).
+func TestReferencesMaterialized(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "guide.md"), []byte("# Guide\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	description := "Acme product documentation"
+	llm := &capturingLLM{reply: "ok"}
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("k"), Model: "test-model",
+		Root: t.TempDir(), LLM: llm,
+		References: map[string]core.ReferenceSource{
+			"docs": schema.ReferenceLocalSource{
+				Type: "local", Path: schema.AbsolutePath(dir), Description: &description,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	ts := serveClient(t, client, Options{})
+	id := createSession(t, ts)
+
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"hi"}`, nil)
+	resp.Body.Close()
+
+	if !poll(t, 5*time.Second, func() bool { return strings.Contains(llm.system(), "docs") }) {
+		t.Fatalf("reference not materialized into the system context:\n%s", llm.system())
 	}
 }
 
