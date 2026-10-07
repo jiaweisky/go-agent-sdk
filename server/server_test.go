@@ -17,6 +17,7 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/core"
 	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
 	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // fakeLLM streams a single text part and finishes, so a turn completes without a
@@ -695,4 +696,163 @@ func TestSessionReplay(t *testing.T) {
 		t.Fatal("history stayed empty")
 	}
 	readSSE(t, ts, "/api/session/"+id+"/event?after=0", "text.ended")
+}
+
+func TestInteractionTimeoutFallback(t *testing.T) {
+	calls := 0
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("k"),
+		Model: "test-model", Root: t.TempDir(),
+		Tools: []agent.Tool{agent.DefineTool("echo", "echo", func(struct{}, agent.ToolContext) (string, error) {
+			return "ok", nil
+		})},
+		LLM: toolCallLLM{calls: &calls, toolName: "echo", reply: "done"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Permissions: schema.PermissionRuleset{{Action: "echo", Resource: "*", Effect: schema.PermissionEffectAsk}},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ts := serveClient(t, client, Options{
+		InteractionTimeout:  200 * time.Millisecond,
+		InteractionFallback: "reject",
+	})
+	id := createSession(t, ts)
+
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"go"}`, nil)
+	resp.Body.Close()
+
+	// The ask must first appear, then the watcher resolves it with no reply.
+	if !poll(t, 5*time.Second, func() bool { return permissionCount(t, ts, id) > 0 }) {
+		t.Fatal("no permission request appeared")
+	}
+	if !poll(t, 8*time.Second, func() bool { return permissionCount(t, ts, id) == 0 }) {
+		t.Fatal("interaction timeout did not resolve the pending ask")
+	}
+}
+
+func permissionCount(t *testing.T, ts *httptest.Server, id string) int {
+	t.Helper()
+	r := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/permission", "", nil)
+	defer r.Body.Close()
+	var body struct {
+		Data []permissionRequestDTO `json:"data"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	return len(body.Data)
+}
+
+// toolCallLLM calls a tool on its first stream and returns text on the second,
+// so a test can drive a tool (and its permission ask) then complete the turn.
+type toolCallLLM struct {
+	calls    *int
+	toolName string
+	reply    string
+}
+
+func (f toolCallLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
+	return nil, nil
+}
+
+func (f toolCallLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
+	return nil, nil
+}
+
+func (f toolCallLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+	*f.calls++
+	var events []llmschema.LLMEvent
+	if *f.calls == 1 {
+		events = []llmschema.LLMEvent{
+			llmschema.NewStepStart(0),
+			llmschema.NewToolCall("call-1", f.toolName, map[string]any{}),
+			llmschema.NewStepFinish(0, llmschema.ReasonToolCalls),
+			llmschema.NewFinish(llmschema.ReasonToolCalls),
+		}
+	} else {
+		events = []llmschema.LLMEvent{
+			llmschema.NewStepStart(0),
+			llmschema.NewTextStart("t1"),
+			llmschema.NewTextDelta("t1", f.reply),
+			llmschema.NewTextEnd("t1"),
+			llmschema.NewStepFinish(0, llmschema.ReasonStop),
+			llmschema.NewFinish(llmschema.ReasonStop),
+		}
+	}
+	return func(yield func(llmschema.LLMEvent, error) bool) {
+		for _, event := range events {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+func TestPermissionRoundTrip(t *testing.T) {
+	calls := 0
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("k"),
+		Model: "test-model", Root: t.TempDir(),
+		Tools: []agent.Tool{agent.DefineTool("echo", "echo", func(struct{}, agent.ToolContext) (string, error) {
+			return "ok", nil
+		})},
+		LLM: toolCallLLM{calls: &calls, toolName: "echo", reply: "done"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Permissions: schema.PermissionRuleset{{Action: "echo", Resource: "*", Effect: schema.PermissionEffectAsk}},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ts := serveClient(t, client, Options{})
+	id := createSession(t, ts)
+
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"go"}`, nil)
+	resp.Body.Close()
+
+	// The tool call parks on an ask; the client observes it and replies.
+	var requestID string
+	if !poll(t, 5*time.Second, func() bool {
+		r := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/permission", "", nil)
+		defer r.Body.Close()
+		var body struct {
+			Data []permissionRequestDTO `json:"data"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if len(body.Data) > 0 {
+			requestID = body.Data[0].ID
+			return true
+		}
+		return false
+	}) {
+		t.Fatal("no permission request appeared")
+	}
+
+	reply := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/permission/"+requestID+"/reply", `{"reply":"once"}`, nil)
+	reply.Body.Close()
+	if reply.StatusCode != http.StatusNoContent {
+		t.Fatalf("reply status = %d", reply.StatusCode)
+	}
+
+	// The turn resumes after the reply and completes the tool call.
+	if !poll(t, 5*time.Second, func() bool {
+		r := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/history", "", nil)
+		defer r.Body.Close()
+		var body struct {
+			Data []wireEvent `json:"data"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		for _, event := range body.Data {
+			if event.Type == "session.next.tool.success" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("turn did not resume after the permission reply")
+	}
 }

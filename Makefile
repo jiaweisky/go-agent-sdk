@@ -14,7 +14,7 @@ else
 EXE :=
 endif
 
-EXAMPLES := chat tool notesmcp a2aserver
+EXAMPLES := chat tool notesmcp a2aserver httpclient
 BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(EXAMPLES)))
 CMDS := a2aserve agentserve
 CMD_BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(CMDS)))

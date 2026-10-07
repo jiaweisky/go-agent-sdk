@@ -25,6 +25,7 @@
 | 2026-10-06 | Landed §16 items: B3 prompt `id` (idempotent admission, `MessageOptions.ID`), B6 `GET /api/session/active` + `GET /api/session/{id}/history` (`Client.ActiveSessions` / `SessionEvents`), S3 `mcp` config in `cmd/agentserve` |
 | 2026-10-06 | Contract finish + tests: typed-error mapping completed (snapshot-unavailable → 503, revert message-not-found → 404); `model`/`revert/stage` 400 validation; basic-auth username defaults to `opencode`; regression tests (CORS, basic auth, wait timeout, delete-while-running, replay, error mapping) |
 | 2026-10-06 | P3 landed: opaque pagination cursors on `/api/session` + `/message` (S1) and a `references` config section in `cmd/agentserve` (S3); added `SessionMessage.SessionMessageID` |
+| 2026-10-06 | Phase 5: `examples/httpclient` (runnable Go client) + permission round-trip and interaction-timeout tests; design doc marked Phases 0–5 complete |
 
 ---
 
@@ -996,9 +997,11 @@ Consequences:
   `jsonschema` stays confined to the **tool** framework.
 - **No typed event union and no generated SDK**; event `data` is documented by
   `type` (§6.4) and each consumer maps it however it likes.
-- To exercise the API end to end, this repo provides a Go example/test that
-  drives `session → prompt → SSE → permission reply`; the WeCom bot, in another
-  language, consumes the same wire contract.
+- To exercise the API end to end, this repo ships `examples/httpclient` (a
+  runnable Go client: create session → prompt → SSE → auto-approve permission →
+  idle) and `server/server_test.go` (session → prompt → SSE → permission
+  round-trip → replay). The WeCom bot, in another language, consumes the same
+  wire contract.
 - If the consumer set ever grows (Go/Java/many clients), schema-first can be
   revisited.
 
@@ -1246,11 +1249,12 @@ Every phase ships `httptest`-based tests (auth, error mapping, worker
 serialization, SSE replay/dedup, HITL); Phase 5 adds the full end-to-end
 round-trip.
 
-> **Status:** Phases 0–3 and the `cmd/agentserve` command (Phase 4) are
-> implemented in `server/` and `cmd/agentserve/`; the SDK additions are
-> `Client.EventStream` / `GetSession` / `WaitSession` / `SessionHistory` and the
-> `ErrUnknownAgent` / `ErrSessionNotFound` sentinels. Phase 5's end-to-end
-> coverage lives in `server/server_test.go`.
+> **Status:** Phases 0–5 are implemented. `server/` + `cmd/agentserve/` cover
+> the API and command; the SDK additions are `Client.EventStream` / `GetSession`
+> / `WaitSession` / `SessionHistory` / `ActiveSessions` / `SessionEvents`. Phase 5
+> ships both a runnable client (`examples/httpclient`) and end-to-end tests
+> (`server/server_test.go`: prompt/SSE, permission round-trip, replay, pagination,
+> delete-while-running, interaction timeout).
 
 **Sequencing note.** `New` sets `HoldInteractions(true)` (§9), which parks every
 `ask` until a reply arrives. Until the interaction routes exist (Phase 3),
