@@ -51,6 +51,11 @@ func Serve(ctx context.Context, server *http.Server, tls *TLS, beforeShutdown fu
 		}
 		return nil
 	case err := <-serveErr:
+		// The listener failed (e.g. the address is in use): release the server
+		// too, so it is not left with live goroutines.
+		if beforeShutdown != nil {
+			beforeShutdown()
+		}
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}

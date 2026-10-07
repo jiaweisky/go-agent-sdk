@@ -25,16 +25,23 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
-// fakeLLM streams a single text part and finishes, so a turn completes without a
-// network call.
-type fakeLLM struct{ reply string }
+// stubLLM provides the no-op Prepare/Generate that the test LLMs do not care
+// about, so each only has to implement the Stream behavior it exercises.
+type stubLLM struct{}
 
-func (f fakeLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
+func (stubLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
 	return nil, nil
 }
 
-func (f fakeLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
+func (stubLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
 	return nil, nil
+}
+
+// fakeLLM streams a single text part and finishes, so a turn completes without a
+// network call.
+type fakeLLM struct {
+	stubLLM
+	reply string
 }
 
 func (f fakeLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
@@ -399,14 +406,9 @@ func serveClient(t *testing.T, client *agent.Client, opts Options) *httptest.Ser
 }
 
 // blockingLLM keeps a turn in flight until release is closed.
-type blockingLLM struct{ release chan struct{} }
-
-func (b blockingLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
-	return nil, nil
-}
-
-func (b blockingLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
-	return nil, nil
+type blockingLLM struct {
+	stubLLM
+	release chan struct{}
 }
 
 func (b blockingLLM) Stream(ctx context.Context, _ *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
@@ -745,17 +747,10 @@ func TestSessionPagination(t *testing.T) {
 // taskCallLLM calls the built-in `task` tool on its first stream and returns
 // text afterwards, so a test can drive a subagent (child session).
 type taskCallLLM struct {
+	stubLLM
 	mu    sync.Mutex
 	calls int
 	reply string
-}
-
-func (f *taskCallLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
-	return nil, nil
-}
-
-func (f *taskCallLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
-	return nil, nil
 }
 
 func (f *taskCallLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
@@ -860,17 +855,10 @@ func readGlobalUntilOtherSession(t *testing.T, ts *httptest.Server, parentID str
 
 // capturingLLM records the last request so a test can inspect the model context.
 type capturingLLM struct {
+	stubLLM
 	mu    sync.Mutex
 	last  *llmschema.LLMRequest
 	reply string
-}
-
-func (c *capturingLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
-	return nil, nil
-}
-
-func (c *capturingLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
-	return nil, nil
 }
 
 func (c *capturingLLM) Stream(_ context.Context, req *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
@@ -1132,17 +1120,10 @@ func TestInteractionFallbackAllow(t *testing.T) {
 // toolCallLLM calls a tool on its first stream and returns text on the second,
 // so a test can drive a tool (and its permission ask) then complete the turn.
 type toolCallLLM struct {
+	stubLLM
 	calls    *int
 	toolName string
 	reply    string
-}
-
-func (f toolCallLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
-	return nil, nil
-}
-
-func (f toolCallLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
-	return nil, nil
 }
 
 func (f toolCallLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
