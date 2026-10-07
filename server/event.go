@@ -116,7 +116,7 @@ func (s *Server) streamSessionEvents(ctx context.Context, sw *sseWriter, id stri
 		close(out)
 	}()
 
-	seen := newRecentIDs(4096)
+	seen := newRecentIDs(sessionDedupCapacity)
 	for ev := range out {
 		if key := string(ev.ID); key != "" && seen.add(key) {
 			continue
@@ -126,6 +126,13 @@ func (s *Server) streamSessionEvents(ctx context.Context, sw *sseWriter, id stri
 		}
 	}
 }
+
+// sessionDedupCapacity bounds the per-session stream's event-ID memory. The two
+// merged legs (durable replay and live) overlap only near the replay/live
+// boundary — at most a live-subscriber burst's worth of events — so a window
+// comfortably above SubscriberCapacity's default (256) is enough; larger values
+// only cost memory.
+const sessionDedupCapacity = 4096
 
 // recentIDs is a bounded FIFO set used to de-duplicate the overlap between the
 // durable replay leg and the live leg without unbounded memory growth. The two
