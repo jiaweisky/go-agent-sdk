@@ -1453,3 +1453,42 @@ func TestWaitAccountsForAcceptedPrompt(t *testing.T) {
 		t.Fatal("wait reported idle for an accepted prompt whose turn had not finished")
 	}
 }
+
+// TestOmittedAttachmentEventVisible guards that a client can perceive an
+// attachment the model could not carry: the omission is a durable event.
+func TestOmittedAttachmentEventVisible(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	id := createSession(t, ts)
+
+	body := `{"prompt":"read this file","files":[{"uri":"data:application/pdf;base64,JVBERi0=","mime":"application/pdf","name":"x.pdf"}]}`
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", body, nil)
+	resp.Body.Close()
+	waitIdle(t, ts, id)
+
+	resp = doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/history?after=0&limit=100", "", nil)
+	defer resp.Body.Close()
+	var page struct {
+		Data []struct {
+			Type string `json:"type"`
+			Data struct {
+				Name string `json:"name"`
+				MIME string `json:"mime"`
+			} `json:"data"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	found := 0
+	for _, ev := range page.Data {
+		if ev.Type == "session.next.attachment.omitted" {
+			found++
+			if ev.Data.Name != "x.pdf" || ev.Data.MIME != "application/pdf" {
+				t.Fatalf("omitted event data = %+v", ev.Data)
+			}
+		}
+	}
+	if found != 1 {
+		t.Fatalf("session.next.attachment.omitted events = %d, want 1 (deduped per attachment)", found)
+	}
+}

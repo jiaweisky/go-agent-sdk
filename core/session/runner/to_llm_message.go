@@ -8,9 +8,31 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
-// mediaSupport reports whether the target model can carry a media part with the
-// given MIME type and payload. A nil mediaSupport accepts everything.
-type mediaSupport func(mime, data string) bool
+// mediaPolicy decides which media the target model can carry and reports each
+// part it omits, so a client can perceive an omission. A nil support accepts
+// everything; a nil omit reports nothing.
+type mediaPolicy struct {
+	support func(mime, data string) bool
+	omit    func(messageID schema.MessageID, name, mime string)
+}
+
+// allows reports whether the model can carry a part.
+func (p mediaPolicy) allows(mime, data string) bool {
+	return p.support == nil || p.support(mime, data)
+}
+
+// omitNote reports a part the model cannot carry and returns the text note that
+// replaces it. name may be nil; an absent name falls back to the MIME.
+func (p mediaPolicy) omitNote(messageID schema.MessageID, name *string, mime string) string {
+	value := mime
+	if name != nil && *name != "" {
+		value = *name
+	}
+	if p.omit != nil {
+		p.omit(messageID, value, mime)
+	}
+	return omittedMediaNote(value, mime)
+}
 
 func llmMedia(file schema.PromptFileAttachment) llmschema.ContentPart {
 	part := llmschema.MediaPart{Type: "media", MediaType: file.Mime, Data: file.URI, Filename: file.Name}
@@ -60,7 +82,11 @@ func llmProviderExecuted(provider *schema.SessionMessageAssistantProvider) *bool
 // llmToolContent converts the session tool content union to the llm schema
 // union (distinct interface types). A file the target model cannot accept is
 // replaced by a text note.
-func llmToolContent(content []schema.ToolContent, accept mediaSupport) []llmschema.ToolContent {
+func llmToolContent(
+	content []schema.ToolContent,
+	policy mediaPolicy,
+	messageID schema.MessageID,
+) []llmschema.ToolContent {
 	if content == nil {
 		return nil
 	}
@@ -70,13 +96,9 @@ func llmToolContent(content []schema.ToolContent, accept mediaSupport) []llmsche
 		case schema.ToolTextContent:
 			converted = append(converted, llmschema.ToolTextContent{Type: value.Type, Text: value.Text})
 		case schema.ToolFileContent:
-			if accept != nil && !accept(value.Mime, value.URI) {
-				name := ""
-				if value.Name != nil {
-					name = *value.Name
-				}
+			if !policy.allows(value.Mime, value.URI) {
 				converted = append(converted, llmschema.ToolTextContent{
-					Type: "text", Text: omittedMediaNote(name, value.Mime),
+					Type: "text", Text: policy.omitNote(messageID, value.Name, value.Mime),
 				})
 				continue
 			}
@@ -106,7 +128,8 @@ func llmToolCall(
 func llmToolResult(
 	tool schema.SessionMessageAssistantTool,
 	providerMetadata llmschema.ProviderMetadata,
-	accept mediaSupport,
+	policy mediaPolicy,
+	messageID schema.MessageID,
 ) (llmschema.ContentPart, bool) {
 	providerExecuted := tool.Provider != nil && tool.Provider.Executed
 	switch state := tool.State.(type) {
@@ -117,7 +140,7 @@ func llmToolResult(
 		} else {
 			result = llmschema.ToolOutputToResultValue(llmschema.ToolOutput{
 				Structured: state.Structured,
-				Content:    llmToolContent(state.Content, accept),
+				Content:    llmToolContent(state.Content, policy, messageID),
 			})
 		}
 		return llmschema.NewToolResultPart(llmschema.ToolResultPartInput{
@@ -161,13 +184,13 @@ func llmResultMetadata(provider *schema.SessionMessageAssistantProvider) llmsche
 	return nil
 }
 
-func llmAssistant(message schema.SessionMessageAssistant, model llmschema.ModelSchema, accept mediaSupport) []llmschema.Message {
+func llmAssistant(message schema.SessionMessageAssistant, model llmschema.ModelSchema, policy mediaPolicy) []llmschema.Message {
 	sameModel := string(message.Model.ProviderID) == string(model.ProviderID()) &&
 		string(message.Model.ID) == string(model.ModelID())
 	reuseProviderMetadata := sameModel && message.Error == nil
 
-	meaningful := llmMeaningfulContent(llmAssistantContent(message, sameModel, reuseProviderMetadata, accept))
-	results := llmAssistantToolResults(message, reuseProviderMetadata, accept)
+	meaningful := llmMeaningfulContent(llmAssistantContent(message, sameModel, reuseProviderMetadata, policy))
+	results := llmAssistantToolResults(message, reuseProviderMetadata, policy)
 
 	if len(meaningful) == 0 {
 		return results
@@ -186,7 +209,7 @@ func llmAssistant(message schema.SessionMessageAssistant, model llmschema.ModelS
 func llmAssistantContent(
 	message schema.SessionMessageAssistant,
 	sameModel, reuseProviderMetadata bool,
-	accept mediaSupport,
+	policy mediaPolicy,
 ) []llmschema.ContentPart {
 	content := make([]llmschema.ContentPart, 0, len(message.Content))
 	for _, item := range message.Content {
@@ -217,7 +240,7 @@ func llmAssistantContent(
 			if reuseProviderMetadata {
 				resultMetadata = llmResultMetadata(part.Provider)
 			}
-			if result, ok := llmToolResult(part, resultMetadata, accept); ok {
+			if result, ok := llmToolResult(part, resultMetadata, policy, message.ID); ok {
 				content = append(content, call, result)
 			} else {
 				content = append(content, call)
@@ -249,7 +272,7 @@ func llmMeaningfulContent(content []llmschema.ContentPart) []llmschema.ContentPa
 
 // llmAssistantToolResults collects the tool results that are not hosted by the
 // provider.
-func llmAssistantToolResults(message schema.SessionMessageAssistant, reuseProviderMetadata bool, accept mediaSupport) []llmschema.Message {
+func llmAssistantToolResults(message schema.SessionMessageAssistant, reuseProviderMetadata bool, policy mediaPolicy) []llmschema.Message {
 	var results []llmschema.Message
 	for _, item := range message.Content {
 		tool, ok := item.(schema.SessionMessageAssistantTool)
@@ -263,14 +286,14 @@ func llmAssistantToolResults(message schema.SessionMessageAssistant, reuseProvid
 		if reuseProviderMetadata {
 			metadata = llmResultMetadata(tool.Provider)
 		}
-		if result, ok := llmToolResult(tool, metadata, accept); ok {
+		if result, ok := llmToolResult(tool, metadata, policy, message.ID); ok {
 			results = append(results, llmschema.MessageTool(result))
 		}
 	}
 	return results
 }
 
-func toLLMMessage(message schema.SessionMessage, model llmschema.ModelSchema, accept mediaSupport) []llmschema.Message {
+func toLLMMessage(message schema.SessionMessage, model llmschema.ModelSchema, policy mediaPolicy) []llmschema.Message {
 	switch m := message.(type) {
 	case schema.SessionMessageAgentSwitched, schema.SessionMessageModelSwitched:
 		return nil
@@ -278,12 +301,8 @@ func toLLMMessage(message schema.SessionMessage, model llmschema.ModelSchema, ac
 		content := make([]llmschema.ContentPart, 0, 1+len(m.Files))
 		content = append(content, llmschema.NewTextContent(m.Text))
 		for _, file := range m.Files {
-			if accept != nil && !accept(file.Mime, file.URI) {
-				name := ""
-				if file.Name != nil {
-					name = *file.Name
-				}
-				content = append(content, llmschema.NewTextContent(omittedMediaNote(name, file.Mime)))
+			if !policy.allows(file.Mime, file.URI) {
+				content = append(content, llmschema.NewTextContent(policy.omitNote(m.ID, file.Name, file.Mime)))
 				continue
 			}
 			content = append(content, llmMedia(file))
@@ -320,7 +339,7 @@ func toLLMMessage(message schema.SessionMessage, model llmschema.ModelSchema, ac
 			Metadata: m.Metadata,
 		})}
 	case schema.SessionMessageAssistant:
-		return llmAssistant(m, model, accept)
+		return llmAssistant(m, model, policy)
 	case schema.SessionMessageCompaction:
 		return []llmschema.Message{llmschema.NewMessage(llmschema.MessageInput{
 			ID:   string(m.ID),
@@ -338,17 +357,17 @@ func toLLMMessage(message schema.SessionMessage, model llmschema.ModelSchema, ac
 }
 
 // ToLLMMessages translates projected session history into the canonical LLM
-// context for a model. accept, when set, decides which media the model can
-// carry: an attachment it rejects is replaced by a text note rather than failing
-// the request.
+// context for a model. policy decides which media the model can carry: an
+// attachment it rejects is replaced by a text note (and reported) rather than
+// failing the request.
 func ToLLMMessages(
 	messages []schema.SessionMessage,
 	model llmschema.ModelSchema,
-	accept mediaSupport,
+	policy mediaPolicy,
 ) []llmschema.Message {
 	result := make([]llmschema.Message, 0, len(messages))
 	for _, message := range messages {
-		result = append(result, toLLMMessage(message, model, accept)...)
+		result = append(result, toLLMMessage(message, model, policy)...)
 	}
 	return result
 }

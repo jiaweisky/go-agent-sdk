@@ -38,6 +38,15 @@ type SessionEventPromptData struct {
 	Delivery  SessionDelivery `json:"delivery"`
 }
 
+// SessionEventAttachmentOmittedData reports an attachment the selected model
+// could not carry, so it was replaced by a text note in the request.
+type SessionEventAttachmentOmittedData struct {
+	SessionEventEnvelope
+	MessageID MessageID `json:"messageID"`
+	Name      string    `json:"name"`
+	MIME      string    `json:"mime"`
+}
+
 // SessionEventMessageTextData covers context.updated and synthetic.
 type SessionEventMessageTextData struct {
 	SessionEventEnvelope

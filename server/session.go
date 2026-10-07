@@ -320,20 +320,17 @@ func (s *Server) handleSessionWait(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSession(w, r) {
 		return
 	}
-	deadline := time.Now().Add(timeout)
 	// WaitSession only sees the SDK coordinator, which stays idle until the
 	// prompt worker calls Session.Send. Wait for the worker to drain first, or a
 	// prompt accepted moments ago would report idle before its turn started.
-	for s.workerBusy(id) {
-		if !time.Now().Before(deadline) {
-			writeData(w, http.StatusOK, map[string]any{"idle": false})
-			return
-		}
-		time.Sleep(waitWorkerPollInterval)
+	deadline := time.Now().Add(timeout)
+	if !s.waitForWorker(id, deadline) {
+		writeIdle(w, false)
+		return
 	}
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		writeData(w, http.StatusOK, map[string]any{"idle": false})
+		writeIdle(w, false)
 		return
 	}
 	idle, err := s.client.WaitSession(r.Context(), id, remaining)
@@ -341,11 +338,23 @@ func (s *Server) handleSessionWait(w http.ResponseWriter, r *http.Request) {
 		s.writeSDKError(w, err)
 		return
 	}
-	writeData(w, http.StatusOK, map[string]any{"idle": idle})
+	writeIdle(w, idle)
 }
 
 // waitWorkerPollInterval is how often /wait checks the session worker.
 const waitWorkerPollInterval = 20 * time.Millisecond
+
+// waitForWorker blocks until the session's prompt worker drains or the deadline
+// passes, reporting whether it drained.
+func (s *Server) waitForWorker(id string, deadline time.Time) bool {
+	for s.workerBusy(id) {
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(waitWorkerPollInterval)
+	}
+	return true
+}
 
 // workerBusy reports whether a session has a prompt worker draining its queue.
 func (s *Server) workerBusy(id string) bool {
@@ -353,6 +362,11 @@ func (s *Server) workerBusy(id string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.worker != nil
+}
+
+// writeIdle writes the /wait result.
+func writeIdle(w http.ResponseWriter, idle bool) {
+	writeData(w, http.StatusOK, map[string]any{"idle": idle})
 }
 
 // handleSessionMessage serves the full transcript as a paged page.

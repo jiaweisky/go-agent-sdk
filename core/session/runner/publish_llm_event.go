@@ -175,7 +175,9 @@ func (p *LLMEventPublisher) Flush() error {
 	return p.toolInput.Flush()
 }
 
-// FailAssistant marks the assistant message as failed.
+// FailAssistant marks the assistant message as failed without a provider
+// classification — an interrupt or a declined tool. Use FailAssistantProvider
+// for a rejection the model itself returned.
 func (p *LLMEventPublisher) FailAssistant(message string) error {
 	return p.failAssistant(message, "unknown")
 }

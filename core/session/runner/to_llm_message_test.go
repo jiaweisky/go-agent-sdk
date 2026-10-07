@@ -59,7 +59,7 @@ func TestToLLMMessagesOmitsEmptyAssistantTurns(t *testing.T) {
 				ProviderMetadata: providerMetadata(map[string]map[string]any{"anthropic": {"signature": "sig_1"}}),
 			},
 		}),
-	}, model, nil)
+	}, model, mediaPolicy{})
 
 	ids := make([]string, len(messages))
 	for i, message := range messages {
@@ -88,7 +88,7 @@ func TestToLLMMessagesMapsTopLevelTypes(t *testing.T) {
 		schema.SessionMessageCompaction{
 			ID: "msg_compaction", Type: "compaction", Reason: "auto", Summary: "Earlier work", Recent: "Recent work",
 		},
-	}, model, nil)
+	}, model, mediaPolicy{})
 
 	roles := make([]llmschema.MessageRole, len(messages))
 	for i, message := range messages {
@@ -171,7 +171,7 @@ func TestToLLMMessagesReplaysToolMedia(t *testing.T) {
 				Structured: map[string]any{}, Error: schema.SessionMessageUnknownError{Type: "unknown", Message: "Denied"},
 			}),
 		}),
-	}, model, nil)
+	}, model, mediaPolicy{})
 
 	roles := []llmschema.MessageRole{messages[0].Role, messages[1].Role}
 	if want := []llmschema.MessageRole{llmschema.RoleAssistant, llmschema.RoleTool}; !reflect.DeepEqual(roles, want) {
@@ -242,7 +242,7 @@ func TestToLLMMessagesRestoresEncryptedReasoning(t *testing.T) {
 					}),
 				},
 			}),
-	}, model, nil)
+	}, model, mediaPolicy{})
 	want := []llmschema.ContentPart{
 		llmschema.ReasoningPart{Type: "reasoning", Text: "Think", ProviderMetadata: llmschema.ProviderMetadata{
 			"openai": {"itemId": "rs_1", "reasoningEncryptedContent": "encrypted-state"},
@@ -277,7 +277,7 @@ func TestToLLMMessagesDropsMetadataFromFailedTurn(t *testing.T) {
 		})
 	failed.Error = &schema.SessionMessageUnknownError{Type: "unknown", Message: "Provider turn interrupted"}
 
-	messages := ToLLMMessages([]schema.SessionMessage{failed}, model, nil)
+	messages := ToLLMMessages([]schema.SessionMessage{failed}, model, mediaPolicy{})
 	want := []llmschema.ContentPart{
 		llmschema.ReasoningPart{Type: "reasoning", Text: "Partial thought"},
 		llmschema.NewToolCallPart(llmschema.ToolCallPartInput{
@@ -336,7 +336,7 @@ func TestToLLMMessagesDropsMetadataAfterModelSwitch(t *testing.T) {
 				},
 			},
 		}),
-	}, model, nil)
+	}, model, mediaPolicy{})
 
 	wantContent := []llmschema.ContentPart{
 		llmschema.NewTextContent("Visible thought"),
@@ -378,8 +378,18 @@ func TestToLLMMessagesDegradesUnsupportedMedia(t *testing.T) {
 	modelRef := schema.ModelRef{ID: "model", ProviderID: "provider"}
 	name := "shot.png"
 	file := schema.PromptFileAttachment{URI: "data:image/png;base64,aGVsbG8=", Mime: "image/png", Name: &name}
-	reject := func(string, string) bool { return false }
-	allow := func(string, string) bool { return true }
+	type omission struct {
+		id         schema.MessageID
+		name, mime string
+	}
+	var omitted []omission
+	reject := mediaPolicy{
+		support: func(string, string) bool { return false },
+		omit: func(id schema.MessageID, name, mime string) {
+			omitted = append(omitted, omission{id: id, name: name, mime: mime})
+		},
+	}
+	allow := mediaPolicy{support: func(string, string) bool { return true }}
 
 	user := schema.SessionMessageUser{
 		ID: "msg_user", Type: "user", Text: "look",
@@ -422,6 +432,14 @@ func TestToLLMMessagesDegradesUnsupportedMedia(t *testing.T) {
 		ID: "call-1", Name: "read",
 		Result: llmschema.ToolResultValue{Type: "text", Value: omittedMediaNote("shot.png", "image/png")},
 	}))})
+
+	want := []omission{
+		{id: "msg_user", name: "shot.png", mime: "image/png"},
+		{id: "msg_tool", name: "shot.png", mime: "image/png"},
+	}
+	if !reflect.DeepEqual(omitted, want) {
+		t.Fatalf("omitted = %+v, want %+v", omitted, want)
+	}
 }
 
 func TestDropErroredTurns(t *testing.T) {

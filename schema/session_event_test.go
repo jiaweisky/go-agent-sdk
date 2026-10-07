@@ -16,11 +16,14 @@ func TestSessionEventDurableVersions(t *testing.T) {
 	if SessionEventTextDelta.Durable != nil {
 		t.Fatalf("text delta should be live-only")
 	}
-	if len(SessionEventDurableDefinitions) != 29 {
-		t.Fatalf("durable definitions = %d, want 29", len(SessionEventDurableDefinitions))
+	if SessionEventAttachmentOmitted.Durable == nil || SessionEventAttachmentOmitted.Durable.Version != 1 {
+		t.Fatalf("attachment omitted durable = %+v", SessionEventAttachmentOmitted.Durable)
 	}
-	if len(SessionEventDefinitions) != 33 {
-		t.Fatalf("definitions = %d, want 33", len(SessionEventDefinitions))
+	if len(SessionEventDurableDefinitions) != 30 {
+		t.Fatalf("durable definitions = %d, want 30", len(SessionEventDurableDefinitions))
+	}
+	if len(SessionEventDefinitions) != 34 {
+		t.Fatalf("definitions = %d, want 34", len(SessionEventDefinitions))
 	}
 }
 

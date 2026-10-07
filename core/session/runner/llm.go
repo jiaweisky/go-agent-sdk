@@ -97,6 +97,32 @@ type LLMRunner struct {
 	compaction *session.Compaction
 	turns      *session.TurnStore
 	tracker    *turnTracker
+	omissions  *omissionTracker
+}
+
+// omissionTracker records attachments already reported as omitted, so the
+// durable event is published once per attachment rather than on every request
+// rebuild (a turn rebuilds its request per step, and history repeats it). The
+// set holds one short key per distinct omitted attachment for the process
+// lifetime — small, since unsupported attachments are rare.
+type omissionTracker struct {
+	mu   sync.Mutex
+	seen map[string]struct{}
+}
+
+// markOnce records key and reports whether it is new. A nil tracker treats
+// every key as new.
+func (t *omissionTracker) markOnce(key string) bool {
+	if t == nil {
+		return true
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, ok := t.seen[key]; ok {
+		return false
+	}
+	t.seen[key] = struct{}{}
+	return true
 }
 
 // turnTracker records the turn the runner currently owns per session, so a
@@ -129,6 +155,7 @@ func NewLLMRunner(runner LLMRunner) *LLMRunner {
 		Settings: runner.Compaction,
 	})
 	result.tracker = newTurnTracker()
+	result.omissions = &omissionTracker{seen: map[string]struct{}{}}
 	if runner.DB != nil {
 		result.turns = session.NewTurnStore(runner.DB)
 	}
@@ -777,6 +804,7 @@ func (r *LLMRunner) prepareTurnAttempt(
 	if r.DropErroredTurns {
 		contextMessages = dropErroredTurns(contextMessages)
 	}
+	policy := r.turnMediaPolicy(model, agent, sessionID)
 	request := buildTurnRequest(
 		sessionID,
 		agent,
@@ -784,6 +812,7 @@ func (r *LLMRunner) prepareTurnAttempt(
 		system,
 		contextMessages,
 		model,
+		policy,
 		isLastStep,
 		toolMaterialization,
 	)
@@ -955,7 +984,7 @@ func dropErroredTurns(messages []schema.SessionMessage) []schema.SessionMessage 
 			turnStart = -1
 		}
 	}
-	kept := messages[:0:0]
+	kept := make([]schema.SessionMessage, 0, len(messages))
 	for i, message := range messages {
 		if !drop[i] {
 			kept = append(kept, message)
@@ -972,6 +1001,7 @@ func buildTurnRequest(
 	system session.ContextEpochPrepared,
 	contextMessages []schema.SessionMessage,
 	model route.Model,
+	policy mediaPolicy,
 	isLastStep bool,
 	toolMaterialization *tool.Materialization,
 ) *llmschema.LLMRequest {
@@ -987,7 +1017,7 @@ func buildTurnRequest(
 	if system.Baseline != "" {
 		systemParts = append(systemParts, llmschema.NewSystemPart(system.Baseline))
 	}
-	messages := ToLLMMessages(contextMessages, model, turnMediaSupport(model, agent))
+	messages := ToLLMMessages(contextMessages, model, policy)
 	if isLastStep {
 		messages = append(messages, llmschema.MessageAssistant(MaxStepsPrompt))
 	}
@@ -1007,32 +1037,70 @@ func buildTurnRequest(
 	})
 }
 
-// turnMediaSupport derives the media filter for a turn: a media part is kept
-// only if the protocol can carry its MIME type, the model accepts its modality,
-// and its payload is well-formed. Anything else is omitted from the request
+// turnMediaPolicy is mediaPolicyForModel with the omission reporter bound to the
+// runner, so every attachment the model cannot carry is published as a durable
+// event (once) and the client can perceive it.
+func (r *LLMRunner) turnMediaPolicy(
+	model route.Model,
+	agent core.AgentSelection,
+	sessionID schema.SessionID,
+) mediaPolicy {
+	policy := mediaPolicyForModel(model, agent)
+	policy.omit = func(messageID schema.MessageID, name, mime string) {
+		r.publishOmittedAttachment(sessionID, messageID, name, mime)
+	}
+	return policy
+}
+
+// publishOmittedAttachment records a durable event for an attachment the model
+// could not carry. It publishes once per attachment: a turn rebuilds its request
+// per step, and history repeats it on later turns.
+func (r *LLMRunner) publishOmittedAttachment(
+	sessionID schema.SessionID,
+	messageID schema.MessageID,
+	name, mime string,
+) {
+	key := string(messageID) + "\x00" + name + "\x00" + mime
+	if !r.omissions.markOnce(key) {
+		return
+	}
+	if _, err := r.Events.Publish(schema.SessionEventAttachmentOmitted, map[string]any{
+		"sessionID": sessionID,
+		"messageID": string(messageID),
+		"name":      name,
+		"mime":      mime,
+		"timestamp": time.Now().UnixMilli(),
+	}); err != nil {
+		r.reportError(err)
+	}
+}
+
+// mediaPolicyForModel derives the media filter for a turn: a part is kept only
+// if the protocol can carry its MIME type, the model accepts its modality, and
+// its payload is well-formed. Anything else is omitted from the request
 // (replaced by a text note) instead of failing the turn. A remote A2A backend
 // carries arbitrary file parts, so it is not filtered by the local protocol.
-func turnMediaSupport(model route.Model, agent core.AgentSelection) mediaSupport {
+func mediaPolicyForModel(model route.Model, agent core.AgentSelection) mediaPolicy {
 	if info := agent.Info; info != nil && info.Backend != nil && info.Backend.Type == schema.AgentBackendA2A {
-		return nil
+		return mediaPolicy{}
 	}
 	protocol := model.Route.Protocol
 	entry, ok := protocols.LookupProtocol(protocol)
 	if !ok {
-		return nil
+		return mediaPolicy{}
 	}
 	var input []string
 	if caps := model.GetCapabilities(); caps != nil {
 		input = caps.Input
 	}
 	routeName := string(protocol)
-	return func(mime, data string) bool {
+	return mediaPolicy{support: func(mime, data string) bool {
 		if !protocols.MediaAllowed(protocol, input, mime) {
 			return false
 		}
 		_, err := utils.ValidateMedia(routeName, llmschema.MediaPart{Type: "media", MediaType: mime, Data: data}, entry.MediaMIMEs)
 		return err == nil
-	}
+	}}
 }
 
 // sessionHeaders carries the per-session routing headers every provider request

@@ -29,6 +29,7 @@
 | 2026-10-06 | Unified lifecycle: `server.New(ctx, client, opts)` derives the server lifetime from the host context; both commands share `serveconfig.Serve` (cancel SSE → bounded `Shutdown`, force-close on timeout → `Client.Close`); graceful-shutdown test + reference/subagent/MCP materialization tests |
 | 2026-10-06 | Review: an async prompt failure is reported through `Options.OnError` (it was silently dropped); corrected §6.1 — a failed turn is observable via the durable `session.next.step.failed` bus event (the Go-level `ErrorEvent` is not a bus event) |
 | 2026-10-06 | Servers self-heal by default: `dropErroredTurns: true` in both commands (the SDK default stays `false`); only provider rejections (`error.type: "provider"`) are dropped — interrupts/declines are kept. Fixed `GET /wait` to wait for the prompt worker, so an accepted prompt is not reported idle before its turn starts |
+| 2026-10-06 | An omitted attachment is now perceivable: the runner publishes the durable `session.next.attachment.omitted` event, so a client is not left believing an unsupported attachment was delivered |
 | 2026-10-06 | Model media capabilities: `ModelInfo.Capabilities.Input` now flows into the request, the context builder omits media the protocol/model cannot carry (text note, never a failed turn), and `inputModalities` is configurable in both commands |
 
 ---
@@ -450,11 +451,15 @@ Notes:
 - **Prompt `delivery`.** `steer` maps to `Session.Steer`, which takes only prompt
   text — `files` are ignored there (attach them with `queue`). An unrecognised
   `delivery` value is rejected `400`, not silently treated as `queue`.
-- **Unsendable attachments are omitted, not fatal.** A `files` entry is dropped
-  from the provider request and replaced by a short text note when its MIME is
-  outside the protocol's wire support, its modality is outside the model's
-  `ModelInfo.Capabilities.Input`, or its payload is malformed/oversized. The
-  turn still completes, so a single attachment can never wedge the session;
+- **Unsendable attachments are omitted, not fatal — and reported.** A `files`
+  entry is dropped from the provider request and replaced by a short text note
+  when its MIME is outside the protocol's wire support, its modality is outside
+  the model's `ModelInfo.Capabilities.Input`, or its payload is
+  malformed/oversized. The client perceives each omission through the **durable**
+  `session.next.attachment.omitted` event (`{messageID, name, mime}`, on
+  `/api/event`, the per-session stream, and replay), so it never believes a
+  dropped attachment was delivered. The turn still completes, so a single
+  attachment can never wedge the session;
   because the decision is per turn, switching to a model that accepts the type
   re-includes it. The model's modalities come from `ModelInfo.Capabilities`,
   wired by the host (or the command's `inputModalities`, §12.1); an empty set

@@ -63,6 +63,17 @@ var SessionEventPromptAdmitted = Define(DefineInput{
 	},
 })
 
+// SessionEventAttachmentOmitted reports an attachment the selected model could
+// not carry, so it was replaced by a text note in the request. It is durable so
+// a client can perceive an omission rather than silently losing the attachment.
+var SessionEventAttachmentOmitted = Define(DefineInput{
+	Type:    "session.next.attachment.omitted",
+	Durable: sessionEventDurable,
+	Schema: map[string]any{
+		"timestamp": nil, "sessionID": nil, "messageID": nil, "name": nil, "mime": nil,
+	},
+})
+
 var SessionEventContextUpdated = Define(DefineInput{
 	Type:    "session.next.context.updated",
 	Durable: sessionEventDurable,
@@ -298,6 +309,7 @@ var SessionEventDurableDefinitions = Inventory(
 	SessionEventMoved,
 	SessionEventPrompted,
 	SessionEventPromptAdmitted,
+	SessionEventAttachmentOmitted,
 	SessionEventContextUpdated,
 	SessionEventSynthetic,
 	SessionEventShellStarted,
@@ -332,6 +344,7 @@ var SessionEventDefinitions = Inventory(
 	SessionEventMoved,
 	SessionEventPrompted,
 	SessionEventPromptAdmitted,
+	SessionEventAttachmentOmitted,
 	SessionEventContextUpdated,
 	SessionEventSynthetic,
 	SessionEventShellStarted,

@@ -82,14 +82,14 @@ func TestTurnMediaSupportGatesProtocolModelAndPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	accept := turnMediaSupport(model, core.AgentSelection{})
-	if !accept("image/png", "data:image/png;base64,aGVsbG8=") {
+	policy := mediaPolicyForModel(model, core.AgentSelection{})
+	if !policy.allows("image/png", "data:image/png;base64,aGVsbG8=") {
 		t.Fatal("a valid image should be accepted")
 	}
-	if accept("application/pdf", "data:application/pdf;base64,JVBERi0=") {
+	if policy.allows("application/pdf", "data:application/pdf;base64,JVBERi0=") {
 		t.Fatal("a document the protocol cannot carry should be rejected")
 	}
-	if accept("image/png", "notbase64!!!") {
+	if policy.allows("image/png", "notbase64!!!") {
 		t.Fatal("a malformed payload should be rejected")
 	}
 
@@ -98,12 +98,12 @@ func TestTurnMediaSupportGatesProtocolModelAndPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if turnMediaSupport(textOnly, core.AgentSelection{})("image/png", "data:image/png;base64,aGVsbG8=") {
+	if mediaPolicyForModel(textOnly, core.AgentSelection{}).allows("image/png", "data:image/png;base64,aGVsbG8=") {
 		t.Fatal("a text-only model should reject an image")
 	}
 
 	a2a := core.AgentSelection{Info: &schema.AgentInfo{Backend: &schema.AgentBackend{Type: schema.AgentBackendA2A}}}
-	if turnMediaSupport(model, a2a) != nil {
+	if mediaPolicyForModel(model, a2a).support != nil {
 		t.Fatal("an A2A backend carries arbitrary file parts and should not be filtered")
 	}
 }
