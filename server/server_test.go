@@ -742,6 +742,122 @@ func TestSessionPagination(t *testing.T) {
 	}
 }
 
+// taskCallLLM calls the built-in `task` tool on its first stream and returns
+// text afterwards, so a test can drive a subagent (child session).
+type taskCallLLM struct {
+	mu    sync.Mutex
+	calls int
+	reply string
+}
+
+func (f *taskCallLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
+	return nil, nil
+}
+
+func (f *taskCallLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
+	return nil, nil
+}
+
+func (f *taskCallLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+	f.mu.Lock()
+	f.calls++
+	first := f.calls == 1
+	f.mu.Unlock()
+	var events []llmschema.LLMEvent
+	if first {
+		args := map[string]any{"description": "delegate", "prompt": "do it", "subagent_type": "general"}
+		events = []llmschema.LLMEvent{
+			llmschema.NewStepStart(0),
+			llmschema.NewToolCall("call-1", "task", args),
+			llmschema.NewStepFinish(0, llmschema.ReasonToolCalls),
+			llmschema.NewFinish(llmschema.ReasonToolCalls),
+		}
+	} else {
+		events = []llmschema.LLMEvent{
+			llmschema.NewStepStart(0),
+			llmschema.NewTextStart("t1"),
+			llmschema.NewTextDelta("t1", f.reply),
+			llmschema.NewTextEnd("t1"),
+			llmschema.NewStepFinish(0, llmschema.ReasonStop),
+			llmschema.NewFinish(llmschema.ReasonStop),
+		}
+	}
+	return func(yield func(llmschema.LLMEvent, error) bool) {
+		for _, event := range events {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+// TestSubagentEventsOnGlobalStream checks that a `task` subagent's child-session
+// events are visible on the global /api/event stream (they carry the child's
+// sessionID, not the parent's).
+func TestSubagentEventsOnGlobalStream(t *testing.T) {
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("k"),
+		Model: "test-model", Root: t.TempDir(),
+		LLM: &taskCallLLM{reply: "child done"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Permissions: schema.PermissionRuleset{{Action: "task", Resource: "*", Effect: schema.PermissionEffectAllow}},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ts := serveClient(t, client, Options{})
+	parentID := createSession(t, ts)
+
+	go func() {
+		resp, err := http.Post(ts.URL+"/api/session/"+parentID+"/prompt", "application/json", strings.NewReader(`{"prompt":"delegate"}`))
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	readGlobalUntilOtherSession(t, ts, parentID)
+}
+
+// readGlobalUntilOtherSession reads /api/event until a frame carries a sessionID
+// other than parentID (i.e. a child session's event).
+func readGlobalUntilOtherSession(t *testing.T, ts *httptest.Server, parentID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/event", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("sse connect: %v", err)
+	}
+	defer resp.Body.Close()
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		var event struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))), &event); err != nil {
+			continue
+		}
+		var data struct {
+			SessionID string `json:"sessionID"`
+		}
+		if err := json.Unmarshal(event.Data, &data); err != nil {
+			continue
+		}
+		if data.SessionID != "" && data.SessionID != parentID {
+			return
+		}
+	}
+	t.Fatal("no child-session event appeared on the global stream")
+}
+
 // capturingLLM records the last request so a test can inspect the model context.
 type capturingLLM struct {
 	mu    sync.Mutex
