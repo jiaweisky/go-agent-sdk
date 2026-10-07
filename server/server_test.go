@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"iter"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,8 @@ import (
 	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/core"
+	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
 	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
 )
 
@@ -374,6 +378,20 @@ func TestSessionActiveAndHistory(t *testing.T) {
 	}
 }
 
+// serveClient wraps a client + server into an httptest server with cleanup.
+func serveClient(t *testing.T, client *agent.Client, opts Options) *httptest.Server {
+	t.Helper()
+	t.Cleanup(func() { _ = client.Close() })
+	srv, err := New(client, opts)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
 // blockingLLM keeps a turn in flight until release is closed.
 type blockingLLM struct{ release chan struct{} }
 
@@ -385,9 +403,13 @@ func (b blockingLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschem
 	return nil, nil
 }
 
-func (b blockingLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+func (b blockingLLM) Stream(ctx context.Context, _ *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
 	return func(yield func(llmschema.LLMEvent, error) bool) {
-		<-b.release
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+			return
+		}
 		for _, event := range []llmschema.LLMEvent{
 			llmschema.NewStepStart(0),
 			llmschema.NewTextStart("t1"),
@@ -447,4 +469,193 @@ func TestSessionActiveList(t *testing.T) {
 	if !seen {
 		t.Fatal("active session was not listed while running")
 	}
+}
+
+func activeContains(t *testing.T, ts *httptest.Server, id string) bool {
+	t.Helper()
+	resp := doJSON(t, http.MethodGet, ts.URL+"/api/session/active", "", nil)
+	defer resp.Body.Close()
+	var body struct {
+		Data map[string]map[string]string `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	_, ok := body.Data[id]
+	return ok
+}
+
+func TestCORSPreflight(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	req, _ := http.NewRequest(http.MethodOptions, ts.URL+"/api/session", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("preflight: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Fatalf("allow-origin = %q", got)
+	}
+}
+
+func TestBasicAuth(t *testing.T) {
+	ts := newTestServer(t, Options{Auth: &Auth{Scheme: schemeBasic, Username: "u", Password: "p"}})
+
+	resp := doJSON(t, http.MethodGet, ts.URL+"/api/agent", "", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauth status = %d", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/agent", nil)
+	req.SetBasicAuth("u", "p")
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("auth status = %d", resp2.StatusCode)
+	}
+}
+
+func TestRequestValidation(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	id := createSession(t, ts)
+	for _, tc := range []struct{ path, body string }{
+		{"/api/session/" + id + "/model", `{}`},
+		{"/api/session/" + id + "/revert/stage", `{}`},
+		{"/api/session/" + id + "/prompt", `{}`},
+	} {
+		resp := doJSON(t, http.MethodPost, ts.URL+tc.path, tc.body, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status = %d, want 400", tc.path, resp.StatusCode)
+		}
+	}
+}
+
+func TestWaitTimeout(t *testing.T) {
+	release := make(chan struct{})
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), LLM: blockingLLM{release: release},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	ts := serveClient(t, client, Options{})
+	id := createSession(t, ts)
+	go func() {
+		resp, err := http.Post(ts.URL+"/api/session/"+id+"/prompt", "application/json", strings.NewReader(`{"prompt":"hi"}`))
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	if !poll(t, 5*time.Second, func() bool { return activeContains(t, ts, id) }) {
+		t.Fatal("turn did not start")
+	}
+
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/wait?timeout=200ms", "", nil)
+	defer resp.Body.Close()
+	var body struct {
+		Data struct {
+			Idle bool `json:"idle"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("wait decode: %v", err)
+	}
+	close(release)
+	if body.Data.Idle {
+		t.Fatal("wait reported idle while the turn was still running")
+	}
+}
+
+func TestDeleteWhileRunning(t *testing.T) {
+	release := make(chan struct{})
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), LLM: blockingLLM{release: release},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	ts := serveClient(t, client, Options{})
+	id := createSession(t, ts)
+	go func() {
+		resp, err := http.Post(ts.URL+"/api/session/"+id+"/prompt", "application/json", strings.NewReader(`{"prompt":"hi"}`))
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+	if !poll(t, 5*time.Second, func() bool { return activeContains(t, ts, id) }) {
+		t.Fatal("turn did not start")
+	}
+
+	resp := doJSON(t, http.MethodDelete, ts.URL+"/api/session/"+id, "", nil)
+	resp.Body.Close()
+	close(release)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status = %d", resp.StatusCode)
+	}
+
+	after := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id, "", nil)
+	after.Body.Close()
+	if after.StatusCode != http.StatusNotFound {
+		t.Fatalf("get after delete = %d, want 404", after.StatusCode)
+	}
+}
+
+func TestErrorMapping(t *testing.T) {
+	srv, err := New(newTestClient(t), Options{OnError: func(error) {}})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	cases := []struct {
+		err  error
+		want int
+	}{
+		{fmt.Errorf("%w: ses_x", agent.ErrSessionNotFound), http.StatusNotFound},
+		{fmt.Errorf("%w: nope", agent.ErrUnknownAgent), http.StatusBadRequest},
+		{agent.ErrSessionBusy, http.StatusConflict},
+		{fmt.Errorf("%w for this project", core.ErrSnapshotUnavailable), http.StatusServiceUnavailable},
+		{&coresession.RevertMessageNotFoundError{MessageID: "msg_x"}, http.StatusNotFound},
+		{errors.New("boom"), http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		srv.writeSDKError(rec, tc.err)
+		if rec.Code != tc.want {
+			t.Errorf("writeSDKError(%v) = %d, want %d", tc.err, rec.Code, tc.want)
+		}
+	}
+}
+
+func TestSessionReplay(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	id := createSession(t, ts)
+
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"hi"}`, nil)
+	resp.Body.Close()
+
+	// Wait until the durable history carries the finished turn, then a
+	// reconnecting client must get it from replay (?after=0).
+	if !poll(t, 5*time.Second, func() bool {
+		r := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/history", "", nil)
+		defer r.Body.Close()
+		var body struct {
+			Data []wireEvent `json:"data"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		return len(body.Data) > 0
+	}) {
+		t.Fatal("history stayed empty")
+	}
+	readSSE(t, ts, "/api/session/"+id+"/event?after=0", "text.ended")
 }

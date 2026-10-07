@@ -201,6 +201,10 @@ func (s *Server) handleSessionSetModel(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
+	if body.ID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "model id is required")
+		return
+	}
 	ref := schema.ModelRef{ID: schema.ModelID(body.ID), ProviderID: schema.ProviderID(body.ProviderID)}
 	if body.Variant != nil {
 		variant := schema.ModelVariantID(*body.Variant)
@@ -356,6 +360,10 @@ func (s *Server) handleSessionRevertStage(w http.ResponseWriter, r *http.Request
 		MessageID string `json:"messageID"`
 	}
 	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.MessageID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "messageID is required")
 		return
 	}
 	var state *schema.RevertState

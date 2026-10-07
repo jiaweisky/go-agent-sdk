@@ -364,7 +364,7 @@ func (r *runtime) compact(ctx context.Context, sessionID schema.SessionID) (bool
 // revertSnapshot adapts the runtime snapshot service to session.RevertSnapshot.
 func (r *runtime) revertSnapshot() (session.RevertSnapshot, error) {
 	if r.snapshot == nil {
-		return nil, fmt.Errorf("snapshots are unavailable for this project")
+		return nil, fmt.Errorf("%w for this project", core.ErrSnapshotUnavailable)
 	}
 	return core.NewSessionRevertSnapshot(r.snapshot), nil
 }

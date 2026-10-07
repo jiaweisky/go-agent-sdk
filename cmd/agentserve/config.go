@@ -154,9 +154,10 @@ func (c config) validateCredentials() error {
 
 func (c config) validateAuth() error {
 	if c.Auth != nil {
-		hasBasic := c.Auth.Username != "" && c.Auth.Password != ""
-		if c.Auth.Bearer == "" && !hasBasic {
-			return errors.New("auth requires bearer or a complete username + password")
+		// The basic-auth username defaults to "opencode", so a password alone
+		// selects basic auth.
+		if c.Auth.Bearer == "" && c.Auth.Password == "" {
+			return errors.New("auth requires bearer or a password (username defaults to opencode)")
 		}
 	}
 	if !serveconfig.IsLoopback(c.Listen) && !c.AllowInsecure && c.Auth == nil {

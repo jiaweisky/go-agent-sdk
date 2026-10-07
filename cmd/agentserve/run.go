@@ -129,5 +129,9 @@ func authFromConfig(auth *authConfig) *server.Auth {
 	if auth.Bearer != "" {
 		return &server.Auth{Scheme: "bearer", Token: auth.Bearer}
 	}
-	return &server.Auth{Scheme: "basic", Username: auth.Username, Password: auth.Password}
+	username := auth.Username
+	if username == "" {
+		username = "opencode"
+	}
+	return &server.Auth{Scheme: "basic", Username: username, Password: auth.Password}
 }

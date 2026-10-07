@@ -23,6 +23,7 @@
 | 2026-10-06 | Dropped OpenAPI entirely (a hand-maintained spec would drift with no codegen consumer) and the Python/Node client deliverable (that client belongs in the consumer's repo); this repo ships the Go server plus a Go end-to-end test |
 | 2026-10-06 | Implementation refinements: internal 500s are logged with a `ref` (`Options.OnError`); per-session stream dedup is bounded; `/api/session` list documented as omitting `model` |
 | 2026-10-06 | Landed §16 items: B3 prompt `id` (idempotent admission, `MessageOptions.ID`), B6 `GET /api/session/active` + `GET /api/session/{id}/history` (`Client.ActiveSessions` / `SessionEvents`), S3 `mcp` config in `cmd/agentserve` |
+| 2026-10-06 | Contract finish + tests: typed-error mapping completed (snapshot-unavailable → 503, revert message-not-found → 404); `model`/`revert/stage` 400 validation; basic-auth username defaults to `opencode`; regression tests (CORS, basic auth, wait timeout, delete-while-running, replay, error mapping) |
 
 ---
 
@@ -958,12 +959,12 @@ Two cases sit outside the table:
   error cannot use this envelope: it arrives as an `event: error` frame and the
   stream closes (§6.3). Clients must handle both error shapes.
 
-**SDK errors are mixed.** Some are sentinels (`session.ErrStopped`,
-`ErrSessionBusy`); others are plain `fmt.Errorf` strings — "unknown agent: X"
-(`CreateSession`), "session not found: X" (`ResumeSession`, `revertSession`). The
-mapping classifies what it can by error type and falls back to matching those few
-known strings. Adding typed errors (`ErrUnknownAgent`, `ErrSessionNotFound`) is a
-recommended SDK improvement, not a blocker (§16 B1).
+**Typed errors (landed).** The mapping is by error type — no string matching:
+`ErrSessionNotFound` (404), `ErrUnknownAgent` (400), `ErrSessionBusy` (409),
+`session.ErrStopped` (503), `core.ErrSnapshotUnavailable` (503), and
+`session.RevertMessageNotFoundError` (404). Any unrecognised error becomes a
+redacted `500` (logged with a `ref`). Extending the typed set remains worthwhile
+wherever a handler can surface a known-but-untyped condition (§16 B1).
 
 ---
 
@@ -1295,11 +1296,12 @@ below.
 
 ### Align with v2
 
-- **B1. Typed errors (recommended).** v2 uses tagged error classes carrying
-  `httpApiStatus` (`packages/protocol/src/errors.ts`). The SDK mixes sentinels
-  with plain `fmt.Errorf` strings; adding typed errors (`ErrUnknownAgent`,
-  `ErrSessionNotFound`) makes the HTTP mapping exact instead of partly
-  string-based (§10). *Not blocking.*
+- **B1. Typed errors.** v2 uses tagged error classes carrying `httpApiStatus`
+  (`packages/protocol/src/errors.ts`). *Landed for the mapped set*:
+  `ErrUnknownAgent` / `ErrSessionNotFound` (sentinels) and the existing
+  `ErrSessionBusy` / `session.ErrStopped` / `core.ErrSnapshotUnavailable` /
+  `RevertMessageNotFoundError`; the HTTP layer maps by type with no string
+  matching (§10). Extending it further is optional.
 - **B3. Prompt id.** v2's `session.prompt` accepts an optional `id` so a retry is
   idempotent. *Landed: `MessageOptions.ID` → admission; the `prompt` body takes
   `id`.* (v2 returns `ConflictError` on a duplicate; this SDK deduplicates

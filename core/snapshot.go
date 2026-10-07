@@ -14,6 +14,10 @@ import (
 // is captured into a snapshot.
 const snapshotMaxUntrackedFileBytes = 2 * 1024 * 1024
 
+// ErrSnapshotUnavailable is returned when an operation needs project snapshots
+// but the project has none (snapshot support is disabled or unavailable).
+var ErrSnapshotUnavailable = errors.New("snapshots are unavailable")
+
 type SnapshotID string
 
 type SnapshotOperation string

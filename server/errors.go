@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/core"
 	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
 )
 
@@ -41,6 +42,7 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 // writeSDKError maps an SDK error to an HTTP status. Internal causes are logged
 // (with a short ref echoed to the client) and never leaked.
 func (s *Server) writeSDKError(w http.ResponseWriter, err error) {
+	var revertNotFound *coresession.RevertMessageNotFoundError
 	switch {
 	case errors.Is(err, agent.ErrSessionNotFound), errors.Is(err, sql.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
@@ -48,8 +50,10 @@ func (s *Server) writeSDKError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 	case errors.Is(err, agent.ErrSessionBusy):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
-	case errors.Is(err, coresession.ErrStopped):
+	case errors.Is(err, coresession.ErrStopped), errors.Is(err, core.ErrSnapshotUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "unavailable", err.Error())
+	case errors.As(err, &revertNotFound):
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
 	default:
 		ref := newErrorRef()
 		if s.onError != nil {
