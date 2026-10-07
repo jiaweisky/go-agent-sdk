@@ -104,6 +104,51 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, fromSchemaSessionInfo(info))
 }
 
+// handleSessionActive lists sessions currently running a turn.
+func (s *Server) handleSessionActive(w http.ResponseWriter, r *http.Request) {
+	data := map[string]map[string]string{}
+	for _, id := range s.client.ActiveSessions() {
+		data[id] = map[string]string{"type": "running"}
+	}
+	writeData(w, http.StatusOK, data)
+}
+
+const (
+	defaultHistoryLimit = 50
+	maxHistoryLimit     = 100
+)
+
+// handleSessionHistory returns a finite page of a session's durable events.
+func (s *Server) handleSessionHistory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("sessionID")
+	if !s.requireSession(w, r) {
+		return
+	}
+	query := r.URL.Query()
+	after := -1 // from the beginning unless a sequence is given
+	if raw := query.Get("after"); raw != "" {
+		after = parseInt(raw, 0)
+	}
+	limit := parseInt(query.Get("limit"), defaultHistoryLimit)
+	if limit <= 0 || limit > maxHistoryLimit {
+		limit = defaultHistoryLimit
+	}
+	events, err := s.client.SessionEvents(id, after)
+	if err != nil {
+		s.writeSDKError(w, err)
+		return
+	}
+	hasMore := len(events) > limit
+	if hasMore {
+		events = events[:limit]
+	}
+	out := make([]wireEvent, 0, len(events))
+	for _, ev := range events {
+		out = append(out, toWireEvent(ev))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "hasMore": hasMore})
+}
+
 func (s *Server) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 	info, err := s.client.GetSession(r.Context(), r.PathValue("sessionID"))
 	if err != nil {
@@ -176,6 +221,7 @@ func (s *Server) handleSessionSetTitle(w http.ResponseWriter, r *http.Request) {
 
 type promptRequest struct {
 	Prompt   string                        `json:"prompt"`
+	ID       string                        `json:"id"`
 	Delivery string                        `json:"delivery"`
 	Files    []schema.PromptFileAttachment `json:"files"`
 }
@@ -205,7 +251,7 @@ func (s *Server) handleSessionPrompt(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		s.enqueue(id, agent.MessageOptions{Prompt: body.Prompt, Files: body.Files})
+		s.enqueue(id, agent.MessageOptions{Prompt: body.Prompt, ID: body.ID, Files: body.Files})
 	}
 	writeData(w, http.StatusAccepted, map[string]any{"queued": true})
 }

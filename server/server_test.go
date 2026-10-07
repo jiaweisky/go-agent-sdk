@@ -272,3 +272,179 @@ func TestPromptTurnEvents(t *testing.T) {
 	}()
 	readSSE(t, ts, "/api/session/"+created.Data.ID+"/event", "hello world")
 }
+
+func createSession(t *testing.T, ts *httptest.Server) string {
+	t.Helper()
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session", `{}`, nil)
+	defer resp.Body.Close()
+	var created struct {
+		Data sessionInfoDTO `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("create decode: %v", err)
+	}
+	return created.Data.ID
+}
+
+func waitIdle(t *testing.T, ts *httptest.Server, id string) {
+	t.Helper()
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/wait?timeout=10s", "", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("wait status = %d", resp.StatusCode)
+	}
+}
+
+// userCount GETs the active context and counts user messages.
+func userCount(t *testing.T, ts *httptest.Server, id string) int {
+	t.Helper()
+	resp := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/context", "", nil)
+	defer resp.Body.Close()
+	var body struct {
+		Data []map[string]any `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	count := 0
+	for _, message := range body.Data {
+		if message["type"] == "user" {
+			count++
+		}
+	}
+	return count
+}
+
+func poll(t *testing.T, timeout time.Duration, fn func() bool) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return fn()
+}
+
+func TestPromptIdempotency(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	id := createSession(t, ts)
+
+	// Two prompts with the same client id must produce one turn.
+	for i := 0; i < 2; i++ {
+		resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"hi","id":"msg_same"}`, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("prompt status = %d", resp.StatusCode)
+		}
+	}
+	if !poll(t, 5*time.Second, func() bool { return userCount(t, ts, id) >= 1 }) {
+		t.Fatal("no user message observed")
+	}
+	waitIdle(t, ts, id)
+	if count := userCount(t, ts, id); count != 1 {
+		t.Fatalf("user messages = %d, want 1 (idempotent admission)", count)
+	}
+}
+
+func TestSessionActiveAndHistory(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	id := createSession(t, ts)
+
+	// /active is a literal route, not a session lookup.
+	resp := doJSON(t, http.MethodGet, ts.URL+"/api/session/active", "", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("active status = %d", resp.StatusCode)
+	}
+
+	resp = doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"hi"}`, nil)
+	resp.Body.Close()
+
+	ok := poll(t, 5*time.Second, func() bool {
+		resp := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/history", "", nil)
+		defer resp.Body.Close()
+		var history struct {
+			Data []wireEvent `json:"data"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&history)
+		return len(history.Data) > 0
+	})
+	if !ok {
+		t.Fatal("history returned no events")
+	}
+}
+
+// blockingLLM keeps a turn in flight until release is closed.
+type blockingLLM struct{ release chan struct{} }
+
+func (b blockingLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {
+	return nil, nil
+}
+
+func (b blockingLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMResponse, error) {
+	return nil, nil
+}
+
+func (b blockingLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+	return func(yield func(llmschema.LLMEvent, error) bool) {
+		<-b.release
+		for _, event := range []llmschema.LLMEvent{
+			llmschema.NewStepStart(0),
+			llmschema.NewTextStart("t1"),
+			llmschema.NewTextDelta("t1", "done"),
+			llmschema.NewTextEnd("t1"),
+			llmschema.NewStepFinish(0, llmschema.ReasonStop),
+			llmschema.NewFinish(llmschema.ReasonStop),
+		} {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+func TestSessionActiveList(t *testing.T) {
+	release := make(chan struct{})
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), LLM: blockingLLM{release: release},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	srv, err := New(client, Options{})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	id := createSession(t, ts)
+	go func() {
+		resp, err := http.Post(ts.URL+"/api/session/"+id+"/prompt", "application/json", strings.NewReader(`{"prompt":"hi"}`))
+		if err == nil {
+			resp.Body.Close()
+		}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	seen := false
+	for time.Now().Before(deadline) && !seen {
+		resp := doJSON(t, http.MethodGet, ts.URL+"/api/session/active", "", nil)
+		var body struct {
+			Data map[string]map[string]string `json:"data"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close()
+		if entry, ok := body.Data[id]; ok && entry["type"] == "running" {
+			seen = true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	close(release)
+	if !seen {
+		t.Fatal("active session was not listed while running")
+	}
+}

@@ -38,6 +38,31 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (schema.Sessi
 	return *info, nil
 }
 
+// ActiveSessions returns the ids of sessions currently running a turn.
+func (c *Client) ActiveSessions() []string {
+	active := c.rt.coord.Active()
+	ids := make([]string, 0, len(active))
+	for _, id := range active {
+		ids = append(ids, string(id))
+	}
+	return ids
+}
+
+// eventReader is the one-shot durable read the event service exposes.
+type eventReader interface {
+	ReadAfter(aggregateID string, after int) ([]schema.EventPayload, error)
+}
+
+// SessionEvents returns a finite page of a session's persisted durable events
+// after the given sequence, in order.
+func (c *Client) SessionEvents(sessionID string, after int) ([]schema.EventPayload, error) {
+	reader, ok := c.rt.events.(eventReader)
+	if !ok {
+		return nil, errors.New("event stream does not support reads")
+	}
+	return reader.ReadAfter(sessionID, after)
+}
+
 // waitPollInterval is how often WaitSession checks whether a session is idle.
 const waitPollInterval = 50 * time.Millisecond
 

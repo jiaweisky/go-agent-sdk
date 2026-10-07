@@ -838,6 +838,13 @@ func (s *eventService) insertDurableEvent(
 	return &payload, nil
 }
 
+// ReadAfter returns the persisted durable events for an aggregate after seq, in
+// order. It backs one-shot history reads (as opposed to the continuous Durable
+// stream).
+func (s *eventService) ReadAfter(aggregateID string, after int) ([]schema.EventPayload, error) {
+	return s.readAfter(aggregateID, after)
+}
+
 func (s *eventService) readAfter(aggregateID string, after int) ([]schema.EventPayload, error) {
 	if s.cfg.BeforeAggregateRead != nil {
 		if err := s.cfg.BeforeAggregateRead(aggregateID); err != nil {

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 )
@@ -66,6 +67,42 @@ func TestValidateRejectsMissingRoot(t *testing.T) {
 	cfg.Protocol = "openai-responses"
 	if err := cfg.validate(); err == nil {
 		t.Fatal("expected missing root to be rejected")
+	}
+}
+
+func TestMCPConfig(t *testing.T) {
+	enabled := true
+	cfg := defaultConfig()
+	cfg.Root = "/r"
+	cfg.Model = "m"
+	cfg.Protocol = "openai-responses"
+	cfg.Credentials = serveconfig.Credentials{APIKey: "k"}
+	cfg.MCP = []mcpConfig{
+		{Name: "fs", Type: "local", Command: []string{"npx", "-y", "server"}, Timeout: "30s"},
+		{Name: "remote", Type: "remote", URL: "https://mcp.example.com/mcp", Enabled: &enabled,
+			Headers: map[string]string{"Authorization": "Bearer x"}},
+	}
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	servers, err := cfg.mcpServers()
+	if err != nil {
+		t.Fatalf("mcpServers: %v", err)
+	}
+	if len(servers) != 2 {
+		t.Fatalf("servers = %d", len(servers))
+	}
+	if servers[0].Server.Type != "local" || servers[0].Server.Timeout != 30*time.Second {
+		t.Fatalf("local server = %+v", servers[0].Server)
+	}
+	if servers[1].Server.URL != "https://mcp.example.com/mcp" || servers[1].Server.Enabled == nil || !*servers[1].Server.Enabled {
+		t.Fatalf("remote server = %+v", servers[1].Server)
+	}
+
+	bad := defaultConfig()
+	bad.MCP = []mcpConfig{{Name: "x", Type: "local"}}
+	if err := bad.validate(); err == nil {
+		t.Fatal("expected local without command to be rejected")
 	}
 }
 

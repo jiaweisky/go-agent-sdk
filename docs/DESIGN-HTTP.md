@@ -22,6 +22,7 @@
 | 2026-10-06 | Cleanup after that decision: `baseURL` is documented as optional-doc-only; the `bad_request` source is "JSON decode / validation" (no schema pipeline) |
 | 2026-10-06 | Dropped OpenAPI entirely (a hand-maintained spec would drift with no codegen consumer) and the Python/Node client deliverable (that client belongs in the consumer's repo); this repo ships the Go server plus a Go end-to-end test |
 | 2026-10-06 | Implementation refinements: internal 500s are logged with a `ref` (`Options.OnError`); per-session stream dedup is bounded; `/api/session` list documented as omitting `model` |
+| 2026-10-06 | Landed §16 items: B3 prompt `id` (idempotent admission, `MessageOptions.ID`), B6 `GET /api/session/active` + `GET /api/session/{id}/history` (`Client.ActiveSessions` / `SessionEvents`), S3 `mcp` config in `cmd/agentserve` |
 
 ---
 
@@ -344,6 +345,7 @@ it to a reduced DTO (`name`, `description`).
 |---|---|---|---|
 | GET | `/api/session` | `ListSessions` + server-side `search`/`limit`/`order` | `{"data":[SessionInfo]}` |
 | POST | `/api/session` | `CreateSession` | `{"data":SessionInfo}` |
+| GET | `/api/session/active` | `ActiveSessions` | `{"data":{sessionID:{"type":"running"}}}` |
 | GET | `/api/session/{sessionID}` | `GetSession` | `{"data":SessionInfo}` |
 | DELETE | `/api/session/{sessionID}` | `DeleteSession` | `204` |
 | POST | `/api/session/{sessionID}/agent` | `Session.SetAgent` | `204` |
@@ -355,6 +357,7 @@ it to a reduced DTO (`name`, `description`).
 | POST | `/api/session/{sessionID}/wait?timeout=` | `WaitSession` (bounded) | `200 {"data":{"idle":bool}}` |
 | GET | `/api/session/{sessionID}/message` | `SessionHistory` (full transcript, §16 B4) | `{"data":[Message]}` |
 | GET | `/api/session/{sessionID}/context` | active context (`SessionMessages`, post-compaction) | `{"data":[Message]}` |
+| GET | `/api/session/{sessionID}/history?after=&limit=` | `SessionEvents` (finite durable page) | `{"data":[Event],"hasMore":bool}` |
 | GET | `/api/session/{sessionID}/event?after=` | `EventStream()` (replay+live, §5.4) | SSE |
 | POST | `/api/session/{sessionID}/revert/stage` | `Session.RevertStage` | `{"data":RevertState}` |
 | GET | `/api/session/{sessionID}/revert` | `GetSession(...).Revert` (no attach) | `{"data":RevertState\|null}` |
@@ -379,6 +382,7 @@ Requests:
 // POST /api/session/{id}/prompt
 {
   "prompt": "fix the failing test",
+  "id": "msg_…",                // optional client id; makes a retry idempotent
   "delivery": "queue",          // "queue" (default) | "steer"; anything else → 400
   "files": [                     // queue only; base64 or data URL (SDK never reads a path/URL)
     { "uri": "data:image/png;base64,…", "mime": "image/png", "name": "shot.png" }
@@ -1190,10 +1194,10 @@ on live SSE streams (§13).
 ### 12.6 Out of scope for the command
 
 The YAML/flag surface covers the SDK's **data** inputs (model, credentials,
-agent/skill dirs, permissions, HTTP), and will gain **`mcp` and `references`**
-sections — both are data, aligning with v2's config model (§16 S3). The genuinely
-**code-only** extension points, `Plugins` and custom `Tools`, are not
-expressible here: a host that needs them embeds the SDK directly
+agent/skill dirs, permissions, HTTP) and an **`mcp`** section (local/remote
+servers), aligning with v2's config model (§16 S3). Reference *sources* are still
+deferred. The genuinely **code-only** extension points, `Plugins` and custom
+`Tools`, are not expressible here: a host that needs them embeds the SDK directly
 (`agent.NewClient`) and mounts `server.Handler()` itself.
 
 ---
@@ -1274,7 +1278,7 @@ routes must land together with it).
 | D14 | The `agents` allow-list is the API-level authorization, separate from the tool permission system | "Which agent may be used" ≠ "which tools a turn may run" (§8.3, §12.4) |
 | D15 | Lifecycle order `Server.Close()` → `http.Server.Shutdown` → `Client.Close()` | Live SSE keeps `Shutdown` waiting; cancel the streams first (§13) |
 | D16 | Uniform error envelope: stable `error` code + HTTP status, mapped centrally; post-start SSE errors are `event: error` frames | One shape for clients; sentinel SDK errors make the mapping non-stringly (§10) |
-| D17 | `cmd/agentserve` configures data inputs and gains `mcp`/`references` sections (align v2); `Plugins`/`Tools` stay code-only | MCP/references are data (§16 S3); plugins/tools are Go code (§12.6) |
+| D17 | `cmd/agentserve` configures data inputs and has an `mcp` section (align v2); `references` still deferred, `Plugins`/`Tools` stay code-only | MCP/references are data (§16 S3); plugins/tools are Go code (§12.6) |
 | D18 | `inboundPermissions`, when set, **replaces** the SDK deny-by-default ruleset (it is then *merged* over a session's stored rules on resume — D19) | Matches `cmd/a2aserve`'s `WithInboundPermissions`; no surprising implicit merge *of the default* (§12.1) |
 | D19 | HTTP `ResumeSession` **merges** `InboundPermissions` over the stored session rules (not substituting) | Enforces the API ruleset on every externally driven session without discarding the host's per-session policy (§7) |
 
@@ -1296,23 +1300,26 @@ below.
   with plain `fmt.Errorf` strings; adding typed errors (`ErrUnknownAgent`,
   `ErrSessionNotFound`) makes the HTTP mapping exact instead of partly
   string-based (§10). *Not blocking.*
-- **B3. Prompt id.** v2's `session.prompt` accepts an optional `id` and returns
-  `SessionInput.Admitted`, with `ConflictError` on duplicates; adopt the same.
+- **B3. Prompt id.** v2's `session.prompt` accepts an optional `id` so a retry is
+  idempotent. *Landed: `MessageOptions.ID` → admission; the `prompt` body takes
+  `id`.* (v2 returns `ConflictError` on a duplicate; this SDK deduplicates
+  silently — a retried prompt does not start a second turn.)
 - **B4. Messages vs context.** v2 exposes both `session.messages` (full) and
   `session.context` (post-compaction); `/message` returns the full transcript and
   `/context` the active context. *Landed: `Client.SessionHistory` /
   `Store.Messages`.*
 - **B6. `session.active` / `session.history` endpoints.** v2 exposes a
-  running-session list and a finite durable-event page; this draft omits both.
-  The history page is a one-shot `Durable` read (bounded, unlike the SSE stream);
-  the active list needs a small SDK read.
+  running-session list and a finite durable-event page. *Landed:
+  `Client.ActiveSessions` → `GET /api/session/active`; `Client.SessionEvents`
+  (one-shot `ReadAfter`) → `GET /api/session/{id}/history`.*
 - **S1. Paging.** v2 uses opaque `SessionsCursor` / message cursors; implement
   the same (replacing this draft's full-list + `limit` ≤ 200).
 - **S2. CORS / `?auth_token`.** v2 accepts `?auth_token` on all routes and ships
   loopback CORS (`packages/server/src/middleware/authorization.ts`); keep both —
   do not drop browser support.
 - **S3. MCP / references config.** v2's config/service model covers MCP (and
-  references); add sections to `cmd/agentserve` (§12.6).
+  references). *MCP landed: `cmd/agentserve` has an `mcp` section; reference
+  sources are still deferred.*
 
 ### Go-specific (no TS counterpart)
 

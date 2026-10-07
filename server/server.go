@@ -149,6 +149,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/session", s.handleSessionList)
 	mux.HandleFunc("POST /api/session", s.handleSessionCreate)
+	mux.HandleFunc("GET /api/session/active", s.handleSessionActive)
 	mux.HandleFunc("GET /api/session/{sessionID}", s.handleSessionGet)
 	mux.HandleFunc("DELETE /api/session/{sessionID}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/session/{sessionID}/agent", s.handleSessionSetAgent)
@@ -161,6 +162,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session/{sessionID}/message", s.handleSessionMessage)
 	mux.HandleFunc("GET /api/session/{sessionID}/context", s.handleSessionContext)
 	mux.HandleFunc("GET /api/session/{sessionID}/event", s.handleSessionEvent)
+	mux.HandleFunc("GET /api/session/{sessionID}/history", s.handleSessionHistory)
 	mux.HandleFunc("POST /api/session/{sessionID}/revert/stage", s.handleSessionRevertStage)
 	mux.HandleFunc("GET /api/session/{sessionID}/revert", s.handleSessionRevertGet)
 	mux.HandleFunc("POST /api/session/{sessionID}/revert/clear", s.handleSessionRevertClear)

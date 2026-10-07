@@ -61,6 +61,11 @@ func buildClient(cfg config) (*agent.Client, error) {
 		auto := true
 		clientOpts.Title = &agent.TitleConfig{Auto: &auto}
 	}
+	mcpServers, err := cfg.mcpServers()
+	if err != nil {
+		return nil, err
+	}
+	clientOpts.MCP = mcpServers
 	return agent.NewClient(clientOpts)
 }
 

@@ -337,10 +337,14 @@ func (r *runtime) publishSessionStatus(id schema.SessionID, status schema.Sessio
 	}, nil)
 }
 
-// admit enqueues a prompt for a session's next turn.
-func (r *runtime) admit(sessionID schema.SessionID, prompt schema.Prompt, delivery schema.SessionDelivery) error {
+// admit enqueues a prompt for a session's next turn. A supplied id makes the
+// admission idempotent: re-admitting the same id is a no-op.
+func (r *runtime) admit(sessionID schema.SessionID, id schema.MessageID, prompt schema.Prompt, delivery schema.SessionDelivery) error {
+	if id == "" {
+		id = schema.NewMessageID()
+	}
 	_, err := session.Admit(r.db.DB, appEvents{events: r.events}, session.AdmitInput{
-		ID:        schema.NewMessageID(),
+		ID:        id,
 		SessionID: sessionID,
 		Prompt:    prompt,
 		Delivery:  delivery,

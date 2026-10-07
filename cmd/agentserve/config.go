@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
+	"github.com/jiaweisky/go-agent-sdk/mcp"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
@@ -37,12 +39,62 @@ type config struct {
 
 	TLS           *serveconfig.TLS `yaml:"tls"`
 	AllowInsecure bool             `yaml:"allowInsecure"`
+
+	MCP []mcpConfig `yaml:"mcp"`
+}
+
+// mcpConfig configures one MCP server (local stdio or remote StreamableHTTP).
+type mcpConfig struct {
+	Name        string            `yaml:"name"`
+	Type        string            `yaml:"type"`
+	Command     []string          `yaml:"command"`
+	Cwd         string            `yaml:"cwd"`
+	Environment map[string]string `yaml:"environment"`
+	URL         string            `yaml:"url"`
+	Headers     map[string]string `yaml:"headers"`
+	Enabled     *bool             `yaml:"enabled"`
+	Timeout     string            `yaml:"timeout"`
 }
 
 type authConfig struct {
 	Bearer   string `yaml:"bearer"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+}
+
+// mcpServers converts the configured MCP servers for the client.
+func (c config) mcpServers() ([]agent.MCPConfig, error) {
+	if len(c.MCP) == 0 {
+		return nil, nil
+	}
+	result := make([]agent.MCPConfig, 0, len(c.MCP))
+	for _, server := range c.MCP {
+		timeout, err := parseOptionalDuration(server.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("mcp %s: timeout: %w", server.Name, err)
+		}
+		result = append(result, agent.MCPConfig{
+			Name: server.Name,
+			Server: mcp.ServerConfig{
+				Type:        server.Type,
+				Command:     server.Command,
+				Cwd:         server.Cwd,
+				Environment: server.Environment,
+				URL:         server.URL,
+				Headers:     server.Headers,
+				Enabled:     server.Enabled,
+				Timeout:     timeout,
+			},
+		})
+	}
+	return result, nil
+}
+
+func parseOptionalDuration(raw string) (time.Duration, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	return time.ParseDuration(raw)
 }
 
 func defaultConfig() config {
@@ -62,6 +114,7 @@ func (c config) validate() error {
 		c.validateAuth,
 		c.validateLimits,
 		c.validatePermissions,
+		c.validateMCP,
 		c.validateHTTP,
 	}
 	for _, check := range checks {
@@ -125,6 +178,25 @@ func (c config) validatePermissions() error {
 		case schema.PermissionEffectAllow, schema.PermissionEffectDeny, schema.PermissionEffectAsk:
 		default:
 			return fmt.Errorf("inboundPermissions: unknown effect %q", rule.Effect)
+		}
+	}
+	return nil
+}
+
+func (c config) validateMCP() error {
+	for _, server := range c.MCP {
+		switch {
+		case server.Name == "":
+			return errors.New("mcp: each server requires a name")
+		case server.Type == "":
+			return fmt.Errorf("mcp %s: type is required (local or remote)", server.Name)
+		case server.Type == "local" && len(server.Command) == 0:
+			return fmt.Errorf("mcp %s: local requires command", server.Name)
+		case server.Type == "remote" && server.URL == "":
+			return fmt.Errorf("mcp %s: remote requires url", server.Name)
+		}
+		if _, err := parseOptionalDuration(server.Timeout); err != nil {
+			return fmt.Errorf("mcp %s: timeout: %w", server.Name, err)
 		}
 	}
 	return nil

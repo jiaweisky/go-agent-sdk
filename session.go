@@ -45,6 +45,10 @@ type SessionConfig struct {
 // MessageOptions describes a message to send.
 type MessageOptions struct {
 	Prompt string
+	// ID is an optional client-supplied message id. Supplying it makes the
+	// admission idempotent: re-sending the same id does not start a second turn.
+	// Empty generates one.
+	ID string
 	// Mode is "queue" (default) or "steer".
 	Mode string
 	// Files are attached to the message and sent to the model as media. Each
@@ -257,7 +261,7 @@ func (s *Session) Send(ctx context.Context, msg MessageOptions) iter.Seq2[Event,
 // turn already in flight without starting a new turn or duplicating its event
 // stream.
 func (s *Session) Steer(prompt string) error {
-	return s.client.rt.admit(s.id, schema.Prompt{Text: prompt}, schema.SessionDeliverySteer)
+	return s.client.rt.admit(s.id, "", schema.Prompt{Text: prompt}, schema.SessionDeliverySteer)
 }
 
 // turnEvents hands a turn's events to the caller with backpressure: the offer
@@ -310,6 +314,7 @@ func (s *Session) run(ctx context.Context, msg MessageOptions) error {
 	}
 	if err := s.client.rt.admit(
 		s.id,
+		schema.MessageID(msg.ID),
 		schema.Prompt{Text: prompt, Files: msg.Files},
 		deliveryForMode(msg.Mode),
 	); err != nil {

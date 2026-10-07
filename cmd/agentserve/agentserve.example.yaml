@@ -27,6 +27,16 @@ subscriberCapacity: 256
 keepAlive: 15s
 publicRoutes: [/api/health]
 cors: []                          # extra browser origins
+# mcp:                            # optional MCP servers (tools are registered)
+#   - name: filesystem
+#     type: local
+#     command: [npx, -y, "@modelcontextprotocol/server-filesystem", /srv/project]
+#     environment: { NODE_ENV: production }
+#     timeout: 30s
+#   - name: remote
+#     type: remote
+#     url: https://mcp.example.com/mcp
+#     headers: { Authorization: "Bearer <token>" }
 # tls:                            # optional; serve HTTPS when both are set
 #   certFile: /etc/agentserve/tls.crt
 #   keyFile: /etc/agentserve/tls.key
