@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -21,7 +23,7 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestLoadExampleConfig(t *testing.T) {
 	cfg := defaultConfig()
-	if err := loadConfig("agentserve.example.yaml", &cfg); err != nil {
+	if err := serveconfig.Load("agentserve.example.yaml", &cfg); err != nil {
 		t.Fatalf("load example: %v", err)
 	}
 	if err := cfg.validate(); err != nil {
@@ -30,8 +32,8 @@ func TestLoadExampleConfig(t *testing.T) {
 	if cfg.Model != "deepseek-flash" || cfg.Protocol != "openai-compatible-chat" {
 		t.Fatalf("cfg = %+v", cfg)
 	}
-	if len(cfg.permissionRuleset()) != 3 {
-		t.Fatalf("permission rules = %v", cfg.permissionRuleset())
+	if len(serveconfig.PermissionRuleset(cfg.InboundPermissions)) != 3 {
+		t.Fatalf("permission rules = %v", cfg.InboundPermissions)
 	}
 }
 
@@ -42,7 +44,7 @@ func TestFlagsOverrideFile(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	cfg := defaultConfig()
-	if err := loadConfig(path, &cfg); err != nil {
+	if err := serveconfig.Load(path, &cfg); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	flags := newFlags()

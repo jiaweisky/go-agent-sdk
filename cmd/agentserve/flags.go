@@ -2,7 +2,8 @@ package main
 
 import (
 	"flag"
-	"strings"
+
+	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 )
 
 // flags holds the CLI options. Only flags the user set are applied over the
@@ -18,12 +19,12 @@ type flags struct {
 	modelBase           string
 	subagentDepth       int
 	titleAuto           bool
-	configDirs          stringList
-	agents              stringList
+	configDirs          serveconfig.StringList
+	agents              serveconfig.StringList
 	interactionTimeout  string
 	interactionFallback string
-	publicRoutes        stringList
-	cors                stringList
+	publicRoutes        serveconfig.StringList
+	cors                serveconfig.StringList
 	subscriberCapacity  int
 	keepAlive           string
 	allowInsecure       bool
@@ -109,14 +110,4 @@ func (f *flags) apply(cfg *config) {
 	if set["allow-insecure"] {
 		cfg.AllowInsecure = f.allowInsecure
 	}
-}
-
-// stringList is a repeatable string flag.
-type stringList []string
-
-func (l *stringList) String() string { return strings.Join(*l, ",") }
-
-func (l *stringList) Set(value string) error {
-	*l = append(*l, value)
-	return nil
 }

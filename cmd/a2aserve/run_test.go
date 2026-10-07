@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
@@ -84,7 +85,7 @@ func TestRunServesCard(t *testing.T) {
 	cfg.Root = t.TempDir()
 	cfg.Model = "test-model"
 	cfg.Protocol = "openai-responses"
-	cfg.Credentials = credentialsConfig{APIKey: "test"}
+	cfg.Credentials = serveconfig.Credentials{APIKey: "test"}
 	cfg.KeepAlive = ""
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -119,10 +120,10 @@ func TestRunServesCard(t *testing.T) {
 
 func TestCredentialProviderAWS(t *testing.T) {
 	cfg := defaultConfig()
-	cfg.Credentials = credentialsConfig{AWS: &awsCredentials{
+	cfg.Credentials = serveconfig.Credentials{AWS: &serveconfig.AWS{
 		Region: "us-east-1", AccessKeyID: "AK", SecretAccessKey: "SK", SessionToken: "ST",
 	}}
-	credential, err := credentialProvider(cfg)(schema.ProviderID("bedrock-converse"))
+	credential, err := serveconfig.CredentialProvider(cfg.Credentials)(schema.ProviderID("bedrock-converse"))
 	if err != nil {
 		t.Fatalf("credentialProvider: %v", err)
 	}
@@ -135,8 +136,8 @@ func TestCredentialProviderAWS(t *testing.T) {
 func TestModelInfoProviderBedrockEndpoint(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Protocol = "bedrock-converse"
-	cfg.Credentials = credentialsConfig{AWS: &awsCredentials{Region: "eu-west-1", AccessKeyID: "AK", SecretAccessKey: "SK"}}
-	info, err := modelInfoProvider(cfg)("anthropic.claude-3-5-sonnet")
+	cfg.Credentials = serveconfig.Credentials{AWS: &serveconfig.AWS{Region: "eu-west-1", AccessKeyID: "AK", SecretAccessKey: "SK"}}
+	info, err := serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS)("anthropic.claude-3-5-sonnet")
 	if err != nil {
 		t.Fatalf("modelInfoProvider: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestModelInfoProviderExplicitBaseURL(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Protocol = "openai-compatible-chat"
 	cfg.ModelBaseURL = "https://api.deepseek.com"
-	info, err := modelInfoProvider(cfg)("deepseek-flash")
+	info, err := serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS)("deepseek-flash")
 	if err != nil {
 		t.Fatalf("modelInfoProvider: %v", err)
 	}

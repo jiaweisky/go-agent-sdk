@@ -1,40 +1,34 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
-	"net"
-	"os"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 )
 
 // config is the a2aserve configuration. It is assembled from built-in defaults,
 // then a YAML file, then CLI flags (flags win). No environment variables are
 // read.
 type config struct {
-	Listen             string                `yaml:"listen"`
-	BaseURL            string                `yaml:"baseURL"`
-	Root               string                `yaml:"root"`
-	WorkingDirectory   string                `yaml:"workingDirectory"`
-	ConfigDirs         []string              `yaml:"configDirs"`
-	Model              string                `yaml:"model"`
-	Protocol           string                `yaml:"protocol"`
-	ModelBaseURL       string                `yaml:"modelBaseURL"`
-	Credentials        credentialsConfig     `yaml:"credentials"`
-	Agents             []string              `yaml:"agents"`
-	Cards              map[string]cardConfig `yaml:"cards"`
-	ContextLimit       int                   `yaml:"contextLimit"`
-	OutputLimit        int                   `yaml:"outputLimit"`
-	InboundPermissions []permissionRule      `yaml:"inboundPermissions"`
-	KeepAlive          string                `yaml:"keepAlive"`
-	Auth               *authConfig           `yaml:"auth"`
-	TLS                *tlsConfig            `yaml:"tls"`
+	Listen             string                       `yaml:"listen"`
+	BaseURL            string                       `yaml:"baseURL"`
+	Root               string                       `yaml:"root"`
+	WorkingDirectory   string                       `yaml:"workingDirectory"`
+	ConfigDirs         []string                     `yaml:"configDirs"`
+	Model              string                       `yaml:"model"`
+	Protocol           string                       `yaml:"protocol"`
+	ModelBaseURL       string                       `yaml:"modelBaseURL"`
+	Credentials        serveconfig.Credentials      `yaml:"credentials"`
+	Agents             []string                     `yaml:"agents"`
+	Cards              map[string]cardConfig        `yaml:"cards"`
+	ContextLimit       int                          `yaml:"contextLimit"`
+	OutputLimit        int                          `yaml:"outputLimit"`
+	InboundPermissions []serveconfig.PermissionRule `yaml:"inboundPermissions"`
+	KeepAlive          string                       `yaml:"keepAlive"`
+	Auth               *authConfig                  `yaml:"auth"`
+	TLS                *serveconfig.TLS             `yaml:"tls"`
 	// AllowInsecure permits binding a non-loopback address without auth. It is
 	// an explicit opt-out of the safe default.
 	AllowInsecure bool `yaml:"allowInsecure"`
@@ -69,34 +63,6 @@ type skillConfig struct {
 	OutputModes []string `yaml:"outputModes"`
 }
 
-// tlsConfig enables HTTPS when both files are set.
-type tlsConfig struct {
-	CertFile string `yaml:"certFile"`
-	KeyFile  string `yaml:"keyFile"`
-}
-
-// credentialsConfig holds the credential for the configured protocol: an API
-// key for bearer/header protocols, or AWS SigV4 for Bedrock.
-type credentialsConfig struct {
-	APIKey string          `yaml:"apiKey"`
-	AWS    *awsCredentials `yaml:"aws"`
-}
-
-// awsCredentials is the SigV4 credential for Amazon Bedrock.
-type awsCredentials struct {
-	Region          string `yaml:"region"`
-	AccessKeyID     string `yaml:"accessKeyId"`
-	SecretAccessKey string `yaml:"secretAccessKey"`
-	SessionToken    string `yaml:"sessionToken"`
-}
-
-// permissionRule is one entry of the inbound permission ruleset.
-type permissionRule struct {
-	Action   string `yaml:"action"`
-	Resource string `yaml:"resource"`
-	Effect   string `yaml:"effect"`
-}
-
 // authConfig enables bearer authentication on the RPC endpoints.
 type authConfig struct {
 	Bearer string `yaml:"bearer"`
@@ -109,37 +75,6 @@ func defaultConfig() config {
 		Agents:    []string{"build"},
 		KeepAlive: "15s",
 	}
-}
-
-// loadConfig decodes a YAML file over cfg, so keys the file omits keep their
-// prior (default) values. Unknown keys are rejected.
-func loadConfig(path string, cfg *config) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("config %s: %w", path, err)
-	}
-	return nil
-}
-
-// isLoopback reports whether Listen binds only the loopback interface.
-func (c config) isLoopback() bool {
-	host, _, err := net.SplitHostPort(c.Listen)
-	if err != nil {
-		return false
-	}
-	if host == "" {
-		return false // empty host binds all interfaces
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // validate reports configuration that cannot produce a running server.
@@ -157,7 +92,7 @@ func (c config) validate() error {
 		return errors.New("credentials must set apiKey or aws")
 	case c.Auth != nil && c.Auth.Bearer == "":
 		return errors.New("auth.bearer is required when auth is set")
-	case !c.isLoopback() && !c.AllowInsecure && c.Auth == nil:
+	case !serveconfig.IsLoopback(c.Listen) && !c.AllowInsecure && c.Auth == nil:
 		return errors.New(
 			"refusing to bind a non-loopback address without auth; set auth.bearer, bind loopback, or allowInsecure",
 		)
@@ -192,21 +127,4 @@ func (c config) keepAliveDuration() (time.Duration, error) {
 		return 0, errors.New("keepAlive must not be negative")
 	}
 	return duration, nil
-}
-
-// permissionRuleset converts the configured rules; nil means "use the SDK
-// default" (see run).
-func (c config) permissionRuleset() []schema.PermissionRule {
-	if len(c.InboundPermissions) == 0 {
-		return nil
-	}
-	rules := make([]schema.PermissionRule, 0, len(c.InboundPermissions))
-	for _, rule := range c.InboundPermissions {
-		rules = append(rules, schema.PermissionRule{
-			Action:   rule.Action,
-			Resource: rule.Resource,
-			Effect:   schema.PermissionEffect(rule.Effect),
-		})
-	}
-	return rules
 }

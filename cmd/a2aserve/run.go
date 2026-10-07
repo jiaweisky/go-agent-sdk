@@ -11,6 +11,7 @@ import (
 
 	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/a2a/server"
+	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 	"golang.org/x/text/language"
 )
@@ -32,8 +33,8 @@ func run(ctx context.Context, cfg config) error {
 		ConfigDirs:       cfg.ConfigDirs,
 		Model:            cfg.Model,
 		Protocol:         schema.ProtocolID(cfg.Protocol),
-		ModelInfo:        modelInfoProvider(cfg),
-		Credentials:      credentialProvider(cfg),
+		ModelInfo:        serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS),
+		Credentials:      serveconfig.CredentialProvider(cfg.Credentials),
 		ContextLimit:     cfg.ContextLimit,
 		OutputLimit:      cfg.OutputLimit,
 	})
@@ -48,7 +49,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 
 	factoryOptions := []agent.A2AFactoryOption{}
-	if permissions := cfg.permissionRuleset(); len(permissions) > 0 {
+	if permissions := serveconfig.PermissionRuleset(cfg.InboundPermissions); len(permissions) > 0 {
 		factoryOptions = append(factoryOptions, agent.WithInboundPermissions(permissions))
 	}
 	var security *server.Security
@@ -190,37 +191,6 @@ func capabilityIDs(client *agent.Client, agentID string) (map[string]bool, error
 		ids[skill.Name] = true
 	}
 	return ids, nil
-}
-
-// credentialProvider returns the configured credential. The server runs one
-// fixed protocol, so the provider id (which equals the protocol id on this path)
-// does not select: there is a single credential.
-func credentialProvider(cfg config) agent.CredentialProvider {
-	return func(schema.ProviderID) (schema.Credential, error) {
-		credential := schema.Credential{APIKey: cfg.Credentials.APIKey}
-		if aws := cfg.Credentials.AWS; aws != nil {
-			credential.AWS = &schema.AWSCredentials{
-				Region:          aws.Region,
-				AccessKeyID:     aws.AccessKeyID,
-				SecretAccessKey: aws.SecretAccessKey,
-				SessionToken:    aws.SessionToken,
-			}
-		}
-		return credential, nil
-	}
-}
-
-// modelInfoProvider supplies model metadata. The endpoint is modelBaseURL when
-// set; otherwise Bedrock derives it from the AWS region (its route has no
-// default) and every other protocol uses its route's built-in endpoint.
-func modelInfoProvider(cfg config) agent.ModelInfoProvider {
-	baseURL := cfg.ModelBaseURL
-	if baseURL == "" && cfg.Protocol == "bedrock-converse" && cfg.Credentials.AWS != nil {
-		baseURL = fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", cfg.Credentials.AWS.Region)
-	}
-	return func(id string) (schema.ModelInfo, error) {
-		return agent.NewModelInfo(schema.ProtocolID(cfg.Protocol), id, baseURL, schema.ModelLimit{})
-	}
 }
 
 // logBaseURL derives the URL printed at startup.

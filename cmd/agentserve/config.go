@@ -1,76 +1,48 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
-	"net"
-	"os"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
+	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // config is the agentserve configuration, assembled from defaults, then a YAML
 // file, then CLI flags. No environment variables are read.
 type config struct {
-	Listen           string            `yaml:"listen"`
-	Root             string            `yaml:"root"`
-	WorkingDirectory string            `yaml:"workingDirectory"`
-	ConfigDirs       []string          `yaml:"configDirs"`
-	Model            string            `yaml:"model"`
-	Protocol         string            `yaml:"protocol"`
-	ModelBaseURL     string            `yaml:"modelBaseURL"`
-	Credentials      credentialsConfig `yaml:"credentials"`
-	ContextLimit     int               `yaml:"contextLimit"`
-	OutputLimit      int               `yaml:"outputLimit"`
-	SubagentDepth    int               `yaml:"subagentDepth"`
-	TitleAuto        bool              `yaml:"titleAuto"`
-	Agents           []string          `yaml:"agents"`
+	Listen           string                  `yaml:"listen"`
+	Root             string                  `yaml:"root"`
+	WorkingDirectory string                  `yaml:"workingDirectory"`
+	ConfigDirs       []string                `yaml:"configDirs"`
+	Model            string                  `yaml:"model"`
+	Protocol         string                  `yaml:"protocol"`
+	ModelBaseURL     string                  `yaml:"modelBaseURL"`
+	Credentials      serveconfig.Credentials `yaml:"credentials"`
+	ContextLimit     int                     `yaml:"contextLimit"`
+	OutputLimit      int                     `yaml:"outputLimit"`
+	SubagentDepth    int                     `yaml:"subagentDepth"`
+	TitleAuto        bool                    `yaml:"titleAuto"`
+	Agents           []string                `yaml:"agents"`
 
-	Auth                *authConfig      `yaml:"auth"`
-	InboundPermissions  []permissionRule `yaml:"inboundPermissions"`
-	InteractionTimeout  string           `yaml:"interactionTimeout"`
-	InteractionFallback string           `yaml:"interactionFallback"`
-	SubscriberCapacity  int              `yaml:"subscriberCapacity"`
-	KeepAlive           string           `yaml:"keepAlive"`
-	PublicRoutes        []string         `yaml:"publicRoutes"`
-	CORS                []string         `yaml:"cors"`
+	Auth                *authConfig                  `yaml:"auth"`
+	InboundPermissions  []serveconfig.PermissionRule `yaml:"inboundPermissions"`
+	InteractionTimeout  string                       `yaml:"interactionTimeout"`
+	InteractionFallback string                       `yaml:"interactionFallback"`
+	SubscriberCapacity  int                          `yaml:"subscriberCapacity"`
+	KeepAlive           string                       `yaml:"keepAlive"`
+	PublicRoutes        []string                     `yaml:"publicRoutes"`
+	CORS                []string                     `yaml:"cors"`
 
-	TLS           *tlsConfig `yaml:"tls"`
-	AllowInsecure bool       `yaml:"allowInsecure"`
+	TLS           *serveconfig.TLS `yaml:"tls"`
+	AllowInsecure bool             `yaml:"allowInsecure"`
 }
 
 type authConfig struct {
 	Bearer   string `yaml:"bearer"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
-}
-
-type credentialsConfig struct {
-	APIKey string          `yaml:"apiKey"`
-	AWS    *awsCredentials `yaml:"aws"`
-}
-
-type awsCredentials struct {
-	Region          string `yaml:"region"`
-	AccessKeyID     string `yaml:"accessKeyId"`
-	SecretAccessKey string `yaml:"secretAccessKey"`
-	SessionToken    string `yaml:"sessionToken"`
-}
-
-type permissionRule struct {
-	Action   string `yaml:"action"`
-	Resource string `yaml:"resource"`
-	Effect   string `yaml:"effect"`
-}
-
-type tlsConfig struct {
-	CertFile string `yaml:"certFile"`
-	KeyFile  string `yaml:"keyFile"`
 }
 
 func defaultConfig() config {
@@ -80,34 +52,6 @@ func defaultConfig() config {
 		KeepAlive:           "15s",
 		InteractionFallback: "reject",
 	}
-}
-
-func loadConfig(path string, cfg *config) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("config %s: %w", path, err)
-	}
-	return nil
-}
-
-func (c config) isLoopback() bool {
-	host, _, err := net.SplitHostPort(c.Listen)
-	if err != nil {
-		return false
-	}
-	if host == "" {
-		return false
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // validate runs every check in order, returning the first failure.
@@ -162,7 +106,7 @@ func (c config) validateAuth() error {
 			return errors.New("auth requires bearer or a complete username + password")
 		}
 	}
-	if !c.isLoopback() && !c.AllowInsecure && c.Auth == nil {
+	if !serveconfig.IsLoopback(c.Listen) && !c.AllowInsecure && c.Auth == nil {
 		return errors.New("refusing to bind a non-loopback address without auth; set auth.bearer, bind loopback, or allowInsecure")
 	}
 	return nil
@@ -225,19 +169,4 @@ func (c config) interactionTimeout() (time.Duration, error) {
 		return 0, errors.New("interactionTimeout must not be negative")
 	}
 	return duration, nil
-}
-
-func (c config) permissionRuleset() schema.PermissionRuleset {
-	if len(c.InboundPermissions) == 0 {
-		return nil
-	}
-	rules := make(schema.PermissionRuleset, 0, len(c.InboundPermissions))
-	for _, rule := range c.InboundPermissions {
-		rules = append(rules, schema.PermissionRule{
-			Action:   rule.Action,
-			Resource: rule.Resource,
-			Effect:   schema.PermissionEffect(rule.Effect),
-		})
-	}
-	return rules
 }

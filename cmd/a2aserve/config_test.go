@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -25,7 +27,7 @@ func TestLoadConfigOverDefaults(t *testing.T) {
 	}
 
 	cfg := defaultConfig()
-	if err := loadConfig(path, &cfg); err != nil {
+	if err := serveconfig.Load(path, &cfg); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if cfg.Listen != "127.0.0.1:1234" || cfg.Model != "gpt-4o-mini" {
@@ -46,7 +48,7 @@ func TestLoadConfigRejectsUnknownField(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	cfg := defaultConfig()
-	if err := loadConfig(path, &cfg); err == nil {
+	if err := serveconfig.Load(path, &cfg); err == nil {
 		t.Fatal("expected unknown field to be rejected")
 	}
 }
@@ -58,7 +60,7 @@ func TestFlagsOverrideFile(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	cfg := defaultConfig()
-	if err := loadConfig(path, &cfg); err != nil {
+	if err := serveconfig.Load(path, &cfg); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
@@ -84,18 +86,18 @@ func TestFlagsOverrideFile(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	valid := config{Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "openai-responses", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}}
+	valid := config{Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "openai-responses", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}}
 	if err := valid.validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 	awsValid := config{Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "bedrock-converse", Agents: []string{"build"},
-		Credentials: credentialsConfig{AWS: &awsCredentials{Region: "us-east-1", AccessKeyID: "AK", SecretAccessKey: "SK"}}}
+		Credentials: serveconfig.Credentials{AWS: &serveconfig.AWS{Region: "us-east-1", AccessKeyID: "AK", SecretAccessKey: "SK"}}}
 	if err := awsValid.validate(); err != nil {
 		t.Fatalf("valid aws config rejected: %v", err)
 	}
 	// A non-loopback bind is allowed with auth or an explicit opt-out.
 	exposed := config{Listen: "0.0.0.0:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"},
-		Credentials: credentialsConfig{APIKey: "k"}, Auth: &authConfig{Bearer: "t"}}
+		Credentials: serveconfig.Credentials{APIKey: "k"}, Auth: &authConfig{Bearer: "t"}}
 	if err := exposed.validate(); err != nil {
 		t.Fatalf("non-loopback with auth rejected: %v", err)
 	}
@@ -106,18 +108,18 @@ func TestValidate(t *testing.T) {
 	}
 
 	cases := map[string]config{
-		"missing root":          {Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"missing model":         {Root: "/r", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"missing protocol":      {Root: "/r", Model: "m", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"no agents":             {Root: "/r", Model: "m", Protocol: "p", Credentials: credentialsConfig{APIKey: "k"}},
+		"missing root":          {Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}},
+		"missing model":         {Root: "/r", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}},
+		"missing protocol":      {Root: "/r", Model: "m", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}},
+		"no agents":             {Root: "/r", Model: "m", Protocol: "p", Credentials: serveconfig.Credentials{APIKey: "k"}},
 		"no credentials":        {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}},
-		"aws missing fields":    {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{AWS: &awsCredentials{Region: "us-east-1"}}},
-		"empty bearer":          {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, Auth: &authConfig{}},
-		"negative keepAlive":    {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, KeepAlive: "-1s"},
-		"non-loopback no auth":  {Listen: "0.0.0.0:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"all-interfaces host":   {Listen: ":9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}},
-		"negative contextLimit": {Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, ContextLimit: -1},
-		"tls missing key":       {Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: credentialsConfig{APIKey: "k"}, TLS: &tlsConfig{CertFile: "c"}},
+		"aws missing fields":    {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{AWS: &serveconfig.AWS{Region: "us-east-1"}}},
+		"empty bearer":          {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}, Auth: &authConfig{}},
+		"negative keepAlive":    {Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}, KeepAlive: "-1s"},
+		"non-loopback no auth":  {Listen: "0.0.0.0:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}},
+		"all-interfaces host":   {Listen: ":9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}},
+		"negative contextLimit": {Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}, ContextLimit: -1},
+		"tls missing key":       {Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}, TLS: &serveconfig.TLS{CertFile: "c"}},
 	}
 	for name, cfg := range cases {
 		if err := cfg.validate(); err == nil {
@@ -145,12 +147,12 @@ func TestKeepAliveDuration(t *testing.T) {
 }
 
 func TestPermissionRuleset(t *testing.T) {
-	cfg := config{InboundPermissions: []permissionRule{{Action: "bash", Resource: "*", Effect: "deny"}}}
-	rules := cfg.permissionRuleset()
+	cfg := config{InboundPermissions: []serveconfig.PermissionRule{{Action: "bash", Resource: "*", Effect: "deny"}}}
+	rules := serveconfig.PermissionRuleset(cfg.InboundPermissions)
 	if len(rules) != 1 || rules[0].Action != "bash" || rules[0].Effect != "deny" {
 		t.Fatalf("rules = %+v", rules)
 	}
-	if (config{}).permissionRuleset() != nil {
+	if serveconfig.PermissionRuleset(nil) != nil {
 		t.Fatal("empty config should yield nil (use SDK default)")
 	}
 }

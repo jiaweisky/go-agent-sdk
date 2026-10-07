@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 	"github.com/jiaweisky/go-agent-sdk/server"
 )
@@ -48,8 +49,8 @@ func buildClient(cfg config) (*agent.Client, error) {
 		ConfigDirs:       cfg.ConfigDirs,
 		Model:            cfg.Model,
 		Protocol:         schema.ProtocolID(cfg.Protocol),
-		ModelInfo:        modelInfoProvider(cfg),
-		Credentials:      credentialProvider(cfg),
+		ModelInfo:        serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS),
+		Credentials:      serveconfig.CredentialProvider(cfg.Credentials),
 		ContextLimit:     cfg.ContextLimit,
 		OutputLimit:      cfg.OutputLimit,
 	}
@@ -73,7 +74,7 @@ func buildServer(client *agent.Client, cfg config, keepAlive, interactionTimeout
 		Auth:                auth,
 		Agents:              cfg.Agents,
 		CORS:                cfg.CORS,
-		InboundPermissions:  cfg.permissionRuleset(),
+		InboundPermissions:  serveconfig.PermissionRuleset(cfg.InboundPermissions),
 		InteractionTimeout:  interactionTimeout,
 		InteractionFallback: cfg.InteractionFallback,
 		SubscriberCapacity:  cfg.SubscriberCapacity,
@@ -124,29 +125,4 @@ func authFromConfig(auth *authConfig) *server.Auth {
 		return &server.Auth{Scheme: "bearer", Token: auth.Bearer}
 	}
 	return &server.Auth{Scheme: "basic", Username: auth.Username, Password: auth.Password}
-}
-
-func credentialProvider(cfg config) agent.CredentialProvider {
-	return func(schema.ProviderID) (schema.Credential, error) {
-		credential := schema.Credential{APIKey: cfg.Credentials.APIKey}
-		if aws := cfg.Credentials.AWS; aws != nil {
-			credential.AWS = &schema.AWSCredentials{
-				Region:          aws.Region,
-				AccessKeyID:     aws.AccessKeyID,
-				SecretAccessKey: aws.SecretAccessKey,
-				SessionToken:    aws.SessionToken,
-			}
-		}
-		return credential, nil
-	}
-}
-
-func modelInfoProvider(cfg config) agent.ModelInfoProvider {
-	baseURL := cfg.ModelBaseURL
-	if baseURL == "" && cfg.Protocol == "bedrock-converse" && cfg.Credentials.AWS != nil {
-		baseURL = fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", cfg.Credentials.AWS.Region)
-	}
-	return func(id string) (schema.ModelInfo, error) {
-		return agent.NewModelInfo(schema.ProtocolID(cfg.Protocol), id, baseURL, schema.ModelLimit{})
-	}
 }

@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 )
 
 func main() {
@@ -32,7 +34,7 @@ func runMain(args []string) error {
 
 	cfg := defaultConfig()
 	if flags.config != "" {
-		if err := loadConfig(flags.config, &cfg); err != nil {
+		if err := serveconfig.Load(flags.config, &cfg); err != nil {
 			return err
 		}
 	}
