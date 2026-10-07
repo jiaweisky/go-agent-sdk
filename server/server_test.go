@@ -502,6 +502,95 @@ func TestCORSPreflight(t *testing.T) {
 	}
 }
 
+func TestCORSConfiguredOrigin(t *testing.T) {
+	ts := newTestServer(t, Options{CORS: []string{"https://app.example.com"}})
+
+	preflight := func(origin string) string {
+		req, _ := http.NewRequest(http.MethodOptions, ts.URL+"/api/session", nil)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("preflight: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.Header.Get("Access-Control-Allow-Origin")
+	}
+
+	if got := preflight("https://app.example.com"); got != "https://app.example.com" {
+		t.Fatalf("configured origin not allowed: %q", got)
+	}
+	if got := preflight("https://evil.example.com"); got != "" {
+		t.Fatalf("unlisted non-loopback origin was allowed: %q", got)
+	}
+}
+
+func TestPublicRouteOverridesAuth(t *testing.T) {
+	ts := newTestServer(t, Options{Auth: &Auth{Scheme: schemeBearer, Token: "t"}, Public: []string{"/api/agent"}})
+
+	resp := doJSON(t, http.MethodGet, ts.URL+"/api/agent", "", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("public route status = %d, want 200", resp.StatusCode)
+	}
+
+	resp = doJSON(t, http.MethodGet, ts.URL+"/api/session", "", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("protected route status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestSessionMessagePagination(t *testing.T) {
+	ts := newTestServer(t, Options{})
+	id := createSession(t, ts)
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"hi"}`, nil)
+	resp.Body.Close()
+	if !poll(t, 5*time.Second, func() bool {
+		r := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/history", "", nil)
+		defer r.Body.Close()
+		var body struct {
+			Data []wireEvent `json:"data"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		for _, event := range body.Data {
+			if event.Type == "session.next.text.ended" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("turn did not finish")
+	}
+
+	first := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/message?limit=1", "", nil)
+	var page1 struct {
+		Data   []map[string]any `json:"data"`
+		Cursor struct {
+			Next string `json:"next"`
+		} `json:"cursor"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&page1); err != nil {
+		t.Fatalf("page1 decode: %v", err)
+	}
+	first.Body.Close()
+	if len(page1.Data) != 1 || page1.Cursor.Next == "" {
+		t.Fatalf("page1 = %d items, next=%q", len(page1.Data), page1.Cursor.Next)
+	}
+
+	second := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/message?limit=1&cursor="+page1.Cursor.Next, "", nil)
+	var page2 struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(second.Body).Decode(&page2); err != nil {
+		t.Fatalf("page2 decode: %v", err)
+	}
+	second.Body.Close()
+	if len(page2.Data) != 1 || page2.Data[0]["id"] == page1.Data[0]["id"] {
+		t.Fatalf("page2 = %v (want a different single message)", page2.Data)
+	}
+}
+
 func TestBasicAuth(t *testing.T) {
 	ts := newTestServer(t, Options{Auth: &Auth{Scheme: schemeBasic, Username: "u", Password: "p"}})
 
@@ -743,6 +832,52 @@ func permissionCount(t *testing.T, ts *httptest.Server, id string) int {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	return len(body.Data)
+}
+
+func TestInteractionFallbackAllow(t *testing.T) {
+	calls := 0
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("k"),
+		Model: "test-model", Root: t.TempDir(),
+		Tools: []agent.Tool{agent.DefineTool("echo", "echo", func(struct{}, agent.ToolContext) (string, error) {
+			return "ok", nil
+		})},
+		LLM: toolCallLLM{calls: &calls, toolName: "echo", reply: "done"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Permissions: schema.PermissionRuleset{{Action: "echo", Resource: "*", Effect: schema.PermissionEffectAsk}},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ts := serveClient(t, client, Options{
+		InteractionTimeout:  200 * time.Millisecond,
+		InteractionFallback: "allow",
+	})
+	id := createSession(t, ts)
+
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"go"}`, nil)
+	resp.Body.Close()
+
+	// With no reply, the fallback approves once and the tool still runs.
+	if !poll(t, 8*time.Second, func() bool {
+		r := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/history", "", nil)
+		defer r.Body.Close()
+		var body struct {
+			Data []wireEvent `json:"data"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		for _, event := range body.Data {
+			if event.Type == "session.next.tool.success" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("allow fallback did not approve the ask")
+	}
 }
 
 // toolCallLLM calls a tool on its first stream and returns text on the second,

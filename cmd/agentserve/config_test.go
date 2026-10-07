@@ -133,6 +133,42 @@ func TestReferenceSources(t *testing.T) {
 	}
 }
 
+func TestFlagsApplyAll(t *testing.T) {
+	cfg := defaultConfig()
+	flags := newFlags()
+	if err := flags.parse([]string{
+		"--listen", "127.0.0.1:1", "--root", "/r", "--working-dir", "/w",
+		"--model", "m", "--protocol", "p", "--model-base-url", "https://x",
+		"--subagent-depth", "2", "--title-auto",
+		"--config-dir", "/a", "--config-dir", "/b", "--agent", "build", "--agent", "plan",
+		"--interaction-timeout", "5m", "--interaction-fallback", "allow",
+		"--public-route", "/api/health", "--cors", "https://x",
+		"--subscriber-capacity", "10", "--keep-alive", "30s", "--allow-insecure",
+	}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	flags.apply(&cfg)
+
+	switch {
+	case cfg.Listen != "127.0.0.1:1":
+		t.Fatalf("listen = %q", cfg.Listen)
+	case cfg.Root != "/r" || cfg.WorkingDirectory != "/w":
+		t.Fatalf("root/workdir = %q/%q", cfg.Root, cfg.WorkingDirectory)
+	case cfg.Model != "m" || cfg.Protocol != "p" || cfg.ModelBaseURL != "https://x":
+		t.Fatalf("model = %+v", cfg)
+	case cfg.SubagentDepth != 2 || !cfg.TitleAuto:
+		t.Fatalf("subagentDepth/titleAuto = %d/%v", cfg.SubagentDepth, cfg.TitleAuto)
+	case len(cfg.ConfigDirs) != 2 || len(cfg.Agents) != 2:
+		t.Fatalf("configDirs/agents = %v/%v", cfg.ConfigDirs, cfg.Agents)
+	case cfg.InteractionTimeout != "5m" || cfg.InteractionFallback != "allow":
+		t.Fatalf("interaction = %q/%q", cfg.InteractionTimeout, cfg.InteractionFallback)
+	case len(cfg.PublicRoutes) != 1 || len(cfg.CORS) != 1:
+		t.Fatalf("publicRoutes/cors = %v/%v", cfg.PublicRoutes, cfg.CORS)
+	case cfg.SubscriberCapacity != 10 || cfg.KeepAlive != "30s" || !cfg.AllowInsecure:
+		t.Fatalf("capacity/keepAlive/allowInsecure = %d/%q/%v", cfg.SubscriberCapacity, cfg.KeepAlive, cfg.AllowInsecure)
+	}
+}
+
 func TestValidateNonLoopbackNeedsAuth(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.Root = "/tmp/x"
