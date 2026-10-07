@@ -27,6 +27,7 @@
 | 2026-10-06 | P3 landed: opaque pagination cursors on `/api/session` + `/message` (S1) and a `references` config section in `cmd/agentserve` (S3); added `SessionMessage.SessionMessageID` |
 | 2026-10-06 | Phase 5: `examples/httpclient` (runnable Go client) + permission round-trip and interaction-timeout tests; design doc marked Phases 0–5 complete |
 | 2026-10-06 | Unified lifecycle: `server.New(ctx, client, opts)` derives the server lifetime from the host context; both commands share `serveconfig.Serve` (cancel SSE → bounded `Shutdown`, force-close on timeout → `Client.Close`); graceful-shutdown test + reference/subagent/MCP materialization tests |
+| 2026-10-06 | Review: an async prompt failure is reported through `Options.OnError` (it was silently dropped); corrected §6.1, which had claimed an `ErrorEvent` on the event stream — the SDK publishes bus events only |
 
 ---
 
@@ -571,9 +572,11 @@ GET  /api/session/{id}/event    ──► SSE: durable replay + live (separate c
   run) and returns; the active turn absorbs it at the next step boundary. If no
   turn is running, it stays queued until the next `queue` prompt drives a worker
   run.
-- A prompt whose `Send` fails (e.g. admission error) does not kill the worker:
-  the failure surfaces as an `ErrorEvent` on the session stream, and the worker
-  continues with the next prompt.
+- A prompt whose `Send` fails (e.g. an admission or model error) does not kill
+  the worker: the worker reports it through `Options.OnError` and continues with
+  the next prompt. The event stream carries only bus events, so the SDK publishes
+  no dedicated error frame for a failed turn; a connected client observes the turn
+  ending without its expected completion.
 - **A parked turn blocks the queue.** When the running turn parks on a
   permission/question ask (§9), the worker is blocked inside `Send`, so any
   prompts queued behind it wait until the ask is resolved (reply, the

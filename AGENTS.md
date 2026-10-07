@@ -1,5 +1,9 @@
 # go-agent-sdk — Coding Agent Reference
 
+## Git: do not commit automatically
+
+**Never commit automatically.** Run `git commit` only when the current request explicitly says to commit; otherwise leave the changes uncommitted (staged or unstaged) for review. Never `git push` unless explicitly asked.
+
 ## Project documentation
 
 - **`docs/DESIGN.md`** — architecture design, detailed module design, MVP scope, SDK public API (**project scope and public API are governed by this document**)

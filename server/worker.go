@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+
 	agent "github.com/jiaweisky/go-agent-sdk"
 )
 
@@ -47,11 +49,23 @@ func (w *worker) run() {
 func (w *worker) runOne(msg agent.MessageOptions) {
 	handle, err := w.s.attach(w.s.ctx, w.id)
 	if err != nil {
+		w.report(err)
 		return
 	}
+	// Drain the turn to completion. The prompt request already returned 202, so
+	// a failure cannot be returned to the caller; report it instead of dropping
+	// it.
 	for _, sendErr := range handle.Send(w.s.ctx, msg) {
 		if sendErr != nil {
+			w.report(sendErr)
 			break
 		}
+	}
+}
+
+// report surfaces an asynchronous turn failure to Options.OnError.
+func (w *worker) report(err error) {
+	if w.s.onError != nil {
+		w.s.onError(fmt.Errorf("session %s: turn failed: %w", w.id, err))
 	}
 }

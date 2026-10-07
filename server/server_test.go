@@ -37,6 +37,14 @@ func (stubLLM) Generate(context.Context, *llmschema.LLMRequest) (*llmschema.LLMR
 	return nil, nil
 }
 
+// failLLM fails every turn, so a test can check how an async prompt failure is
+// surfaced.
+type failLLM struct{ stubLLM }
+
+func (failLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[llmschema.LLMEvent, error], error) {
+	return nil, errors.New("model unavailable")
+}
+
 // fakeLLM streams a single text part and finishes, so a turn completes without a
 // network call.
 type fakeLLM struct {
@@ -340,6 +348,46 @@ func poll(t *testing.T, timeout time.Duration, fn func() bool) bool {
 		time.Sleep(20 * time.Millisecond)
 	}
 	return fn()
+}
+
+func TestAsyncPromptFailureReported(t *testing.T) {
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), LLM: failLLM{},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	reported := make(chan error, 1)
+	srv, err := New(context.Background(), client, Options{OnError: func(e error) {
+		select {
+		case reported <- e:
+		default:
+		}
+	}})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	id := createSession(t, ts)
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"hi"}`, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("prompt status = %d, want 202", resp.StatusCode)
+	}
+	select {
+	case err := <-reported:
+		if !strings.Contains(err.Error(), "model unavailable") {
+			t.Fatalf("reported error = %v, want it to wrap the model failure", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("async prompt failure was not reported to OnError")
+	}
 }
 
 func TestPromptIdempotency(t *testing.T) {
