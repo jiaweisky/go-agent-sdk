@@ -47,8 +47,7 @@ func (s *Server) handleEvent(w http.ResponseWriter, r *http.Request) {
 // given) merged with the live filtered stream.
 func (s *Server) handleSessionEvent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
+	if !s.requireSession(w, r) {
 		return
 	}
 	after := -1

@@ -13,7 +13,7 @@ import (
 	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
 )
 
-// apiError is the uniform error envelope (docs/DESIGN-HTTP.md §10).
+// apiError is the uniform JSON error envelope returned by every failure.
 type apiError struct {
 	Error     string `json:"error"`
 	Message   string `json:"message"`
@@ -29,7 +29,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writeData writes the opencode-style {"data": ...} envelope.
+// writeData writes a success response wrapped as {"data": ...}.
 func writeData(w http.ResponseWriter, status int, data any) {
 	writeJSON(w, status, map[string]any{"data": data})
 }

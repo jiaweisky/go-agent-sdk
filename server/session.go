@@ -115,8 +115,7 @@ func (s *Server) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
+	if !s.requireSession(w, r) {
 		return
 	}
 	_ = s.withHandle(r.Context(), id, func(h *agent.Session) error {
@@ -195,8 +194,7 @@ func (s *Server) handleSessionPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
+	if !s.requireSession(w, r) {
 		return
 	}
 	if body.Delivery == "steer" {
@@ -214,8 +212,7 @@ func (s *Server) handleSessionPrompt(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSessionInterrupt(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
+	if !s.requireSession(w, r) {
 		return
 	}
 	_ = s.withHandle(r.Context(), id, func(h *agent.Session) error {
@@ -266,7 +263,7 @@ func (s *Server) handleSessionWait(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if parsed <= 0 {
-			// A non-positive timeout must not mean "wait forever" (D3).
+			// A non-positive timeout must not turn into an unbounded wait.
 			writeError(w, http.StatusBadRequest, "bad_request", "timeout must be positive")
 			return
 		}
@@ -297,8 +294,7 @@ func (s *Server) writeSessionMessages(
 	read func(string) ([]schema.SessionMessage, error),
 ) {
 	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
+	if !s.requireSession(w, r) {
 		return
 	}
 	messages, err := read(id)

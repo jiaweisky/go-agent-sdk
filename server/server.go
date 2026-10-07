@@ -1,6 +1,7 @@
 // Package server exposes go-agent-sdk over a language-agnostic HTTP/SSE API so
 // hosts written in other languages can drive the SDK across a process boundary.
-// See docs/DESIGN-HTTP.md.
+// It binds no port and reads no environment: the host mounts Handler() on its
+// own server.
 package server
 
 import (
@@ -223,6 +224,16 @@ func (s *Server) defaultAgent() string {
 		return s.opts.Agents[0]
 	}
 	return string(core.AgentDefaultID)
+}
+
+// requireSession verifies the path session exists, writing the error response
+// and returning false otherwise.
+func (s *Server) requireSession(w http.ResponseWriter, r *http.Request) bool {
+	if _, err := s.client.GetSession(r.Context(), r.PathValue("sessionID")); err != nil {
+		s.writeSDKError(w, err)
+		return false
+	}
+	return true
 }
 
 // requireAgent validates that name is a registered, allowed agent. It writes

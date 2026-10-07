@@ -27,6 +27,21 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 
+	client, err := buildClient(cfg)
+	if err != nil {
+		return err
+	}
+	srv, err := buildServer(client, cfg, keepAlive, timeout)
+	if err != nil {
+		_ = client.Close()
+		return err
+	}
+	return serve(ctx, cfg, srv, client)
+}
+
+// buildClient assembles the SDK client from the model, credential and limit
+// settings.
+func buildClient(cfg config) (*agent.Client, error) {
 	clientOpts := &agent.ClientOptions{
 		Root:             cfg.Root,
 		WorkingDirectory: cfg.WorkingDirectory,
@@ -45,32 +60,31 @@ func run(ctx context.Context, cfg config) error {
 		auto := true
 		clientOpts.Title = &agent.TitleConfig{Auto: &auto}
 	}
+	return agent.NewClient(clientOpts)
+}
 
-	client, err := agent.NewClient(clientOpts)
-	if err != nil {
-		return err
-	}
-
+// buildServer assembles the HTTP server options from cfg.
+func buildServer(client *agent.Client, cfg config, keepAlive, interactionTimeout time.Duration) (*server.Server, error) {
 	var auth *server.Auth
 	if cfg.Auth != nil {
 		auth = authFromConfig(cfg.Auth)
 	}
-	srv, err := server.New(client, server.Options{
+	return server.New(client, server.Options{
 		Auth:                auth,
 		Agents:              cfg.Agents,
 		CORS:                cfg.CORS,
 		InboundPermissions:  cfg.permissionRuleset(),
-		InteractionTimeout:  timeout,
+		InteractionTimeout:  interactionTimeout,
 		InteractionFallback: cfg.InteractionFallback,
 		SubscriberCapacity:  cfg.SubscriberCapacity,
 		KeepAlive:           keepAlive,
 		Public:              cfg.PublicRoutes,
 	})
-	if err != nil {
-		_ = client.Close()
-		return err
-	}
+}
 
+// serve runs the HTTP server until ctx is canceled, then closes the server and
+// the client.
+func serve(ctx context.Context, cfg config, srv *server.Server, client *agent.Client) error {
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           srv.Handler(),

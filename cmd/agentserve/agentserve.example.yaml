@@ -1,6 +1,6 @@
 # agentserve configuration. Copy to agentserve.yaml (git-ignored) and edit.
 # No environment variables are read; credentials and the auth token live only
-# here. See docs/DESIGN-HTTP.md 12.
+# here.
 listen: 127.0.0.1:8787
 root: ~/.go-agent-sdk             # required; the SDK state directory
 workingDirectory: /srv/project

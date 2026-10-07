@@ -13,8 +13,7 @@ func (s *Server) handleQuestionList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSessionQuestionList(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
+	if !s.requireSession(w, r) {
 		return
 	}
 	var requests []agent.QuestionRequest
@@ -29,11 +28,10 @@ func (s *Server) handleSessionQuestionList(w http.ResponseWriter, r *http.Reques
 // pendingQuestion returns the pending question request owned by the path
 // session, writing 404 and returning nil otherwise.
 func (s *Server) pendingQuestion(w http.ResponseWriter, r *http.Request) *agent.QuestionRequest {
-	id := r.PathValue("sessionID")
-	if _, err := s.client.GetSession(r.Context(), id); err != nil {
-		s.writeSDKError(w, err)
+	if !s.requireSession(w, r) {
 		return nil
 	}
+	id := r.PathValue("sessionID")
 	req := s.client.Question().Get(r.PathValue("requestID"))
 	if req == nil || req.SessionID != id {
 		writeError(w, http.StatusNotFound, "not_found", "question request not found")

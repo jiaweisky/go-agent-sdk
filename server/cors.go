@@ -24,7 +24,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 }
 
 // allowedOrigin allows the configured origins plus same-origin/loopback by
-// default (matching opencode).
+// default, so a local browser client works without configuration.
 func (s *Server) allowedOrigin(origin string) bool {
 	for _, o := range s.opts.CORS {
 		if o == origin {
