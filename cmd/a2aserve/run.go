@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/a2a/server"
@@ -15,9 +13,6 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/schema"
 	"golang.org/x/text/language"
 )
-
-// shutdownTimeout bounds graceful shutdown.
-const shutdownTimeout = 10 * time.Second
 
 // run builds the SDK client and A2A server from cfg and serves until ctx is
 // canceled, then shuts down gracefully and closes the client.
@@ -74,26 +69,7 @@ func run(ctx context.Context, cfg config) error {
 	fmt.Fprintf(os.Stderr, "a2aserve: card at %s/.well-known/agent-card.json\n", logBaseURL(cfg))
 	fmt.Fprintf(os.Stderr, "a2aserve: agent cards at %s%s\n", logBaseURL(cfg), server.DiscoveryPath)
 
-	serveErr := make(chan error, 1)
-	go func() {
-		if cfg.TLS != nil {
-			serveErr <- httpServer.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile)
-			return
-		}
-		serveErr <- httpServer.ListenAndServe()
-	}()
-
-	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		return httpServer.Shutdown(shutdownCtx)
-	case err := <-serveErr:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
-	}
+	return serveconfig.Serve(ctx, httpServer, cfg.TLS, nil)
 }
 
 // exposeAgents marks each named existing agent exposed and returns its info.

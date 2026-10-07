@@ -26,6 +26,7 @@
 | 2026-10-06 | Contract finish + tests: typed-error mapping completed (snapshot-unavailable → 503, revert message-not-found → 404); `model`/`revert/stage` 400 validation; basic-auth username defaults to `opencode`; regression tests (CORS, basic auth, wait timeout, delete-while-running, replay, error mapping) |
 | 2026-10-06 | P3 landed: opaque pagination cursors on `/api/session` + `/message` (S1) and a `references` config section in `cmd/agentserve` (S3); added `SessionMessage.SessionMessageID` |
 | 2026-10-06 | Phase 5: `examples/httpclient` (runnable Go client) + permission round-trip and interaction-timeout tests; design doc marked Phases 0–5 complete |
+| 2026-10-06 | Unified lifecycle: `server.New(ctx, client, opts)` derives the server lifetime from the host context; both commands share `serveconfig.Serve` (cancel SSE → bounded `Shutdown`, force-close on timeout → `Client.Close`); graceful-shutdown test + reference/subagent/MCP materialization tests |
 
 ---
 
@@ -238,9 +239,11 @@ type Options struct {
 
 type Server struct { /* ... */ }
 
-// New binds a Server to one Client. It switches the client to
-// HoldInteractions(true) so permission/question prompts surface over HTTP.
-func New(client *agent.Client, opts Options) (*Server, error)
+// New binds a Server to one Client, with the server's lifetime derived from
+// ctx: cancelling ctx (or calling Close) cancels the SSE streams and stops the
+// background workers. It switches the client to HoldInteractions(true) so
+// permission/question prompts surface over HTTP.
+func New(ctx context.Context, client *agent.Client, opts Options) (*Server, error)
 
 // Handler returns the http.Handler for the host to mount on its own mux/server.
 // The SDK never binds a port or reads env.
@@ -1186,15 +1189,17 @@ which subagents a turn may delegate to does so through `InboundPermissions`
 
 ### 12.5 Lifecycle
 
-`agentserve` builds the `Client`, wires `server.New(client, opts)` with the
-derived `Options` (`Auth`, `Agents`, `CORS`, `InboundPermissions`,
-`InteractionTimeout`, `InteractionFallback`, `KeepAlive`, `SubscriberCapacity`,
-`Public`), then on `SIGINT`/`SIGTERM`: `Server.Close()` (cancels SSE subscribers
-and signals workers) → `httpServer.Shutdown(ctx)` (now completes; still bounded
-by a timeout) → `Client.Close()`. `Server.Close()` must not block on parked
-workers (§13); `Client.Close()` settles pending interactions and stops turns.
-Order matters: running `Shutdown` first would make it wait out its whole timeout
-on live SSE streams (§13).
+`agentserve` builds the `Client`, then `server.New(ctx, client, opts)` with the
+context from `SIGINT`/`SIGTERM` and the derived `Options` (`Auth`, `Agents`,
+`CORS`, `InboundPermissions`, `InteractionTimeout`, `InteractionFallback`,
+`KeepAlive`, `SubscriberCapacity`, `Public`). On cancel it calls the shared
+`serveconfig.Serve`, i.e. `Server.Close()` (cancels SSE subscribers and signals
+workers) → `http.Server.Shutdown` (bounded, force-closed on timeout) →
+`Client.Close()`. `Server.Close()` must not block on parked workers (§13);
+`Client.Close()` settles pending interactions and stops turns. Order matters:
+running `Shutdown` first would make it wait out its whole timeout on live SSE
+streams (§13). `a2aserve` shares the same `Serve` helper (with no `beforeShutdown`
+hook).
 
 ### 12.6 Out of scope for the command
 
@@ -1228,6 +1233,13 @@ directly (`agent.NewClient`) and mounts `server.Handler()` itself.
   for the whole shutdown timeout. `Server.Close()` therefore cancels every SSE
   subscriber's context (closing the streams) and signals the workers, and the
   lifecycle runs it **before** `Shutdown` (§12.5).
+- **One context, one shutdown path.** The server's lifetime is derived from the
+  host context passed to `New` (§4): cancelling it (or `Close()`) runs the same
+  cleanup. Both commands share `cmd/serveconfig.Serve`, which cancels SSE first
+  (`Server.Close` via the `beforeShutdown` hook), then `http.Server.Shutdown`
+  bounded by a timeout, **force-closing** on timeout so a stubborn stream cannot
+  hang the process; `Client.Close()` follows. `a2aserve` passes no hook (a2a-go
+  owns its streams) and relies on the force-close fallback.
 - **HTTP server timeouts.** Set `ReadHeaderTimeout` (and a body limit at the
   proxy, §8.5); do **not** set a short `WriteTimeout`, which would cut SSE
   mid-stream. Boundaries come from `Server.Close()` and the SSE keep-alive.

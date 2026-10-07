@@ -5,18 +5,58 @@ package serveconfig
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
+
+// ShutdownTimeout bounds graceful shutdown before connections are force-closed.
+const ShutdownTimeout = 10 * time.Second
+
+// Serve runs the HTTP server until ctx is canceled, then shuts down gracefully:
+// it waits up to ShutdownTimeout for in-flight requests and force-closes on
+// timeout. beforeShutdown, when set, runs first so long-lived streams (SSE) end
+// and Shutdown can complete. The caller closes the SDK client afterwards.
+func Serve(ctx context.Context, server *http.Server, tls *TLS, beforeShutdown func()) error {
+	serveErr := make(chan error, 1)
+	go func() {
+		if tls != nil {
+			serveErr <- server.ListenAndServeTLS(tls.CertFile, tls.KeyFile)
+			return
+		}
+		serveErr <- server.ListenAndServe()
+	}()
+
+	select {
+	case <-ctx.Done():
+		if beforeShutdown != nil {
+			beforeShutdown()
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			_ = server.Close()
+			return err
+		}
+		return nil
+	case err := <-serveErr:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
+}
 
 // Credentials holds the credential for the configured protocol: an API key for
 // bearer/header protocols, or AWS SigV4 for Bedrock.

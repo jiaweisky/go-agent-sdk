@@ -75,7 +75,10 @@ type sessionEntry struct {
 
 // New binds a Server to one Client. It switches the client to hold mode so
 // permission/question prompts surface over HTTP.
-func New(client *agent.Client, opts Options) (*Server, error) {
+//
+// The server's lifetime is derived from ctx: cancelling ctx (or calling Close)
+// cancels the SSE streams and stops the background workers.
+func New(ctx context.Context, client *agent.Client, opts Options) (*Server, error) {
 	if client == nil {
 		return nil, errors.New("server: client is required")
 	}
@@ -133,9 +136,15 @@ func New(client *agent.Client, opts Options) (*Server, error) {
 			s.allow[name] = true
 		}
 	}
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.ctx, s.cancel = context.WithCancel(ctx)
 	client.HoldInteractions(true)
 	go s.runWatcher(s.ctx)
+	// Cancelling the host context releases the server even if the host forgets
+	// to call Close.
+	go func() {
+		<-s.ctx.Done()
+		_ = s.Close()
+	}()
 	return s, nil
 }
 

@@ -71,7 +71,7 @@ func newTestClient(t *testing.T) *agent.Client {
 
 func newTestServer(t *testing.T, opts Options) *httptest.Server {
 	t.Helper()
-	srv, err := New(newTestClient(t), opts)
+	srv, err := New(context.Background(), newTestClient(t), opts)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestSessionActiveAndHistory(t *testing.T) {
 func serveClient(t *testing.T, client *agent.Client, opts Options) *httptest.Server {
 	t.Helper()
 	t.Cleanup(func() { _ = client.Close() })
-	srv, err := New(client, opts)
+	srv, err := New(context.Background(), client, opts)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
@@ -441,7 +441,7 @@ func TestSessionActiveList(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	srv, err := New(client, Options{})
+	srv, err := New(context.Background(), client, Options{})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
@@ -987,7 +987,7 @@ func TestMCPToolMaterialization(t *testing.T) {
 }
 
 func TestErrorMapping(t *testing.T) {
-	srv, err := New(newTestClient(t), Options{OnError: func(error) {}})
+	srv, err := New(context.Background(), newTestClient(t), Options{OnError: func(error) {}})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

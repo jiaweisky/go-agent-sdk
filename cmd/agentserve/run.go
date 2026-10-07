@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,8 +12,6 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/schema"
 	"github.com/jiaweisky/go-agent-sdk/server"
 )
-
-const shutdownTimeout = 10 * time.Second
 
 // run builds the SDK client and HTTP server from cfg, serves until ctx is
 // canceled, then shuts down (Server.Close -> http.Shutdown -> Client.Close).
@@ -32,12 +29,13 @@ func run(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
-	srv, err := buildServer(client, cfg, keepAlive, timeout)
+	srv, err := buildServer(ctx, client, cfg, keepAlive, timeout)
 	if err != nil {
 		_ = client.Close()
 		return err
 	}
-	return serve(ctx, cfg, srv, client)
+	defer client.Close()
+	return serve(ctx, cfg, srv)
 }
 
 // buildClient assembles the SDK client from the model, credential and limit
@@ -75,12 +73,12 @@ func buildClient(cfg config) (*agent.Client, error) {
 }
 
 // buildServer assembles the HTTP server options from cfg.
-func buildServer(client *agent.Client, cfg config, keepAlive, interactionTimeout time.Duration) (*server.Server, error) {
+func buildServer(ctx context.Context, client *agent.Client, cfg config, keepAlive, interactionTimeout time.Duration) (*server.Server, error) {
 	var auth *server.Auth
 	if cfg.Auth != nil {
 		auth = authFromConfig(cfg.Auth)
 	}
-	return server.New(client, server.Options{
+	return server.New(ctx, client, server.Options{
 		Auth:                auth,
 		Agents:              cfg.Agents,
 		CORS:                cfg.CORS,
@@ -95,39 +93,15 @@ func buildServer(client *agent.Client, cfg config, keepAlive, interactionTimeout
 
 // serve runs the HTTP server until ctx is canceled, then closes the server and
 // the client.
-func serve(ctx context.Context, cfg config, srv *server.Server, client *agent.Client) error {
+func serve(ctx context.Context, cfg config, srv *server.Server) error {
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	fmt.Fprintf(os.Stderr, "agentserve: listening on %s\n", cfg.Listen)
-
-	serveErr := make(chan error, 1)
-	go func() {
-		if cfg.TLS != nil {
-			serveErr <- httpServer.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile)
-			return
-		}
-		serveErr <- httpServer.ListenAndServe()
-	}()
-
-	select {
-	case <-ctx.Done():
-		_ = srv.Close() // cancel SSE streams so Shutdown can complete
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		shutdownErr := httpServer.Shutdown(shutdownCtx)
-		_ = client.Close()
-		return shutdownErr
-	case err := <-serveErr:
-		_ = srv.Close()
-		_ = client.Close()
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
-	}
+	// Server.Close cancels the SSE streams so Shutdown can complete.
+	return serveconfig.Serve(ctx, httpServer, cfg.TLS, func() { _ = srv.Close() })
 }
 
 func authFromConfig(auth *authConfig) *server.Auth {
