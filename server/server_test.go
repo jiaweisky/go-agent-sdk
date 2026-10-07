@@ -9,6 +9,8 @@ import (
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/core"
 	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
 	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/mcp"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
@@ -735,6 +738,53 @@ func TestSessionPagination(t *testing.T) {
 	if second.Data[0].ID == first.Data[0].ID || second.Data[0].ID == first.Data[1].ID {
 		t.Fatal("page2 overlapped page1")
 	}
+}
+
+// TestMCPToolMaterialization builds the repo's notes MCP server, connects it as
+// a local stdio server and checks that its tools surface through /api/tool.
+func TestMCPToolMaterialization(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the notes MCP server")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatalf("repo root: %v", err)
+	}
+	binary := filepath.Join(t.TempDir(), "notesmcp")
+	build := exec.Command("go", "build", "-o", binary, "./examples/notesmcp")
+	build.Dir = root
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build notesmcp: %v\n%s", err, out)
+	}
+
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("k"), Model: "test-model",
+		Root: t.TempDir(),
+		MCP: []agent.MCPConfig{{Name: "notes", Server: mcp.ServerConfig{
+			Type:    "local",
+			Command: []string{binary, "--data", filepath.Join(t.TempDir(), "notes.json")},
+		}}},
+		LLM: fakeLLM{reply: "x"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	ts := serveClient(t, client, Options{})
+
+	resp := doJSON(t, http.MethodGet, ts.URL+"/api/tool?agent=build", "", nil)
+	defer resp.Body.Close()
+	var body struct {
+		Data []toolInfoDTO `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("tool decode: %v", err)
+	}
+	for _, tool := range body.Data {
+		if strings.Contains(tool.Name, "note_list") {
+			return
+		}
+	}
+	t.Fatalf("MCP tool not materialized; tools = %+v", body.Data)
 }
 
 func TestErrorMapping(t *testing.T) {
