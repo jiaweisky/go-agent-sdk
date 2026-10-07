@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
@@ -38,13 +39,14 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (schema.Sessi
 	return *info, nil
 }
 
-// ActiveSessions returns the ids of sessions currently running a turn.
+// ActiveSessions returns the ids of sessions currently running a turn, sorted.
 func (c *Client) ActiveSessions() []string {
 	active := c.rt.coord.Active()
 	ids := make([]string, 0, len(active))
 	for _, id := range active {
 		ids = append(ids, string(id))
 	}
+	sort.Strings(ids)
 	return ids
 }
 
