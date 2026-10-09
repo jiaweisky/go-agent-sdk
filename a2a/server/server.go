@@ -12,7 +12,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/taskstore"
 
-	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	coresession "github.com/jiaweisky/go-agent-sdk/pkg/session"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
@@ -22,7 +22,7 @@ type Options struct {
 	Factory Factory
 	// Turns persists A2A tasks on the core turn table. When nil, an in-memory
 	// store is used.
-	Turns *coresession.TurnStore
+	Turns coresession.TurnStore
 	// TaskStore overrides the task store. Takes precedence over Turns.
 	TaskStore taskstore.Store
 	// Agents lists the agents whose card this server exposes. Only agents with

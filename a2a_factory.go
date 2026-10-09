@@ -12,13 +12,14 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/a2a/server"
 	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/pkg/session"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // TurnStore returns a task store over the client's database, so an A2A server
 // persists tasks durably (and survives restarts). Pass it to
 // server.Options.Turns.
-func (c *Client) TurnStore() *coresession.TurnStore {
+func (c *Client) TurnStore() session.TurnStore {
 	return coresession.NewTurnStore(c.rt.db)
 }
 

@@ -13,7 +13,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/taskstore"
 
-	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	coresession "github.com/jiaweisky/go-agent-sdk/pkg/session"
 	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
@@ -36,13 +36,13 @@ const (
 // the turn's metadata, which keeps the task store stateless and its versions
 // durable across restarts.
 type turnTaskStore struct {
-	turns *coresession.TurnStore
+	turns coresession.TurnStore
 }
 
 var _ taskstore.Store = (*turnTaskStore)(nil)
 
 // NewTurnTaskStore returns a taskstore.Store backed by the core turn table.
-func NewTurnTaskStore(turns *coresession.TurnStore) taskstore.Store {
+func NewTurnTaskStore(turns coresession.TurnStore) taskstore.Store {
 	return &turnTaskStore{turns: turns}
 }
 
