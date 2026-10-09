@@ -10,9 +10,10 @@ import (
 
 func newA2ATestSession(t *testing.T, mode string) *a2aSession {
 	t.Helper()
+	dir := t.TempDir()
 	client, err := NewClient(&ClientOptions{
 		Protocol: "openai-compatible-chat", Credentials: APIKey("k"), Model: "m",
-		Root: t.TempDir(), Permission: ApproveAll, LLM: &capturingLLM{},
+		Root: dir, WorkingDirectory: dir, Permission: ApproveAll, LLM: &capturingLLM{},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
