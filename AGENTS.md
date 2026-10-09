@@ -117,71 +117,100 @@ Go 1.27.1; the following features are safe to use:
 
 ## Package architecture
 
-Go directories **directly mirror opencode's TS monorepo package structure**, without using `pkg/` or `internal/`. Each top-level directory corresponds to one TS package:
+Go directories mirror opencode's TS **package** structure, but split by visibility:
+the **public API lives under `pkg/`** (importable by external code) and the
+**engine internals live under `internal/`** (importable only within this module).
+The module root is package-free.
 
 ```
 go-agent-sdk/                       opencode TS
-├── *.go          module root package agent: high-level public API (modeled on copilot-sdk/go, no corresponding TS dir)
-│   Client / Session / Send / On / DefineTool / Hooks / Permission
-├── llm/          ← packages/llm/src/        (@opencode-ai/llm)
-│   ├── schema/     LLMRequest, LLMEvent, LLMError, ID types
-│   ├── route/      Route, Protocol, Endpoint, Auth, Framing, Executor, Transport
-│   ├── protocols/  per-provider wire protocols (flat: openai_chat.go, openai_responses.go, ...)
-│   │   └── utils/   protocol shared utilities
-│   ├── provider/   Provider facades (openai, anthropic, openrouter, ...)
-│   └── utils/      general utilities (record)
-├── core/         ← packages/core/src/        (@opencode-ai/core)
-│   ├── database/   SQLite + migrations
-│   ├── effect/     Effect runtime utilities (keyed-mutex)
-│   ├── project/    Project schema + directories
-│   ├── tool/       tool framework (tool, registry, write, ...)
-│   └── util/       general utilities (wildcard, hash)
-├── mcp/          ← packages/opencode/src/mcp/  (MCP client + adapter)
-├── a2a/          A2A (Agent2Agent) protocol support (no TS counterpart; Go-specific)
-│   ├── client/     outbound thin interface (SDK's own types, does not leak a2a-go)
-│   ├── a2ago/      the outbound a2a-go adapter (the only outbound layer importing a2a-go)
-│   └── server/     inbound: AgentExecutor + taskstore.Store + AgentCard + http.Handler
-├── server/       HTTP/SSE API for non-Go hosts (no TS counterpart; Go-specific)
-├── defs/         load agent/skill definitions from explicit ConfigDirs (no CLI discovery)
-│   ├── config/     parse {agent,agents}/**/*.md, {mode,modes}/*.md
-│   └── skill/      scan {skill,skills}/**/SKILL.md
-└── schema/       ← packages/schema/src/      (@opencode-ai/schema)
+├── pkg/            public API (external code imports pkg/...)
+│   ├── agent/      ← (no TS dir) high-level public API: Client / Session / Send / On / DefineTool / Hooks / Permission
+│   ├── schema/     ← packages/schema/src/     (@opencode-ai/schema)
+│   ├── llm/        ← packages/llm/src/         (@opencode-ai/llm)
+│   │   ├── schema/    LLMRequest, LLMEvent, LLMError, ID types
+│   │   ├── route/     Route, Protocol, Endpoint, Auth, Framing, Executor, Transport
+│   │   ├── protocols/ per-provider wire protocols (flat: openai_chat.go, ...)
+│   │   └── provider/  Provider facades (openai, anthropic, openrouter, ...)
+│   ├── core/       ← packages/core/src/        (@opencode-ai/core) public core types
+│   │   ├── tool/      tool framework (tool, registry, write, ...)
+│   │   ├── skill/     skill discovery
+│   │   ├── systemcontext/ agent system context
+│   │   └── project/   project resolution + directories
+│   ├── mcp/        ← packages/opencode/src/mcp/ (MCP client + adapter)
+│   ├── a2a/        A2A (Agent2Agent) support (Go-specific; no TS counterpart)
+│   │   ├── client/    outbound thin interface (does not leak a2a-go)
+│   │   ├── a2ago/     outbound a2a-go adapter (the only outbound layer importing a2a-go)
+│   │   └── server/    inbound: AgentExecutor + taskstore.Store + AgentCard + http.Handler
+│   ├── server/     HTTP/SSE API for non-Go hosts (Go-specific; no TS counterpart)
+│   ├── jsonschema/ Go-specific typed JSON Schema AST for tool schemas
+│   └── session/    public session-store interfaces (e.g. TurnStore)
+├── internal/       engine internals (not importable outside this module)
+│   ├── core/       ← packages/core/src/ internals
+│   │   ├── session/ session engine (+ session/runner)
+│   │   ├── database/ SQLite + migrations
+│   │   ├── effect/  Effect runtime utilities (keyed-mutex)
+│   │   ├── util/    general utilities (wildcard, hash, glob)
+│   │   ├── reference/ ripgrep/ installation/ wire/
+│   ├── defs/       ← (no TS dir) load agent/skill definitions from explicit ConfigDirs
+│   │   ├── config/  parse {agent,agents}/**/*.md, {mode,modes}/*.md
+│   │   └── skill/   scan {skill,skills}/**/SKILL.md
+│   └── llm/        ← packages/llm/src/ internals
+│       ├── utils/   general utilities (record)
+│       └── protocols/utils/ protocol shared utilities
+└── cmd/            standalone commands (Go-specific; no TS counterpart)
 ```
 
-- `jsonschema/` is a Go-specific typed JSON Schema AST (modeled on Effect `Schema`), used by `core/tool` to define tool schemas; no corresponding TS directory
-- `a2a/` is likewise a Go-specific capability (**no corresponding TS directory**) and the "port v2 core only" rule does not apply; see `docs/DESIGN-A2A.md` for design and decisions. It depends only on the single version `github.com/a2aproject/a2a-go/v2`, and a2a-go types do not cross the `a2a/a2ago/` and `a2a/server/` boundaries into the public API
-- `server/` is a Go-specific capability (**no corresponding TS directory**): a language-agnostic HTTP/SSE API so non-Go hosts (e.g. a Python/Node WeCom bot) can drive the SDK across a process boundary; see `docs/DESIGN-HTTP.md`. Its *shape* is modeled on `packages/server` + `packages/protocol`, but it is not a port: it uses `net/http` with plain Go structs, keeps `jsonschema` confined to `core/tool`, and deliberately does **not** do schema-first/OpenAPI codegen (no generated SDK)
-- All packages are public; no `internal/` is needed
-- `cmd/` holds standalone commands rather than SDK packages (no TS counterpart); `cmd/a2aserve` runs an A2A server, `cmd/agentserve` runs the HTTP API, and `cmd/serveconfig` is their shared configuration helper package (not a command)
-- Flat files under `packages/<pkg>/src/` go into the `<pkg>/` package root; subdirectories become subpackages
-- Effect's `Context.Tag` + `Layer` (DI) is not ported; constructor injection is used instead
+- **Visibility rule (enforced):** no exported `pkg/...` symbol may reference an
+  `internal/...` type. `make check-boundary` runs an AST check
+  (`testdata/boundarycheck.go`) and builds `testdata/external` (a separate module
+  that imports only `pkg/...`). A type referenced by the public API must live in
+  `pkg/...`; only code used solely within the module goes to `internal/...`.
+- Public vs internal is decided by **who must name the type**, not by porting order:
+  a ported module that the public API exposes goes to `pkg/...`; a pure engine
+  module (session engine, database, effect, defs loading, protocol utils) goes to
+  `internal/...`. Some `packages/core/src/` subdirs are public (`tool`, `skill`,
+  `systemcontext`, `project`), the rest are internal.
+- `jsonschema/` is a Go-specific typed JSON Schema AST (modeled on Effect `Schema`),
+  used by `core/tool` to define tool schemas; no corresponding TS directory.
+- `a2a/` is a Go-specific capability (**no corresponding TS directory**) and the "port
+  v2 core only" rule does not apply; see `docs/DESIGN-A2A.md`. It depends only on
+  `github.com/a2aproject/a2a-go/v2`, and a2a-go types do not cross the `a2a/a2ago/`
+  and `a2a/server/` boundaries into the public API.
+- `server/` is a Go-specific HTTP/SSE API (no TS counterpart); see `docs/DESIGN-HTTP.md`.
+  It uses `net/http` with plain Go structs, keeps `jsonschema` confined to `core/tool`,
+  and deliberately does **not** do schema-first/OpenAPI codegen.
+- `cmd/` holds standalone commands: `cmd/a2aserve` (A2A server), `cmd/agentserve`
+  (HTTP API), `cmd/serveconfig` (their shared configuration helper package).
+- Effect's `Context.Tag` + `Layer` (DI) is not ported; constructor injection is used instead.
 
 ## Directory/file name alignment with opencode
 
 Rules:
-- `packages/<pkg>/src/<path>/<name>.ts` → `<pkg>/<path>/<name>.go`, **kebab-case → snake_case**, keeping the directory hierarchy
+- `packages/<pkg>/src/<path>/<name>.ts` → `<pkg>/<path>/<name>.go`, **kebab-case → snake_case**, keeping the directory hierarchy — under `pkg/` when public, under `internal/` when engine-internal
 - A directory's `index.ts`, if it needs porting (contains implementation) → `<pkg>/<path>/<directory-name>.go`; a pure barrel (re-export only) is not ported, because Go has no re-export
 
 | opencode TS | Go |
 |---|---|
-| `packages/llm/src/route/client.ts` | `llm/route/client.go` |
-| `packages/llm/src/schema/messages.ts` | `llm/schema/messages.go` |
-| `packages/llm/src/protocols/openai-chat.ts` | `llm/protocols/openai_chat.go` (flat in the same package; symbols get a protocol prefix) |
-| `packages/llm/src/protocols/utils/tool-stream.ts` | `llm/protocols/utils/tool_stream.go` |
-| `packages/core/src/file-mutation.ts` | `core/file_mutation.go` |
-| `packages/core/src/location-mutation.ts` | `core/location_mutation.go` |
-| `packages/core/src/tool/tool.ts` | `core/tool/tool.go` |
-| `packages/core/src/tool/write.ts` | `core/tool/write.go` |
-| `packages/core/src/effect/keyed-mutex.ts` | `core/effect/keyed_mutex.go` |
-| `packages/core/src/util/wildcard.ts` | `core/util/wildcard.go` |
-| `packages/core/src/project/directories.ts` | `core/project/directories.go` |
-| `packages/schema/src/identifier.ts` | `schema/identifier.go` |
-| `packages/opencode/src/id/id.ts` | not ported (`schema/identifier.go` already provides ID generation) |
+| `packages/llm/src/route/client.ts` | `pkg/llm/route/client.go` |
+| `packages/llm/src/schema/messages.ts` | `pkg/llm/schema/messages.go` |
+| `packages/llm/src/protocols/openai-chat.ts` | `pkg/llm/protocols/openai_chat.go` (flat in the same package; symbols get a protocol prefix) |
+| `packages/llm/src/protocols/utils/tool-stream.ts` | `internal/llm/protocols/utils/tool_stream.go` |
+| `packages/core/src/file-mutation.ts` | `pkg/core/file_mutation.go` |
+| `packages/core/src/location-mutation.ts` | `pkg/core/location_mutation.go` |
+| `packages/core/src/tool/tool.ts` | `pkg/core/tool/tool.go` |
+| `packages/core/src/tool/write.ts` | `pkg/core/tool/write.go` |
+| `packages/core/src/effect/keyed-mutex.ts` | `internal/core/effect/keyed_mutex.go` |
+| `packages/core/src/util/wildcard.ts` | `internal/core/util/wildcard.go` |
+| `packages/core/src/project/directories.ts` | `pkg/core/project/directories.go` |
+| `packages/schema/src/identifier.ts` | `pkg/schema/identifier.go` |
+| `packages/opencode/src/id/id.ts` | not ported (`pkg/schema/identifier.go` already provides ID generation) |
 
 **Common pitfalls:**
-- Do not create a same-named subpackage for a flat file: `core/src/file-mutation.ts` → `core/file_mutation.go` (package `core`), **not** `core/filemutation/filemutation.go`
+- Do not create a same-named subpackage for a flat file: `core/src/file-mutation.ts` → `pkg/core/file_mutation.go` (package `core`), **not** `pkg/core/filemutation/filemutation.go`
 - Type names collide within the same Go package; distinguish them with a module-name prefix (e.g. `FileMutationTarget` vs `LocationMutationTarget`, `OpenAIChatProtocol` vs `OpenAIResponsesProtocol`)
-- `packages/opencode/src/tool/json-schema.ts` is **not ported**: it only serves `$ref` inlining for CLI tool schemas, and there is no consumer on the Go side. The tool framework is only `core/tool`
+- `packages/opencode/src/tool/json-schema.ts` is **not ported**: it only serves `$ref` inlining for CLI tool schemas, and there is no consumer on the Go side. The tool framework is only `pkg/core/tool`
 - `packages/core/src/effect/app-node.ts` and `layer-node.ts` are Effect DI infrastructure and are not ported
+- When porting a `packages/core/src/` module, first decide its visibility: if the public API names its types, port it to `pkg/core/...`; otherwise `internal/core/...`. Run `make check-boundary` after adding a public type.
 - Go has no circular dependencies; a TS module cycle (e.g. `protocols/` ↔ `protocols/utils/`) must be refactored away (e.g. move `ValidateMedia`, which `utils` reverse-depends on, into `utils`)
 - `packages/llm/src/route/transport/index.ts`'s `Transport`/`TransportRuntime`/`TransportPrepareInput` go in `llm/route/transport.go` (package `route`), because the `transport` package reverse-depends on `route` (`Framing`) and putting them in `transport/` would create a cycle
