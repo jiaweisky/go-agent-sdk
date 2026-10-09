@@ -7,6 +7,7 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm"
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	coreschema "github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // AmazonBedrockProviderID is the provider id used for Bedrock.
@@ -16,7 +17,7 @@ const AmazonBedrockProviderID = schema.ProviderID("amazon-bedrock")
 type AmazonBedrockConfig struct {
 	CommonConfig
 	Region      string
-	Credentials *utils.Credentials
+	Credentials *coreschema.AWSCredentials
 }
 
 // AmazonBedrockProvider is a configured Bedrock facade: its id, its route, and

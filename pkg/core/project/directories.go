@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/internal/core/database"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
@@ -35,15 +34,15 @@ type Directories interface {
 }
 
 type directoryStore struct {
-	db *database.Database
+	db *sql.DB
 }
 
-func NewDirectories(db *database.Database) Directories {
+func NewDirectories(db *sql.DB) Directories {
 	return &directoryStore{db: db}
 }
 
 func (s *directoryStore) List(projectID schema.ProjectID) ([]Directory, error) {
-	rows, err := s.db.DB.Query(
+	rows, err := s.db.Query(
 		"SELECT directory, strategy FROM project_directory WHERE project_id = ? ORDER BY time_created DESC, directory ASC",
 		string(projectID),
 	)
@@ -71,7 +70,7 @@ func (s *directoryStore) List(projectID schema.ProjectID) ([]Directory, error) {
 func (s *directoryStore) Get(projectID schema.ProjectID, directory schema.AbsolutePath) (*Directory, error) {
 	var dir string
 	var strategy sql.NullString
-	err := s.db.DB.QueryRow(
+	err := s.db.QueryRow(
 		"SELECT directory, strategy FROM project_directory WHERE project_id = ? AND directory = ?",
 		string(projectID), string(directory),
 	).Scan(&dir, &strategy)
@@ -90,7 +89,7 @@ func (s *directoryStore) Get(projectID schema.ProjectID, directory schema.Absolu
 
 func (s *directoryStore) Contains(projectID schema.ProjectID, directory schema.AbsolutePath) (bool, error) {
 	var dir string
-	err := s.db.DB.QueryRow(
+	err := s.db.QueryRow(
 		"SELECT directory FROM project_directory WHERE project_id = ? AND directory = ?",
 		string(projectID), string(directory),
 	).Scan(&dir)
@@ -122,7 +121,7 @@ func (s *directoryStore) Create(input CreateInput) (bool, error) {
 		if input.Strategy != nil {
 			args = append(args, *input.Strategy)
 		}
-		row := s.db.DB.QueryRow(
+		row := s.db.QueryRow(
 			"INSERT INTO project_directory (project_id, directory, strategy, time_created) VALUES (?, ?, ?, ?) "+
 				"ON CONFLICT (project_id, directory) DO UPDATE SET strategy = excluded.strategy WHERE "+condition+
 				" RETURNING directory",
@@ -139,7 +138,7 @@ func (s *directoryStore) Create(input CreateInput) (bool, error) {
 		return true, nil
 	}
 
-	row := s.db.DB.QueryRow(
+	row := s.db.QueryRow(
 		"INSERT INTO project_directory (project_id, directory, strategy, time_created) VALUES (?, ?, ?, ?) "+
 			"ON CONFLICT (project_id, directory) DO NOTHING RETURNING directory",
 		string(input.ProjectID), string(input.Directory), input.Strategy, now,
@@ -156,7 +155,7 @@ func (s *directoryStore) Create(input CreateInput) (bool, error) {
 }
 
 func (s *directoryStore) Remove(input RemoveInput) (bool, error) {
-	row := s.db.DB.QueryRow(
+	row := s.db.QueryRow(
 		"DELETE FROM project_directory WHERE project_id = ? AND directory = ? RETURNING directory",
 		string(input.ProjectID), string(input.Directory),
 	)

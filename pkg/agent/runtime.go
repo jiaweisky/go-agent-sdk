@@ -17,15 +17,15 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/internal/core/reference"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/session"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/session/runner"
-	"github.com/jiaweisky/go-agent-sdk/internal/core/skill"
-	"github.com/jiaweisky/go-agent-sdk/internal/core/systemcontext"
-	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/wire"
 	defsconfig "github.com/jiaweisky/go-agent-sdk/internal/defs/config"
 	defsskill "github.com/jiaweisky/go-agent-sdk/internal/defs/skill"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	coreproject "github.com/jiaweisky/go-agent-sdk/pkg/core/project"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core/skill"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core/systemcontext"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm"
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
 	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
@@ -732,7 +732,7 @@ func openDatabase(global core.Global, maxConns int) (*database.Database, error) 
 func ensureProject(db *database.Database, git core.Git, directory string) (*core.Location, error) {
 	projectService := core.NewProject(core.ProjectConfig{
 		Git:         git,
-		Directories: coreproject.NewDirectories(db),
+		Directories: coreproject.NewDirectories(db.DB),
 	})
 	location, err := core.NewLocation(schema.LocationRef{Directory: schema.AbsolutePath(directory)}, projectService)
 	if err != nil {

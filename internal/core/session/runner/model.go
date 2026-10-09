@@ -193,12 +193,7 @@ func runnerProtocolAuth(entry protocols.ProtocolEntry, credential schema.Credent
 
 // bedrockSigV4 signs Bedrock requests with AWS SigV4 credentials.
 func bedrockSigV4(aws *schema.AWSCredentials) *route.Auth {
-	signer := utils.SigV4(&utils.Credentials{
-		Region:          aws.Region,
-		AccessKeyID:     aws.AccessKeyID,
-		SecretAccessKey: aws.SecretAccessKey,
-		SessionToken:    aws.SessionToken,
-	})
+	signer := utils.SigV4(aws)
 	return route.Custom(func(input route.AuthInput) (map[string]string, error) {
 		return signer(utils.AuthInput{URL: input.URL, Body: input.Body, Headers: input.Headers})
 	})

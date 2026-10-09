@@ -8,15 +8,9 @@ import (
 	"sort"
 	"strings"
 	"time"
-)
 
-// Credentials is the AWS credential SigV4 signs with.
-type Credentials struct {
-	Region          string
-	AccessKeyID     string
-	SecretAccessKey string
-	SessionToken    string
-}
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
+)
 
 // AuthInput is what a signing function sees.
 type AuthInput struct {
@@ -29,11 +23,11 @@ type AuthInput struct {
 type AuthFunc func(input AuthInput) (map[string]string, error)
 
 // SigV4 signs a request with AWS SigV4. It fails when credentials are nil.
-func SigV4(credentials *Credentials) AuthFunc {
+func SigV4(credentials *schema.AWSCredentials) AuthFunc {
 	return sigV4(credentials)
 }
 
-func sigV4(credentials *Credentials) AuthFunc {
+func sigV4(credentials *schema.AWSCredentials) AuthFunc {
 	return func(input AuthInput) (map[string]string, error) {
 		if credentials == nil {
 			return nil, fmt.Errorf(
@@ -55,7 +49,7 @@ func sigV4(credentials *Credentials) AuthFunc {
 	}
 }
 
-func signRequest(input AuthInput, creds *Credentials) (map[string]string, error) {
+func signRequest(input AuthInput, creds *schema.AWSCredentials) (map[string]string, error) {
 	bodyHash := sha256Hex(input.Body)
 	now := time.Now().UTC()
 	amzDate := now.Format("20060102T150405Z")
@@ -89,7 +83,7 @@ func signRequest(input AuthInput, creds *Credentials) (map[string]string, error)
 }
 
 // signableHeaders copies the request headers and adds the SigV4 headers.
-func signableHeaders(input AuthInput, creds *Credentials, amzDate, bodyHash string) map[string]string {
+func signableHeaders(input AuthInput, creds *schema.AWSCredentials, amzDate, bodyHash string) map[string]string {
 	headers := make(map[string]string)
 	for k, v := range input.Headers {
 		headers[strings.ToLower(k)] = v

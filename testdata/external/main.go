@@ -13,8 +13,8 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/server"
 	"github.com/jiaweisky/go-agent-sdk/pkg/session"
 
-	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	a2aserver "github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // Compile-time references to the public surface that used to expose internals.

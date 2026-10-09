@@ -10,7 +10,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/internal/core/database"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/session"
-	"github.com/jiaweisky/go-agent-sdk/internal/core/systemcontext"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core/systemcontext"
 )
 
 func eventTestDB(t *testing.T) *database.Database {

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/internal/core/systemcontext"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core/systemcontext"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 

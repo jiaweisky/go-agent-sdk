@@ -15,9 +15,9 @@ import (
 	"time"
 
 	coresession "github.com/jiaweisky/go-agent-sdk/internal/core/session"
-	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core/tool"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )

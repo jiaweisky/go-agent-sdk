@@ -1,8 +1,8 @@
 package agent
 
 import (
-	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core/tool"
 )
 
 // PluginContext is the capability surface a plugin receives. It

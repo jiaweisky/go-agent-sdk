@@ -7,9 +7,9 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/internal/core/database"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/ripgrep"
-	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/wire"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 

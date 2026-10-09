@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/text/language"
 
-	"github.com/jiaweisky/go-agent-sdk/internal/core/systemcontext"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core/systemcontext"
 )
 
 type stubLister struct {

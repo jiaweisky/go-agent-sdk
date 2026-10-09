@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	skillsub "github.com/jiaweisky/go-agent-sdk/internal/core/skill"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
+	skillsub "github.com/jiaweisky/go-agent-sdk/pkg/core/skill"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
