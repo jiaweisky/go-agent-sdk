@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // modelInfoFor returns a ModelInfo provider whose capabilities are chosen by

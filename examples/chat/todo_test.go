@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // TestTodosCommand guards that /todos prints the cached task list and the empty

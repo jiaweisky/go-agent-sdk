@@ -16,7 +16,7 @@ import (
 	"testing"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // openAIStub is an OpenAI-compatible /chat/completions upstream that records the

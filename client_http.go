@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // ErrUnknownAgent is returned when an operation names an agent that is not

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 type (

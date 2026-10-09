@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // config is the a2aserve configuration. It is assembled from built-in defaults,

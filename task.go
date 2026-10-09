@@ -11,8 +11,8 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/core/util"
-	"github.com/jiaweisky/go-agent-sdk/jsonschema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // TaskName is the task tool's registered name.

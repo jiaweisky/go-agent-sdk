@@ -8,7 +8,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/core/util"
-	"github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 )
 
 type ExecuteInput struct {

@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // TestRunServesMediaTurn starts the real agentserve command against a live model

@@ -6,7 +6,7 @@ import (
 	"sort"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // referenceCommand handles "/reference" (list), "/reference add <name> <path>",

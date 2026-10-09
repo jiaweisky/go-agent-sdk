@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // asyncCommand toggles out-of-band interaction handling. With it on, permission

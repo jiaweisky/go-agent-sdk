@@ -3,7 +3,7 @@ package session
 import (
 	"fmt"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // MessageDecodeError reports a stored message that cannot be decoded.

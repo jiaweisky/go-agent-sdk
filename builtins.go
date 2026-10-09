@@ -9,7 +9,7 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/core/database"
 	"github.com/jiaweisky/go-agent-sdk/core/ripgrep"
 	"github.com/jiaweisky/go-agent-sdk/core/tool"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // builtinDeps are the services the built-in tools register with.

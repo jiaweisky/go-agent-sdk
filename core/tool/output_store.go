@@ -2,8 +2,8 @@ package tool
 
 import (
 	"github.com/jiaweisky/go-agent-sdk/core"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // coreOutputStore adapts core.ToolOutputStore to the OutputStore seam the

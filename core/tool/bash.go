@@ -13,7 +13,7 @@ import (
 	"unicode"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
 )
 
 const BashName = "bash"

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jiaweisky/go-agent-sdk/mcp"
+	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

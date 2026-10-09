@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/jiaweisky/go-agent-sdk/jsonschema"
-	"github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
 )
 

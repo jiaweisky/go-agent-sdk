@@ -10,10 +10,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jiaweisky/go-agent-sdk/a2a/server"
 	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/session"
-	"github.com/jiaweisky/go-agent-sdk/schema"
 )
 
 // TurnStore returns a task store over the client's database, so an A2A server

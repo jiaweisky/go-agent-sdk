@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 )
 
 func TestLastUserFilesDecodesAttachments(t *testing.T) {

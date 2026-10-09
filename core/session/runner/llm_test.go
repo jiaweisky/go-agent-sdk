@@ -15,11 +15,11 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/core/skill"
 	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
 	"github.com/jiaweisky/go-agent-sdk/core/tool"
-	"github.com/jiaweisky/go-agent-sdk/jsonschema"
-	"github.com/jiaweisky/go-agent-sdk/llm/protocols"
-	"github.com/jiaweisky/go-agent-sdk/llm/route"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/protocols"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"golang.org/x/text/language"
 )
 

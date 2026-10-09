@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/core/database"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 var (

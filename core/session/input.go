@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // LifecycleConflict reports an input whose message already exists.

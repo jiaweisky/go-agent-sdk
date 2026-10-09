@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // System prompt modes.

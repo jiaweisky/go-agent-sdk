@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk/llm/schema"
-	rootschema "github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	rootschema "github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 type stubTodoUpdater struct {

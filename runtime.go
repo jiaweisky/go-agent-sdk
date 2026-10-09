@@ -25,10 +25,10 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/core/util"
 	defsconfig "github.com/jiaweisky/go-agent-sdk/defs/config"
 	defsskill "github.com/jiaweisky/go-agent-sdk/defs/skill"
-	"github.com/jiaweisky/go-agent-sdk/llm"
-	"github.com/jiaweisky/go-agent-sdk/llm/route"
-	"github.com/jiaweisky/go-agent-sdk/mcp"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // runtime holds the process-wide services shared by all sessions.

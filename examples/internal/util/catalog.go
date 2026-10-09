@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // Pricing is a model's per-million-token usage pricing.

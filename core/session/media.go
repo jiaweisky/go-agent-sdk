@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/core/database"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // PersistMessage rewrites a stored message's data. It is used after an

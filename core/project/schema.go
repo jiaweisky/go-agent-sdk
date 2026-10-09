@@ -1,6 +1,6 @@
 package project
 
-import "github.com/jiaweisky/go-agent-sdk/schema"
+import "github.com/jiaweisky/go-agent-sdk/pkg/schema"
 
 type ID = schema.ProjectID
 

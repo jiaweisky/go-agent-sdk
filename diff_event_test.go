@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // TestMapStepEndedFiles guards that the high-level step event carries the

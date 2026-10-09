@@ -7,7 +7,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk"
 	coretool "github.com/jiaweisky/go-agent-sdk/core/tool"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // chat renders client-wide events. Subagent internals are not streamed inline;

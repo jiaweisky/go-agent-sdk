@@ -2,7 +2,7 @@ package core
 
 import (
 	"github.com/jiaweisky/go-agent-sdk/core/project"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 type Location struct {

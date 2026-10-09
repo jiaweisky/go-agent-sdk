@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 func TestMediaUploaderPostsMultipartAndReadsRef(t *testing.T) {

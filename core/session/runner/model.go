@@ -1,11 +1,11 @@
 package runner
 
 import (
-	"github.com/jiaweisky/go-agent-sdk/llm/protocols"
-	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
-	"github.com/jiaweisky/go-agent-sdk/llm/route"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/internal/llm/protocols/utils"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/protocols"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // ModelNotSelectedError reports a session without a model.

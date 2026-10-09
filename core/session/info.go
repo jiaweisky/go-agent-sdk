@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/jiaweisky/go-agent-sdk/core/database"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 const sessionSelectColumns = "`id`,`project_id`,`workspace_id`,`parent_id`,`slug`,`directory`," +

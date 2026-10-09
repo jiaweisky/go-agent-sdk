@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/core/database"
-	"github.com/jiaweisky/go-agent-sdk/schema"
-	v1 "github.com/jiaweisky/go-agent-sdk/schema/v1"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
+	v1 "github.com/jiaweisky/go-agent-sdk/pkg/schema/v1"
 )
 
 func sessionProjectorTestEvents(t *testing.T) (*database.Database, func(schema.EventDefinition, map[string]any) schema.EventPayload) {

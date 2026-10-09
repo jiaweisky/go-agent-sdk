@@ -3,7 +3,7 @@
 // internal persistence implementation.
 package session
 
-import "github.com/jiaweisky/go-agent-sdk/schema"
+import "github.com/jiaweisky/go-agent-sdk/pkg/schema"
 
 // TurnStore persists core turn records. A turn is one terminal-bound unit of
 // work in a session: the local subagent's delegated run or an A2A task.

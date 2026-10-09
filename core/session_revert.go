@@ -2,7 +2,7 @@ package core
 
 import (
 	"github.com/jiaweisky/go-agent-sdk/core/session"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // NewSessionRevertSnapshot wires the core Snapshot into session.RevertSnapshot.

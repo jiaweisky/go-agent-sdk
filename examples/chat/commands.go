@@ -8,8 +8,8 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/core/util"
-	"github.com/jiaweisky/go-agent-sdk/mcp"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // skillsCommand lists the skills discovered from the config directories

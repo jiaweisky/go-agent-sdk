@@ -9,8 +9,8 @@ import (
 
 	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
-	"github.com/jiaweisky/go-agent-sdk/schema"
-	"github.com/jiaweisky/go-agent-sdk/server"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/server"
 )
 
 // run builds the SDK client and HTTP server from cfg, serves until ctx is

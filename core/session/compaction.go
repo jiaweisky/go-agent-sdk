@@ -10,10 +10,10 @@ import (
 	"unicode/utf16"
 
 	"github.com/jiaweisky/go-agent-sdk/core/util"
-	"github.com/jiaweisky/go-agent-sdk/llm"
-	"github.com/jiaweisky/go-agent-sdk/llm/route"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 const (

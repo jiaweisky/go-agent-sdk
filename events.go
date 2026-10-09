@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // PanicInfo describes a panic recovered from a user event handler.

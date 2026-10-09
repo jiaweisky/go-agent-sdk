@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/a2a/a2ago"
-	"github.com/jiaweisky/go-agent-sdk/a2a/client"
 	"github.com/jiaweisky/go-agent-sdk/core/session/runner"
-	"github.com/jiaweisky/go-agent-sdk/llm/route"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/a2ago"
+	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/client"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // a2aQuestionAsker asks the local user for input a remote agent requested,

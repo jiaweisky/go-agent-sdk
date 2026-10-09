@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // TestExpandPath guards the .env path handling: the loader stores values

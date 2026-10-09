@@ -21,7 +21,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // ShutdownTimeout bounds graceful shutdown before connections are force-closed.

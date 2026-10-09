@@ -5,7 +5,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/core/tool"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 )
 
 // SessionHooks intercepts session lifecycle and tool execution.

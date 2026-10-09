@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/jiaweisky/go-agent-sdk/core/database"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // LatestCompaction is the sequence of the session's latest compaction, or nil.

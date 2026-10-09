@@ -17,7 +17,7 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 const (

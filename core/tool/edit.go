@@ -8,8 +8,8 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/core/util"
-	"github.com/jiaweisky/go-agent-sdk/jsonschema"
-	coreschema "github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
+	coreschema "github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // EditTool is the model-facing V2 exact-edit leaf. Relative paths resolve

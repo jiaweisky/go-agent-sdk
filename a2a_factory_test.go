@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk/a2a/server"
+	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
 )
 
 func newA2ATestSession(t *testing.T, mode string) *a2aSession {

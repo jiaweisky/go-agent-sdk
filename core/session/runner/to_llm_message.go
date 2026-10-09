@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // mediaPolicy decides which media the target model can carry and reports each

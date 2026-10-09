@@ -11,7 +11,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
-	"github.com/jiaweisky/go-agent-sdk/mcp"
+	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
 )
 
 // startNotesMCP launches the notes MCP server as a child process over

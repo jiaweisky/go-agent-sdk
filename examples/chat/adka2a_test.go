@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 )
 
 // adkStubLLM is an unused local model: the session runs the remote ADK agent,

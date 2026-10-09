@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/llm/route"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 func runnerStrPtr(value string) *string { return &value }

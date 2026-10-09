@@ -21,12 +21,12 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/core/skill"
 	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
 	"github.com/jiaweisky/go-agent-sdk/core/tool"
-	"github.com/jiaweisky/go-agent-sdk/llm"
-	"github.com/jiaweisky/go-agent-sdk/llm/protocols"
-	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
-	"github.com/jiaweisky/go-agent-sdk/llm/route"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/internal/llm/protocols/utils"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/protocols"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // RunnerEvents is the event surface the runner needs: publishing plus the

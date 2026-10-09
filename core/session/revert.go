@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // RevertMessageNotFoundError reports a revert target message that does not exist.

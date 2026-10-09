@@ -15,8 +15,8 @@ import (
 	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/schema"
-	"github.com/jiaweisky/go-agent-sdk/server"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/server"
 )
 
 // TestServerPromptWithMedia drives the HTTP/SSE surface end to end against a

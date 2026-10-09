@@ -3,7 +3,7 @@ package runner
 import (
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk/llm/route"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
 )
 
 func mustBindModel(t *testing.T, r route.Route, input route.RouteModelInput) route.Model {

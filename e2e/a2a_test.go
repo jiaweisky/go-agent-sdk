@@ -22,9 +22,9 @@ import (
 	"iter"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
-	a2aserver "github.com/jiaweisky/go-agent-sdk/a2a/server"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	a2aserver "github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // registerExposed registers a media-capable "build" agent and marks it exposed.

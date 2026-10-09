@@ -6,7 +6,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/core/session"
 	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // TestSessionContextEpochPrepareThroughEventService wires the real event

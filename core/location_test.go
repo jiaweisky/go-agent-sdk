@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/core/project"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 func gitExec(t *testing.T, dir string, args ...string) {

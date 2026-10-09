@@ -3,7 +3,7 @@ package core
 import (
 	"path/filepath"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // Default agent system prompts.

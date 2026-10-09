@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 func TestTurnStoreFindByMetadata(t *testing.T) {

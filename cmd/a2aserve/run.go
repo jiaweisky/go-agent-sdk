@@ -8,9 +8,9 @@ import (
 	"os"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/a2a/server"
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"golang.org/x/text/language"
 )
 

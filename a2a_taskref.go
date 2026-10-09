@@ -2,7 +2,7 @@ package agent
 
 import (
 	"github.com/jiaweisky/go-agent-sdk/core/session"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // Turn metadata keys recording the remote task a local session is talking to,

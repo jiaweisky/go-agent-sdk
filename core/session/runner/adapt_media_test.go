@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk/llm/protocols"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/protocols"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 type fakeUploader struct {

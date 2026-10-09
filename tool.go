@@ -9,7 +9,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/core/tool"
-	"github.com/jiaweisky/go-agent-sdk/jsonschema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
 )
 
 // ToolContext describes a single tool invocation.

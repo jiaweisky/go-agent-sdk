@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 func storagePath(input string) string {

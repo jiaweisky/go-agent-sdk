@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // taskSet tracks the subagent tasks of one chat: byCall maps an open task tool

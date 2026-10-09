@@ -13,8 +13,8 @@ import (
 	"github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
-	"github.com/jiaweisky/go-agent-sdk/mcp"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // agentName is the primary agent the chat session runs. util.Client registers it

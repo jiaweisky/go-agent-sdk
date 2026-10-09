@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 func TestApplyDirAgents(t *testing.T) {

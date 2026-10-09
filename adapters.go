@@ -3,7 +3,7 @@ package agent
 import (
 	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/core/reference"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // noopSnapshots is the snapshotter used when the project has no git backing.

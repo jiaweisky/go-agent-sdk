@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/a2a/client"
-	"github.com/jiaweisky/go-agent-sdk/a2a/server"
 	"github.com/jiaweisky/go-agent-sdk/core/session/runner"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/client"
+	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // startA2AServer exposes the client's "build" agent over A2A and returns its URL.

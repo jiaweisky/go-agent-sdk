@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // diffFile is one file's diff, from a snapshot diff or a tool's structured output.

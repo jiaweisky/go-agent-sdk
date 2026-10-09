@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 )
 
 type testQuestion struct {

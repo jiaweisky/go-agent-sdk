@@ -5,8 +5,8 @@ import (
 	"iter"
 	"testing"
 
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // capturingLLM records the request the runner builds, so a test can inspect it.

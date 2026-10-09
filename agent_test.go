@@ -18,8 +18,8 @@ import (
 	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
 	"github.com/jiaweisky/go-agent-sdk/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/core/util"
-	llmschema "github.com/jiaweisky/go-agent-sdk/llm/schema"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 type fakeLLM struct{ reply string }

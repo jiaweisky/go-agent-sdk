@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // TestAsyncCommandToggles guards /async on|off and the status query.

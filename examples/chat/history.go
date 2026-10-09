@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // historyCommand prints the session's stored messages via Session.Messages: the

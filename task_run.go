@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // deferredTaskRunner defers to the runtime's task runner. The builtin deps are

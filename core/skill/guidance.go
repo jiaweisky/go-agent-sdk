@@ -8,7 +8,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
 	"github.com/jiaweisky/go-agent-sdk/core/util"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // Summary is a skill's name and description, for the system context.

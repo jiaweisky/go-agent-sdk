@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 func TestPersistMessageFiles(t *testing.T) {

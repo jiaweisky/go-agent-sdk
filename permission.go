@@ -9,7 +9,7 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/core/database"
 	"github.com/jiaweisky/go-agent-sdk/core/session"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // PermissionRequest describes an approval request raised before a tool runs.

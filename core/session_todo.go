@@ -3,7 +3,7 @@ package core
 import (
 	"github.com/jiaweisky/go-agent-sdk/core/database"
 	"github.com/jiaweisky/go-agent-sdk/core/session"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // NewSessionTodo wires the core event service into session.Todo.

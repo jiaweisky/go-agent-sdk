@@ -8,7 +8,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/core/project"
 	"github.com/jiaweisky/go-agent-sdk/core/util"
-	"github.com/jiaweisky/go-agent-sdk/schema"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // projectIDFile is the marker file, inside a repository's store, that caches
