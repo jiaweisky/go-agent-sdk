@@ -92,7 +92,7 @@ lint: fmt-check vet
 check-boundary:
 	$(GO) run testdata/boundarycheck.go
 	cp go.sum testdata/external/go.sum
-	cd testdata/external && $(GO) build ./...
+	cd testdata/external && $(GO) build -o /dev/null ./...
 	@echo "internal boundary OK"
 
 # Strict lint via golangci-lint. Rules are pinned by .golangci.yml and the tool
