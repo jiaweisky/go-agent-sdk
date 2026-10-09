@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // TestCountToToolEmitsProgress guards that count_to reports each step through

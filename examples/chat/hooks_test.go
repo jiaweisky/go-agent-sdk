@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // TestSessionHooksPromptRewriteAndDeny guards the two hooks with observable

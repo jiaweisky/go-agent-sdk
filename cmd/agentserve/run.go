@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/server"
 )

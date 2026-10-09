@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
 	coresession "github.com/jiaweisky/go-agent-sdk/internal/core/session"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk"
 	defsconfig "github.com/jiaweisky/go-agent-sdk/internal/defs/config"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"golang.org/x/text/language"

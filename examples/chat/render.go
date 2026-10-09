@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk"
 	coretool "github.com/jiaweisky/go-agent-sdk/internal/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 

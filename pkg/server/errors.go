@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
 	coresession "github.com/jiaweisky/go-agent-sdk/internal/core/session"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 

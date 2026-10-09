@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"os"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
 	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"golang.org/x/text/language"
 )

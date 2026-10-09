@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 

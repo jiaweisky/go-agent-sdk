@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/cmd/serveconfig"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"

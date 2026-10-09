@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // TestNewCommandCreatesSession guards that /new (and its /clear alias) starts a

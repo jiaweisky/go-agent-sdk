@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // runWatcher auto-resolves held interactions that no client answers within

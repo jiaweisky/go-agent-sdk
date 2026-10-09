@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // TestEmitLinesTool guards the large-output tool used to trigger truncation.

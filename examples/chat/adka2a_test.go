@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 )
 

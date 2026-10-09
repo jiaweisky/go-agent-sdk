@@ -3,7 +3,7 @@ package server
 import (
 	"net/http"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 func (s *Server) handlePermissionList(w http.ResponseWriter, r *http.Request) {

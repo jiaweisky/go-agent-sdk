@@ -17,8 +17,8 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )

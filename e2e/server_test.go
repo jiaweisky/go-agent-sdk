@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/server"
 )

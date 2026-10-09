@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // TestSwitchSessionResetsSnapshot guards that switching sessions clears the

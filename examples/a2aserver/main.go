@@ -29,8 +29,8 @@ import (
 	"syscall"
 	"time"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )

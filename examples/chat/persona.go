@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // personaCommand starts a new session whose system prompt is the build agent's

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 type statusInput struct {

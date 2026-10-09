@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // countToParams is the count_to tool's input.

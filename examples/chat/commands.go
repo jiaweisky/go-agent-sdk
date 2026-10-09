@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jiaweisky/go-agent-sdk"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )

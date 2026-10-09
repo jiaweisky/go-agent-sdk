@@ -3,7 +3,7 @@ package server
 import (
 	"fmt"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // worker drains a session's queued prompts one turn at a time.

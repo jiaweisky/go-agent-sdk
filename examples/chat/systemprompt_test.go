@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk"
+	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 // TestPersonaCommandReplace guards that /persona --replace accepts the flag and
