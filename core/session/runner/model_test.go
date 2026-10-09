@@ -75,7 +75,7 @@ func TestFromCatalogModelOpenAI(t *testing.T) {
 
 func TestTurnMediaSupportGatesProtocolModelAndPayload(t *testing.T) {
 	info := runnerModelInfo(schema.ModelAPI{
-		Protocol: "openai-responses", URL: runnerStrPtr("https://openai.example/v1"),
+		Protocol: "openai-chat", URL: runnerStrPtr("https://openai.example/v1"),
 	}, nil)
 	info.Capabilities.Input = nil // protocol-only: exercise the wire set and payload
 	model, err := FromCatalogModel(info, schema.Credential{})
@@ -83,14 +83,21 @@ func TestTurnMediaSupportGatesProtocolModelAndPayload(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	policy := mediaPolicyForModel(model, core.AgentSelection{})
-	if !policy.allows("image/png", "data:image/png;base64,aGVsbG8=") {
+	if !policy.allows("user", "image/png", "inline", "data:image/png;base64,aGVsbG8=") {
 		t.Fatal("a valid image should be accepted")
 	}
-	if policy.allows("application/pdf", "data:application/pdf;base64,JVBERi0=") {
+	if policy.allows("user", "application/pdf", "inline", "data:application/pdf;base64,JVBERi0=") {
 		t.Fatal("a document the protocol cannot carry should be rejected")
 	}
-	if policy.allows("image/png", "notbase64!!!") {
+	if policy.allows("user", "image/png", "inline", "notbase64!!!") {
 		t.Fatal("a malformed payload should be rejected")
+	}
+	// openai-chat carries inline and url images, but not provider file refs.
+	if got := policy.reason("user", "image/jpeg", "file", "file-api-123"); got != string(schema.AttachmentOmitUnsupportedSource) {
+		t.Fatalf("file-source reason = %q, want unsupported_source", got)
+	}
+	if got := policy.reason("user", "image/jpeg", "url", "https://example.com/a.jpg"); got != "" {
+		t.Fatalf("url should be allowed for openai-chat, got %q", got)
 	}
 
 	info.Capabilities.Input = []string{"text"} // model declares no image support
@@ -98,12 +105,12 @@ func TestTurnMediaSupportGatesProtocolModelAndPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if mediaPolicyForModel(textOnly, core.AgentSelection{}).allows("image/png", "data:image/png;base64,aGVsbG8=") {
+	if mediaPolicyForModel(textOnly, core.AgentSelection{}).allows("user", "image/png", "inline", "data:image/png;base64,aGVsbG8=") {
 		t.Fatal("a text-only model should reject an image")
 	}
 
 	a2a := core.AgentSelection{Info: &schema.AgentInfo{Backend: &schema.AgentBackend{Type: schema.AgentBackendA2A}}}
-	if mediaPolicyForModel(model, a2a).support != nil {
+	if mediaPolicyForModel(model, a2a).reason != nil {
 		t.Fatal("an A2A backend carries arbitrary file parts and should not be filtered")
 	}
 }

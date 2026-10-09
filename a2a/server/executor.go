@@ -69,7 +69,7 @@ func (e *executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		}
 
 		// A message for a task that is still working steers the active turn
-		// rather than starting another one (docs/DESIGN-A2A.md §5.3). It runs on
+		// rather than starting another one. It runs on
 		// the already-active turn, so it registers no end hook of its own.
 		if steerable(execCtx.StoredTask) {
 			if err := sess.Steer(messageText(execCtx.Message)); err != nil {
@@ -305,6 +305,13 @@ func (e *executor) mapStream(
 				if !appendPart(diff) {
 					return
 				}
+			}
+		case EventNotice:
+			if event.Text == "" {
+				continue
+			}
+			if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, noticeMessage(execCtx, event.Text)), nil) {
+				return
 			}
 		case EventToolProgress, EventStepStarted:
 			if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, nil), nil) {

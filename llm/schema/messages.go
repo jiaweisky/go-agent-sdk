@@ -17,10 +17,12 @@ func (ToolTextContent) toolContentTag() {}
 
 // ToolFileContent is a tool result's file reference.
 type ToolFileContent struct {
-	Type string  `json:"type"` // must be "file"
-	URI  string  `json:"uri"`
-	Mime string  `json:"mime"`
-	Name *string `json:"name,omitempty"`
+	Type   string      `json:"type"` // must be "file"
+	URI    string      `json:"uri"`
+	Mime   string      `json:"mime"`
+	Name   *string     `json:"name,omitempty"`
+	Source MediaSource `json:"source,omitempty"`
+	FileID string      `json:"fileId,omitempty"`
 }
 
 func (ToolFileContent) toolContentTag() {}
@@ -103,8 +105,10 @@ func (TextPart) contentPartTag() {}
 type MediaPart struct {
 	Type      string         `json:"type"` // must be "media"
 	MediaType string         `json:"mediaType"`
+	Source    MediaSource    `json:"source,omitempty"` // inline | url | file; empty = inline
 	Data      any            `json:"data"`
 	Filename  *string        `json:"filename,omitempty"`
+	Detail    string         `json:"detail,omitempty"` // low | high | original | auto
 	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 

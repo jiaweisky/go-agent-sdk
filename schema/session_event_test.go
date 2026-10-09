@@ -16,7 +16,7 @@ func TestSessionEventDurableVersions(t *testing.T) {
 	if SessionEventTextDelta.Durable != nil {
 		t.Fatalf("text delta should be live-only")
 	}
-	if SessionEventAttachmentOmitted.Durable == nil || SessionEventAttachmentOmitted.Durable.Version != 1 {
+	if SessionEventAttachmentOmitted.Durable == nil || SessionEventAttachmentOmitted.Durable.Version != 2 {
 		t.Fatalf("attachment omitted durable = %+v", SessionEventAttachmentOmitted.Durable)
 	}
 	if len(SessionEventDurableDefinitions) != 30 {

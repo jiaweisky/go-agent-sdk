@@ -1471,8 +1471,9 @@ func TestOmittedAttachmentEventVisible(t *testing.T) {
 		Data []struct {
 			Type string `json:"type"`
 			Data struct {
-				Name string `json:"name"`
-				MIME string `json:"mime"`
+				Name   string `json:"name"`
+				MIME   string `json:"mime"`
+				Reason string `json:"reason"`
 			} `json:"data"`
 		} `json:"data"`
 	}
@@ -1485,6 +1486,9 @@ func TestOmittedAttachmentEventVisible(t *testing.T) {
 			found++
 			if ev.Data.Name != "x.pdf" || ev.Data.MIME != "application/pdf" {
 				t.Fatalf("omitted event data = %+v", ev.Data)
+			}
+			if ev.Data.Reason != "unsupported_type" {
+				t.Fatalf("omitted reason = %q, want unsupported_type", ev.Data.Reason)
 			}
 		}
 	}

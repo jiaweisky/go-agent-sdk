@@ -13,6 +13,18 @@ credentials:                      # required; the only secret source (no env)
   apiKey: sk-...                  # or credentials.aws: { region, accessKeyId, secretAccessKey, sessionToken }
 contextLimit: 128000
 outputLimit: 8192
+# models:                           # optional; additional models an agent/subagent may name
+#   - id: gemini-2.5-flash          # catalog id (what an agent's `model:` field names)
+#     protocol: gemini
+#     modelBaseURL: https://generativelanguage.googleapis.com
+#     media: { input: [text, image, audio, video], sources: [inline, file] }  # modalities + sources
+#     credentials: { apiKey: ... }
+#   - id: deepseek-vision
+#     model: deepseek-flash         # wire model name when it differs from the id
+#     providerID: deepseek          # credential key; defaults to the protocol
+#     protocol: openai-compatible-chat
+#     media: { input: [text, image], sources: [inline, url, file] }
+#     credentials: { apiKey: ... }
 subagentDepth: 1
 titleAuto: false
 dropErroredTurns: true             # server default: exclude a turn that ended in error from later contexts (prevents a rejected message from wedging the session); false = opencode-CLI behavior (recover via revert)

@@ -16,10 +16,12 @@ type ToolTextContent struct {
 func (ToolTextContent) ToolContentType() string { return "text" }
 
 type ToolFileContent struct {
-	Type string  `json:"type"`
-	URI  string  `json:"uri"`
-	Mime string  `json:"mime"`
-	Name *string `json:"name,omitempty"`
+	Type        string  `json:"type"`
+	URI         string  `json:"uri"`
+	Mime        string  `json:"mime"`
+	Name        *string `json:"name,omitempty"`
+	MediaSource string  `json:"mediaSource,omitempty"`
+	FileID      string  `json:"fileId,omitempty"`
 }
 
 func (ToolFileContent) ToolContentType() string { return "file" }

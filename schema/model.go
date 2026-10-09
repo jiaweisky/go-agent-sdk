@@ -22,9 +22,17 @@ type ModelRef struct {
 
 // ModelCapabilities lists what a model can do (tools, reasoning, ...).
 type ModelCapabilities struct {
-	Tools  bool     `json:"tools"`
-	Input  []string `json:"input"`
-	Output []string `json:"output"`
+	Tools  bool                  `json:"tools"`
+	Input  []string              `json:"input"`
+	Output []string              `json:"output"`
+	Media  *ModelMediaCapability `json:"media,omitempty"`
+}
+
+// ModelMediaCapability is a model's media constraints: which sources it accepts
+// (inline, url, file). Input modalities stay in ModelCapabilities.Input; an empty
+// Input means "unconstrained", not "text only".
+type ModelMediaCapability struct {
+	Sources []string `json:"sources,omitempty"`
 }
 
 // ModelCostTier is one pricing tier.

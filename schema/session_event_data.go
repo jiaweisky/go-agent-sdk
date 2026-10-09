@@ -38,13 +38,25 @@ type SessionEventPromptData struct {
 	Delivery  SessionDelivery `json:"delivery"`
 }
 
+// SessionAttachmentOmitReason explains why an attachment was omitted.
+type SessionAttachmentOmitReason string
+
+const (
+	AttachmentOmitUnsupportedType     SessionAttachmentOmitReason = "unsupported_type"
+	AttachmentOmitUnsupportedModality SessionAttachmentOmitReason = "unsupported_modality"
+	AttachmentOmitUnsupportedSource   SessionAttachmentOmitReason = "unsupported_source"
+	AttachmentOmitUnsupportedRole     SessionAttachmentOmitReason = "unsupported_role"
+	AttachmentOmitInvalidPayload      SessionAttachmentOmitReason = "invalid_payload"
+)
+
 // SessionEventAttachmentOmittedData reports an attachment the selected model
 // could not carry, so it was replaced by a text note in the request.
 type SessionEventAttachmentOmittedData struct {
 	SessionEventEnvelope
-	MessageID MessageID `json:"messageID"`
-	Name      string    `json:"name"`
-	MIME      string    `json:"mime"`
+	MessageID MessageID                   `json:"messageID"`
+	Name      string                      `json:"name"`
+	MIME      string                      `json:"mime"`
+	Reason    SessionAttachmentOmitReason `json:"reason"`
 }
 
 // SessionEventMessageTextData covers context.updated and synthetic.

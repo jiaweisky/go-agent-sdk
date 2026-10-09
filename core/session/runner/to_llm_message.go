@@ -9,33 +9,92 @@ import (
 )
 
 // mediaPolicy decides which media the target model can carry and reports each
-// part it omits, so a client can perceive an omission. A nil support accepts
-// everything; a nil omit reports nothing.
+// part it omits, so a client can perceive an omission. A nil reason accepts
+// everything; a nil omit reports nothing. The part's role is a normalized
+// vocabulary ("user", "assistant", "tool"), enforced against the protocol's
+// declared roles.
 type mediaPolicy struct {
-	support func(mime, data string) bool
-	omit    func(messageID schema.MessageID, name, mime string)
+	reason func(role, mime, source, data string) string
+	omit   func(messageID schema.MessageID, name, mime, reason string)
 }
 
-// allows reports whether the model can carry a part.
-func (p mediaPolicy) allows(mime, data string) bool {
-	return p.support == nil || p.support(mime, data)
+// allows reports whether the model can carry a part in a role.
+func (p mediaPolicy) allows(role, mime, source, data string) bool {
+	return p.reason == nil || p.reason(role, mime, source, data) == ""
 }
 
-// omitNote reports a part the model cannot carry and returns the text note that
-// replaces it. name may be nil; an absent name falls back to the MIME.
-func (p mediaPolicy) omitNote(messageID schema.MessageID, name *string, mime string) string {
+// omitNote reports a part the model cannot carry (with its reason) and returns
+// the text note that replaces it. name may be nil; an absent name falls back to
+// the MIME.
+func (p mediaPolicy) omitNote(messageID schema.MessageID, name *string, role, mime, source, data string) string {
 	value := mime
 	if name != nil && *name != "" {
 		value = *name
 	}
-	if p.omit != nil {
-		p.omit(messageID, value, mime)
+	reason := ""
+	if p.reason != nil {
+		reason = p.reason(role, mime, source, data)
 	}
-	return omittedMediaNote(value, mime)
+	if p.omit != nil {
+		p.omit(messageID, value, mime, reason)
+	}
+	return omittedMediaNote(value, mime, reason)
+}
+
+// attachmentDecision is the resolved outcome for one file attachment: its
+// canonical source and, when the role's model cannot carry it, the omission note
+// to substitute.
+type attachmentDecision struct {
+	Source  llmschema.MediaSource
+	Omitted bool
+	Note    string
+}
+
+// decide resolves a file attachment's source and checks whether the role's model
+// can carry it, returning the omission note when it cannot.
+func (p mediaPolicy) decide(role, mime, uri, fileID, mediaSource string, name *string, messageID schema.MessageID) attachmentDecision {
+	source := attachmentSource(mediaSource, uri, fileID)
+	payload := attachmentPayload(uri, fileID, source)
+	if p.allows(role, mime, string(source), payload) {
+		return attachmentDecision{Source: source}
+	}
+	return attachmentDecision{
+		Source: source, Omitted: true,
+		Note: p.omitNote(messageID, name, role, mime, string(source), payload),
+	}
+}
+
+// attachmentSource resolves a media source: an explicit declaration wins, then a
+// FileID implies "file", then the URI scheme is inferred.
+func attachmentSource(declared, uri, fileID string) llmschema.MediaSource {
+	if declared != "" {
+		return llmschema.MediaSource(declared)
+	}
+	if fileID != "" {
+		return llmschema.MediaSourceFile
+	}
+	return llmschema.InferMediaSource(uri)
+}
+
+// attachmentPayload is the value carried for a source: the provider FileID for a
+// file reference, else the URI (data URL / http URL / bytes string).
+func attachmentPayload(uri, fileID string, source llmschema.MediaSource) string {
+	if source == llmschema.MediaSourceFile && fileID != "" {
+		return fileID
+	}
+	return uri
 }
 
 func llmMedia(file schema.PromptFileAttachment) llmschema.ContentPart {
-	part := llmschema.MediaPart{Type: "media", MediaType: file.Mime, Data: file.URI, Filename: file.Name}
+	source := attachmentSource(file.MediaSource, file.URI, file.FileID)
+	part := llmschema.MediaPart{
+		Type:      "media",
+		MediaType: file.Mime,
+		Source:    source,
+		Data:      attachmentPayload(file.URI, file.FileID, source),
+		Filename:  file.Name,
+		Detail:    file.Detail,
+	}
 	if file.Description != nil {
 		part.Metadata = map[string]any{"description": *file.Description}
 	}
@@ -43,13 +102,16 @@ func llmMedia(file schema.PromptFileAttachment) llmschema.ContentPart {
 }
 
 // omittedMediaNote replaces an attachment the target model cannot accept
-// (unsupported type, modality, or malformed/oversized payload), so the model
+// (unsupported type/modality/source/role, or malformed payload), so the model
 // still learns something was attached instead of the turn failing.
-func omittedMediaNote(name, mime string) string {
+func omittedMediaNote(name, mime, reason string) string {
 	if name == "" {
 		name = mime
 	}
-	return fmt.Sprintf("[attachment omitted: %s (%s); it could not be sent to the selected model]", name, mime)
+	if reason == "" {
+		return fmt.Sprintf("[attachment omitted: %s (%s); it could not be sent to the selected model]", name, mime)
+	}
+	return fmt.Sprintf("[attachment omitted: %s (%s); it could not be sent to the selected model (reason: %s)]", name, mime, reason)
 }
 
 func llmToolInput(tool schema.SessionMessageAssistantTool) any {
@@ -96,14 +158,13 @@ func llmToolContent(
 		case schema.ToolTextContent:
 			converted = append(converted, llmschema.ToolTextContent{Type: value.Type, Text: value.Text})
 		case schema.ToolFileContent:
-			if !policy.allows(value.Mime, value.URI) {
-				converted = append(converted, llmschema.ToolTextContent{
-					Type: "text", Text: policy.omitNote(messageID, value.Name, value.Mime),
-				})
+			decision := policy.decide("tool", value.Mime, value.URI, value.FileID, value.MediaSource, value.Name, messageID)
+			if decision.Omitted {
+				converted = append(converted, llmschema.ToolTextContent{Type: "text", Text: decision.Note})
 				continue
 			}
 			converted = append(converted, llmschema.ToolFileContent{
-				Type: value.Type, URI: value.URI, Mime: value.Mime, Name: value.Name,
+				Type: value.Type, URI: value.URI, Mime: value.Mime, Name: value.Name, Source: decision.Source, FileID: value.FileID,
 			})
 		}
 	}
@@ -301,8 +362,9 @@ func toLLMMessage(message schema.SessionMessage, model llmschema.ModelSchema, po
 		content := make([]llmschema.ContentPart, 0, 1+len(m.Files))
 		content = append(content, llmschema.NewTextContent(m.Text))
 		for _, file := range m.Files {
-			if !policy.allows(file.Mime, file.URI) {
-				content = append(content, llmschema.NewTextContent(policy.omitNote(m.ID, file.Name, file.Mime)))
+			decision := policy.decide("user", file.Mime, file.URI, file.FileID, file.MediaSource, file.Name, m.ID)
+			if decision.Omitted {
+				content = append(content, llmschema.NewTextContent(decision.Note))
 				continue
 			}
 			content = append(content, llmMedia(file))

@@ -29,6 +29,12 @@ type geminiInlineDataPart struct {
 		Data     string `json:"data"`
 	} `json:"inlineData"`
 }
+type geminiFileDataPart struct {
+	FileData struct {
+		MimeType string `json:"mimeType"`
+		FileURI  string `json:"fileUri"`
+	} `json:"fileData"`
+}
 type geminiFunctionCallPart struct {
 	FunctionCall struct {
 		Name string `json:"name"`
@@ -165,13 +171,31 @@ func geminiLowerUserPart(part schema.ContentPart) (any, error) {
 	case schema.TextPart:
 		return geminiTextPart{Text: p.Text}, nil
 	case schema.MediaPart:
-		media, err := utils.ValidateMedia("Gemini", p, geminiMediaMIMEs)
-		if err != nil {
-			return nil, err
-		}
-		return geminiInlineData(media.MIME, media.Base64), nil
+		return geminiLowerMedia(p)
 	}
 	return nil, fmt.Errorf("Gemini user parts only support text and media")
+}
+
+// geminiLowerMedia lowers a media part: inline bytes become inlineData; url and
+// file sources become fileData (the provider fetches a URL or reads a Files API
+// reference).
+func geminiLowerMedia(part schema.MediaPart) (any, error) {
+	source := part.Source
+	if source == "" {
+		source = schema.MediaSourceInline
+	}
+	if source == schema.MediaSourceURL || source == schema.MediaSourceFile {
+		uri, _ := part.Data.(string)
+		if strings.TrimSpace(uri) == "" {
+			return nil, InvalidRequest("Gemini media reference is empty")
+		}
+		return geminiFileData(part.MediaType, uri), nil
+	}
+	media, err := utils.ValidateMedia("Gemini", part, geminiMediaMIMEs)
+	if err != nil {
+		return nil, err
+	}
+	return geminiInlineData(media.MIME, media.Base64), nil
 }
 
 func geminiLowerToolCall(part schema.ToolCallPart) geminiFunctionCallPart {
@@ -299,6 +323,18 @@ func geminiLowerToolResultPart(part schema.ToolResultPart) ([]any, error) {
 		if !ok {
 			continue
 		}
+		source := fc.Source
+		if source == "" {
+			source = schema.MediaSourceInline
+		}
+		if source == schema.MediaSourceURL || source == schema.MediaSourceFile {
+			uri := fc.URI
+			if fc.FileID != "" {
+				uri = fc.FileID
+			}
+			parts = append(parts, geminiFileData(fc.Mime, uri))
+			continue
+		}
 		media, err := utils.ValidateToolFile("Gemini", fc, geminiMediaMIMEs)
 		if err != nil {
 			return nil, err
@@ -319,6 +355,13 @@ func geminiInlineData(mimeType, data string) geminiInlineDataPart {
 	var part geminiInlineDataPart
 	part.InlineData.MimeType = mimeType
 	part.InlineData.Data = data
+	return part
+}
+
+func geminiFileData(mimeType, fileURI string) geminiFileDataPart {
+	var part geminiFileDataPart
+	part.FileData.MimeType = mimeType
+	part.FileData.FileURI = fileURI
 	return part
 }
 

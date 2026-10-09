@@ -41,16 +41,23 @@ func run(ctx context.Context, cfg config) error {
 // buildClient assembles the SDK client from the model, credential and limit
 // settings.
 func buildClient(cfg config) (*agent.Client, error) {
+	catalog, err := cfg.modelCatalog()
+	if err != nil {
+		return nil, err
+	}
+	model := cfg.Model
+	if model == "" {
+		model = catalog.DefaultID()
+	}
 	clientOpts := &agent.ClientOptions{
 		Root:             cfg.Root,
 		WorkingDirectory: cfg.WorkingDirectory,
 		ConfigDirs:       cfg.ConfigDirs,
-		Model:            cfg.Model,
+		Model:            model,
 		Protocol:         schema.ProtocolID(cfg.Protocol),
-		ModelInfo:        serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS, cfg.InputModalities),
-		Credentials:      serveconfig.CredentialProvider(cfg.Credentials),
-		ContextLimit:     cfg.ContextLimit,
-		OutputLimit:      cfg.OutputLimit,
+		ModelInfo:        catalog.ModelInfo,
+		Credentials:      catalog.Credentials,
+		MediaUploader:    cfg.mediaUploader(),
 	}
 	if cfg.SubagentDepth > 0 {
 		clientOpts.SubagentDepth = cfg.SubagentDepth
@@ -79,9 +86,15 @@ func buildServer(ctx context.Context, client *agent.Client, cfg config, keepAliv
 	if cfg.Auth != nil {
 		auth = authFromConfig(cfg.Auth)
 	}
+	models, err := cfg.modelInfos()
+	if err != nil {
+		return nil, err
+	}
 	return server.New(ctx, client, server.Options{
 		Auth:                auth,
 		Agents:              cfg.Agents,
+		Models:              models,
+		MediaUploader:       cfg.mediaUploader(),
 		CORS:                cfg.CORS,
 		InboundPermissions:  serveconfig.PermissionRuleset(cfg.InboundPermissions),
 		InteractionTimeout:  interactionTimeout,

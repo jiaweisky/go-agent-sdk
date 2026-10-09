@@ -627,6 +627,8 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		Events:            appEvents{events: r.events},
 		LLM:               chooseLLM(opts),
 		Backends:          r.a2aBackendPool.forAgent,
+		MediaUploader:     opts.MediaUploader,
+		OnMediaDecision:   opts.OnMediaDecision,
 		Agents:            r.agentSelector,
 		Tools:             hookedRegistry{inner: r.dispatcher, hooksFor: r.hooksFor},
 		Models:            r.models,

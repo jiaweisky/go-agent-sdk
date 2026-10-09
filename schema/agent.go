@@ -98,6 +98,10 @@ type AgentExpose struct {
 	IconURL          string `json:"iconUrl,omitempty"`
 	// Provider identifies the organization offering the agent.
 	Provider *AgentProvider `json:"provider,omitempty"`
+	// InputModes / OutputModes override the card's media modes (MIME strings),
+	// so a multimodal agent advertises audio/video, not just text+image.
+	InputModes  []string `json:"inputModes,omitempty"`
+	OutputModes []string `json:"outputModes,omitempty"`
 	// Skills are the capabilities advertised on the card. Each ID must name a
 	// real capability of the agent (a tool, subagent or skill); when empty the
 	// card falls back to a single skill derived from the agent.

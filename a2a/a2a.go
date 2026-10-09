@@ -1,6 +1,6 @@
 // Package a2a contains protocol-agnostic helpers for the SDK's Agent2Agent
 // (A2A) support: identity and metadata conventions shared by the inbound
-// (server) and outbound (client) adapters. See docs/DESIGN-A2A.md.
+// (server) and outbound (client) adapters.
 package a2a
 
 // Metadata prefixes. A2A has no standard metadata key space, so the SDK adopts
@@ -18,7 +18,7 @@ const (
 
 // Shared metadata keys (aligned with ADK) written into A2A object metadata.
 //
-// This is the full vocabulary of docs/DESIGN-A2A.md §4.3. Some keys are not
+// This is the full vocabulary of shared metadata keys. Some keys are not
 // emitted yet; they are declared here so later phases never hand-write a
 // metadata string.
 const (

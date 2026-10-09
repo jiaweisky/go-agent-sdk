@@ -20,6 +20,15 @@ modelBaseURL: https://api.deepseek.com  # model API base URL; empty uses the pro
 inputModalities: [text, image]    # optional: input modalities the model accepts (text/image/audio/video/pdf). DeepSeek accepts text and images; media outside these is omitted from requests
 dropErroredTurns: true            # server default: exclude a turn that ended in error from later contexts (prevents a rejected message from wedging the session); false = opt out
 
+# models:                         # optional; additional models an agent may name
+#   - id: gemini-2.5-flash        # catalog id (agent `model:` names this)
+#     protocol: gemini
+#     modelBaseURL: https://generativelanguage.googleapis.com
+#     media: { input: [text, image, audio, video], sources: [inline, file] }  # modalities + sources
+#     credentials: { apiKey: ... }
+
+# inboundMedia: spool             # spool (default) writes inbound A2A files into the workspace; inline delivers known media to the model
+
 credentials:                      # REQUIRED: the only place a secret is read
   apiKey: <your-deepseek-api-key> #   bearer/header protocols
   # aws:                          #   Amazon Bedrock (SigV4), instead of apiKey

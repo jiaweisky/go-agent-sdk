@@ -14,6 +14,15 @@ type PromptFileAttachment struct {
 	Name        *string       `json:"name,omitempty"`
 	Description *string       `json:"description,omitempty"`
 	Source      *PromptSource `json:"source,omitempty"`
+	// MediaSource declares where the media bytes come from: "inline" (default,
+	// bytes / data URL in URI), "url" (http(s) reference the provider fetches) or
+	// "file" (a provider reference in FileID). Empty infers from URI.
+	MediaSource string `json:"mediaSource,omitempty"`
+	// FileID is a provider file reference (file_id / fileUri / s3://…).
+	FileID string `json:"fileId,omitempty"`
+	// Detail is an optional image detail hint: low | high | original | auto
+	// (lowered where the protocol supports it, ignored elsewhere).
+	Detail string `json:"detail,omitempty"`
 }
 
 // PromptAgentAttachment is an agent mentioned in a prompt.

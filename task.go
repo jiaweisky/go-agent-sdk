@@ -99,6 +99,10 @@ type TaskRunInput struct {
 	Description     string
 	Prompt          string
 	TaskID          *string
+	// Files are media attachments admitted to the child session alongside the
+	// prompt. The model-driven task tool leaves this empty (a model
+	// cannot emit bytes); a host or structured caller may supply references.
+	Files []schema.PromptFileAttachment
 	// Progress publishes the running task state (durable) on the parent
 	// session, carrying the child session id.
 	Progress func(structured map[string]any, content []tool.Content) error

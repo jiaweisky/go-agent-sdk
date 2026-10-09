@@ -16,6 +16,16 @@ var readSupportedImageMIMEs = map[string]bool{
 	"image/webp": true,
 }
 
+// readSupportedMediaMIMEs are the media types the read tool ingests: images
+// (normalized) plus audio, video and PDF.
+var readSupportedMediaMIMEs = map[string]bool{
+	"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true,
+	"audio/wav": true, "audio/mp3": true, "audio/aiff": true,
+	"audio/aac": true, "audio/ogg": true, "audio/flac": true,
+	"video/mp4": true, "video/webm": true, "video/quicktime": true,
+	"application/pdf": true,
+}
+
 type ReadInput struct {
 	Path   string `json:"path"`
 	Offset *int   `json:"offset,omitempty"`
@@ -74,7 +84,7 @@ type ReadDeps struct {
 
 func MakeRead(deps ReadDeps) *Def[ReadInput, any, any] {
 	return Make(Config[ReadInput, any, any]{
-		Description: "Read a text file or supported image, page through a large UTF-8 text file by line offset, " +
+		Description: "Read a text file or supported media (image, audio, video, PDF), page through a large UTF-8 text file by line offset, " +
 			"or list a directory page. Relative paths resolve from the current location; absolute paths inside " +
 			"it are accepted, while external absolute paths require external_directory approval.",
 		Input:  ReadInputSchema,
@@ -86,13 +96,17 @@ func MakeRead(deps ReadDeps) *Def[ReadInput, any, any] {
 			}
 			encoding, _ := encoded["encoding"].(string)
 			mime, _ := encoded["mime"].(string)
-			if encoding != "base64" || !readSupportedImageMIMEs[mime] {
+			if encoding != "base64" || !readSupportedMediaMIMEs[mime] {
 				return nil
 			}
 			data, _ := encoded["content"].(string)
 			name := input.Path
+			text := "Media read successfully"
+			if readSupportedImageMIMEs[mime] {
+				text = "Image read successfully"
+			}
 			return []Content{
-				TextContent{Text: "Image read successfully"},
+				TextContent{Text: text},
 				FileContent{Data: data, MIME: mime, Name: &name},
 			}
 		},
@@ -170,12 +184,15 @@ func executeRead(deps ReadDeps, input ReadInput, ctx Context) (any, error) {
 		return content, nil
 	}
 
-	if fileContent.Encoding == "base64" && readSupportedImageMIMEs[fileContent.MIME] {
+	if readSupportedImageMIMEs[fileContent.MIME] {
 		normalized, nerr := deps.Image.Normalize(resource, fileContent)
 		if nerr != nil {
 			return nil, nerr
 		}
 		return normalized, nil
+	}
+	if readSupportedMediaMIMEs[fileContent.MIME] {
+		return fileContent, nil
 	}
 	if fileContent.Encoding == "base64" {
 		return nil, &ReadBinaryFileError{Resource: resource}

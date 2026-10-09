@@ -27,8 +27,9 @@ type anthropicMessagesTextBlock struct {
 }
 type anthropicMessagesImageSource struct {
 	Type      string `json:"type"`
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
 type anthropicMessagesImageBlock struct {
 	Type         string                         `json:"type"`
@@ -264,6 +265,18 @@ func anthropicMessagesLowerServerToolCall(part schema.ToolCallPart) anthropicMes
 }
 
 func anthropicMessagesLowerImage(part schema.MediaPart) (*anthropicMessagesImageBlock, error) {
+	source := part.Source
+	if source == "" {
+		source = schema.MediaSourceInline
+	}
+	switch source {
+	case schema.MediaSourceURL:
+		url, _ := part.Data.(string)
+		if strings.TrimSpace(url) == "" {
+			return nil, InvalidRequest("Anthropic image URL is empty")
+		}
+		return &anthropicMessagesImageBlock{Type: "image", Source: anthropicMessagesImageSource{Type: "url", URL: url}}, nil
+	}
 	media, err := utils.ValidateMedia("Anthropic Messages", part, imageMIMESet)
 	if err != nil {
 		return nil, err
@@ -283,6 +296,13 @@ func anthropicMessagesLowerToolResultContentItem(item schema.ToolContent) (any, 
 	case schema.ToolTextContent:
 		return anthropicMessagesTextBlock{Type: "text", Text: v.Text}, nil
 	case schema.ToolFileContent:
+		source := v.Source
+		if source == "" {
+			source = schema.MediaSourceInline
+		}
+		if source == schema.MediaSourceURL {
+			return anthropicMessagesImageBlock{Type: "image", Source: anthropicMessagesImageSource{Type: "url", URL: v.URI}}, nil
+		}
 		media, err := utils.ValidateToolFile("Anthropic Messages", v, imageMIMESet)
 		if err != nil {
 			return nil, err

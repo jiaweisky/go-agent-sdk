@@ -29,14 +29,14 @@ func newTestClient(t *testing.T) *agent.Client {
 
 func TestExposeAgentsUnknown(t *testing.T) {
 	client := newTestClient(t)
-	if _, err := exposeAgents(client, []string{"does-not-exist"}, nil); err == nil {
+	if _, err := exposeAgents(client, []string{"does-not-exist"}, nil, nil, ""); err == nil {
 		t.Fatal("expected an error for an unknown agent")
 	}
 }
 
 func TestExposeAgentsBuild(t *testing.T) {
 	client := newTestClient(t)
-	exposed, err := exposeAgents(client, []string{"build"}, nil)
+	exposed, err := exposeAgents(client, []string{"build"}, nil, nil, "")
 	if err != nil {
 		t.Fatalf("exposeAgents: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestExposeAgentsCardOverride(t *testing.T) {
 	client := newTestClient(t)
 	exposed, err := exposeAgents(client, []string{"build"}, map[string]cardConfig{
 		"build": {Name: "Custom", Description: "custom card"},
-	})
+	}, nil, "")
 	if err != nil {
 		t.Fatalf("exposeAgents: %v", err)
 	}
@@ -62,13 +62,13 @@ func TestExposeAgentsValidatesSkills(t *testing.T) {
 	client := newTestClient(t)
 	if _, err := exposeAgents(client, []string{"build"}, map[string]cardConfig{
 		"build": {Skills: []skillConfig{{ID: "not-a-capability"}}},
-	}); err == nil {
+	}, nil, ""); err == nil {
 		t.Fatal("expected an unknown skill id to be rejected")
 	}
 
 	exposed, err := exposeAgents(client, []string{"build"}, map[string]cardConfig{
 		"build": {Skills: []skillConfig{{ID: "read", Name: "Read files", Tags: []string{"files"}}}},
-	})
+	}, nil, "")
 	if err != nil {
 		t.Fatalf("exposeAgents: %v", err)
 	}
@@ -118,14 +118,20 @@ func TestRunServesCard(t *testing.T) {
 	}
 }
 
-func TestCredentialProviderAWS(t *testing.T) {
+func TestCatalogCredentialsAWS(t *testing.T) {
 	cfg := defaultConfig()
+	cfg.Protocol = "bedrock-converse"
+	cfg.Model = "anthropic.claude-3-5-sonnet"
 	cfg.Credentials = serveconfig.Credentials{AWS: &serveconfig.AWS{
 		Region: "us-east-1", AccessKeyID: "AK", SecretAccessKey: "SK", SessionToken: "ST",
 	}}
-	credential, err := serveconfig.CredentialProvider(cfg.Credentials)(schema.ProviderID("bedrock-converse"))
+	catalog, err := cfg.modelCatalog()
 	if err != nil {
-		t.Fatalf("credentialProvider: %v", err)
+		t.Fatalf("modelCatalog: %v", err)
+	}
+	credential, err := catalog.Credentials(schema.ProviderID("bedrock-converse"))
+	if err != nil {
+		t.Fatalf("credentials: %v", err)
 	}
 	if credential.AWS == nil || credential.AWS.Region != "us-east-1" ||
 		credential.AWS.AccessKeyID != "AK" || credential.AWS.SecretAccessKey != "SK" || credential.AWS.SessionToken != "ST" {
@@ -133,26 +139,37 @@ func TestCredentialProviderAWS(t *testing.T) {
 	}
 }
 
-func TestModelInfoProviderBedrockEndpoint(t *testing.T) {
+func TestCatalogModelInfoBedrockEndpoint(t *testing.T) {
 	cfg := defaultConfig()
+	cfg.Model = "anthropic.claude-3-5-sonnet"
 	cfg.Protocol = "bedrock-converse"
 	cfg.Credentials = serveconfig.Credentials{AWS: &serveconfig.AWS{Region: "eu-west-1", AccessKeyID: "AK", SecretAccessKey: "SK"}}
-	info, err := serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS, nil)("anthropic.claude-3-5-sonnet")
+	catalog, err := cfg.modelCatalog()
 	if err != nil {
-		t.Fatalf("modelInfoProvider: %v", err)
+		t.Fatalf("modelCatalog: %v", err)
+	}
+	info, err := catalog.ModelInfo("anthropic.claude-3-5-sonnet")
+	if err != nil {
+		t.Fatalf("model info: %v", err)
 	}
 	if info.API.URL == nil || *info.API.URL != "https://bedrock-runtime.eu-west-1.amazonaws.com" {
 		t.Fatalf("endpoint = %v, want the region-derived Bedrock endpoint", info.API.URL)
 	}
 }
 
-func TestModelInfoProviderExplicitBaseURL(t *testing.T) {
+func TestCatalogModelInfoExplicitBaseURL(t *testing.T) {
 	cfg := defaultConfig()
+	cfg.Model = "deepseek-flash"
 	cfg.Protocol = "openai-compatible-chat"
 	cfg.ModelBaseURL = "https://api.deepseek.com"
-	info, err := serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS, nil)("deepseek-flash")
+	cfg.Credentials = serveconfig.Credentials{APIKey: "k"}
+	catalog, err := cfg.modelCatalog()
 	if err != nil {
-		t.Fatalf("modelInfoProvider: %v", err)
+		t.Fatalf("modelCatalog: %v", err)
+	}
+	info, err := catalog.ModelInfo("deepseek-flash")
+	if err != nil {
+		t.Fatalf("model info: %v", err)
 	}
 	if info.API.URL == nil || *info.API.URL != "https://api.deepseek.com" {
 		t.Fatalf("endpoint = %v, want modelBaseURL", info.API.URL)

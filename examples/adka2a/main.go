@@ -1,7 +1,7 @@
 // Command adka2a runs a small A2A server backed by a Google ADK (adk-go) agent.
 // It exists to prove cross-implementation interoperability: the go-agent-sdk
-// chat example delegates to it over A2A, exercising the wire conventions in
-// docs/DESIGN-A2A.md against a different A2A implementation.
+// chat example delegates to it over A2A, exercising the wire conventions
+// against a different A2A implementation.
 //
 // It is a separate Go module so the SDK itself never depends on adk-go (see the
 // dependency policy in the design doc). Its model is a deterministic stub, so

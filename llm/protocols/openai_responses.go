@@ -3,6 +3,7 @@ package protocols
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/llm/protocols/utils"
 	"github.com/jiaweisky/go-agent-sdk/llm/route"
@@ -23,8 +24,10 @@ type openaiResponsesInputText struct {
 	Text string `json:"text"`
 }
 type openaiResponsesInputImage struct {
-	Type     string `json:"type"`
-	ImageURL string `json:"image_url"`
+	Type     string  `json:"type"`
+	ImageURL string  `json:"image_url,omitempty"`
+	FileID   *string `json:"file_id,omitempty"`
+	Detail   string  `json:"detail,omitempty"`
 }
 type openaiResponsesOutputText struct {
 	Type string `json:"type"`
@@ -278,13 +281,37 @@ func openaiResponsesLowerUserContent(part schema.ContentPart) (any, error) {
 	case schema.TextPart:
 		return openaiResponsesInputText{Type: "input_text", Text: p.Text}, nil
 	case schema.MediaPart:
-		media, err := utils.ValidateMedia("OpenAI Responses", p, imageMIMESet)
-		if err != nil {
-			return nil, err
-		}
-		return openaiResponsesInputImage{Type: "input_image", ImageURL: media.DataURL}, nil
+		return openaiResponsesLowerImage(p)
 	}
 	return nil, fmt.Errorf("OpenAI Responses user content only supports text and media")
+}
+
+// openaiResponsesLowerImage lowers an image part: inline bytes become a data
+// URL, a url source the raw URL, and a file source a file_id.
+func openaiResponsesLowerImage(part schema.MediaPart) (any, error) {
+	source := part.Source
+	if source == "" {
+		source = schema.MediaSourceInline
+	}
+	switch source {
+	case schema.MediaSourceURL:
+		url, _ := part.Data.(string)
+		if strings.TrimSpace(url) == "" {
+			return nil, InvalidRequest("OpenAI Responses image URL is empty")
+		}
+		return openaiResponsesInputImage{Type: "input_image", ImageURL: url, Detail: part.Detail}, nil
+	case schema.MediaSourceFile:
+		id, _ := part.Data.(string)
+		if strings.TrimSpace(id) == "" {
+			return nil, InvalidRequest("OpenAI Responses image file id is empty")
+		}
+		return openaiResponsesInputImage{Type: "input_image", FileID: &id}, nil
+	}
+	media, err := utils.ValidateMedia("OpenAI Responses", part, imageMIMESet)
+	if err != nil {
+		return nil, err
+	}
+	return openaiResponsesInputImage{Type: "input_image", ImageURL: media.DataURL, Detail: part.Detail}, nil
 }
 
 func openaiResponsesLowerToolResultContentItem(item schema.ToolContent) (any, error) {
@@ -292,13 +319,17 @@ func openaiResponsesLowerToolResultContentItem(item schema.ToolContent) (any, er
 	case schema.ToolTextContent:
 		return openaiResponsesInputText{Type: "input_text", Text: v.Text}, nil
 	case schema.ToolFileContent:
-		media, err := utils.ValidateToolFile("OpenAI Responses", v, imageMIMESet)
-		if err != nil {
-			return nil, err
-		}
-		return openaiResponsesInputImage{Type: "input_image", ImageURL: media.DataURL}, nil
+		return openaiResponsesLowerImage(schema.MediaPart{Type: "media", MediaType: v.Mime, Source: v.Source, Data: toolFileData(v), Filename: v.Name})
 	}
 	return openaiResponsesInputText{Type: "input_text", Text: fmt.Sprint(item)}, nil
+}
+
+// toolFileData is a tool file's payload: the FileID for a file source, else URI.
+func toolFileData(v schema.ToolFileContent) any {
+	if v.Source == schema.MediaSourceFile && v.FileID != "" {
+		return v.FileID
+	}
+	return v.URI
 }
 
 func openaiResponsesLowerToolResultOutput(part schema.ToolResultPart) (any, error) {

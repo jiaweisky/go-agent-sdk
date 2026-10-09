@@ -206,6 +206,19 @@ type TodoUpdated struct {
 
 func (e TodoUpdated) sessionID() string { return e.SessionID }
 
+// AttachmentOmitted reports an attachment the selected model could not carry, so
+// it was replaced by a text note in the request. Reason is one of the
+// schema.SessionAttachmentOmitReason values.
+type AttachmentOmitted struct {
+	SessionID string
+	MessageID string
+	Name      string
+	MIME      string
+	Reason    string
+}
+
+func (e AttachmentOmitted) sessionID() string { return e.SessionID }
+
 // PermissionAsked reports a tool asking for permission. When the client holds
 // interactions, the turn blocks until PermissionReplied or
 // Client.Permission().Reply resolves the request.
@@ -577,6 +590,14 @@ func mapRunEvent(eventType string, data map[string]any, sessionID, messageID str
 	case schema.SessionEventCompactionEnded.Type:
 		return CompactionEnded{
 			SessionID: sessionID, MessageID: fieldString(data, "messageID"), Text: fieldString(data, "text"),
+		}, true
+	case schema.SessionEventAttachmentOmitted.Type:
+		return AttachmentOmitted{
+			SessionID: sessionID,
+			MessageID: fieldString(data, "messageID"),
+			Name:      fieldString(data, "name"),
+			MIME:      fieldString(data, "mime"),
+			Reason:    fieldString(data, "reason"),
 		}, true
 	}
 	return nil, false

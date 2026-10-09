@@ -86,3 +86,28 @@ func TestBodySchemasAcceptLoweredBodies(t *testing.T) {
 		validateLoweredBody(t, tc.name, tc.route, request)
 	}
 }
+
+// TestBodySchemasAcceptURLAndFileMedia guards the "three touch-points" rule: a
+// protocol that declares a source must lower it to a body its schema accepts.
+func TestBodySchemasAcceptURLAndFileMedia(t *testing.T) {
+	parts := []schema.MediaPart{
+		{Type: "media", MediaType: "image/png", Source: schema.MediaSourceURL, Data: "https://example.com/a.png"},
+		{Type: "media", MediaType: "image/png", Source: schema.MediaSourceFile, Data: "file-id-123"},
+	}
+	for _, tc := range bodySchemaRoutes() {
+		entry, ok := LookupProtocol(schema.ProtocolID(tc.route.ID))
+		if !ok {
+			t.Fatalf("%s: not registered", tc.name)
+		}
+		for _, part := range parts {
+			if !entry.Media.AllowsSource(part.Source) {
+				continue
+			}
+			request := &schema.LLMRequest{
+				Model:    schema.Model{ID: "test-model", Provider: "test"},
+				Messages: []schema.Message{{Role: schema.RoleUser, Content: []schema.ContentPart{part}}},
+			}
+			validateLoweredBody(t, tc.name+"/"+string(part.Source), tc.route, request)
+		}
+	}
+}

@@ -38,11 +38,25 @@ type openaiChatToolCallFunction struct {
 	Arguments string `json:"arguments"`
 }
 type openaiChatUserContent struct {
-	Type     string              `json:"type"`
-	Text     string              `json:"text,omitempty"`
-	ImageURL *openaiChatImageURL `json:"image_url,omitempty"`
+	Type       string                `json:"type"`
+	Text       string                `json:"text,omitempty"`
+	ImageURL   *openaiChatImageURL   `json:"image_url,omitempty"`
+	InputAudio *openaiChatInputAudio `json:"input_audio,omitempty"`
+	AudioURL   *openaiChatAudioURL   `json:"audio_url,omitempty"`
+	VideoURL   *openaiChatVideoURL   `json:"video_url,omitempty"`
 }
 type openaiChatImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+type openaiChatInputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
+}
+type openaiChatAudioURL struct {
+	URL string `json:"url"`
+}
+type openaiChatVideoURL struct {
 	URL string `json:"url"`
 }
 type openaiChatMessage struct {
@@ -114,6 +128,7 @@ type openaiChatEvent struct {
 type openaiChatBody struct {
 	Model            string   `json:"model"`
 	Messages         any      `json:"messages"`
+	Modalities       []string `json:"modalities,omitempty"`
 	Tools            any      `json:"tools,omitempty"`
 	ToolChoice       any      `json:"tool_choice,omitempty"`
 	Stream           bool     `json:"stream"`
@@ -171,25 +186,55 @@ func openaiChatLowerToolCall(part schema.ToolCallPart) openaiChatAssistantToolCa
 	}
 }
 
-func openaiChatLowerMedia(part schema.MediaPart) (*openaiChatUserContent, error) {
-	media, err := utils.ValidateMedia("OpenAI Chat", part, imageMIMESet)
+func openaiChatLowerMedia(part schema.MediaPart, profile MediaEncodingProfile) (*openaiChatUserContent, error) {
+	source := part.Source
+	if source == "" {
+		source = schema.MediaSourceInline
+	}
+	kind, ok := profile.blockFor(part.MediaType, source)
+	if !ok {
+		return nil, InvalidRequest(fmt.Sprintf("OpenAI Chat cannot carry %s media (%s)", part.MediaType, source))
+	}
+	// URL source: pass the http(s) URL through unchanged.
+	if source == schema.MediaSourceURL {
+		url, _ := part.Data.(string)
+		if strings.TrimSpace(url) == "" {
+			return nil, InvalidRequest("OpenAI Chat media URL is empty")
+		}
+		switch kind {
+		case ImageURL:
+			return &openaiChatUserContent{Type: "image_url", ImageURL: &openaiChatImageURL{URL: url, Detail: part.Detail}}, nil
+		case AudioURLHTTP:
+			return &openaiChatUserContent{Type: "audio_url", AudioURL: &openaiChatAudioURL{URL: url}}, nil
+		case VideoURLHTTP:
+			return &openaiChatUserContent{Type: "video_url", VideoURL: &openaiChatVideoURL{URL: url}}, nil
+		}
+	}
+	media, err := utils.ValidateMedia("OpenAI Chat", part, kind.mimeSet())
 	if err != nil {
 		return nil, err
 	}
-	return &openaiChatUserContent{
-		Type:     "image_url",
-		ImageURL: &openaiChatImageURL{URL: media.DataURL},
-	}, nil
+	switch kind {
+	case ImageInlineDataURL:
+		return &openaiChatUserContent{Type: "image_url", ImageURL: &openaiChatImageURL{URL: media.DataURL, Detail: part.Detail}}, nil
+	case InputAudioBase64:
+		return &openaiChatUserContent{Type: "input_audio", InputAudio: &openaiChatInputAudio{Data: media.Base64, Format: audioFormat(media.MIME)}}, nil
+	case AudioURLDataURL:
+		return &openaiChatUserContent{Type: "audio_url", AudioURL: &openaiChatAudioURL{URL: media.DataURL}}, nil
+	case VideoURLDataURL:
+		return &openaiChatUserContent{Type: "video_url", VideoURL: &openaiChatVideoURL{URL: media.DataURL}}, nil
+	}
+	return nil, InvalidRequest(fmt.Sprintf("OpenAI Chat has no encoder for %s", kind))
 }
 
-func openaiChatLowerUserMessage(msg schema.Message) (any, error) {
+func openaiChatLowerUserMessage(msg schema.Message, profile MediaEncodingProfile) (any, error) {
 	var parts []openaiChatUserContent
 	for _, p := range msg.Content {
 		switch part := p.(type) {
 		case schema.TextPart:
 			parts = append(parts, openaiChatUserContent{Type: "text", Text: part.Text})
 		case schema.MediaPart:
-			m, err := openaiChatLowerMedia(part)
+			m, err := openaiChatLowerMedia(part, profile)
 			if err != nil {
 				return nil, err
 			}
@@ -264,8 +309,8 @@ func openaiChatLowerToolMessage(part schema.ToolResultPart) openaiChatMessage {
 	}
 }
 
-func openaiChatFromRequest(request *schema.LLMRequest) (any, error) {
-	messages, err := openaiChatLowerMessages(request)
+func openaiChatFromRequest(request *schema.LLMRequest, profile MediaEncodingProfile) (any, error) {
+	messages, err := openaiChatLowerMessages(request, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -274,6 +319,9 @@ func openaiChatFromRequest(request *schema.LLMRequest) (any, error) {
 		Messages:      messages,
 		Stream:        true,
 		StreamOptions: map[string]any{"include_usage": true},
+	}
+	if profile.has(InputAudioBase64) && requestHasModality(request, "audio") {
+		body.Modalities = []string{"text", "audio"}
 	}
 	if len(request.Tools) > 0 {
 		tools := make([]openaiChatTool, 0, len(request.Tools))
@@ -312,7 +360,7 @@ func openaiChatFromRequest(request *schema.LLMRequest) (any, error) {
 	return body, nil
 }
 
-func openaiChatLowerMessages(request *schema.LLMRequest) ([]openaiChatMessage, error) {
+func openaiChatLowerMessages(request *schema.LLMRequest, profile MediaEncodingProfile) ([]openaiChatMessage, error) {
 	msgs := []openaiChatMessage{}
 	if len(request.System) > 0 {
 		parts := make([]struct{ Text string }, len(request.System))
@@ -344,7 +392,7 @@ func openaiChatLowerMessages(request *schema.LLMRequest) ([]openaiChatMessage, e
 				}
 			}
 		case schema.RoleUser:
-			m, err := openaiChatLowerUserMessage(msg)
+			m, err := openaiChatLowerUserMessage(msg, profile)
 			if err != nil {
 				return nil, err
 			}
@@ -519,25 +567,50 @@ func openaiChatFinish(state any) []schema.LLMEvent {
 	return events
 }
 
-// OpenAIChatProtocol is the OpenAI Chat Completions wire protocol.
-var OpenAIChatProtocol = route.Protocol{
-	ID: openaiChatAdapter,
-	Body: route.ProtocolBody{
-		Schema: openaiChatBodySchema,
-		From:   openaiChatFromRequest,
-	},
-	Stream: route.ProtocolStream{
-		DecodeEvent: openaiChatDecodeEvent,
-		Initial: func(request *schema.LLMRequest) any {
-			return openaiChatParserState{
-				tools:     utils.ToolStreamEmpty(),
-				lifecycle: utils.LifecycleInitial(),
+// requestHasModality reports whether any message carries media of a modality.
+func requestHasModality(request *schema.LLMRequest, modality string) bool {
+	for _, msg := range request.Messages {
+		for _, part := range msg.Content {
+			if media, ok := part.(schema.MediaPart); ok && utils.MediaModality(media.MediaType) == modality {
+				return true
 			}
-		},
-		Step:   openaiChatStep,
-		OnHalt: openaiChatFinish,
-	},
+		}
+	}
+	return false
 }
+
+// openAIChatProtocolWith builds the OpenAI Chat protocol parameterized by the
+// block kinds its wire may emit. Body lowering and the registry
+// descriptor both derive from the same profile.
+func openAIChatProtocolWith(profile MediaEncodingProfile) route.Protocol {
+	return route.Protocol{
+		ID: openaiChatAdapter,
+		Body: route.ProtocolBody{
+			Schema: openaiChatBodySchema,
+			From: func(request *schema.LLMRequest) (any, error) {
+				return openaiChatFromRequest(request, profile)
+			},
+		},
+		Stream: route.ProtocolStream{
+			DecodeEvent: openaiChatDecodeEvent,
+			Initial: func(request *schema.LLMRequest) any {
+				return openaiChatParserState{
+					tools:     utils.ToolStreamEmpty(),
+					lifecycle: utils.LifecycleInitial(),
+				}
+			},
+			Step:   openaiChatStep,
+			OnHalt: openaiChatFinish,
+		},
+	}
+}
+
+// OpenAIChatProtocol is the OpenAI Chat Completions wire protocol.
+var OpenAIChatProtocol = openAIChatProtocolWith(openAIChatProfile)
+
+// OpenAICompatibleChatProtocol is the OpenAI-compatible wire protocol with the
+// vLLM video/audio extension blocks.
+var OpenAICompatibleChatProtocol = openAIChatProtocolWith(openAICompatibleProfile)
 
 // OpenAIChatHTTPRoute is the OpenAI Chat Completions route.
 var OpenAIChatHTTPRoute = route.MakeFromTransport(route.MakeTransportInput{

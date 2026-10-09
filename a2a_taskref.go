@@ -7,7 +7,7 @@ import (
 
 // Turn metadata keys recording the remote task a local session is talking to,
 // so a later turn can resume a remote task that parked at input-required. The
-// names follow the ADK interop convention (docs/DESIGN-A2A.md §4.7).
+// names follow the ADK interop convention.
 const (
 	turnMetaRemoteTask    = "a2a:task_id"
 	turnMetaRemoteContext = "a2a:context_id"

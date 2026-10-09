@@ -168,8 +168,9 @@ func InvalidRequest(message string) *schema.LLMError {
 // imageMIMEs are the image types the protocols accept.
 var imageMIMEs = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
 
-// videoMIMEs are the video types the protocols accept.
-var videoMIMEs = []string{"video/mp4", "video/webm", "video/quicktime"}
+// videoMIMEs are the video types the protocols accept. video/jpeg is vLLM's
+// client-extracted frame sequence; video/x-msvideo is AVI.
+var videoMIMEs = []string{"video/mp4", "video/webm", "video/quicktime", "video/jpeg", "video/x-msvideo"}
 
 // audioMIMEs are the audio types the protocols accept.
 var audioMIMEs = []string{"audio/wav", "audio/mp3", "audio/aiff", "audio/aac", "audio/ogg", "audio/flac"}

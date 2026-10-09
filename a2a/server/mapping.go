@@ -317,6 +317,12 @@ func errorMessage(execCtx *a2asrv.ExecutorContext, err error) *a2a.Message {
 	return a2a.NewMessageForTask(a2a.MessageRoleAgent, execCtx, a2a.NewTextPart(text))
 }
 
+// noticeMessage builds an informational agent message (for example an omitted
+// attachment), surfaced as a working status update.
+func noticeMessage(execCtx *a2asrv.ExecutorContext, text string) *a2a.Message {
+	return a2a.NewMessageForTask(a2a.MessageRoleAgent, execCtx, a2a.NewTextPart(text))
+}
+
 // sealArtifact emits the final chunk that closes a turn's streamed artifact.
 func sealArtifact(execCtx *a2asrv.ExecutorContext, artifactID a2a.ArtifactID) *a2a.TaskArtifactUpdateEvent {
 	return &a2a.TaskArtifactUpdateEvent{

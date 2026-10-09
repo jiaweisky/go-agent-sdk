@@ -47,7 +47,7 @@ func (r *runtime) runTask(ctx context.Context, input TaskRunInput) (TaskRunOutpu
 	defer r.clearSession(childID)
 
 	r.publishTaskProgress(input, childID, subagent, parent)
-	if err := r.runChildSession(ctx, childID, input.Prompt); err != nil {
+	if err := r.runChildSession(ctx, childID, input.Prompt, input.Files); err != nil {
 		return TaskRunOutput{}, err
 	}
 	text, err := r.lastAssistantText(childID)
@@ -122,9 +122,10 @@ func (r *runtime) publishTaskProgress(
 	}, nil)
 }
 
-// runChildSession admits the prompt and drains the child session's turn.
-func (r *runtime) runChildSession(ctx context.Context, childID schema.SessionID, prompt string) error {
-	if err := r.admit(childID, "", schema.Prompt{Text: prompt}, schema.SessionDeliveryQueue); err != nil {
+// runChildSession admits the prompt (and any attachments) and drains the child
+// session's turn.
+func (r *runtime) runChildSession(ctx context.Context, childID schema.SessionID, prompt string, files []schema.PromptFileAttachment) error {
+	if err := r.admit(childID, "", schema.Prompt{Text: prompt, Files: files}, schema.SessionDeliveryQueue); err != nil {
 		return err
 	}
 	runErr := r.coord.Run(ctx, childID)

@@ -28,6 +28,21 @@ func containsMode(modes []string, want string) bool {
 	return false
 }
 
+// TestBuildCardDeclaresAudioVideoModes covers the media-capability advertisement
+// added for audio/video models: the exposed agent's InputModes (derived from the
+// model) become the card's defaultInputModes.
+func TestBuildCardDeclaresAudioVideoModes(t *testing.T) {
+	info := schema.AgentInfo{ID: schema.AgentID("build"), Expose: &schema.AgentExpose{
+		InputModes: []string{"text/plain", "image/png", "audio/wav", "video/mp4"},
+	}}
+	card := buildCard(info, "", nil)
+	for _, mode := range []string{"audio/wav", "video/mp4"} {
+		if !containsMode(card.DefaultInputModes, mode) {
+			t.Fatalf("defaultInputModes = %v, want %s", card.DefaultInputModes, mode)
+		}
+	}
+}
+
 func TestBuildCardDeclaresSecurityScheme(t *testing.T) {
 	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "http://example.com/", &Security{Bearer: "s3cret"})
 	if _, ok := card.SecuritySchemes["bearer"]; !ok {

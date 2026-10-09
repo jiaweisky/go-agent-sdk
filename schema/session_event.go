@@ -11,8 +11,9 @@ type SessionEventRetryError struct {
 }
 
 var (
-	sessionEventDurable     = &EventDurable{Aggregate: "sessionID", Version: 1}
-	sessionEventStepDurable = &EventDurable{Aggregate: "sessionID", Version: 2}
+	sessionEventDurable           = &EventDurable{Aggregate: "sessionID", Version: 1}
+	sessionEventStepDurable       = &EventDurable{Aggregate: "sessionID", Version: 2}
+	sessionEventAttachmentDurable = &EventDurable{Aggregate: "sessionID", Version: 2}
 )
 
 var SessionEventAgentSwitched = Define(DefineInput{
@@ -68,9 +69,9 @@ var SessionEventPromptAdmitted = Define(DefineInput{
 // a client can perceive an omission rather than silently losing the attachment.
 var SessionEventAttachmentOmitted = Define(DefineInput{
 	Type:    "session.next.attachment.omitted",
-	Durable: sessionEventDurable,
+	Durable: sessionEventAttachmentDurable,
 	Schema: map[string]any{
-		"timestamp": nil, "sessionID": nil, "messageID": nil, "name": nil, "mime": nil,
+		"timestamp": nil, "sessionID": nil, "messageID": nil, "name": nil, "mime": nil, "reason": nil,
 	},
 })
 

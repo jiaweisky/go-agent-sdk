@@ -222,7 +222,7 @@ func resumeRequest(event client.Event, answer string) client.Request {
 }
 
 // cancelRemoteTimeout bounds the best-effort CancelTask issued when a local
-// turn is aborted (docs/DESIGN-A2A.md §6.2).
+// turn is aborted.
 const cancelRemoteTimeout = 5 * time.Second
 
 // cancelRemote asks the remote to stop a task the local turn abandoned.
@@ -433,9 +433,12 @@ func lastUserFiles(req *llmschema.LLMRequest) ([]client.FileAttachment, error) {
 			if !ok {
 				continue
 			}
-			file, err := attachmentFromMedia(media)
+			file, ok, err := attachmentFromMedia(media)
 			if err != nil {
 				return nil, err
+			}
+			if !ok {
+				continue
 			}
 			files = append(files, file)
 		}
@@ -444,11 +447,28 @@ func lastUserFiles(req *llmschema.LLMRequest) ([]client.FileAttachment, error) {
 	return nil, nil
 }
 
-// attachmentFromMedia converts a request media part into an A2A attachment.
-func attachmentFromMedia(media llmschema.MediaPart) (client.FileAttachment, error) {
+// attachmentFromMedia converts a request media part into an A2A attachment. A
+// url source becomes a URI reference; a provider file reference is not portable
+// across A2A, so it is skipped (ok=false) rather than forwarded.
+func attachmentFromMedia(media llmschema.MediaPart) (client.FileAttachment, bool, error) {
 	file := client.FileAttachment{MIME: media.MediaType}
 	if media.Filename != nil {
 		file.Name = *media.Filename
+	}
+	source := media.Source
+	if source == "" {
+		source = llmschema.MediaSourceInline
+	}
+	switch source {
+	case llmschema.MediaSourceURL:
+		url, _ := media.Data.(string)
+		if strings.TrimSpace(url) == "" {
+			return client.FileAttachment{}, false, fmt.Errorf("a2a: empty media URL")
+		}
+		file.URI = url
+		return file, true, nil
+	case llmschema.MediaSourceFile:
+		return client.FileAttachment{}, false, nil
 	}
 	switch data := media.Data.(type) {
 	case []byte:
@@ -456,13 +476,13 @@ func attachmentFromMedia(media llmschema.MediaPart) (client.FileAttachment, erro
 	case string:
 		decoded, err := decodeAttachment(data)
 		if err != nil {
-			return client.FileAttachment{}, err
+			return client.FileAttachment{}, false, err
 		}
 		file.Data = decoded
 	default:
-		return client.FileAttachment{}, fmt.Errorf("a2a: unsupported attachment data type %T", media.Data)
+		return client.FileAttachment{}, false, fmt.Errorf("a2a: unsupported attachment data type %T", media.Data)
 	}
-	return file, nil
+	return file, true, nil
 }
 
 // decodeAttachment decodes a PromptFileAttachment URI payload: a data URL or

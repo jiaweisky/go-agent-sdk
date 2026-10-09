@@ -36,6 +36,10 @@ type FileContent struct {
 	Data string
 	MIME string
 	Name *string
+	// Source is inline (default), url, or file; Data carries the base64
+	// bytes for inline, the http URL for url, or the provider reference for file.
+	Source string
+	FileID string
 }
 
 func (FileContent) toolContentTag() {}
@@ -321,11 +325,17 @@ func ToToolContent(content []Content) []schema.ToolContent {
 		case TextContent:
 			result = append(result, schema.ToolTextContent{Type: "text", Text: v.Text})
 		case FileContent:
+			uri := fmt.Sprintf("data:%s;base64,%s", v.MIME, v.Data)
+			if v.Source == "url" || v.Source == "file" {
+				uri = v.Data
+			}
 			result = append(result, schema.ToolFileContent{
-				Type: "file",
-				URI:  fmt.Sprintf("data:%s;base64,%s", v.MIME, v.Data),
-				Mime: v.MIME,
-				Name: v.Name,
+				Type:   "file",
+				URI:    uri,
+				Mime:   v.MIME,
+				Name:   v.Name,
+				Source: schema.MediaSource(v.Source),
+				FileID: v.FileID,
 			})
 		}
 	}

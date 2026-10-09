@@ -26,6 +26,9 @@ const (
 	EventToolProgress
 	// EventStepStarted reports the start of an agent step (used as a heartbeat).
 	EventStepStarted
+	// EventNotice is an informational note surfaced as a status message (for
+	// example an omitted attachment); it does not change the artifact.
+	EventNotice
 	// EventUsage reports the provider's token usage for a completed step.
 	EventUsage
 	// EventAwaitInput reports that the turn is waiting for user input

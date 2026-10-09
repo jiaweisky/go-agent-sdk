@@ -30,9 +30,15 @@ type BedrockDocumentContent struct {
 	BedrockSource BedrockSource `json:"source"`
 }
 
-// BedrockSource is a Bedrock media source carrying base64-encoded bytes.
+// BedrockSource is a Bedrock media source: base64 bytes, or an S3 location.
 type BedrockSource struct {
-	Bytes string `json:"bytes"`
+	Bytes      string             `json:"bytes,omitempty"`
+	S3Location *BedrockS3Location `json:"s3Location,omitempty"`
+}
+
+// BedrockS3Location is an S3 object reference the provider reads.
+type BedrockS3Location struct {
+	URI string `json:"uri"`
 }
 
 var imageFormats = map[string]string{
@@ -55,7 +61,7 @@ var documentFormats = map[string]string{
 	"text/markdown": "md",
 }
 
-func documentBlock(part schema.MediaPart, format, bytes string) DocumentBlock {
+func documentBlock(part schema.MediaPart, format string, source BedrockSource) DocumentBlock {
 	name := part.Filename
 	if name == nil || *name == "" {
 		s := "document." + format
@@ -65,7 +71,7 @@ func documentBlock(part schema.MediaPart, format, bytes string) DocumentBlock {
 		Document: BedrockDocumentContent{
 			Format:        format,
 			Name:          *name,
-			BedrockSource: BedrockSource{Bytes: bytes},
+			BedrockSource: source,
 		},
 	}
 }
@@ -102,7 +108,30 @@ func BedrockMediaMIMEs() []string {
 // BedrockLower converts a media part into the Bedrock block that carries it.
 func BedrockLower(part schema.MediaPart) (any, error) {
 	mime := strings.ToLower(part.MediaType)
-	if imageFormat, ok := imageFormats[mime]; ok {
+	source := part.Source
+	if source == "" {
+		source = schema.MediaSourceInline
+	}
+	imageFormat, isImage := imageFormats[mime]
+	docFormat, isDoc := documentFormats[mime]
+	if !isImage && !isDoc {
+		return nil, fmt.Errorf("Bedrock Converse does not support media type %s", part.MediaType)
+	}
+
+	// A file source is an S3 reference the provider reads.
+	if source == schema.MediaSourceFile {
+		uri, _ := part.Data.(string)
+		if strings.TrimSpace(uri) == "" {
+			return nil, fmt.Errorf("Bedrock Converse media reference is empty")
+		}
+		s3 := &BedrockS3Location{URI: uri}
+		if isImage {
+			return ImageBlock{Image: ImageContent{Format: imageFormat, BedrockSource: BedrockSource{S3Location: s3}}}, nil
+		}
+		return documentBlock(part, docFormat, BedrockSource{S3Location: s3}), nil
+	}
+
+	if isImage {
 		media, err := ValidateMedia("Bedrock Converse", part, imageMIMESet())
 		if err != nil {
 			return nil, err
@@ -114,15 +143,9 @@ func BedrockLower(part schema.MediaPart) (any, error) {
 			},
 		}, nil
 	}
-	if strings.HasPrefix(mime, "image/") {
-		return nil, fmt.Errorf("Bedrock Converse does not support image media type %s", part.MediaType)
+	media, err := ValidateMedia("Bedrock Converse", part, documentMIMESet())
+	if err != nil {
+		return nil, err
 	}
-	if docFormat, ok := documentFormats[mime]; ok {
-		media, err := ValidateMedia("Bedrock Converse", part, documentMIMESet())
-		if err != nil {
-			return nil, err
-		}
-		return documentBlock(part, docFormat, media.Base64), nil
-	}
-	return nil, fmt.Errorf("Bedrock Converse does not support media type %s", part.MediaType)
+	return documentBlock(part, docFormat, BedrockSource{Bytes: media.Base64}), nil
 }

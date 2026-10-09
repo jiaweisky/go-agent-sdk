@@ -90,7 +90,7 @@ func TestOpenAIChatLowerMessagesDropsReasoningOnlyAssistant(t *testing.T) {
 			schema.MessageUser("continue"),
 		},
 	}
-	msgs, err := openaiChatLowerMessages(request)
+	msgs, err := openaiChatLowerMessages(request, openAIChatProfile)
 	if err != nil {
 		t.Fatalf("lower: %v", err)
 	}

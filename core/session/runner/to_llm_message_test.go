@@ -106,7 +106,7 @@ func TestToLLMMessagesMapsTopLevelTypes(t *testing.T) {
 		Role: llmschema.RoleUser,
 		Content: []llmschema.ContentPart{
 			llmschema.NewTextContent("Inspect this image"),
-			llmschema.MediaPart{Type: "media", MediaType: "image/png", Data: "data:image/png;base64,aGVsbG8=", Filename: &name},
+			llmschema.MediaPart{Type: "media", MediaType: "image/png", Source: llmschema.MediaSourceInline, Data: "data:image/png;base64,aGVsbG8=", Filename: &name},
 		},
 		Metadata: map[string]any{"agents": []schema.PromptAgentAttachment{{Name: "build"}}},
 	})})
@@ -219,7 +219,7 @@ func TestToLLMMessagesReplaysToolMedia(t *testing.T) {
 			ID: "completed", Name: "read",
 			Result: llmschema.ToolResultValue{Type: "content", Value: []llmschema.ToolContent{
 				llmschema.ToolTextContent{Type: "text", Text: "Hello"},
-				llmschema.ToolFileContent{Type: "file", URI: "data:image/png;base64,aGVsbG8=", Mime: "image/png", Name: &fileName},
+				llmschema.ToolFileContent{Type: "file", URI: "data:image/png;base64,aGVsbG8=", Mime: "image/png", Name: &fileName, Source: llmschema.MediaSourceInline},
 			}},
 		}),
 	}
@@ -384,12 +384,12 @@ func TestToLLMMessagesDegradesUnsupportedMedia(t *testing.T) {
 	}
 	var omitted []omission
 	reject := mediaPolicy{
-		support: func(string, string) bool { return false },
-		omit: func(id schema.MessageID, name, mime string) {
+		reason: func(string, string, string, string) string { return string(schema.AttachmentOmitUnsupportedType) },
+		omit: func(id schema.MessageID, name, mime, _ string) {
 			omitted = append(omitted, omission{id: id, name: name, mime: mime})
 		},
 	}
-	allow := mediaPolicy{support: func(string, string) bool { return true }}
+	allow := mediaPolicy{reason: func(string, string, string, string) string { return "" }}
 
 	user := schema.SessionMessageUser{
 		ID: "msg_user", Type: "user", Text: "look",
@@ -402,7 +402,7 @@ func TestToLLMMessagesDegradesUnsupportedMedia(t *testing.T) {
 		Role: llmschema.RoleUser,
 		Content: []llmschema.ContentPart{
 			llmschema.NewTextContent("look"),
-			llmschema.NewTextContent(omittedMediaNote("shot.png", "image/png")),
+			llmschema.NewTextContent(omittedMediaNote("shot.png", "image/png", string(schema.AttachmentOmitUnsupportedType))),
 		},
 	})})
 
@@ -412,7 +412,7 @@ func TestToLLMMessagesDegradesUnsupportedMedia(t *testing.T) {
 		Role: llmschema.RoleUser,
 		Content: []llmschema.ContentPart{
 			llmschema.NewTextContent("look"),
-			llmschema.MediaPart{Type: "media", MediaType: "image/png", Data: "data:image/png;base64,aGVsbG8=", Filename: &name},
+			llmschema.MediaPart{Type: "media", MediaType: "image/png", Source: llmschema.MediaSourceInline, Data: "data:image/png;base64,aGVsbG8=", Filename: &name},
 		},
 	})})
 
@@ -430,7 +430,7 @@ func TestToLLMMessagesDegradesUnsupportedMedia(t *testing.T) {
 	got := ToLLMMessages([]schema.SessionMessage{toolMessage}, model, reject)
 	assertMessages(t, got[1:], []llmschema.Message{llmschema.MessageTool(llmschema.NewToolResultPart(llmschema.ToolResultPartInput{
 		ID: "call-1", Name: "read",
-		Result: llmschema.ToolResultValue{Type: "text", Value: omittedMediaNote("shot.png", "image/png")},
+		Result: llmschema.ToolResultValue{Type: "text", Value: omittedMediaNote("shot.png", "image/png", string(schema.AttachmentOmitUnsupportedType))},
 	}))})
 
 	want := []omission{

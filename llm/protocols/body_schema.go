@@ -33,6 +33,26 @@ var openaiChatUserContentSchema = jsonschema.Union(
 		jsonschema.Required("type", jsonschema.Literal("image_url")),
 		jsonschema.Required("image_url", jsonschema.Object(
 			jsonschema.Required("url", jsonschema.String()),
+			jsonschema.Optional("detail", jsonschema.Enum([]any{"low", "high", "original", "auto"})),
+		)),
+	),
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("input_audio")),
+		jsonschema.Required("input_audio", jsonschema.Object(
+			jsonschema.Required("data", jsonschema.String()),
+			jsonschema.Required("format", jsonschema.String()),
+		)),
+	),
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("audio_url")),
+		jsonschema.Required("audio_url", jsonschema.Object(
+			jsonschema.Required("url", jsonschema.String()),
+		)),
+	),
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("video_url")),
+		jsonschema.Required("video_url", jsonschema.Object(
+			jsonschema.Required("url", jsonschema.String()),
 		)),
 	),
 )
@@ -78,6 +98,7 @@ var openaiChatToolChoiceSchema = jsonschema.Union(
 var openaiChatBodySchema = jsonschema.Object(
 	jsonschema.Required("model", jsonschema.String()),
 	jsonschema.Required("messages", jsonschema.Array(openaiChatMessageSchema)),
+	jsonschema.Optional("modalities", jsonschema.Array(jsonschema.String())),
 	jsonschema.Optional("tools", jsonschema.Array(openaiChatToolSchema)),
 	jsonschema.Optional("tool_choice", openaiChatToolChoiceSchema),
 	jsonschema.Required("stream", jsonschema.Literal(true)),
@@ -102,9 +123,16 @@ var openaiResponsesInputTextSchema = jsonschema.Object(
 	jsonschema.Required("text", jsonschema.String()),
 )
 
-var openaiResponsesInputImageSchema = jsonschema.Object(
-	jsonschema.Required("type", jsonschema.Literal("input_image")),
-	jsonschema.Required("image_url", jsonschema.String()),
+var openaiResponsesInputImageSchema = jsonschema.Union(
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("input_image")),
+		jsonschema.Required("image_url", jsonschema.String()),
+		jsonschema.Optional("detail", jsonschema.Enum([]any{"low", "high", "original", "auto"})),
+	),
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("input_image")),
+		jsonschema.Required("file_id", jsonschema.String()),
+	),
 )
 
 var openaiResponsesInputContentSchema = jsonschema.Union(
@@ -223,13 +251,21 @@ var anthropicTextBlockSchema = jsonschema.Object(
 	jsonschema.Optional("cache_control", anthropicCacheControlSchema),
 )
 
-var anthropicImageBlockSchema = jsonschema.Object(
-	jsonschema.Required("type", jsonschema.Literal("image")),
-	jsonschema.Required("source", jsonschema.Object(
+var anthropicImageSourceSchema = jsonschema.Union(
+	jsonschema.Object(
 		jsonschema.Required("type", jsonschema.Literal("base64")),
 		jsonschema.Required("media_type", jsonschema.String()),
 		jsonschema.Required("data", jsonschema.String()),
-	)),
+	),
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("url")),
+		jsonschema.Required("url", jsonschema.String()),
+	),
+)
+
+var anthropicImageBlockSchema = jsonschema.Object(
+	jsonschema.Required("type", jsonschema.Literal("image")),
+	jsonschema.Required("source", anthropicImageSourceSchema),
 	jsonschema.Optional("cache_control", anthropicCacheControlSchema),
 )
 
@@ -351,6 +387,13 @@ var geminiInlineDataPartSchema = jsonschema.Object(
 	)),
 )
 
+var geminiFileDataPartSchema = jsonschema.Object(
+	jsonschema.Required("fileData", jsonschema.Object(
+		jsonschema.Required("mimeType", jsonschema.String()),
+		jsonschema.Required("fileUri", jsonschema.String()),
+	)),
+)
+
 var geminiFunctionCallPartSchema = jsonschema.Object(
 	jsonschema.Required("functionCall", jsonschema.Object(
 		jsonschema.Required("name", jsonschema.String()),
@@ -371,6 +414,7 @@ var geminiContentSchema = jsonschema.Object(
 	jsonschema.Required("parts", jsonschema.Array(jsonschema.Union(
 		geminiTextPartSchema,
 		geminiInlineDataPartSchema,
+		geminiFileDataPartSchema,
 		geminiFunctionCallPartSchema,
 		geminiFunctionResponsePartSchema,
 	))),
@@ -432,12 +476,18 @@ var bedrockCachePointBlockSchema = jsonschema.Object(
 	)),
 )
 
+// bedrockSourceSchema is bytes or an S3 location.
+var bedrockSourceSchema = jsonschema.Union(
+	jsonschema.Object(jsonschema.Required("bytes", jsonschema.String())),
+	jsonschema.Object(jsonschema.Required("s3Location", jsonschema.Object(
+		jsonschema.Required("uri", jsonschema.String()),
+	))),
+)
+
 var bedrockImageBlockSchema = jsonschema.Object(
 	jsonschema.Required("image", jsonschema.Object(
 		jsonschema.Required("format", jsonschema.Enum([]any{"png", "jpeg", "gif", "webp"})),
-		jsonschema.Required("source", jsonschema.Object(
-			jsonschema.Required("bytes", jsonschema.String()),
-		)),
+		jsonschema.Required("source", bedrockSourceSchema),
 	)),
 )
 
@@ -447,9 +497,7 @@ var bedrockDocumentBlockSchema = jsonschema.Object(
 			"pdf", "csv", "doc", "docx", "xls", "xlsx", "html", "txt", "md",
 		})),
 		jsonschema.Required("name", jsonschema.String()),
-		jsonschema.Required("source", jsonschema.Object(
-			jsonschema.Required("bytes", jsonschema.String()),
-		)),
+		jsonschema.Required("source", bedrockSourceSchema),
 	)),
 )
 

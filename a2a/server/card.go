@@ -19,6 +19,8 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 	var documentationURL, iconURL string
 	var provider *a2a.AgentProvider
 	var skills []a2a.AgentSkill
+	inputModes := []string{"text/plain", "application/json", "image/png", "image/jpeg", "image/gif", "image/webp"}
+	outputModes := []string{"text/plain", "application/json"}
 	if info.Expose != nil {
 		expose := info.Expose
 		if expose.Name != "" {
@@ -34,6 +36,12 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 		iconURL = expose.IconURL
 		if expose.Provider != nil {
 			provider = &a2a.AgentProvider{Org: expose.Provider.Organization, URL: expose.Provider.URL}
+		}
+		if len(expose.InputModes) > 0 {
+			inputModes = expose.InputModes
+		}
+		if len(expose.OutputModes) > 0 {
+			outputModes = expose.OutputModes
 		}
 		skills = cardSkills(expose.Skills)
 	}
@@ -52,8 +60,8 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 		},
 		// Input: text prompts, structured data parts, and the image types the read
 		// tool can ingest. Output: assistant text and structured (data) parts.
-		DefaultInputModes:  []string{"text/plain", "application/json", "image/png", "image/jpeg", "image/gif", "image/webp"},
-		DefaultOutputModes: []string{"text/plain", "application/json"},
+		DefaultInputModes:  inputModes,
+		DefaultOutputModes: outputModes,
 		Skills:             skills,
 	}
 	if endpoint != "" {

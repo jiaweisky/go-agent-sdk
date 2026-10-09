@@ -10,7 +10,7 @@ import (
 // endpoint.
 var OpenAICompatibleChatHTTPRoute = route.MakeFromTransport(route.MakeTransportInput{
 	ID:        "openai-compatible-chat",
-	Protocol:  OpenAIChatProtocol,
+	Protocol:  OpenAICompatibleChatProtocol,
 	Endpoint:  route.NewStaticPath(OpenAIChatPath),
 	Transport: transport.SSEJson(),
 })

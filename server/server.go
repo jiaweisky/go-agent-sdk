@@ -27,6 +27,13 @@ type Options struct {
 	// Agents is the allow-list of agent names the API may create/use. Empty
 	// allows every registered agent.
 	Agents []string
+	// Models is the catalog exposed by GET /api/model, so a client can discover
+	// the models and their media capabilities. Nil lists nothing.
+	Models []schema.ModelInfo
+	// MediaUploader resolves a provider's uploader for POST
+	// /api/session/{id}/file, letting HTTP callers obtain a file reference
+	// Nil disables the endpoint.
+	MediaUploader func(providerID schema.ProviderID) schema.MediaUploader
 	// CORS adds browser origins to the default allow-list.
 	CORS []string
 	// InboundPermissions is applied to sessions created through the API, merged
@@ -153,6 +160,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/agent", s.handleAgentList)
+	mux.HandleFunc("GET /api/model", s.handleModelList)
 	mux.HandleFunc("GET /api/skill", s.handleSkillList)
 	mux.HandleFunc("GET /api/tool", s.handleToolList)
 
@@ -165,6 +173,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/session/{sessionID}/model", s.handleSessionSetModel)
 	mux.HandleFunc("POST /api/session/{sessionID}/title", s.handleSessionSetTitle)
 	mux.HandleFunc("POST /api/session/{sessionID}/prompt", s.handleSessionPrompt)
+	mux.HandleFunc("POST /api/session/{sessionID}/file", s.handleSessionFile)
 	mux.HandleFunc("POST /api/session/{sessionID}/interrupt", s.handleSessionInterrupt)
 	mux.HandleFunc("POST /api/session/{sessionID}/compact", s.handleSessionCompact)
 	mux.HandleFunc("POST /api/session/{sessionID}/wait", s.handleSessionWait)

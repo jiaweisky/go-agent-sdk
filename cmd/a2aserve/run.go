@@ -22,16 +22,23 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 
+	catalog, err := cfg.modelCatalog()
+	if err != nil {
+		return err
+	}
+	model := cfg.Model
+	if model == "" {
+		model = catalog.DefaultID()
+	}
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Root:             cfg.Root,
 		WorkingDirectory: cfg.WorkingDirectory,
 		ConfigDirs:       cfg.ConfigDirs,
-		Model:            cfg.Model,
+		Model:            model,
 		Protocol:         schema.ProtocolID(cfg.Protocol),
-		ModelInfo:        serveconfig.ModelInfoProvider(cfg.Protocol, cfg.ModelBaseURL, cfg.Credentials.AWS, cfg.InputModalities),
-		Credentials:      serveconfig.CredentialProvider(cfg.Credentials),
-		ContextLimit:     cfg.ContextLimit,
-		OutputLimit:      cfg.OutputLimit,
+		ModelInfo:        catalog.ModelInfo,
+		Credentials:      catalog.Credentials,
+		MediaUploader:    cfg.mediaUploader(),
 		DropErroredTurns: cfg.DropErroredTurns,
 	})
 	if err != nil {
@@ -39,7 +46,11 @@ func run(ctx context.Context, cfg config) error {
 	}
 	defer client.Close()
 
-	agents, err := exposeAgents(client, cfg.Agents, cfg.Cards)
+	models, err := cfg.modelInfos()
+	if err != nil {
+		return err
+	}
+	agents, err := exposeAgents(client, cfg.Agents, cfg.Cards, modelModes(models), cfg.Model)
 	if err != nil {
 		return err
 	}
@@ -47,6 +58,9 @@ func run(ctx context.Context, cfg config) error {
 	factoryOptions := []agent.A2AFactoryOption{}
 	if permissions := serveconfig.PermissionRuleset(cfg.InboundPermissions); len(permissions) > 0 {
 		factoryOptions = append(factoryOptions, agent.WithInboundPermissions(permissions))
+	}
+	if cfg.InboundMedia != "" {
+		factoryOptions = append(factoryOptions, agent.WithInboundMedia(cfg.InboundMedia))
 	}
 	var security *server.Security
 	if cfg.Auth != nil {
@@ -76,10 +90,11 @@ func run(ctx context.Context, cfg config) error {
 // exposeAgents marks each named existing agent exposed and returns its info.
 // cards optionally overrides an agent's card; every skill id is validated
 // against the agent's real capabilities.
-func exposeAgents(client *agent.Client, names []string, cards map[string]cardConfig) ([]schema.AgentInfo, error) {
+func exposeAgents(client *agent.Client, names []string, cards map[string]cardConfig, modes map[string][]string, defaultModel string) ([]schema.AgentInfo, error) {
 	exposed := make([]schema.AgentInfo, 0, len(names))
 	for _, name := range names {
-		if info := client.Agents().Get(schema.AgentID(name)); info == nil {
+		info := client.Agents().Get(schema.AgentID(name))
+		if info == nil {
 			return nil, fmt.Errorf("unknown agent %q", name)
 		}
 		expose := &schema.AgentExpose{}
@@ -89,12 +104,54 @@ func exposeAgents(client *agent.Client, names []string, cards map[string]cardCon
 			}
 			applyCard(expose, override)
 		}
+		// Advertise the agent's model media modes on the card when the
+		// card config did not set them.
+		if len(expose.InputModes) == 0 {
+			modelID := defaultModel
+			if info.Model != nil {
+				modelID = string(info.Model.ID)
+			}
+			if agentModes := modes[modelID]; len(agentModes) > 0 {
+				expose.InputModes = agentModes
+			}
+		}
 		if err := client.RegisterAgent(name, agent.AgentConfig{Expose: expose}); err != nil {
 			return nil, fmt.Errorf("expose agent %q: %w", name, err)
 		}
 		exposed = append(exposed, *client.Agents().Get(schema.AgentID(name)))
 	}
 	return exposed, nil
+}
+
+// modelModes maps each catalog model id to the A2A input MIME modes its
+// modalities imply.
+func modelModes(models []schema.ModelInfo) map[string][]string {
+	out := make(map[string][]string, len(models))
+	for _, model := range models {
+		out[string(model.ID)] = modalityMIMEs(model.Capabilities.Input)
+	}
+	return out
+}
+
+// modalityMIMEs maps declared modalities to A2A input MIME modes.
+func modalityMIMEs(modalities []string) []string {
+	if len(modalities) == 0 {
+		return nil
+	}
+	modes := []string{"text/plain", "application/json"}
+	for _, modality := range modalities {
+		switch modality {
+		case "image":
+			modes = append(modes, "image/png", "image/jpeg", "image/gif", "image/webp")
+		case "audio":
+			modes = append(modes, "audio/wav", "audio/mp3")
+		case "video":
+			modes = append(modes, "video/mp4", "video/webm", "video/quicktime")
+		case "pdf":
+			modes = append(modes, "application/pdf")
+		}
+	}
+	return modes
 }
 
 // applyCard copies a card override into an AgentExpose.

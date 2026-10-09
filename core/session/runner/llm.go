@@ -2,10 +2,14 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"iter"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,11 +70,28 @@ type ToolRegistry interface {
 // default LLM client.
 type BackendSelector func(info *schema.AgentInfo) route.LLMClient
 
+// mediaUploadCache deduplicates uploads by content hash. It is FIFO-bounded so
+// a long-lived runner does not grow without limit.
+type mediaUploadCache struct {
+	mu    sync.Mutex
+	index map[string]schema.MediaRef
+	order []string
+}
+
+// maxMediaCacheEntries bounds the upload dedup cache.
+const maxMediaCacheEntries = 512
+
 // LLMRunner runs one durable coding-agent session until it settles.
 type LLMRunner struct {
-	Events            RunnerEvents
-	LLM               route.LLMClient
-	Backends          BackendSelector
+	Events   RunnerEvents
+	LLM      route.LLMClient
+	Backends BackendSelector
+	// MediaUploader resolves a provider's media uploader for inline→file
+	// adaptation. Nil disables adaptation.
+	MediaUploader func(providerID schema.ProviderID) schema.MediaUploader
+	// OnMediaDecision reports each omit/upload for host metrics. Nil reports
+	// nothing.
+	OnMediaDecision   func(schema.MediaDecision)
 	Agents            AgentSelector
 	Tools             ToolRegistry
 	Models            ModelResolver
@@ -97,6 +118,7 @@ type LLMRunner struct {
 	compaction *session.Compaction
 	turns      *session.TurnStore
 	tracker    *turnTracker
+	media      *mediaUploadCache
 	omissions  *omissionTracker
 }
 
@@ -156,6 +178,7 @@ func NewLLMRunner(runner LLMRunner) *LLMRunner {
 	})
 	result.tracker = newTurnTracker()
 	result.omissions = &omissionTracker{seen: map[string]struct{}{}}
+	result.media = &mediaUploadCache{}
 	if runner.DB != nil {
 		result.turns = session.NewTurnStore(runner.DB)
 	}
@@ -804,6 +827,7 @@ func (r *LLMRunner) prepareTurnAttempt(
 	if r.DropErroredTurns {
 		contextMessages = dropErroredTurns(contextMessages)
 	}
+	contextMessages = r.adaptMedia(ctx, sessionID, model, contextMessages)
 	policy := r.turnMediaPolicy(model, agent, sessionID)
 	request := buildTurnRequest(
 		sessionID,
@@ -1046,8 +1070,8 @@ func (r *LLMRunner) turnMediaPolicy(
 	sessionID schema.SessionID,
 ) mediaPolicy {
 	policy := mediaPolicyForModel(model, agent)
-	policy.omit = func(messageID schema.MessageID, name, mime string) {
-		r.publishOmittedAttachment(sessionID, messageID, name, mime)
+	policy.omit = func(messageID schema.MessageID, name, mime, reason string) {
+		r.publishOmittedAttachment(sessionID, messageID, name, mime, reason)
 	}
 	return policy
 }
@@ -1058,19 +1082,29 @@ func (r *LLMRunner) turnMediaPolicy(
 func (r *LLMRunner) publishOmittedAttachment(
 	sessionID schema.SessionID,
 	messageID schema.MessageID,
-	name, mime string,
+	name, mime, reason string,
 ) {
 	key := string(messageID) + "\x00" + name + "\x00" + mime
 	if !r.omissions.markOnce(key) {
 		return
 	}
-	if _, err := r.Events.Publish(schema.SessionEventAttachmentOmitted, map[string]any{
+	if r.OnMediaDecision != nil {
+		r.OnMediaDecision(schema.MediaDecision{
+			SessionID: string(sessionID), MessageID: string(messageID),
+			Name: name, MIME: mime, Action: "omit", Reason: reason,
+		})
+	}
+	payload := map[string]any{
 		"sessionID": sessionID,
 		"messageID": string(messageID),
 		"name":      name,
 		"mime":      mime,
 		"timestamp": time.Now().UnixMilli(),
-	}); err != nil {
+	}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	if _, err := r.Events.Publish(schema.SessionEventAttachmentOmitted, payload); err != nil {
 		r.reportError(err)
 	}
 }
@@ -1084,23 +1118,239 @@ func mediaPolicyForModel(model route.Model, agent core.AgentSelection) mediaPoli
 	if info := agent.Info; info != nil && info.Backend != nil && info.Backend.Type == schema.AgentBackendA2A {
 		return mediaPolicy{}
 	}
-	protocol := model.Route.Protocol
-	entry, ok := protocols.LookupProtocol(protocol)
+	// The registry is keyed by route id; openai-chat and openai-compatible-chat
+	// share a protocol id, so the route id is what selects the right descriptor.
+	entry, ok := protocols.LookupProtocol(llmschema.ProtocolID(model.Route.ID))
 	if !ok {
 		return mediaPolicy{}
 	}
 	var input []string
+	var sources []llmschema.MediaSource
 	if caps := model.GetCapabilities(); caps != nil {
 		input = caps.Input
+		sources = caps.Sources
 	}
-	routeName := string(protocol)
-	return mediaPolicy{support: func(mime, data string) bool {
-		if !protocols.MediaAllowed(protocol, input, mime) {
-			return false
+	routeName := model.Route.ID
+	return mediaPolicy{reason: func(role, mime, source, data string) string {
+		src := llmschema.MediaSource(source)
+		if reason := mediaFeasibilityReason(entry.Media, input, sources, role, mime, src); reason != "" {
+			return reason
 		}
-		_, err := utils.ValidateMedia(routeName, llmschema.MediaPart{Type: "media", MediaType: mime, Data: data}, entry.MediaMIMEs)
-		return err == nil
+		if src == llmschema.MediaSourceInline {
+			if _, err := utils.ValidateMedia(routeName, llmschema.MediaPart{Type: "media", MediaType: mime, Data: data}, entry.Media.MIMEs); err != nil {
+				return string(schema.AttachmentOmitInvalidPayload)
+			}
+		}
+		return ""
 	}}
+}
+
+// mediaFeasibilityReason returns why a protocol descriptor plus a model's
+// declared capabilities cannot carry a media part from a source in a role, or ""
+// when it can. It checks MIME support, the model's modality and source
+// constraints, and the protocol's role constraint, but not the payload. It is
+// the single feasibility predicate shared by the turn planner and the
+// inline-to-file adaptation loop.
+func mediaFeasibilityReason(support protocols.ProtocolMediaSupport, modelInput []string, modelSources []llmschema.MediaSource, role, mime string, source llmschema.MediaSource) string {
+	lower := strings.ToLower(mime)
+	if !support.AllowsMIME(lower) {
+		return string(schema.AttachmentOmitUnsupportedType)
+	}
+	if len(modelInput) > 0 && !slices.Contains(modelInput, utils.MediaModality(lower)) {
+		return string(schema.AttachmentOmitUnsupportedModality)
+	}
+	if !support.AllowsSource(source) {
+		return string(schema.AttachmentOmitUnsupportedSource)
+	}
+	if len(modelSources) > 0 && !slices.Contains(modelSources, source) {
+		return string(schema.AttachmentOmitUnsupportedSource)
+	}
+	if !support.AllowsRole(role) {
+		return string(schema.AttachmentOmitUnsupportedRole)
+	}
+	return ""
+}
+
+// adaptMedia rewrites inline attachments to provider file references when the
+// target model/protocol cannot carry them inline but can carry a file reference,
+// using the host MediaUploader. Best-effort: on any error the part is left
+// unchanged and the planner omits it.
+func (r *LLMRunner) adaptMedia(ctx context.Context, sessionID schema.SessionID, model route.Model, messages []schema.SessionMessage) []schema.SessionMessage {
+	if r.MediaUploader == nil {
+		return messages
+	}
+	entry, ok := protocols.LookupProtocol(llmschema.ProtocolID(model.Route.ID))
+	if !ok {
+		return messages
+	}
+	provider := schema.ProviderID(model.ProviderID())
+	uploader := r.MediaUploader(provider)
+	if uploader == nil {
+		return messages
+	}
+	var input []string
+	var sources []llmschema.MediaSource
+	if caps := model.GetCapabilities(); caps != nil {
+		input = caps.Input
+		sources = caps.Sources
+	}
+	adapter := mediaAdapter{runner: r, entry: entry, provider: provider, input: input, sources: sources, uploader: uploader}
+	for i := range messages {
+		if user, ok := messages[i].(schema.SessionMessageUser); ok && len(user.Files) > 0 {
+			messages[i] = adapter.adaptUserMessage(ctx, sessionID, user)
+		}
+	}
+	return messages
+}
+
+// mediaAdapter carries the per-turn invariants the inline-to-file adaptation
+// needs, so each attachment is handled without re-deriving them.
+type mediaAdapter struct {
+	runner   *LLMRunner
+	entry    protocols.ProtocolEntry
+	provider schema.ProviderID
+	input    []string
+	sources  []llmschema.MediaSource
+	uploader schema.MediaUploader
+}
+
+// adaptUserMessage rewrites a user message's inline attachments to file
+// references where needed and persists the result, so a rebuilt turn or a
+// restart reuses it instead of re-uploading.
+func (a mediaAdapter) adaptUserMessage(ctx context.Context, sessionID schema.SessionID, user schema.SessionMessageUser) schema.SessionMessageUser {
+	files := make([]schema.PromptFileAttachment, len(user.Files))
+	copy(files, user.Files)
+	changed := false
+	for i := range files {
+		adapted := a.adapt(ctx, sessionID, files[i])
+		if adapted.FileID != files[i].FileID || adapted.MediaSource != files[i].MediaSource || adapted.URI != files[i].URI {
+			changed = true
+		}
+		files[i] = adapted
+	}
+	if !changed {
+		return user
+	}
+	user.Files = files
+	if err := session.PersistMessage(a.runner.DB, sessionID, user); err != nil {
+		a.runner.reportError(err)
+	}
+	return user
+}
+
+// adapt uploads an infeasible inline attachment and rewrites it as a file
+// reference, or returns it unchanged. Uploads are deduplicated by content hash;
+// a cached ref is reused until it expires.
+func (a mediaAdapter) adapt(ctx context.Context, sessionID schema.SessionID, file schema.PromptFileAttachment) schema.PromptFileAttachment {
+	source := attachmentSource(file.MediaSource, file.URI, file.FileID)
+	if source != llmschema.MediaSourceInline {
+		return file
+	}
+	if mediaFeasibilityReason(a.entry.Media, a.input, a.sources, "user", file.Mime, source) == "" {
+		return file
+	}
+	if mediaFeasibilityReason(a.entry.Media, a.input, a.sources, "user", file.Mime, llmschema.MediaSourceFile) != "" {
+		return file
+	}
+	data, err := inlineBytes(file.URI)
+	if err != nil {
+		return file
+	}
+	key := mediaCacheKey(a.provider, file.Mime, data)
+	if ref, ok := a.runner.cachedUpload(key); ok {
+		return fileWithRef(file, ref)
+	}
+	ref, err := a.uploader.Upload(ctx, schema.MediaUpload{Mime: file.Mime, Name: file.Name, Data: data})
+	if err != nil {
+		a.runner.reportError(err)
+		return file
+	}
+	a.runner.storeUpload(key, ref)
+	if a.runner.OnMediaDecision != nil {
+		name := ""
+		if file.Name != nil {
+			name = *file.Name
+		}
+		a.runner.OnMediaDecision(schema.MediaDecision{
+			SessionID: string(sessionID), Name: name, MIME: file.Mime, Action: "upload",
+		})
+	}
+	return fileWithRef(file, ref)
+}
+
+// fileWithRef rewrites an inline attachment to reference an uploaded file. The
+// resolved source comes from the returned MediaRef (a provider may return a file
+// id or a URI); an empty source defaults to "file".
+func fileWithRef(file schema.PromptFileAttachment, ref schema.MediaRef) schema.PromptFileAttachment {
+	source := ref.Source
+	if source == "" {
+		source = string(llmschema.MediaSourceFile)
+	}
+	file.MediaSource = source
+	file.URI = ""
+	file.FileID = ref.ID
+	if source == string(llmschema.MediaSourceURL) {
+		file.URI = ref.ID
+		file.FileID = ""
+	}
+	return file
+}
+
+// cachedUpload returns a cached, unexpired upload for a content key.
+func (r *LLMRunner) cachedUpload(key string) (schema.MediaRef, bool) {
+	if r.media == nil {
+		return schema.MediaRef{}, false
+	}
+	r.media.mu.Lock()
+	defer r.media.mu.Unlock()
+	ref, ok := r.media.index[key]
+	if !ok {
+		return schema.MediaRef{}, false
+	}
+	if ref.ExpiresAt != nil && ref.ExpiresAt.Before(time.Now()) {
+		delete(r.media.index, key)
+		return schema.MediaRef{}, false
+	}
+	return ref, true
+}
+
+func (r *LLMRunner) storeUpload(key string, ref schema.MediaRef) {
+	if r.media == nil {
+		r.media = &mediaUploadCache{}
+	}
+	r.media.mu.Lock()
+	defer r.media.mu.Unlock()
+	if r.media.index == nil {
+		r.media.index = map[string]schema.MediaRef{}
+	}
+	if _, exists := r.media.index[key]; !exists {
+		r.media.order = append(r.media.order, key)
+	}
+	r.media.index[key] = ref
+	// FIFO-evict the oldest entries once the cap is exceeded.
+	for len(r.media.order) > maxMediaCacheEntries {
+		oldest := r.media.order[0]
+		r.media.order = r.media.order[1:]
+		delete(r.media.index, oldest)
+	}
+}
+
+// mediaCacheKey keys an upload by provider and content hash.
+func mediaCacheKey(provider schema.ProviderID, mime string, data []byte) string {
+	sum := sha256.Sum256(append([]byte(mime+"\x00"), data...))
+	return string(provider) + "\x00" + hex.EncodeToString(sum[:])
+}
+
+// inlineBytes decodes an inline payload: a data URL or a bare base64 string.
+func inlineBytes(uri string) ([]byte, error) {
+	if strings.HasPrefix(uri, "data:") {
+		i := strings.Index(uri, ",")
+		if i < 0 {
+			return nil, fmt.Errorf("invalid data URL")
+		}
+		uri = uri[i+1:]
+	}
+	return base64.StdEncoding.DecodeString(uri)
 }
 
 // sessionHeaders carries the per-session routing headers every provider request

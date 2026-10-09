@@ -239,6 +239,96 @@ func TestRead_Image(t *testing.T) {
 	}
 }
 
+func TestRead_Audio(t *testing.T) {
+	root := t.TempDir()
+	wav := append([]byte("RIFF"), make([]byte, 64)...)
+	if err := os.WriteFile(filepath.Join(root, "clip.wav"), wav, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := settleRead(t, newReadDeps(root), map[string]any{"path": "clip.wav"})
+	if result.Result.Type != "content" {
+		t.Fatalf("expected content result, got %q (%v)", result.Result.Type, result.Result.Value)
+	}
+	content, ok := result.Result.Value.([]schema.ToolContent)
+	if !ok || len(content) != 2 {
+		t.Fatalf("expected 2 content parts, got %T %v", result.Result.Value, result.Result.Value)
+	}
+	if text, ok := content[0].(schema.ToolTextContent); !ok || text.Text != "Media read successfully" {
+		t.Fatalf("unexpected text part: %#v", content[0])
+	}
+	file, ok := content[1].(schema.ToolFileContent)
+	if !ok {
+		t.Fatalf("expected file part, got %T", content[1])
+	}
+	if file.Mime != "audio/wav" {
+		t.Fatalf("unexpected mime: %s", file.Mime)
+	}
+	if !strings.HasPrefix(file.URI, "data:audio/wav;base64,") {
+		t.Fatalf("unexpected uri: %s", file.URI)
+	}
+}
+
+func TestRead_Video(t *testing.T) {
+	root := t.TempDir()
+	mp4 := append([]byte("\x00\x00\x00\x18ftypmp42"), bytes.Repeat([]byte("x"), 64)...)
+	if err := os.WriteFile(filepath.Join(root, "clip.mp4"), mp4, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := settleRead(t, newReadDeps(root), map[string]any{"path": "clip.mp4"})
+	if result.Result.Type != "content" {
+		t.Fatalf("expected content result, got %q (%v)", result.Result.Type, result.Result.Value)
+	}
+	content, ok := result.Result.Value.([]schema.ToolContent)
+	if !ok || len(content) != 2 {
+		t.Fatalf("expected 2 content parts, got %T %v", result.Result.Value, result.Result.Value)
+	}
+	if text, ok := content[0].(schema.ToolTextContent); !ok || text.Text != "Media read successfully" {
+		t.Fatalf("unexpected text part: %#v", content[0])
+	}
+	file, ok := content[1].(schema.ToolFileContent)
+	if !ok {
+		t.Fatalf("expected file part, got %T", content[1])
+	}
+	if file.Mime != "video/mp4" {
+		t.Fatalf("unexpected mime: %s", file.Mime)
+	}
+	if !strings.HasPrefix(file.URI, "data:video/mp4;base64,") {
+		t.Fatalf("unexpected uri: %s", file.URI)
+	}
+}
+
+func TestRead_PDF(t *testing.T) {
+	root := t.TempDir()
+	pdf := append([]byte("%PDF-1.4\n"), bytes.Repeat([]byte("x"), 64)...)
+	if err := os.WriteFile(filepath.Join(root, "doc.pdf"), pdf, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := settleRead(t, newReadDeps(root), map[string]any{"path": "doc.pdf"})
+	if result.Result.Type != "content" {
+		t.Fatalf("expected content result, got %q (%v)", result.Result.Type, result.Result.Value)
+	}
+	content, ok := result.Result.Value.([]schema.ToolContent)
+	if !ok || len(content) != 2 {
+		t.Fatalf("expected 2 content parts, got %T %v", result.Result.Value, result.Result.Value)
+	}
+	if text, ok := content[0].(schema.ToolTextContent); !ok || text.Text != "Media read successfully" {
+		t.Fatalf("unexpected text part: %#v", content[0])
+	}
+	file, ok := content[1].(schema.ToolFileContent)
+	if !ok {
+		t.Fatalf("expected file part, got %T", content[1])
+	}
+	if file.Mime != "application/pdf" {
+		t.Fatalf("unexpected mime: %s", file.Mime)
+	}
+	if !strings.HasPrefix(file.URI, "data:application/pdf;base64,") {
+		t.Fatalf("unexpected uri: %s", file.URI)
+	}
+}
+
 func TestRead_StripsUtf8Bom(t *testing.T) {
 	root := t.TempDir()
 	content := append([]byte{0xef, 0xbb, 0xbf}, []byte("hello")...)

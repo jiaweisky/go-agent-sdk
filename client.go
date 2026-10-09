@@ -63,6 +63,11 @@ type ClientOptions struct {
 	// Credentials supplies the provider secret used to authenticate requests.
 	// The protocol decides how it is applied, so callers supply only the secret.
 	Credentials CredentialProvider
+	// MediaUploader resolves a provider's media uploader, used to adapt an inline
+	// attachment to a provider file reference when the target model/protocol
+	// cannot carry it inline. Nil disables adaptation; the SDK never
+	// owns credentials or storage, so the host implements the upload.
+	MediaUploader func(providerID schema.ProviderID) schema.MediaUploader
 	// LLM overrides the default LLM client (route.LLMClient). When nil, a client
 	// is built from ModelInfo/Protocol over the default HTTP transport.
 	LLM route.LLMClient
@@ -88,6 +93,9 @@ type ClientOptions struct {
 	// OnError reports background errors that do not fail a turn: turn
 	// bookkeeping and event-listener panics. Nil ignores them.
 	OnError func(error)
+	// OnMediaDecision reports each media omit/upload for host metrics.
+	// Nil reports nothing.
+	OnMediaDecision func(schema.MediaDecision)
 	// SubagentDepth limits nested subagent (task) recursion. Defaults to 1.
 	SubagentDepth int
 	// Shell overrides the shell used by the bash tool. Empty uses the platform

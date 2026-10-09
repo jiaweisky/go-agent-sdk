@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"iter"
 	"os"
@@ -24,8 +25,9 @@ func (c *Client) TurnStore() *coresession.TurnStore {
 // a2aFactory adapts a Client to the A2A server's session surface. It binds the
 // inbound permissions every externally triggered session runs under.
 type a2aFactory struct {
-	client      *Client
-	permissions schema.PermissionRuleset
+	client       *Client
+	permissions  schema.PermissionRuleset
+	inboundMedia string
 }
 
 // A2AInboundConfig configures how an A2A server drives sessions.
@@ -33,6 +35,10 @@ type A2AInboundConfig struct {
 	// Permissions is the ruleset applied to sessions created by inbound A2A
 	// calls.
 	Permissions schema.PermissionRuleset
+	// InboundMedia is "spool" (default) or "inline". With "inline", known media
+	// parts with bytes become native media on the turn; otherwise they are
+	// written into the workspace and referenced by path.
+	InboundMedia string
 }
 
 // A2AFactoryOption customizes NewA2AFactory.
@@ -44,9 +50,16 @@ func WithInboundPermissions(rules schema.PermissionRuleset) A2AFactoryOption {
 	return func(config *A2AInboundConfig) { config.Permissions = rules }
 }
 
+// WithInboundMedia selects how inbound A2A media is delivered: "spool" (default)
+// writes files into the workspace; "inline" delivers known media as native parts
+// when the target model accepts the modality.
+func WithInboundMedia(mode string) A2AFactoryOption {
+	return func(config *A2AInboundConfig) { config.InboundMedia = mode }
+}
+
 // DefaultInboundPermissions is the deny-by-default ruleset for externally
 // triggered sessions. A remote caller must not gain shell or file mutation
-// power implicitly; hosts widen this explicitly (see docs/DESIGN-A2A.md §5.5).
+// power implicitly; hosts widen this explicitly.
 func DefaultInboundPermissions() schema.PermissionRuleset {
 	deny := schema.PermissionEffectDeny
 	return schema.PermissionRuleset{
@@ -67,12 +80,12 @@ func DefaultInboundPermissions() schema.PermissionRuleset {
 // WithInboundPermissions: the client's own permission handler (which may be
 // ApproveAll) does NOT grant a remote caller shell or file mutation power.
 func NewA2AFactory(client *Client, opts ...A2AFactoryOption) server.Factory {
-	config := A2AInboundConfig{Permissions: DefaultInboundPermissions()}
+	config := A2AInboundConfig{Permissions: DefaultInboundPermissions(), InboundMedia: "spool"}
 	for _, opt := range opts {
 		opt(&config)
 	}
 	client.HoldInteractions(true)
-	return &a2aFactory{client: client, permissions: config.Permissions}
+	return &a2aFactory{client: client, permissions: config.Permissions, inboundMedia: config.InboundMedia}
 }
 
 // CreateSession implements server.Factory. The SDK client is bound to one
@@ -88,7 +101,7 @@ func (f *a2aFactory) CreateSession(ctx context.Context, req server.SessionReques
 		return nil, err
 	}
 	f.client.rt.markInbound(schema.SessionID(session.ID()))
-	return &a2aSession{session: session, turns: map[string]*a2aTurn{}}, nil
+	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia}, nil
 }
 
 // ResumeSession implements server.Factory. The inbound/workspace ruleset is
@@ -114,7 +127,7 @@ func (f *a2aFactory) ResumeSession(
 		return nil, err
 	}
 	f.client.rt.markInbound(schema.SessionID(session.ID()))
-	return &a2aSession{session: session, turns: map[string]*a2aTurn{}}, nil
+	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia}, nil
 }
 
 // mergePermissionRules appends the overlay rules not already present in base, so
@@ -166,6 +179,9 @@ func (f *a2aFactory) permissionsFor(workspace server.Workspace) schema.Permissio
 type a2aSession struct {
 	session *Session
 
+	// inboundMedia is "spool" or "inline".
+	inboundMedia string
+
 	mu    sync.Mutex
 	turns map[string]*a2aTurn
 }
@@ -187,7 +203,7 @@ func (s *a2aSession) OnTurnEnd(turnID string, fn func()) {
 }
 
 func (s *a2aSession) Send(ctx context.Context, turnID string, req server.SendRequest) iter.Seq2[server.Event, error] {
-	prompt, err := s.materialize(turnID, req)
+	prompt, files, err := s.materialize(turnID, req)
 	if err != nil {
 		// No channel was opened; still drop the turn and run its callbacks so
 		// the session is released.
@@ -210,7 +226,7 @@ func (s *a2aSession) Send(ctx context.Context, turnID string, req server.SendReq
 	turnCtx := context.WithoutCancel(ctx)
 	go func() {
 		defer s.endTurn(turnID, turn, true)
-		for event, err := range s.session.Send(turnCtx, MessageOptions{Prompt: prompt}) {
+		for event, err := range s.session.Send(turnCtx, MessageOptions{Prompt: prompt, Files: files}) {
 			mapped, ok := a2aEventFrom(event)
 			if ok && err == nil {
 				ch <- mapped
@@ -242,37 +258,75 @@ func (s *a2aSession) endTurn(turnID string, turn *a2aTurn, closeChannel bool) {
 	}
 }
 
-// materialize writes raw inbound attachments into the workspace and appends
-// their paths to the prompt, so the agent's tools can read them by path; URL
-// attachments are referenced (not fetched).
-func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string, error) {
+// materialize prepares inbound attachments. In "spool" mode (default) raw
+// attachments are written into the workspace and referenced by path, so the
+// agent's tools can read them; URL attachments are referenced (not fetched). In
+// "inline" mode known media with bytes become native media parts and URL parts
+// become url-source parts, so the target model's planner decides whether they
+// are carried.
+func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string, []schema.PromptFileAttachment, error) {
 	if len(req.Files) == 0 {
-		return req.Prompt, nil
+		return req.Prompt, nil, nil
 	}
+	inline := s.inboundMedia == "inline"
 	root := filepath.Join(string(s.session.client.rt.location.Directory), ".a2a")
 	dir := filepath.Join(root, "attachments", turnID)
+	var files []schema.PromptFileAttachment
 	var builder strings.Builder
 	builder.WriteString(req.Prompt)
 	builder.WriteString("\n\n[attachments]")
 	for _, file := range req.Files {
-		switch {
-		case len(file.Data) > 0:
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				return "", fmt.Errorf("write attachment: %w", err)
-			}
-			if err := ensureA2AIgnore(root); err != nil {
-				return "", fmt.Errorf("write attachment: %w", err)
-			}
-			path := filepath.Join(dir, filepath.Base(file.Name))
-			if err := os.WriteFile(path, file.Data, 0o644); err != nil {
-				return "", fmt.Errorf("write attachment: %w", err)
-			}
-			fmt.Fprintf(&builder, "\n- %s", path)
-		case file.URI != "":
-			fmt.Fprintf(&builder, "\n- %s", file.URI)
+		attachment, note, err := materializeA2AFile(root, dir, inline, file)
+		if err != nil {
+			return "", nil, err
+		}
+		if attachment != nil {
+			files = append(files, *attachment)
+		}
+		if note != "" {
+			fmt.Fprintf(&builder, "\n- %s", note)
 		}
 	}
-	return builder.String(), nil
+	return builder.String(), files, nil
+}
+
+// materializeA2AFile prepares one inbound A2A file. In inline mode, known media
+// with bytes become a native attachment and a URL with a MIME becomes a
+// url-source attachment; otherwise raw bytes are written into dir and referenced
+// by path. It returns the native attachment (nil when none applies) and the
+// prompt note describing the file.
+func materializeA2AFile(root, dir string, inline bool, file server.File) (*schema.PromptFileAttachment, string, error) {
+	name := file.Name
+	if name == "" {
+		name = file.MIME
+	}
+	switch {
+	case len(file.Data) > 0:
+		if inline {
+			return &schema.PromptFileAttachment{
+				URI:  fmt.Sprintf("data:%s;base64,%s", file.MIME, base64.StdEncoding.EncodeToString(file.Data)),
+				Mime: file.MIME,
+				Name: &name,
+			}, name + " (attached)", nil
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, "", fmt.Errorf("write attachment: %w", err)
+		}
+		if err := ensureA2AIgnore(root); err != nil {
+			return nil, "", fmt.Errorf("write attachment: %w", err)
+		}
+		path := filepath.Join(dir, filepath.Base(name))
+		if err := os.WriteFile(path, file.Data, 0o644); err != nil {
+			return nil, "", fmt.Errorf("write attachment: %w", err)
+		}
+		return nil, path, nil
+	case file.URI != "":
+		if inline && file.MIME != "" {
+			return &schema.PromptFileAttachment{URI: file.URI, Mime: file.MIME, Name: &name}, file.URI, nil
+		}
+		return nil, file.URI, nil
+	}
+	return nil, "", nil
 }
 
 // ensureA2AIgnore drops a .gitignore inside the .a2a directory so attachments
@@ -384,6 +438,11 @@ func a2aEventFrom(event Event) (server.Event, bool) {
 		}, true
 	case ErrorEvent:
 		return server.Event{Kind: server.EventError, Err: e.Err}, true
+	case AttachmentOmitted:
+		return server.Event{
+			Kind: server.EventNotice,
+			Text: fmt.Sprintf("attachment omitted: %s (%s; %s)", e.Name, e.MIME, e.Reason),
+		}, true
 	case Idle:
 		return server.Event{Kind: server.EventIdle}, true
 	default:

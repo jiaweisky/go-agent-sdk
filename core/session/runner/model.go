@@ -156,10 +156,16 @@ func FromCatalogModel(model schema.ModelInfo, credential schema.Credential) (rou
 // schema form, or nil when none are declared.
 func runnerModelCapabilities(model schema.ModelInfo) *llmschema.ModelCapabilities {
 	caps := model.Capabilities
-	if len(caps.Input) == 0 && len(caps.Output) == 0 {
+	var sources []llmschema.MediaSource
+	if caps.Media != nil {
+		for _, source := range caps.Media.Sources {
+			sources = append(sources, llmschema.MediaSource(source))
+		}
+	}
+	if len(caps.Input) == 0 && len(caps.Output) == 0 && len(sources) == 0 {
 		return nil
 	}
-	return &llmschema.ModelCapabilities{Input: caps.Input, Output: caps.Output}
+	return &llmschema.ModelCapabilities{Input: caps.Input, Output: caps.Output, Sources: sources}
 }
 
 // runnerProtocolAuth applies the credential using the protocol's auth scheme.

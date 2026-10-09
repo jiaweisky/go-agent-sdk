@@ -2,6 +2,30 @@ package server
 
 import "net/http"
 
+// modelInfoDTO is one model's discoverable metadata for GET /api/model.
+type modelInfoDTO struct {
+	ID       string   `json:"id"`
+	Protocol string   `json:"protocol"`
+	Input    []string `json:"input,omitempty"`
+	Sources  []string `json:"sources,omitempty"`
+}
+
+func (s *Server) handleModelList(w http.ResponseWriter, r *http.Request) {
+	out := make([]modelInfoDTO, 0, len(s.opts.Models))
+	for _, model := range s.opts.Models {
+		dto := modelInfoDTO{
+			ID:       string(model.ID),
+			Protocol: string(model.API.Protocol),
+			Input:    model.Capabilities.Input,
+		}
+		if model.Capabilities.Media != nil {
+			dto.Sources = model.Capabilities.Media.Sources
+		}
+		out = append(out, dto)
+	}
+	writeData(w, http.StatusOK, out)
+}
+
 func (s *Server) handleAgentList(w http.ResponseWriter, r *http.Request) {
 	all := s.client.Agents().All()
 	out := make([]agentInfoDTO, 0, len(all))

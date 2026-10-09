@@ -186,6 +186,26 @@ func readImageMime(bytes []byte) string {
 	return ""
 }
 
+// readMediaExtensions maps a file extension to its media MIME type.
+var readMediaExtensions = map[string]string{
+	".wav": "audio/wav", ".mp3": "audio/mp3",
+	".aiff": "audio/aiff", ".aif": "audio/aiff",
+	".aac": "audio/aac", ".ogg": "audio/ogg", ".flac": "audio/flac",
+	".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+}
+
+// readMediaMime detects a supported media MIME: image magic bytes, PDF magic, or
+// a known media extension.
+func readMediaMime(resource string, bytes []byte) string {
+	if mime := readImageMime(bytes); mime != "" {
+		return mime
+	}
+	if readStartsWith(bytes, []byte{0x25, 0x50, 0x44, 0x46}) {
+		return "application/pdf"
+	}
+	return readMediaExtensions[strings.ToLower(filepath.Ext(resource))]
+}
+
 func readExtensionBinary(resource string) bool {
 	return readBinaryExtensions[strings.ToLower(filepath.Ext(resource))]
 }
@@ -319,10 +339,10 @@ func readToolRead(input schema.AbsolutePath, resource string, page ReadPageInput
 		return nil, err
 	}
 
-	if mime := readImageMime(first); mime != "" {
-		return readImageContent(file, first, size, resource, real, mime)
+	if mime := readMediaMime(resource, first); mime != "" {
+		return readMediaContent(file, first, size, resource, real, mime)
 	}
-	if readStartsWith(first, []byte{0x25, 0x50, 0x44, 0x46}) || readExtensionBinary(resource) {
+	if readExtensionBinary(resource) {
 		return nil, &ReadBinaryFileError{Resource: resource}
 	}
 
@@ -345,9 +365,9 @@ func readFirstChunkSize(size int64) int64 {
 	}
 }
 
-// readImageContent reads a recognized image as base64, bounded by the media
+// readMediaContent reads a recognized media file as base64, bounded by the media
 // ingest limit.
-func readImageContent(
+func readMediaContent(
 	file *os.File,
 	first []byte,
 	size int64,
