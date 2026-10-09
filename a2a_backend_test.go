@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/core/session/runner"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/session/runner"
 	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/client"
 	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"

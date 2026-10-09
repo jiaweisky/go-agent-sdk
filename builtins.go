@@ -5,10 +5,11 @@ import (
 
 	"golang.org/x/text/language"
 
-	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/core/database"
-	"github.com/jiaweisky/go-agent-sdk/core/ripgrep"
-	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/database"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/ripgrep"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/wire"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
@@ -37,7 +38,7 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 	process := core.NewAppProcess()
 	image := core.NewImage(core.DefaultImageConfig())
 	ripgrepService := core.NewRipgrep(process, ripgrep.NewBinary(deps.global))
-	todos := core.NewSessionTodo(deps.db, deps.events)
+	todos := wire.NewSessionTodo(deps.db, deps.events)
 	directory := string(deps.location.Directory)
 
 	registrations := []func() error{

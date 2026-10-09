@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
 	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )

@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/core"
-	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
-	"github.com/jiaweisky/go-agent-sdk/core/tool"
-	"github.com/jiaweisky/go-agent-sdk/core/util"
+	coresession "github.com/jiaweisky/go-agent-sdk/internal/core/session"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )

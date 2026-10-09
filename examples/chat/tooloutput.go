@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 
 // emitLinesTool returns many lines of text, so a large tool result can be

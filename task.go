@@ -8,9 +8,9 @@ import (
 
 	"golang.org/x/text/language"
 
-	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/core/tool"
-	"github.com/jiaweisky/go-agent-sdk/core/util"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )

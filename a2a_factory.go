@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	coresession "github.com/jiaweisky/go-agent-sdk/internal/core/session"
 	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/session"

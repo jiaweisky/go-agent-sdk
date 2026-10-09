@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/core/database"
-	"github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/database"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/session"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 

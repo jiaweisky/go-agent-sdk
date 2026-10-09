@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
 )
 

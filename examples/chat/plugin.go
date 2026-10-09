@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 

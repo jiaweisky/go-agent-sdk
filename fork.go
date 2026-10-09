@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/jiaweisky/go-agent-sdk/core/session"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/session"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 

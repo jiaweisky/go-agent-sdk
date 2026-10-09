@@ -18,8 +18,8 @@ import (
 	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/core"
-	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	coresession "github.com/jiaweisky/go-agent-sdk/internal/core/session"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"

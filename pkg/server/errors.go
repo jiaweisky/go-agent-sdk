@@ -10,8 +10,8 @@ import (
 	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/core"
-	coresession "github.com/jiaweisky/go-agent-sdk/core/session"
+	coresession "github.com/jiaweisky/go-agent-sdk/internal/core/session"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 
 // apiError is the uniform JSON error envelope returned by every failure.

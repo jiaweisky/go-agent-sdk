@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/core"
 	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )

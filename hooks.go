@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 )
 

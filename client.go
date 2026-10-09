@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
 	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"

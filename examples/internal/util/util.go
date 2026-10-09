@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk"
-	"github.com/jiaweisky/go-agent-sdk/core"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 
 // Option customizes the client built by Client.

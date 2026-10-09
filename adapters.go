@@ -1,8 +1,8 @@
 package agent
 
 import (
-	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/core/reference"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/reference"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 

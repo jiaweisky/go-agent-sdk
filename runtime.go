@@ -12,19 +12,20 @@ import (
 
 	"golang.org/x/text/language"
 
-	"github.com/jiaweisky/go-agent-sdk/core"
-	"github.com/jiaweisky/go-agent-sdk/core/database"
-	"github.com/jiaweisky/go-agent-sdk/core/installation"
-	coreproject "github.com/jiaweisky/go-agent-sdk/core/project"
-	"github.com/jiaweisky/go-agent-sdk/core/reference"
-	"github.com/jiaweisky/go-agent-sdk/core/session"
-	"github.com/jiaweisky/go-agent-sdk/core/session/runner"
-	"github.com/jiaweisky/go-agent-sdk/core/skill"
-	"github.com/jiaweisky/go-agent-sdk/core/systemcontext"
-	"github.com/jiaweisky/go-agent-sdk/core/tool"
-	"github.com/jiaweisky/go-agent-sdk/core/util"
-	defsconfig "github.com/jiaweisky/go-agent-sdk/defs/config"
-	defsskill "github.com/jiaweisky/go-agent-sdk/defs/skill"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/database"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/installation"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/reference"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/session"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/session/runner"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/skill"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/systemcontext"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/tool"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/wire"
+	defsconfig "github.com/jiaweisky/go-agent-sdk/internal/defs/config"
+	defsskill "github.com/jiaweisky/go-agent-sdk/internal/defs/skill"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
+	coreproject "github.com/jiaweisky/go-agent-sdk/pkg/core/project"
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm"
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm/route"
 	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
@@ -366,7 +367,7 @@ func (r *runtime) revertSnapshot() (session.RevertSnapshot, error) {
 	if r.snapshot == nil {
 		return nil, fmt.Errorf("%w for this project", core.ErrSnapshotUnavailable)
 	}
-	return core.NewSessionRevertSnapshot(r.snapshot), nil
+	return wire.NewSessionRevertSnapshot(r.snapshot), nil
 }
 
 // revertSession returns the stored session a revert operates on.
