@@ -1,4 +1,4 @@
-package core
+package project
 
 import (
 	"net/url"
@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
-	"github.com/jiaweisky/go-agent-sdk/pkg/core/project"
+	core "github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
@@ -15,38 +15,42 @@ import (
 // the resolved project id.
 const projectIDFile = "project-id"
 
+// ProjectResolved is the outcome of resolving a directory to a project.
 type ProjectResolved struct {
 	Previous  *schema.ProjectID
 	ID        schema.ProjectID
-	Directory AbsolutePath
-	Vcs       *project.Vcs
+	Directory schema.AbsolutePath
+	Vcs       *Vcs
 }
 
+// Project resolves a directory to its project and commits a project id.
 type Project interface {
-	Directories(projectID schema.ProjectID) ([]project.Directory, error)
-	Resolve(input AbsolutePath) (*ProjectResolved, error)
-	Commit(store AbsolutePath, id schema.ProjectID) error
+	Directories(projectID schema.ProjectID) ([]Directory, error)
+	Resolve(input schema.AbsolutePath) (*ProjectResolved, error)
+	Commit(store schema.AbsolutePath, id schema.ProjectID) error
 }
 
+// ProjectConfig configures a Project.
 type ProjectConfig struct {
-	Git         Git
-	Directories project.Directories
+	Git         core.Git
+	Directories Directories
 }
 
+// NewProject returns a Project over the configured git and directory store.
 func NewProject(cfg ProjectConfig) Project {
 	return &projectService{git: cfg.Git, directories: cfg.Directories}
 }
 
 type projectService struct {
-	git         Git
-	directories project.Directories
+	git         core.Git
+	directories Directories
 }
 
-func (p *projectService) Directories(projectID schema.ProjectID) ([]project.Directory, error) {
+func (p *projectService) Directories(projectID schema.ProjectID) ([]Directory, error) {
 	return p.directories.List(projectID)
 }
 
-func (p *projectService) Resolve(input AbsolutePath) (*ProjectResolved, error) {
+func (p *projectService) Resolve(input schema.AbsolutePath) (*ProjectResolved, error) {
 	repo, err := p.git.Repo.Discover(input)
 	if err != nil {
 		return nil, err
@@ -55,7 +59,7 @@ func (p *projectService) Resolve(input AbsolutePath) (*ProjectResolved, error) {
 		root := filepath.VolumeName(string(input)) + string(filepath.Separator)
 		return &ProjectResolved{
 			ID:        schema.ProjectIDGlobal,
-			Directory: AbsolutePath(root),
+			Directory: schema.AbsolutePath(root),
 		}, nil
 	}
 
@@ -75,17 +79,17 @@ func (p *projectService) Resolve(input AbsolutePath) (*ProjectResolved, error) {
 		Previous:  previous,
 		ID:        resolvedID,
 		Directory: repo.Worktree,
-		Vcs:       &project.Vcs{Type: project.VcsTypeGit, Store: repo.CommonDirectory},
+		Vcs:       &Vcs{Type: VcsTypeGit, Store: repo.CommonDirectory},
 	}, nil
 }
 
-func (p *projectService) Commit(store AbsolutePath, id schema.ProjectID) error {
-	_ = WriteFileString(filepath.Join(string(store), projectIDFile), string(id))
+func (p *projectService) Commit(store schema.AbsolutePath, id schema.ProjectID) error {
+	_ = core.WriteFileString(filepath.Join(string(store), projectIDFile), string(id))
 	return nil
 }
 
 func (p *projectService) cached(dir string) *schema.ProjectID {
-	value, err := ReadFileString(filepath.Join(dir, projectIDFile))
+	value, err := core.ReadFileString(filepath.Join(dir, projectIDFile))
 	if err != nil {
 		return nil
 	}
@@ -97,7 +101,7 @@ func (p *projectService) cached(dir string) *schema.ProjectID {
 	return &id
 }
 
-func (p *projectService) remote(repo *GitRepository) *schema.ProjectID {
+func (p *projectService) remote(repo *core.GitRepository) *schema.ProjectID {
 	origin, err := p.git.Remote.Get(*repo)
 	if err != nil || origin == "" {
 		return nil
@@ -110,7 +114,7 @@ func (p *projectService) remote(repo *GitRepository) *schema.ProjectID {
 	return &id
 }
 
-func (p *projectService) root(repo *GitRepository) *schema.ProjectID {
+func (p *projectService) root(repo *core.GitRepository) *schema.ProjectID {
 	commits, err := p.git.History.RootCommits(*repo)
 	if err != nil || len(commits) == 0 {
 		return nil

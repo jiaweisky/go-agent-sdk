@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
-	"github.com/jiaweisky/go-agent-sdk/pkg/core/project"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
@@ -93,7 +92,7 @@ func NewSnapshot(git Git, global Global, location *Location) (*Snapshot, error) 
 		filepath.Join(global.Data, "snapshot", string(location.Project.ID), util.HashFastString(string(worktree))),
 	)
 
-	enabled := location.Vcs != nil && location.Vcs.Type == project.VcsTypeGit
+	enabled := location.Vcs != nil && location.Vcs.Type == schema.ProjectVcsGit
 
 	return &Snapshot{
 		git:          git,

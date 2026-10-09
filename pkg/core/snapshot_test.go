@@ -28,10 +28,15 @@ func newSnapshotTest(t *testing.T) (*Snapshot, string) {
 	gitExec(t, root, "commit", "-m", "init")
 
 	git := NewGit(NewAppProcess())
-	proj := NewProject(ProjectConfig{Git: git})
-	location, err := NewLocation(schema.LocationRef{Directory: schema.AbsolutePath(root)}, proj)
-	if err != nil {
-		t.Fatalf("location: %v", err)
+	location := &Location{
+		LocationInfo: schema.LocationInfo{
+			Directory: schema.AbsolutePath(root),
+			Project: schema.LocationProject{
+				ID:        schema.ProjectID("git-test"),
+				Directory: schema.AbsolutePath(root),
+			},
+		},
+		Vcs: &schema.LocationVcs{Type: schema.ProjectVcsGit, Store: schema.AbsolutePath(filepath.Join(root, ".git"))},
 	}
 	global := NewGlobal(t.TempDir(), "/home")
 	snapshot, err := NewSnapshot(git, global, location)
@@ -107,5 +112,20 @@ func TestSnapshotPlanRejectsEscapingPath(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected path escape error")
+	}
+}
+
+func gitExec(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }

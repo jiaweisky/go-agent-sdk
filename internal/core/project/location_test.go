@@ -1,4 +1,4 @@
-package core
+package project
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk/pkg/core/project"
+	core "github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
@@ -38,7 +38,7 @@ func TestLocation_ResolveGitProject(t *testing.T) {
 	gitExec(t, root, "add", ".")
 	gitExec(t, root, "commit", "-m", "init")
 
-	git := NewGit(NewAppProcess())
+	git := core.NewGit(core.NewAppProcess())
 	proj := NewProject(ProjectConfig{Git: git})
 
 	location, err := NewLocation(schema.LocationRef{Directory: schema.AbsolutePath(root)}, proj)
@@ -51,7 +51,7 @@ func TestLocation_ResolveGitProject(t *testing.T) {
 	if location.Project.ID == schema.ProjectIDGlobal {
 		t.Fatalf("expected git-derived project id, got global")
 	}
-	if location.Vcs == nil || location.Vcs.Type != project.VcsTypeGit {
+	if location.Vcs == nil || location.Vcs.Type != schema.ProjectVcsGit {
 		t.Fatalf("expected git vcs, got %+v", location.Vcs)
 	}
 	if string(location.Directory) == "" {
@@ -62,7 +62,7 @@ func TestLocation_ResolveGitProject(t *testing.T) {
 func TestLocation_NonGitDirectory(t *testing.T) {
 	root := t.TempDir()
 
-	git := NewGit(NewAppProcess())
+	git := core.NewGit(core.NewAppProcess())
 	proj := NewProject(ProjectConfig{Git: git})
 
 	location, err := NewLocation(schema.LocationRef{Directory: schema.AbsolutePath(root)}, proj)
@@ -89,8 +89,8 @@ func TestGit_Discover(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	git := NewGit(NewAppProcess())
-	repo, err := git.Repo.Discover(AbsolutePath(sub))
+	git := core.NewGit(core.NewAppProcess())
+	repo, err := git.Repo.Discover(schema.AbsolutePath(sub))
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}

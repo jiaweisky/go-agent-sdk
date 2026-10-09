@@ -4,6 +4,12 @@ type ProjectVcs string
 
 const ProjectVcsGit ProjectVcs = "git"
 
+// LocationVcs is the version-control backing of a resolved location.
+type LocationVcs struct {
+	Type  ProjectVcs
+	Store AbsolutePath
+}
+
 type ProjectIcon struct {
 	URL      *string
 	Override *string

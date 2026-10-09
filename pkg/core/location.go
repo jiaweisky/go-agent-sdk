@@ -1,29 +1,10 @@
 package core
 
-import (
-	"github.com/jiaweisky/go-agent-sdk/pkg/core/project"
-	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
-)
+import "github.com/jiaweisky/go-agent-sdk/pkg/schema"
 
+// Location is a resolved working location: the project it belongs to and, when
+// version-controlled, the VCS backing it.
 type Location struct {
 	schema.LocationInfo
-	Vcs *project.Vcs
-}
-
-func NewLocation(ref schema.LocationRef, proj Project) (*Location, error) {
-	resolved, err := proj.Resolve(ref.Directory)
-	if err != nil {
-		return nil, err
-	}
-	return &Location{
-		LocationInfo: schema.LocationInfo{
-			Directory:   ref.Directory,
-			WorkspaceID: ref.WorkspaceID,
-			Project: schema.LocationProject{
-				ID:        resolved.ID,
-				Directory: resolved.Directory,
-			},
-		},
-		Vcs: resolved.Vcs,
-	}, nil
+	Vcs *schema.LocationVcs
 }

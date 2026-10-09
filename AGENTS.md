@@ -135,8 +135,7 @@ go-agent-sdk/                       opencode TS
 │   ├── core/       ← packages/core/src/        (@opencode-ai/core) public core types
 │   │   ├── tool/      tool framework (tool, registry, write, ...)
 │   │   ├── skill/     skill discovery
-│   │   ├── systemcontext/ agent system context
-│   │   └── project/   project resolution + directories
+│   │   └── systemcontext/ agent system context
 │   ├── mcp/        ← packages/opencode/src/mcp/ (MCP client + adapter)
 │   ├── a2a/        A2A (Agent2Agent) support (Go-specific; no TS counterpart)
 │   │   ├── client/    outbound thin interface (does not leak a2a-go)
@@ -151,6 +150,7 @@ go-agent-sdk/                       opencode TS
 │   │   ├── database/ SQLite + migrations
 │   │   ├── effect/  Effect runtime utilities (keyed-mutex)
 │   │   ├── util/    general utilities (wildcard, hash, glob)
+│   │   ├── project/ project resolution + directories
 │   │   ├── reference/ ripgrep/ installation/ wire/
 │   ├── defs/       ← (no TS dir) load agent/skill definitions from explicit ConfigDirs
 │   │   ├── config/  parse {agent,agents}/**/*.md, {mode,modes}/*.md
@@ -170,7 +170,7 @@ go-agent-sdk/                       opencode TS
   a ported module that the public API exposes goes to `pkg/...`; a pure engine
   module (session engine, database, effect, defs loading, protocol utils) goes to
   `internal/...`. Some `packages/core/src/` subdirs are public (`tool`, `skill`,
-  `systemcontext`, `project`), the rest are internal.
+  `systemcontext`), the rest are internal.
 - `jsonschema/` is a Go-specific typed JSON Schema AST (modeled on Effect `Schema`),
   used by `core/tool` to define tool schemas; no corresponding TS directory.
 - `a2a/` is a Go-specific capability (**no corresponding TS directory**) and the "port
@@ -202,7 +202,7 @@ Rules:
 | `packages/core/src/tool/write.ts` | `pkg/core/tool/write.go` |
 | `packages/core/src/effect/keyed-mutex.ts` | `internal/core/effect/keyed_mutex.go` |
 | `packages/core/src/util/wildcard.ts` | `internal/core/util/wildcard.go` |
-| `packages/core/src/project/directories.ts` | `pkg/core/project/directories.go` |
+| `packages/core/src/project/directories.ts` | `internal/core/project/directories.go` |
 | `packages/schema/src/identifier.ts` | `pkg/schema/identifier.go` |
 | `packages/opencode/src/id/id.ts` | not ported (`pkg/schema/identifier.go` already provides ID generation) |
 

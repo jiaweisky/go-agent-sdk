@@ -14,6 +14,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/internal/core/database"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/installation"
+	coreproject "github.com/jiaweisky/go-agent-sdk/internal/core/project"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/reference"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/session"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/session/runner"
@@ -22,7 +23,6 @@ import (
 	defsconfig "github.com/jiaweisky/go-agent-sdk/internal/defs/config"
 	defsskill "github.com/jiaweisky/go-agent-sdk/internal/defs/skill"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
-	coreproject "github.com/jiaweisky/go-agent-sdk/pkg/core/project"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core/skill"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core/systemcontext"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core/tool"
@@ -730,11 +730,11 @@ func openDatabase(global core.Global, maxConns int) (*database.Database, error) 
 // ensureProject resolves the project location and records it, so the row the
 // session tables reference exists.
 func ensureProject(db *database.Database, git core.Git, directory string) (*core.Location, error) {
-	projectService := core.NewProject(core.ProjectConfig{
+	projectService := coreproject.NewProject(coreproject.ProjectConfig{
 		Git:         git,
 		Directories: coreproject.NewDirectories(db.DB),
 	})
-	location, err := core.NewLocation(schema.LocationRef{Directory: schema.AbsolutePath(directory)}, projectService)
+	location, err := coreproject.NewLocation(schema.LocationRef{Directory: schema.AbsolutePath(directory)}, projectService)
 	if err != nil {
 		return nil, err
 	}
