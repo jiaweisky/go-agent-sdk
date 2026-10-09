@@ -20,7 +20,7 @@ CMDS := a2aserve agentserve
 CMD_BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(CMDS)))
 GO_SOURCES := $(shell find . -name '*.go' -not -path './bin/*')
 
-.PHONY: all examples cmds chat a2aserver a2aserve agentserve fmt fmt-check vet test lint golangci clean
+.PHONY: all examples cmds chat a2aserver a2aserve agentserve fmt fmt-check vet test lint golangci check-boundary clean
 
 all: examples cmds
 
@@ -85,6 +85,19 @@ test:
 
 # Always-available lint: formatting check plus go vet.
 lint: fmt-check vet
+
+# Verify the internal/ boundary: no exported pkg/... symbol may reference an
+# internal/ type, and the external probe module (public imports only) must
+# build.
+check-boundary:
+	@leaks=""; for p in $$($(GO) list ./pkg/...); do \
+		found=$$($(GO) doc -all $$p 2>/dev/null | grep 'internal/'); \
+		if [ -n "$$found" ]; then leaks="$$leaks\n$$p:\n$$found"; fi; \
+	done; \
+	if [ -n "$$leaks" ]; then echo "public API leaks internal types:"; printf "$$leaks\n"; exit 1; fi
+	cp go.sum testdata/external/go.sum
+	cd testdata/external && $(GO) build ./...
+	@echo "internal boundary OK"
 
 # Strict lint via golangci-lint. Rules are pinned by .golangci.yml and the tool
 # version is pinned above, so `make golangci` is reproducible.

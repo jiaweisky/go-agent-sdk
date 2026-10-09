@@ -675,10 +675,10 @@ func NewPermission(cfg PermissionConfig) Permission
 
 ## 11. SDK layer (high-level API)
 
-The public entry point is the module root package `agent`, import path `github.com/jiaweisky/go-agent-sdk`. **Implemented**, modeled on `github/copilot-sdk/go` (`Client` → `CreateSession` → `Send`/`On`).
+The public entry point is `pkg/agent`, import path `github.com/jiaweisky/go-agent-sdk/pkg/agent`. **Implemented**, modeled on `github/copilot-sdk/go` (`Client` → `CreateSession` → `Send`/`On`).
 
 ```go
-import "github.com/jiaweisky/go-agent-sdk"
+import "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 
 // ─── Client ─────────────────────────────────────────────
 type ClientOptions struct {

@@ -32,7 +32,7 @@ Go 1.27 or newer.
 ## Install
 
 ```sh
-go get github.com/jiaweisky/go-agent-sdk
+go get github.com/jiaweisky/go-agent-sdk/pkg/agent
 ```
 
 ## Quick start
@@ -46,7 +46,7 @@ import (
 	"os"
 	"path/filepath"
 
-	agent "github.com/jiaweisky/go-agent-sdk"
+	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
 func main() {
@@ -92,7 +92,7 @@ environment to locate state, so every instance is explicit and isolated.
 
 ## Public API
 
-The root package is `agent` (`import "github.com/jiaweisky/go-agent-sdk"`).
+The public API lives in `pkg/agent` (`import "github.com/jiaweisky/go-agent-sdk/pkg/agent"`); internal engine code is under `internal/`.
 
 | Type / function | Purpose |
 |---|---|
@@ -168,20 +168,30 @@ and is validated before the handler runs.
 ## Package layout
 
 ```
-go-agent-sdk/     root `agent` package — high-level public API
-├── llm/          LLM protocol layer
-│   ├── schema/     request/event/error types
-│   ├── route/      Route, Protocol, transport, auth
-│   ├── protocols/  openai-chat, openai-responses, anthropic-messages, gemini, bedrock-converse
-│   └── provider/   provider facades
-├── core/         agent core: session, tool framework, database, permission, ...
-├── mcp/          MCP client and tool adapter
-├── a2a/          A2A protocol: client, a2ago (a2a-go adapter), server
-├── defs/         agent and skill definitions loaded from markdown
-├── schema/       shared types
-├── jsonschema/   typed JSON Schema AST for tool schemas
+go-agent-sdk/
+├── pkg/          public API (importable by external code)
+│   ├── agent/      high-level Client/Session API
+│   ├── schema/     shared types
+│   ├── llm/        LLM protocol layer
+│   │   ├── schema/   request/event/error types
+│   │   ├── route/    Route, Protocol, transport, auth
+│   │   ├── protocols/ openai-chat, openai-responses, anthropic-messages, gemini, bedrock-converse
+│   │   └── provider/ provider facades
+│   ├── core/       core engine types (permission, agent, project, event)
+│   ├── mcp/        MCP client and tool adapter
+│   ├── a2a/        A2A protocol: client, a2ago (a2a-go adapter), server
+│   ├── server/     language-agnostic HTTP/SSE API
+│   └── jsonschema/ typed JSON Schema AST for tool schemas
+├── internal/     engine internals (not importable outside this module)
+│   ├── core/       session, session/runner, database, tool, skill, ...
+│   └── defs/       agent and skill definitions loaded from markdown
 └── cmd/          commands (cmd/a2aserve runs an A2A server)
 ```
+
+> The public API is `pkg/...`; everything under `internal/` is implementation
+> detail and cannot be imported by other modules. An external probe module in
+> `testdata/external` asserts the boundary.
+
 
 ## Examples
 
