@@ -487,6 +487,14 @@ func (c *Client) HoldInteractions(hold bool) {
 	c.rt.question.setHold(hold)
 }
 
+// HoldQuestions switches question prompts alone to (or out of) out-of-band
+// mode. Combine it with HoldInteractions to keep permission prompts blocked on
+// an external reply while question asks resolve through the registered
+// handlers. It takes effect from the next request onward.
+func (c *Client) HoldQuestions(hold bool) {
+	c.rt.question.setHold(hold)
+}
+
 // Skills returns the skill service.
 func (c *Client) Skills() *core.Skill {
 	return c.rt.skills

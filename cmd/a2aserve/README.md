@@ -88,6 +88,8 @@ contextLimit: 128000                # optional; drives automatic compaction
 outputLimit: 8192                   # optional
 inboundPermissions:                 # default: SDK deny-by-default ruleset
   - { action: bash, resource: "*", effect: deny }
+questions: decline                  # default: reject the question tool (A2A clients poll task state and
+                                    # cannot answer); "park" waits at input-required for a client that answers
 keepAlive: 15s
 # auth:                             # optional; when set, RPC requires a bearer token
 #   bearer: <token>

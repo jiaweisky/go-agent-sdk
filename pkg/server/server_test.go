@@ -1119,6 +1119,63 @@ func permissionCount(t *testing.T, ts *httptest.Server, id string) int {
 	return len(body.Data)
 }
 
+// TestQuestionsDeclineRejectsImmediately guards the "decline" questions
+// policy: the question tool fails fast with the dismissal and the turn reaches
+// its terminal state, instead of parking at a pending question forever.
+func TestQuestionsDeclineRejectsImmediately(t *testing.T) {
+	calls := 0
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("k"),
+		Model: "test-model", Root: t.TempDir(),
+		LLM: toolCallLLM{calls: &calls, toolName: "question", toolArgs: map[string]any{
+			"questions": []any{map[string]any{
+				"question": "Which color?",
+				"header":   "color",
+				"options":  []any{map[string]any{"label": "blue", "description": "cool"}},
+			}},
+		}, reply: "unreachable"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if err := client.RegisterAgent("build", agent.AgentConfig{}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	ts := serveClient(t, client, Options{Questions: "decline"})
+	id := createSession(t, ts)
+
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", `{"prompt":"go"}`, nil)
+	resp.Body.Close()
+
+	if !poll(t, 8*time.Second, func() bool {
+		r := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/history", "", nil)
+		defer r.Body.Close()
+		var body struct {
+			Data []wireEvent `json:"data"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		for _, event := range body.Data {
+			if event.Type == "session.next.tool.failed" {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("the declined question did not fail the tool call")
+	}
+	r := doJSON(t, http.MethodGet, ts.URL+"/api/session/"+id+"/question", "", nil)
+	defer r.Body.Close()
+	var pending struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&pending); err != nil {
+		t.Fatalf("decode pending questions: %v", err)
+	}
+	if len(pending.Data) != 0 {
+		t.Fatalf("pending questions = %d, want 0 (decline must not park)", len(pending.Data))
+	}
+}
+
 func TestInteractionFallbackAllow(t *testing.T) {
 	calls := 0
 	client, err := agent.NewClient(&agent.ClientOptions{
@@ -1171,6 +1228,8 @@ type toolCallLLM struct {
 	stubLLM
 	calls    *int
 	toolName string
+	// toolArgs overrides the tool call's arguments; nil sends an empty object.
+	toolArgs map[string]any
 	reply    string
 }
 
@@ -1178,9 +1237,13 @@ func (f toolCallLLM) Stream(context.Context, *llmschema.LLMRequest) (iter.Seq2[l
 	*f.calls++
 	var events []llmschema.LLMEvent
 	if *f.calls == 1 {
+		args := f.toolArgs
+		if args == nil {
+			args = map[string]any{}
+		}
 		events = []llmschema.LLMEvent{
 			llmschema.NewStepStart(0),
-			llmschema.NewToolCall("call-1", f.toolName, map[string]any{}),
+			llmschema.NewToolCall("call-1", f.toolName, args),
 			llmschema.NewStepFinish(0, llmschema.ReasonToolCalls),
 			llmschema.NewFinish(llmschema.ReasonToolCalls),
 		}

@@ -19,6 +19,9 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.DropErroredTurns {
 		t.Fatal("dropErroredTurns should default to true for the server")
 	}
+	if cfg.Questions != "decline" {
+		t.Fatalf("questions = %q, want the decline default (A2A clients cannot answer)", cfg.Questions)
+	}
 }
 
 func TestLoadExampleConfig(t *testing.T) {
@@ -136,6 +139,7 @@ func TestValidate(t *testing.T) {
 		"all-interfaces host":   {Listen: ":9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}},
 		"negative contextLimit": {Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}, ContextLimit: -1},
 		"tls missing key":       {Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}, TLS: &serveconfig.TLS{CertFile: "c"}},
+		"bad questions policy":  {Listen: "127.0.0.1:9099", Root: "/r", Model: "m", Protocol: "p", Agents: []string{"build"}, Credentials: serveconfig.Credentials{APIKey: "k"}, Questions: "block"},
 	}
 	for name, cfg := range cases {
 		if err := cfg.validate(); err == nil {

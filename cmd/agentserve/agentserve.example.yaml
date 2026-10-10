@@ -37,6 +37,8 @@ inboundPermissions:               # REPLACES the SDK deny-by-default (not additi
   - { action: edit, resource: "*", effect: deny }
 interactionTimeout: 5m            # optional HITL fallback
 interactionFallback: reject
+# questions: park                 # park (default) holds the turn until the HTTP client answers;
+#                                 # decline rejects questions, ending the turn with the dismissal instead of parking forever
 subscriberCapacity: 256
 keepAlive: 15s
 publicRoutes: [/api/health]

@@ -99,6 +99,7 @@ func buildServer(ctx context.Context, client *agent.Client, cfg config, keepAliv
 		InboundPermissions:  serveconfig.PermissionRuleset(cfg.InboundPermissions),
 		InteractionTimeout:  interactionTimeout,
 		InteractionFallback: cfg.InteractionFallback,
+		Questions:           cfg.Questions,
 		SubscriberCapacity:  cfg.SubscriberCapacity,
 		KeepAlive:           keepAlive,
 		Public:              cfg.PublicRoutes,

@@ -1,7 +1,8 @@
 # Example a2aserve configuration. Copy to a2aserve.yaml (git-ignored) and edit.
 #
-# Every field can also be set as a CLI flag (which overrides this file), except
-# credentials and auth, which live only here. No environment variables are read.
+# Core runtime fields also exist as CLI flags (which override this file);
+# credentials, auth and policy fields (inboundPermissions, inboundMedia,
+# questions, models, cards) live only here. No environment variables are read.
 #
 #   a2aserve --config a2aserve.yaml
 
@@ -28,6 +29,9 @@ dropErroredTurns: true            # server default: exclude a turn that ended in
 #     credentials: { apiKey: ... }
 
 # inboundMedia: spool             # spool (default) writes inbound A2A files into the workspace; inline delivers known media to the model
+questions: decline                # default: reject the question tool (A2A clients poll task state and cannot answer),
+                                  # so the turn ends with the dismissal instead of parking forever; set park for a
+                                  # client that answers input-required (e.g. an agent calling this one via task)
 
 credentials:                      # REQUIRED: the only place a secret is read
   apiKey: <your-deepseek-api-key> #   bearer/header protocols

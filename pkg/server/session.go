@@ -84,6 +84,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	handle, err := s.client.CreateSession(r.Context(), &agent.SessionConfig{
 		Agent: agentID, Model: body.Model, Title: body.Title, Permissions: s.inbound,
+		OnQuestion: s.questionOverride(),
 	})
 	if err != nil {
 		s.writeSDKError(w, err)

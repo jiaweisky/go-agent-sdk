@@ -39,10 +39,14 @@ type config struct {
 	InboundPermissions  []serveconfig.PermissionRule `yaml:"inboundPermissions"`
 	InteractionTimeout  string                       `yaml:"interactionTimeout"`
 	InteractionFallback string                       `yaml:"interactionFallback"`
-	SubscriberCapacity  int                          `yaml:"subscriberCapacity"`
-	KeepAlive           string                       `yaml:"keepAlive"`
-	PublicRoutes        []string                     `yaml:"publicRoutes"`
-	CORS                []string                     `yaml:"cors"`
+	// Questions selects the question tool's policy: "park" (default) holds the
+	// turn until the HTTP client answers; "decline" rejects questions, ending
+	// the turn with the dismissal instead of parking it forever.
+	Questions          string   `yaml:"questions"`
+	SubscriberCapacity int      `yaml:"subscriberCapacity"`
+	KeepAlive          string   `yaml:"keepAlive"`
+	PublicRoutes       []string `yaml:"publicRoutes"`
+	CORS               []string `yaml:"cors"`
 
 	TLS           *serveconfig.TLS `yaml:"tls"`
 	AllowInsecure bool             `yaml:"allowInsecure"`
@@ -346,6 +350,11 @@ func (c config) validateReferences() error {
 func (c config) validateHTTP() error {
 	if c.InteractionFallback != "" && c.InteractionFallback != "reject" && c.InteractionFallback != "allow" {
 		return errors.New("interactionFallback must be reject or allow")
+	}
+	switch c.Questions {
+	case "", "park", "decline":
+	default:
+		return fmt.Errorf("questions must be park or decline, got %q", c.Questions)
 	}
 	if c.TLS != nil && (c.TLS.CertFile == "" || c.TLS.KeyFile == "") {
 		return errors.New("tls requires both certFile and keyFile")

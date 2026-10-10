@@ -61,6 +61,9 @@ func run(ctx context.Context, cfg config) error {
 	if cfg.InboundMedia != "" {
 		factoryOptions = append(factoryOptions, agent.WithInboundMedia(cfg.InboundMedia))
 	}
+	if cfg.Questions != "" {
+		factoryOptions = append(factoryOptions, agent.WithInboundQuestions(cfg.Questions))
+	}
 	var security *server.Security
 	if cfg.Auth != nil {
 		security = &server.Security{Bearer: cfg.Auth.Bearer}

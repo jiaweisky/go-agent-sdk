@@ -34,9 +34,13 @@ type config struct {
 	ContextLimit       int                            `yaml:"contextLimit"`
 	OutputLimit        int                            `yaml:"outputLimit"`
 	InboundPermissions []serveconfig.PermissionRule   `yaml:"inboundPermissions"`
-	KeepAlive          string                         `yaml:"keepAlive"`
-	Auth               *authConfig                    `yaml:"auth"`
-	TLS                *serveconfig.TLS               `yaml:"tls"`
+	// Questions selects the question tool's policy: "decline" (default) rejects
+	// questions, ending the turn with the dismissal instead of parking forever;
+	// "park" holds the turn at input-required until the client answers.
+	Questions string           `yaml:"questions"`
+	KeepAlive string           `yaml:"keepAlive"`
+	Auth      *authConfig      `yaml:"auth"`
+	TLS       *serveconfig.TLS `yaml:"tls"`
 	// AllowInsecure permits binding a non-loopback address without auth. It is
 	// an explicit opt-out of the safe default.
 	AllowInsecure bool `yaml:"allowInsecure"`
@@ -79,8 +83,13 @@ type authConfig struct {
 // defaultConfig is the baseline every run starts from.
 func defaultConfig() config {
 	return config{
-		Listen:    "127.0.0.1:9099",
-		Agents:    []string{"build"},
+		Listen: "127.0.0.1:9099",
+		Agents: []string{"build"},
+		// A2A clients today cannot answer questions (they poll task state), so
+		// the default must not park a turn waiting for an answer nobody will
+		// give: questions are rejected and the turn ends with the dismissal.
+		// Set questions: park for a client that answers input-required.
+		Questions: "decline",
 		KeepAlive: "15s",
 		// A remote A2A client cannot run the interactive revert dance, so the
 		// server self-heals by default: a turn that ends in error is excluded from
@@ -140,6 +149,11 @@ func (c config) validate() error {
 	case "", "spool", "inline":
 	default:
 		return fmt.Errorf("inboundMedia must be spool or inline, got %q", c.InboundMedia)
+	}
+	switch c.Questions {
+	case "", "park", "decline":
+	default:
+		return fmt.Errorf("questions must be park or decline, got %q", c.Questions)
 	}
 	return nil
 }

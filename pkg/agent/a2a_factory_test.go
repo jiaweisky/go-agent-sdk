@@ -2,10 +2,14 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 func newA2ATestSession(t *testing.T, mode string) *a2aSession {
@@ -113,5 +117,58 @@ func TestA2AEventFromPermissionAskedCarriesDetails(t *testing.T) {
 	}
 	if len(event.Permission.Save) != 1 || event.Permission.Save[0] != "docker *" {
 		t.Fatalf("permission save = %v", event.Permission.Save)
+	}
+}
+
+// TestA2AFactoryDeclinesQuestions guards the "decline" questions policy: a
+// question ask resolves immediately with a rejection instead of parking, while
+// permissions stay held.
+func TestA2AFactoryDeclinesQuestions(t *testing.T) {
+	client := newTestClient(t)
+	factory := NewA2AFactory(client, WithInboundQuestions("decline"))
+	session, err := factory.CreateSession(context.Background(), server.SessionRequest{AgentID: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	if client.rt.question.hold.Load() {
+		t.Fatal("questions should leave hold mode under the decline policy")
+	}
+	if !client.rt.permission.hold.Load() {
+		t.Fatal("permissions must stay held under the decline policy")
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.rt.question.Ask(context.Background(), core.QuestionAskInput{
+			SessionID: session.ID(),
+			Questions: []schema.QuestionInfo{{Question: "Pick", Options: []schema.QuestionOption{{Label: "a"}}}},
+		})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		var rejected *core.QuestionRejectedError
+		if !errors.As(err, &rejected) {
+			t.Fatalf("ask error = %v, want QuestionRejectedError", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("question ask was held instead of declined")
+	}
+}
+
+// TestA2AFactoryParksQuestionsByDefault guards the default: the factory holds
+// questions, so the question tool parks the turn for a client answer.
+func TestA2AFactoryParksQuestionsByDefault(t *testing.T) {
+	client := newTestClient(t)
+	factory := NewA2AFactory(client)
+	session, err := factory.CreateSession(context.Background(), server.SessionRequest{AgentID: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	if !client.rt.question.hold.Load() || !client.rt.permission.hold.Load() {
+		t.Fatal("park policy should hold both questions and permissions")
 	}
 }

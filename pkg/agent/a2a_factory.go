@@ -29,6 +29,8 @@ type a2aFactory struct {
 	client       *Client
 	permissions  schema.PermissionRuleset
 	inboundMedia string
+	// questions is "park" (default) or "decline".
+	questions string
 }
 
 // A2AInboundConfig configures how an A2A server drives sessions.
@@ -40,6 +42,11 @@ type A2AInboundConfig struct {
 	// parts with bytes become native media on the turn; otherwise they are
 	// written into the workspace and referenced by path.
 	InboundMedia string
+	// Questions selects what happens when the model invokes the question tool:
+	// "park" (default) holds the turn at input-required until the client
+	// answers; "decline" rejects every question, ending the turn with the
+	// dismissal instead of parking it forever when no client will ever answer.
+	Questions string
 }
 
 // A2AFactoryOption customizes NewA2AFactory.
@@ -58,6 +65,13 @@ func WithInboundMedia(mode string) A2AFactoryOption {
 	return func(config *A2AInboundConfig) { config.InboundMedia = mode }
 }
 
+// WithInboundQuestions selects the question tool's policy: "park" (default)
+// holds the turn at input-required until the client answers; "decline" rejects
+// questions so the turn ends with the dismissal instead of parking forever.
+func WithInboundQuestions(mode string) A2AFactoryOption {
+	return func(config *A2AInboundConfig) { config.Questions = mode }
+}
+
 // DefaultInboundPermissions is the deny-by-default ruleset for externally
 // triggered sessions. A remote caller must not gain shell or file mutation
 // power implicitly; hosts widen this explicitly.
@@ -74,8 +88,13 @@ func DefaultInboundPermissions() schema.PermissionRuleset {
 
 // NewA2AFactory returns an adapter that lets the A2A server drive sessions of
 // this client. It switches the client to out-of-band interaction mode
-// (HoldInteractions), so permission and question prompts surface as A2A
-// input-required instead of blocking on the default handlers.
+// (HoldInteractions), so permission prompts surface as A2A input-required
+// instead of blocking on the default handlers.
+//
+// With the "decline" questions policy, questions leave hold mode immediately:
+// a question ask resolves with a rejection, which ends the turn with the
+// dismissal instead of parking it at input-required. Permissions stay held —
+// an approval is a meaningful client interaction.
 //
 // Inbound sessions run under DefaultInboundPermissions unless overridden with
 // WithInboundPermissions: the client's own permission handler (which may be
@@ -86,7 +105,11 @@ func NewA2AFactory(client *Client, opts ...A2AFactoryOption) server.Factory {
 		opt(&config)
 	}
 	client.HoldInteractions(true)
-	return &a2aFactory{client: client, permissions: config.Permissions, inboundMedia: config.InboundMedia}
+	if config.Questions == "decline" {
+		// Permissions stay held; questions resolve through handlers again.
+		client.HoldQuestions(false)
+	}
+	return &a2aFactory{client: client, permissions: config.Permissions, inboundMedia: config.InboundMedia, questions: config.Questions}
 }
 
 // CreateSession implements server.Factory. The SDK client is bound to one
@@ -96,7 +119,7 @@ func NewA2AFactory(client *Client, opts ...A2AFactoryOption) server.Factory {
 func (f *a2aFactory) CreateSession(ctx context.Context, req server.SessionRequest) (server.Session, error) {
 	session, err := f.client.CreateSession(
 		ctx,
-		&SessionConfig{Agent: req.AgentID, Permissions: f.permissionsFor(req.Workspace)},
+		&SessionConfig{Agent: req.AgentID, Permissions: f.permissionsFor(req.Workspace), OnQuestion: f.questionOverride()},
 	)
 	if err != nil {
 		return nil, err
@@ -123,12 +146,24 @@ func (f *a2aFactory) ResumeSession(
 	if stored != nil {
 		rules = mergePermissionRules(permissionRulesOf(stored), inbound)
 	}
-	session, err := f.client.ResumeSession(ctx, sessionID, &SessionConfig{Permissions: rules})
+	session, err := f.client.ResumeSession(ctx, sessionID, &SessionConfig{Permissions: rules, OnQuestion: f.questionOverride()})
 	if err != nil {
 		return nil, err
 	}
 	f.client.rt.markInbound(schema.SessionID(session.ID()))
 	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia}, nil
+}
+
+// questionOverride returns the per-session question handler enforcing the
+// "decline" policy: nil in park mode (the host's handler applies), or a
+// rejection handler in decline mode. A rejection ends the turn with the
+// dismissal, so an unattended session never parks waiting for an answer
+// nobody will give.
+func (f *a2aFactory) questionOverride() QuestionHandlerFunc {
+	if f.questions == "decline" {
+		return RejectQuestions
+	}
+	return nil
 }
 
 // mergePermissionRules appends the overlay rules not already present in base, so

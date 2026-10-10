@@ -45,6 +45,11 @@ type Options struct {
 	// InteractionFallback is the auto-resolution on timeout: "reject" (default)
 	// or "allow".
 	InteractionFallback string
+	// Questions selects the question tool's policy: "park" (default) holds the
+	// turn until the client answers over the API; "decline" rejects every
+	// question, ending the turn with the dismissal instead of parking it
+	// forever when no client will ever answer. Permissions always stay held.
+	Questions string
 	// SubscriberCapacity bounds the live event queue per SSE subscriber. Zero
 	// uses the default (256).
 	SubscriberCapacity int
@@ -109,6 +114,11 @@ func New(ctx context.Context, client *agent.Client, opts Options) (*Server, erro
 	if opts.InteractionFallback != "reject" && opts.InteractionFallback != "allow" {
 		return nil, fmt.Errorf("server: InteractionFallback must be reject or allow, got %q", opts.InteractionFallback)
 	}
+	switch opts.Questions {
+	case "", "park", "decline":
+	default:
+		return nil, fmt.Errorf("server: Questions must be park or decline, got %q", opts.Questions)
+	}
 	if opts.SubscriberCapacity == 0 {
 		opts.SubscriberCapacity = 256
 	}
@@ -145,6 +155,11 @@ func New(ctx context.Context, client *agent.Client, opts Options) (*Server, erro
 	}
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	client.HoldInteractions(true)
+	if opts.Questions == "decline" {
+		// Permissions stay held; questions resolve through the per-session
+		// rejection handler attached at session creation instead of parking.
+		client.HoldQuestions(false)
+	}
 	go s.runWatcher(s.ctx)
 	// Cancelling the host context releases the server even if the host forgets
 	// to call Close.
@@ -287,12 +302,23 @@ func (s *Server) attach(ctx context.Context, sessionID string) (*agent.Session, 
 	if info.Permission != nil {
 		rules = core.PermissionMerge(*info.Permission, s.inbound)
 	}
-	handle, err := s.client.ResumeSession(ctx, sessionID, &agent.SessionConfig{Permissions: rules})
+	handle, err := s.client.ResumeSession(ctx, sessionID, &agent.SessionConfig{Permissions: rules, OnQuestion: s.questionOverride()})
 	if err != nil {
 		return nil, err
 	}
 	e.handle = handle
 	return handle, nil
+}
+
+// questionOverride returns the per-session question handler for the "decline"
+// policy: nil in park mode (the client's handler applies), or a rejection
+// handler in decline mode. A rejection ends the turn with the dismissal, so a
+// session never parks waiting for an answer the HTTP client may never give.
+func (s *Server) questionOverride() agent.QuestionHandlerFunc {
+	if s.opts.Questions == "decline" {
+		return agent.RejectQuestions
+	}
+	return nil
 }
 
 // withHandle runs fn against the session's handle, keeping the handle alive for
