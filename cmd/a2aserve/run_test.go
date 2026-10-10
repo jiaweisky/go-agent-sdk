@@ -60,20 +60,24 @@ func TestExposeAgentsCardOverride(t *testing.T) {
 
 func TestExposeAgentsValidatesSkills(t *testing.T) {
 	client := newTestClient(t)
+	// A skill missing name/description is rejected.
 	if _, err := exposeAgents(client, []string{"build"}, map[string]cardConfig{
-		"build": {Skills: []skillConfig{{ID: "not-a-capability"}}},
+		"build": {Skills: []skillConfig{{ID: "code-review"}}},
 	}, nil, ""); err == nil {
-		t.Fatal("expected an unknown skill id to be rejected")
+		t.Fatal("expected a skill without name/description to be rejected")
 	}
 
+	// A well-formed skill is accepted even when its id is not an internal
+	// capability: skills are operator-authored descriptive labels, not a
+	// mirror of the agent's tools/subagents.
 	exposed, err := exposeAgents(client, []string{"build"}, map[string]cardConfig{
-		"build": {Skills: []skillConfig{{ID: "read", Name: "Read files", Tags: []string{"files"}}}},
+		"build": {Skills: []skillConfig{{ID: "code-review", Name: "Code review", Description: "Review a change"}}},
 	}, nil, "")
 	if err != nil {
 		t.Fatalf("exposeAgents: %v", err)
 	}
 	expose := exposed[0].Expose
-	if expose == nil || len(expose.Skills) != 1 || expose.Skills[0].ID != "read" || expose.Skills[0].Name != "Read files" {
+	if expose == nil || len(expose.Skills) != 1 || expose.Skills[0].ID != "code-review" || expose.Skills[0].Name != "Code review" {
 		t.Fatalf("expose = %+v", expose)
 	}
 }

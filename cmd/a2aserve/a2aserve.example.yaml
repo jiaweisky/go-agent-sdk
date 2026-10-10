@@ -45,21 +45,9 @@ cards:                          # optional per-agent card overrides (advertised 
     version: "1.0.0"
     documentationUrl: https://github.com/jiaweisky/go-agent-sdk
     provider: { organization: jiaweisky, url: https://github.com/jiaweisky }
-    skills:                     # id must be a real capability of the agent (tool/subagent/skill)
-      - { id: read,        name: Read,        description: "Read a file or paged text (images too).", tags: [files] }
-      - { id: write,       name: Write,       description: "Write content to one file.",             tags: [files] }
-      - { id: edit,        name: Edit,        description: "Replace an exact string in a file.",     tags: [files] }
-      - { id: apply_patch, name: Apply patch, description: "Apply an add/update/delete patch.",      tags: [files] }
-      - { id: glob,        name: Find files,  description: "Find files by glob pattern.",            tags: [search] }
-      - { id: grep,        name: Search,      description: "Search file contents by regex.",         tags: [search] }
-      - { id: bash,        name: Shell,       description: "Run a shell command.",                   tags: [shell] }
-      - { id: webfetch,    name: Fetch URL,   description: "Fetch a URL as text/markdown/HTML.",     tags: [web] }
-      - { id: question,    name: Ask,         description: "Ask the user a question.",               tags: [interaction] }
-      - { id: todowrite,   name: Todos,       description: "Maintain the task list.",                tags: [planning] }
-      - { id: skill,       name: Load skill,  description: "Load a specialized skill.",              tags: [knowledge] }
-      - { id: task,        name: Delegate,    description: "Delegate work to a subagent.",           tags: [subagent] }
-      - { id: general,     name: General subagent, description: "Delegate multi-step research/execution.", tags: [subagent] }
-      - { id: explore,     name: Explore subagent, description: "Delegate fast codebase exploration.",     tags: [subagent] }
+    # skills:                   # optional; operator-authored labels on the card. Omitted here
+    #                           # (the common case) → the card advertises an empty array [].
+    #                           # Each entry needs id+name+description; NOT a mirror of the agent's tools.
 
 # contextLimit: 128000            # optional; drives automatic compaction
 # outputLimit: 8192               # optional

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
@@ -77,5 +79,37 @@ func TestBuildCardRendersExposeMetadata(t *testing.T) {
 	}
 	if len(card.Skills) != 1 || card.Skills[0].ID != "read" || card.Skills[0].Name != "Read" || card.Skills[0].Tags[0] != "files" {
 		t.Fatalf("skills = %+v", card.Skills)
+	}
+}
+
+// TestBuildCardAdvertisesNoSyntheticSkills verifies an agent that configures no
+// skills advertises an empty (non-nil) list, serialized as `"skills": []` and
+// never a synthetic self-skill or `null`.
+func TestBuildCardAdvertisesNoSyntheticSkills(t *testing.T) {
+	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "", nil)
+	if card.Skills == nil {
+		t.Fatal("skills = nil, want a non-nil empty slice")
+	}
+	if len(card.Skills) != 0 {
+		t.Fatalf("skills = %+v, want none", card.Skills)
+	}
+	encoded, err := json.Marshal(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"skills":[]`) {
+		t.Fatalf("card JSON = %s, want %q", encoded, `"skills":[]`)
+	}
+}
+
+// TestCardSkillTagsAreNonNull verifies a configured skill without tags still
+// serializes its tags as `[]`, not `null`.
+func TestCardSkillTagsAreNonNull(t *testing.T) {
+	info := schema.AgentInfo{ID: schema.AgentID("build"), Expose: &schema.AgentExpose{
+		Skills: []schema.AgentSkill{{ID: "read", Name: "Read", Description: "Read files"}},
+	}}
+	card := buildCard(info, "", nil)
+	if len(card.Skills) != 1 || card.Skills[0].Tags == nil {
+		t.Fatalf("skill = %+v, want non-nil tags", card.Skills)
 	}
 }

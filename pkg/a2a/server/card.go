@@ -18,7 +18,9 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 	version := "1.0.0"
 	var documentationURL, iconURL string
 	var provider *a2a.AgentProvider
-	var skills []a2a.AgentSkill
+	// Non-nil empty by default so the serialized card always carries a "skills"
+	// field (an empty array, never null) when the agent configures none.
+	skills := []a2a.AgentSkill{}
 	inputModes := []string{"text/plain", "application/json", "image/png", "image/jpeg", "image/gif", "image/webp"}
 	outputModes := []string{"text/plain", "application/json"}
 	if info.Expose != nil {
@@ -44,9 +46,6 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 			outputModes = expose.OutputModes
 		}
 		skills = cardSkills(expose.Skills)
-	}
-	if len(skills) == 0 {
-		skills = []a2a.AgentSkill{{ID: string(info.ID), Name: name, Description: description, Tags: []string{"agent"}}}
 	}
 	card := &a2a.AgentCard{
 		Name:             name,
@@ -82,10 +81,11 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 }
 
 // cardSkills maps configured skills to card skills, defaulting a name to its ID.
+// It returns a non-nil (possibly empty) slice so the serialized card always
+// carries a "skills" field (an empty array, never null). An agent that
+// configures no skills therefore advertises none, rather than a synthetic
+// self-skill that merely repeats the card's name/description.
 func cardSkills(skills []schema.AgentSkill) []a2a.AgentSkill {
-	if len(skills) == 0 {
-		return nil
-	}
 	out := make([]a2a.AgentSkill, 0, len(skills))
 	for _, skill := range skills {
 		name := skill.Name
@@ -96,7 +96,7 @@ func cardSkills(skills []schema.AgentSkill) []a2a.AgentSkill {
 			ID:          skill.ID,
 			Name:        name,
 			Description: skill.Description,
-			Tags:        skill.Tags,
+			Tags:        append([]string{}, skill.Tags...), // non-nil so tags serialize as [], not null
 			Examples:    skill.Examples,
 			InputModes:  skill.InputModes,
 			OutputModes: skill.OutputModes,

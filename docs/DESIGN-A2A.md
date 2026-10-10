@@ -25,6 +25,7 @@
 | 2026-10-04 | Closed out previously unlanded items: inbound attachment spooling (raw/URL part → workspace + prompt path, §4.2/§5.3); outbound cancel/cleanup (Abort → remote `CancelTask`, only non-terminal and not input-required, §6.2); `turn` completion (local turns also persist a turn; `parent_turn_id`/`anchor_seq`/`end_seq`/`input_id` are all written; A2A inbound turns are exclusively owned by the task store, §5.6/A8); inbound steer (append a message to a working task → `SessionDeliverySteer`, §5.3); outbound remote `taskId`/`contextId` persisted to turn metadata and resumed on the next turn (§4.7 item 2) |
 | 2026-10-05 | Media and security landed: outbound user media now sent as A2A file parts (raw/URL, §4.2/§6.2); inbound raw parts spool with an extension derived from `MediaType`; the AgentCard declares truthful `defaultInputModes`/`defaultOutputModes`; new `server.Options.Security` enforces a bearer token on the RPC endpoints and declares `securitySchemes` (§5.1/§5.5); new `cmd/a2aserve` command serves the built-in `build` agent from a YAML config + CLI flags (no env) (§5.2) |
 | 2026-10-06 | `a2aFactory.ResumeSession` now **merges** the inbound/workspace ruleset over the session's stored rules instead of replacing them (dedupe, idempotent), so an in-process session keeps its own policy while staying constrained by the inbound rules — the same semantics the HTTP API adopts (`a2a_factory.go`, `docs/DESIGN-HTTP.md` §7) |
+| 2026-10-10 | Card `skills` semantics corrected: skills are **operator-authored descriptive labels** (`cards.<agent>.skills`, validated to carry `id`+`name`+`description`), **not** a mirror of the agent's tools/subagents/skills — the earlier "skill id must name an existing capability" rule is removed. An agent that configures none advertises an **empty `skills` array** (field always present, `[]` never `null`); the synthesized "self" default skill is dropped (`pkg/a2a/server/card.go`, `cmd/a2aserve/run.go`). |
 
 ---
 
@@ -334,7 +335,7 @@ The same backend dispatch makes "**a remote agent as a primary agent**" availabl
 
 **The problem to solve**: inbound, when acting as an A2A server, **which local agents provide service externally** (each with its own card).
 
-**A2A's model**: one AgentCard describes **one** agent; exposing multiple agents means providing **multiple card URLs** (each with its own endpoint). A card's `skills` lists what this agent can do — its tools, capabilities, and subagents can all be listed; **which to list, and whether to list at all, is a choice made when defining the card**.
+**A2A's model**: one AgentCard describes **one** agent; exposing multiple agents means providing **multiple card URLs** (each with its own endpoint). A card's `skills` is a **descriptive** list of what the agent advertises; entries are **operator-authored** (`cards.<agent>.skills`) and are **not** required to mirror the agent's internal tools/subagents. **Which to list — or none at all — is a choice made when defining the card**; an agent with none advertises an empty `skills` array (the field is always present).
 
 **Why an explicit declaration is needed**: no "default/visibility"-style heuristic can infer "which agents provide service externally". At the very least it cannot express these requirements:
 
@@ -483,7 +484,7 @@ After this section we write only the "we" parts; rows marked **a2a-go** only exp
 
 | Component | Responsibility | Implementation (Go) |
 |---|---|---|
-| `CardBuilder` | Generates one AgentCard for **each explicitly exposed agent** (**one card = one agent**, each with its own URL/endpoint); its `skills` describe that agent's capabilities (entries may be tools / subagents / others; tools are not dumped by default); `capabilities`, `defaultInputModes`/`defaultOutputModes` and `securitySchemes` are declared truthfully (§3.4 / §6.2) | `a2a/server.buildCard` |
+| `CardBuilder` | Generates one AgentCard for **each explicitly exposed agent** (**one card = one agent**, each with its own URL/endpoint); `skills` are **operator-authored descriptive labels** (validated only to carry `id`/`name`/`description`; not tied to the agent's tools/subagents), and unset → an **empty array** (`[]`, never a synthesized default skill); `capabilities`, `defaultInputModes`/`defaultOutputModes` and `securitySchemes` are declared truthfully (§3.4 / §6.2) | `a2a/server.buildCard` |
 | `Executor` | Implements `a2asrv.AgentExecutor` (Execute / Cancel): maps the `session.Send` event stream to A2A events (§4) | `a2a/server.executor` (dependencies injected via `executorConfig`) |
 | `TaskStore` | Implements `a2asrv/taskstore.Store` (Create / Update / Get / List), mapped to core `turn` (§5.6) | `a2a/server.turnTaskStore` (version/pending live in turn metadata) |
 | Pending (formerly `PendingRegistry`) | Parked turns + requestIDs awaiting reply | `executor.pending` + `a2aSession.turns` (a channel per `turnID`, released uniformly by `OnTurnEnd`) |

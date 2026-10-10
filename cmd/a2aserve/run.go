@@ -11,7 +11,6 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
 	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
-	"golang.org/x/text/language"
 )
 
 // run builds the SDK client and A2A server from cfg and serves until ctx is
@@ -88,8 +87,8 @@ func run(ctx context.Context, cfg config) error {
 }
 
 // exposeAgents marks each named existing agent exposed and returns its info.
-// cards optionally overrides an agent's card; every skill id is validated
-// against the agent's real capabilities.
+// cards optionally overrides an agent's card; configured skills are validated
+// as well-formed (id, name and description).
 func exposeAgents(client *agent.Client, names []string, cards map[string]cardConfig, modes map[string][]string, defaultModel string) ([]schema.AgentInfo, error) {
 	exposed := make([]schema.AgentInfo, 0, len(names))
 	for _, name := range names {
@@ -99,7 +98,7 @@ func exposeAgents(client *agent.Client, names []string, cards map[string]cardCon
 		}
 		expose := &schema.AgentExpose{}
 		if override, ok := cards[name]; ok {
-			if err := validateSkills(client, name, override.Skills); err != nil {
+			if err := validateSkills(name, override.Skills); err != nil {
 				return nil, err
 			}
 			applyCard(expose, override)
@@ -181,50 +180,17 @@ func applyCard(expose *schema.AgentExpose, card cardConfig) {
 	}
 }
 
-// validateSkills rejects a card skill whose id is not a real capability of the
-// agent, so the card cannot advertise something the program cannot do.
-func validateSkills(client *agent.Client, agentID string, skills []skillConfig) error {
-	if len(skills) == 0 {
-		return nil
-	}
-	ids, err := capabilityIDs(client, agentID)
-	if err != nil {
-		return err
-	}
-	for _, skill := range skills {
-		if skill.ID == "" {
-			return fmt.Errorf("agent %q: card skill requires an id", agentID)
-		}
-		if !ids[skill.ID] {
-			return fmt.Errorf("agent %q: card skill %q is not one of its capabilities", agentID, skill.ID)
+// validateSkills requires each configured card skill to carry id, name and
+// description — the fields A2A marks required. Skills are operator-authored
+// descriptive labels advertised on the card; they are not tied to the agent's
+// internal tools/subagents, and an agent with none advertises an empty list.
+func validateSkills(agentID string, skills []skillConfig) error {
+	for i, skill := range skills {
+		if skill.ID == "" || skill.Name == "" || skill.Description == "" {
+			return fmt.Errorf("agent %q: skills[%d] requires id, name, and description", agentID, i)
 		}
 	}
 	return nil
-}
-
-// capabilityIDs returns the ids of an agent's capabilities: its tools,
-// delegatable subagents and loaded skills.
-func capabilityIDs(client *agent.Client, agentID string) (map[string]bool, error) {
-	ids := map[string]bool{}
-	tools, err := client.AgentTools(agentID, nil)
-	if err != nil {
-		return nil, err
-	}
-	for _, tool := range tools {
-		ids[tool.Name] = true
-	}
-	allowAll := schema.PermissionRuleset{{Action: "*", Resource: "*", Effect: schema.PermissionEffectAllow}}
-	for _, subagent := range agent.SubagentTypes(client.Agents(), allowAll, language.English) {
-		ids[string(subagent.ID)] = true
-	}
-	skills, err := client.Skills().List()
-	if err != nil {
-		return nil, err
-	}
-	for _, skill := range skills {
-		ids[skill.Name] = true
-	}
-	return ids, nil
 }
 
 // logBaseURL derives the URL printed at startup.
