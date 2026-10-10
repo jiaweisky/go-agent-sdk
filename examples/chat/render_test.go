@@ -346,6 +346,100 @@ func TestTaskCallsAreNotTheCurrentTool(t *testing.T) {
 	}
 }
 
+// TestMarkdownStreamTable guards table rendering: rows buffer until the block
+// ends, then align on display width (CJK cells count two terminal columns).
+func TestMarkdownStreamTable(t *testing.T) {
+	var out strings.Builder
+	stream := newMarkdownStream(func(s string) { out.WriteString(s) })
+	stream.Write("| 日期 | 白天/夜间 |\n")
+	stream.Write("|---|---|\n")
+	stream.Write("| 10-10 | 晴 / 晴 |\n")
+	stream.Flush()
+	got := out.String()
+
+	// Column widths: 日期(4) vs 10-10(5) → 5; 白天/夜间(9) vs 晴 / 晴(7) → 9.
+	rule := "├" + strings.Repeat("─", 7) + "┼" + strings.Repeat("─", 11) + "┤"
+	if !strings.Contains(got, dim+rule+reset) {
+		t.Errorf("table rule not rendered: %q", got)
+	}
+	if !strings.Contains(got, bold+"日期"+reset+" ") {
+		t.Errorf("header not bold: %q", got)
+	}
+	if strings.Contains(got, "|---|") {
+		t.Errorf("separator row leaked into the output: %q", got)
+	}
+	if lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n"); len(lines) != 3 {
+		t.Errorf("want 3 lines (header, rule, row), got %d: %q", len(lines), got)
+	}
+}
+
+// TestTableEndsAtBlankLine guards that a table flushes when a non-row line
+// arrives, and that a lone | row without a separator renders literally.
+func TestTableEndsAtNonRowLine(t *testing.T) {
+	md := &markdown{}
+	if got := md.render("| 日期 | 气温 |"); got != "" {
+		t.Errorf("table row should buffer, got %q", got)
+	}
+	got := md.render("after the table")
+	if !strings.Contains(got, "日期") || !strings.Contains(got, "after the table") {
+		t.Errorf("table did not flush before the next line: %q", got)
+	}
+
+	md = &markdown{}
+	md.render("| not a table |")
+	if got := md.takeTable(); got != "| not a table |" {
+		t.Errorf("a lone | row (no separator) should stay literal, got %q", got)
+	}
+}
+
+// TestBlankLinesSurviveAroundTables guards the Write skip: a buffered table row
+// renders to "" and must be skipped, but genuinely blank lines must survive.
+func TestBlankLinesSurviveAroundTables(t *testing.T) {
+	var out strings.Builder
+	stream := newMarkdownStream(func(s string) { out.WriteString(s) })
+	stream.Write("before\n")
+	stream.Write("\n")
+	stream.Write("| a | b |\n")
+	stream.Write("|---|---|\n")
+	stream.Write("| 1 | 2 |\n")
+	stream.Write("\n")
+	stream.Write("after\n")
+	stream.Flush()
+
+	got := out.String()
+	if !strings.Contains(got, "before\n\n") {
+		t.Errorf("blank line before the table was dropped: %q", got)
+	}
+	if !strings.Contains(got, "\nafter\n") {
+		t.Errorf("blank line after the table was dropped: %q", got)
+	}
+}
+
+// TestTableWidthsIgnoreSeparatorAndSpans guards the column measurement: the
+// |---| row does not hold columns open, and cells are measured after inline
+// rendering (visible width), so **-marked cells still align.
+func TestTableWidthsIgnoreSeparatorAndSpans(t *testing.T) {
+	var out strings.Builder
+	stream := newMarkdownStream(func(s string) { out.WriteString(s) })
+	stream.Write("| x |\n")
+	stream.Write("|:-:|\n")
+	stream.Write("| **ab** |\n")
+	stream.Flush()
+	got := out.String()
+
+	// "x" and "ab" (rendered) are both 2 cells wide; the ":-:" separator must
+	// not widen the column to 3.
+	rule := "├" + strings.Repeat("─", 4) + "┤"
+	if !strings.Contains(got, dim+rule+reset) {
+		t.Errorf("separator row inflated the column widths: %q", got)
+	}
+	// "ab" fills the 2-cell column exactly: one space, then the border — no
+	// extra padding from the ** markers.
+	if !strings.Contains(got, bold+"ab"+reset+" "+dim+"│"+reset) {
+		t.Errorf("cell padding not computed on the rendered width: %q", got)
+	}
+}
+
 // TestRenderLists guards list rendering: nested items keep their indentation and
 // ordered items keep their number.
 func TestRenderLists(t *testing.T) {
