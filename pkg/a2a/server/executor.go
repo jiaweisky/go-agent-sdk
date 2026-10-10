@@ -4,14 +4,15 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/a2asrv/taskstore"
 
 	a2acommon "github.com/jiaweisky/go-agent-sdk/pkg/a2a"
-	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // pendingState is a turn parked at input-required, waiting for the client to
@@ -239,7 +240,10 @@ func (e *executor) deliverReply(pending *pendingState, message *a2a.Message) err
 	return pending.session.ReplyPermission(pending.requestID, permissionReplyFromMessage(message))
 }
 
-// mapStream maps a session event stream onto A2A events.
+// mapStream maps a session event stream onto A2A events. Text and reasoning
+// deltas are batched (see deltaBuffer): consecutive deltas become one artifact
+// part instead of one part per token, which otherwise makes a2a-go persist the
+// whole task per token and slows turns down quadratically.
 func (e *executor) mapStream(
 	ctx context.Context,
 	execCtx *a2asrv.ExecutorContext,
@@ -271,93 +275,166 @@ func (e *executor) mapStream(
 		return yield(event, nil)
 	}
 
+	appendText := func(text string, thought bool) bool {
+		part := a2a.NewTextPart(text)
+		if thought {
+			part.SetMeta(a2acommon.ToA2AMetaKey(a2acommon.MetaThought), true)
+		}
+		return appendPart(part)
+	}
+
+	deltas := &deltaBuffer{emit: appendText}
+
 	for event, err := range stream {
 		if err != nil {
+			if !deltas.flush() {
+				return
+			}
 			e.fail(execCtx, err, yield)
 			return
 		}
 		switch event.Kind {
-		case EventText:
+		case EventText, EventReasoning:
 			if event.Text == "" {
 				continue
 			}
-			if !appendPart(a2a.NewTextPart(event.Text)) {
+			if !deltas.add(event.Kind, event.Text) {
 				return
 			}
-		case EventReasoning:
-			if event.Text == "" {
-				continue
-			}
-			part := a2a.NewTextPart(event.Text)
-			part.SetMeta(a2acommon.ToA2AMetaKey(a2acommon.MetaThought), true)
-			if !appendPart(part) {
+		default:
+			if !deltas.flush() {
 				return
 			}
-		case EventToolCalled:
-			if !appendPart(toolCallPart(event)) {
-				return
-			}
-		case EventToolResult:
-			if !appendPart(toolResultPart(event)) {
-				return
-			}
-			for _, diff := range fileDiffParts(event.Structured) {
-				if !appendPart(diff) {
+			switch event.Kind {
+			case EventToolCalled:
+				if !appendPart(toolCallPart(event)) {
 					return
 				}
-			}
-		case EventNotice:
-			if event.Text == "" {
-				continue
-			}
-			if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, noticeMessage(execCtx, event.Text)), nil) {
+			case EventToolResult:
+				if !appendPart(toolResultPart(event)) {
+					return
+				}
+				for _, diff := range fileDiffParts(event.Structured) {
+					if !appendPart(diff) {
+						return
+					}
+				}
+			case EventNotice:
+				if event.Text == "" {
+					continue
+				}
+				if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, noticeMessage(execCtx, event.Text)), nil) {
+					return
+				}
+			case EventToolProgress, EventStepStarted:
+				if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, nil), nil) {
+					return
+				}
+			case EventUsage:
+				usage = event.Usage
+			case EventAwaitInput:
+				e.awaitInput(execCtx, sess, artifactID, event, yield)
+				return
+			case EventError:
+				e.fail(execCtx, event.Err, yield)
+				return
+			case EventIdle:
+				e.complete(execCtx, artifactID, usage, yield)
 				return
 			}
-		case EventToolProgress, EventStepStarted:
-			if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, nil), nil) {
-				return
-			}
-		case EventUsage:
-			usage = event.Usage
-		case EventAwaitInput:
-			e.awaitInput(execCtx, sess, artifactID, event.RequestID, event.IsQuestion, event.Questions, yield)
-			return
-		case EventError:
-			e.fail(execCtx, event.Err, yield)
-			return
-		case EventIdle:
-			e.complete(execCtx, artifactID, usage, yield)
-			return
 		}
 	}
 	// The stream ended without EventIdle; treat it as a completed turn.
+	if !deltas.flush() {
+		return
+	}
 	e.complete(execCtx, artifactID, usage, yield)
+}
+
+// Text and reasoning deltas are accumulated before being emitted as one
+// artifact part. One token per part would make a2a-go deep-copy the task and
+// the turn task store re-serialize it on every event; batching keeps a turn's
+// event count independent of the model's token count. A buffer flushes when a
+// non-delta event arrives, the kind changes, it reaches deltaFlushThreshold
+// bytes, or deltaFlushInterval elapses since the last flush (so output still
+// streams live instead of appearing only at the end of the turn).
+const (
+	deltaFlushThreshold = 4 << 10 // 4 KiB
+	deltaFlushInterval  = 250 * time.Millisecond
+)
+
+// deltaBuffer accumulates consecutive streamed deltas of one kind (EventText
+// or EventReasoning) and emits them through emit as a single text part, with
+// the thought flag set for reasoning deltas. An empty buffer accepts the first
+// delta of either kind; add flushes before switching kinds and whenever a
+// flush trigger (size or elapsed time) fires. flush is safe to call at any
+// time and is a no-op on an empty buffer, so event consumers can call it
+// unconditionally before emitting non-delta events.
+type deltaBuffer struct {
+	// emit delivers one merged text chunk; it returns false when the event
+	// consumer stopped and no further events should be emitted.
+	emit func(text string, thought bool) bool
+
+	builder   strings.Builder
+	kind      EventKind
+	lastFlush time.Time
+}
+
+// add appends one delta of the given kind, flushing the buffer first when the
+// kind differs from what is buffered, and flushing again when a size or time
+// trigger fires. It reports whether emitting may continue.
+func (b *deltaBuffer) add(kind EventKind, text string) bool {
+	if b.builder.Len() > 0 && b.kind != kind {
+		if !b.flush() {
+			return false
+		}
+	}
+	if b.builder.Len() == 0 {
+		b.kind = kind
+		b.lastFlush = time.Now()
+	}
+	b.builder.WriteString(text)
+	if b.builder.Len() >= deltaFlushThreshold || time.Since(b.lastFlush) >= deltaFlushInterval {
+		return b.flush()
+	}
+	return true
+}
+
+// flush emits the buffered text as one part and empties the buffer. It returns
+// true when there was nothing to emit or emission succeeded.
+func (b *deltaBuffer) flush() bool {
+	if b.builder.Len() == 0 {
+		return true
+	}
+	text := b.builder.String()
+	b.builder.Reset()
+	b.lastFlush = time.Now()
+	return b.emit(text, b.kind == EventReasoning)
 }
 
 // awaitInput parks the turn: it seals the open artifact, records the pending
 // request, and emits the input-required status so the client can reply on the
-// next message.
+// next message. The status message carries what the client needs to answer:
+// the questions a question request asked, or what a permission request wants.
 func (e *executor) awaitInput(
 	execCtx *a2asrv.ExecutorContext,
 	sess Session,
 	artifactID a2a.ArtifactID,
-	requestID string,
-	question bool,
-	questions []schema.QuestionInfo,
+	event Event,
 	yield func(a2a.Event, error) bool,
 ) {
 	if artifactID != "" && !yield(sealArtifact(execCtx, artifactID), nil) {
 		return
 	}
-	e.setPending(execCtx.TaskID, sess, requestID, question)
+	e.setPending(execCtx.TaskID, sess, event.RequestID, event.IsQuestion)
 	status := a2a.NewStatusUpdateEvent(
 		execCtx,
 		a2a.TaskStateInputRequired,
-		awaitInputMessage(execCtx, requestID, questions),
+		awaitInputMessage(execCtx, event),
 	)
 	status.Metadata = map[string]any{
 		metaKeySession:        sess.ID(),
-		metaKeyPendingRequest: requestID,
+		metaKeyPendingRequest: event.RequestID,
 	}
 	yield(status, nil)
 }

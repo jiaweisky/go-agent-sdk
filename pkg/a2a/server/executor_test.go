@@ -344,17 +344,12 @@ func TestExecutorSteersWorkingTask(t *testing.T) {
 	}
 }
 
-func TestExecutorForwardsQuestions(t *testing.T) {
-	session := &fakeSession{id: "ses_questions", events: []Event{{
-		Kind:       EventAwaitInput,
-		RequestID:  "que_1",
-		IsQuestion: true,
-		Questions:  []schema.QuestionInfo{{Question: "Pick a color", Header: "color", Options: []schema.QuestionOption{{Label: "blue", Description: "cool"}}}},
-	}}}
-	exec := newExecutor(executorConfig{factory: &fakeFactory{session: session}, agentID: "build", store: taskstore.NewInMemory(nil)})
-
-	var questions []schema.QuestionInfo
-	for event, err := range exec.Execute(context.Background(), newExecCtx(a2a.NewTaskID(), a2a.NewContextID())) {
+// awaitInputArgs drives an executor stream and returns the args of the
+// await_input function call in the input-required status message. It fails the
+// test when the stream never parks at input-required.
+func awaitInputArgs(t *testing.T, exec *executor, execCtx *a2asrv.ExecutorContext) map[string]any {
+	t.Helper()
+	for event, err := range exec.Execute(context.Background(), execCtx) {
 		if err != nil {
 			t.Fatalf("execute: %v", err)
 		}
@@ -364,16 +359,168 @@ func TestExecutorForwardsQuestions(t *testing.T) {
 		}
 		for _, part := range status.Status.Message.Parts {
 			data, _ := part.Data().(map[string]any)
-			args, _ := data["args"].(map[string]any)
-			raw, ok := args["questions"]
-			if !ok {
-				continue
+			if name, _ := data["name"].(string); name == "await_input" {
+				args, _ := data["args"].(map[string]any)
+				return args
 			}
-			encoded, _ := json.Marshal(raw)
-			_ = json.Unmarshal(encoded, &questions)
 		}
+	}
+	t.Fatal("stream did not park at input-required with an await_input call")
+	return nil
+}
+
+func TestExecutorForwardsQuestions(t *testing.T) {
+	session := &fakeSession{id: "ses_questions", events: []Event{{
+		Kind:       EventAwaitInput,
+		RequestID:  "que_1",
+		IsQuestion: true,
+		Questions:  []schema.QuestionInfo{{Question: "Pick a color", Header: "color", Options: []schema.QuestionOption{{Label: "blue", Description: "cool"}}}},
+	}}}
+	exec := newExecutor(executorConfig{factory: &fakeFactory{session: session}, agentID: "build", store: taskstore.NewInMemory(nil)})
+
+	encoded, err := json.Marshal(awaitInputArgs(t, exec, newExecCtx(a2a.NewTaskID(), a2a.NewContextID()))["questions"])
+	if err != nil {
+		t.Fatalf("marshal questions: %v", err)
+	}
+	var questions []schema.QuestionInfo
+	if err := json.Unmarshal(encoded, &questions); err != nil {
+		t.Fatalf("unmarshal questions: %v", err)
 	}
 	if len(questions) != 1 || questions[0].Question != "Pick a color" || len(questions[0].Options) != 1 {
 		t.Fatalf("forwarded questions = %+v", questions)
+	}
+}
+
+func TestExecutorForwardsPermissionDetails(t *testing.T) {
+	session := &fakeSession{id: "ses_permission", events: []Event{{
+		Kind:      EventAwaitInput,
+		RequestID: "per_1",
+		Permission: &PermissionInfo{
+			Action:    "bash",
+			Resources: []string{"docker ps"},
+			Save:      []string{"docker *"},
+		},
+	}}}
+	exec := newExecutor(executorConfig{factory: &fakeFactory{session: session}, agentID: "build", store: taskstore.NewInMemory(nil)})
+
+	permission, ok := awaitInputArgs(t, exec, newExecCtx(a2a.NewTaskID(), a2a.NewContextID()))["permission"].(map[string]any)
+	if !ok {
+		t.Fatal("await_input args carry no permission object")
+	}
+	if permission["action"] != "bash" {
+		t.Fatalf("forwarded permission = %+v, want action %q", permission, "bash")
+	}
+	resources, _ := permission["resources"].([]any)
+	if len(resources) != 1 || resources[0] != "docker ps" {
+		t.Fatalf("forwarded permission resources = %v", permission["resources"])
+	}
+	save, _ := permission["save"].([]any)
+	if len(save) != 1 || save[0] != "docker *" {
+		t.Fatalf("forwarded permission save = %v", permission["save"])
+	}
+}
+
+// emittedText is one text part an executor stream produced.
+type emittedText struct {
+	text    string
+	thought bool
+}
+
+// collectArtifactParts drains an executor stream and returns each text part
+// with its thought flag, in emission order.
+func collectArtifactParts(t *testing.T, exec *executor, execCtx *a2asrv.ExecutorContext) []emittedText {
+	t.Helper()
+	var parts []emittedText
+	for event, err := range exec.Execute(context.Background(), execCtx) {
+		if err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		artifact, ok := event.(*a2a.TaskArtifactUpdateEvent)
+		if !ok {
+			continue
+		}
+		for _, part := range artifact.Artifact.Parts {
+			// Skip the seal event's empty text chunk and data parts (tool
+			// calls/results), which carry no text.
+			if part.Text() == "" {
+				continue
+			}
+			thought, _ := part.Metadata[a2acommon.ToA2AMetaKey(a2acommon.MetaThought)].(bool)
+			parts = append(parts, emittedText{text: part.Text(), thought: thought})
+		}
+	}
+	return parts
+}
+
+func TestExecutorBatchesTextDeltas(t *testing.T) {
+	session := &fakeSession{id: "ses_batch", events: []Event{
+		{Kind: EventText, Text: "hel"},
+		{Kind: EventText, Text: "lo "},
+		{Kind: EventText, Text: "world"},
+		{Kind: EventIdle},
+	}}
+	exec := newExecutor(executorConfig{factory: &fakeFactory{session: session}, agentID: "build", store: taskstore.NewInMemory(nil)})
+
+	parts := collectArtifactParts(t, exec, newExecCtx(a2a.NewTaskID(), a2a.NewContextID()))
+	if len(parts) != 1 || parts[0].text != "hello world" || parts[0].thought {
+		t.Fatalf("parts = %+v, want one plain part %q", parts, "hello world")
+	}
+}
+
+func TestExecutorFlushesDeltasOnKindChangeAndToolCall(t *testing.T) {
+	session := &fakeSession{id: "ses_order", events: []Event{
+		{Kind: EventReasoning, Text: "thinking"},
+		{Kind: EventReasoning, Text: " hard"},
+		{Kind: EventText, Text: "ans"},
+		{Kind: EventText, Text: "wer"},
+		{Kind: EventToolCalled, ToolName: "bash", CallID: "c1", Input: map[string]any{"command": "ls"}},
+		{Kind: EventToolResult, ToolName: "bash", CallID: "c1", Result: "out"},
+		{Kind: EventText, Text: "done"},
+		{Kind: EventIdle},
+	}}
+	exec := newExecutor(executorConfig{factory: &fakeFactory{session: session}, agentID: "build", store: taskstore.NewInMemory(nil)})
+
+	parts := collectArtifactParts(t, exec, newExecCtx(a2a.NewTaskID(), a2a.NewContextID()))
+	var texts []string
+	thoughts := 0
+	for _, part := range parts {
+		texts = append(texts, part.text)
+		if part.thought {
+			thoughts++
+		}
+	}
+	want := []string{"thinking hard", "answer", "done"}
+	if len(texts) != len(want) {
+		t.Fatalf("parts = %q, want %q", texts, want)
+	}
+	for i := range want {
+		if texts[i] != want[i] {
+			t.Fatalf("parts = %q, want %q", texts, want)
+		}
+	}
+	if thoughts != 1 {
+		t.Fatalf("thought parts = %d, want 1", thoughts)
+	}
+}
+
+func TestExecutorFlushesDeltasAtSizeThreshold(t *testing.T) {
+	chunk := strings.Repeat("a", deltaFlushThreshold/2)
+	session := &fakeSession{id: "ses_size", events: []Event{
+		{Kind: EventText, Text: chunk},
+		{Kind: EventText, Text: chunk},
+		{Kind: EventText, Text: chunk},
+		{Kind: EventIdle},
+	}}
+	exec := newExecutor(executorConfig{factory: &fakeFactory{session: session}, agentID: "build", store: taskstore.NewInMemory(nil)})
+
+	parts := collectArtifactParts(t, exec, newExecCtx(a2a.NewTaskID(), a2a.NewContextID()))
+	if len(parts) != 2 {
+		t.Fatalf("parts = %d, want 2 (one full buffer plus one final flush)", len(parts))
+	}
+	if parts[0].text != strings.Repeat("a", deltaFlushThreshold) {
+		t.Fatalf("first part length = %d, want %d", len(parts[0].text), deltaFlushThreshold)
+	}
+	if parts[1].text != chunk {
+		t.Fatalf("last part = %q, want %d a's", parts[1].text, len(chunk))
 	}
 }

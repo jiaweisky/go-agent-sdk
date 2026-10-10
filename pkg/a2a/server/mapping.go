@@ -287,20 +287,24 @@ func usageMetadata(usage any) map[string]any {
 
 // awaitInputMessage builds the input-required status message: a human-readable
 // text part plus a long-running function_call data part, matching the ADK
-// human-in-the-loop convention. When the park is a question, its questions
-// travel in the call's args so the client can show them.
-func awaitInputMessage(
-	execCtx *a2asrv.ExecutorContext,
-	requestID string,
-	questions []schema.QuestionInfo,
-) *a2a.Message {
+// human-in-the-loop convention. The call's args carry what the client needs to
+// answer: the questions a question request asked, or the action, resources and
+// savable resources a permission request wants.
+func awaitInputMessage(execCtx *a2asrv.ExecutorContext, event Event) *a2a.Message {
 	args := map[string]any{}
-	if len(questions) > 0 {
-		args["questions"] = normalizeValue(questions)
+	if len(event.Questions) > 0 {
+		args["questions"] = normalizeValue(event.Questions)
+	}
+	if event.Permission != nil {
+		args["permission"] = map[string]any{
+			"action":    event.Permission.Action,
+			"resources": normalizeValue(event.Permission.Resources),
+			"save":      normalizeValue(event.Permission.Save),
+		}
 	}
 	call := a2a.NewDataPart(map[string]any{
 		"name": "await_input",
-		"id":   requestID,
+		"id":   event.RequestID,
 		"args": args,
 	})
 	call.SetMeta(a2acommon.ToA2AMetaKey(a2acommon.MetaType), a2acommon.TypeFunctionCall)

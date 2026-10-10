@@ -90,3 +90,28 @@ func TestA2AEventFromAttachmentOmitted(t *testing.T) {
 		t.Fatalf("notice text = %q", event.Text)
 	}
 }
+
+func TestA2AEventFromPermissionAskedCarriesDetails(t *testing.T) {
+	event, ok := a2aEventFrom(PermissionAsked{Request: PermissionRequest{
+		ID:        "per_1",
+		SessionID: "ses_1",
+		Action:    "bash",
+		Resources: []string{"docker ps"},
+		Save:      []string{"docker *"},
+	}})
+	if !ok || event.Kind != server.EventAwaitInput {
+		t.Fatalf("event = %+v, ok = %v", event, ok)
+	}
+	if event.RequestID != "per_1" || event.IsQuestion {
+		t.Fatalf("request id = %q, isQuestion = %v", event.RequestID, event.IsQuestion)
+	}
+	if event.Permission == nil {
+		t.Fatal("permission details were dropped")
+	}
+	if event.Permission.Action != "bash" || len(event.Permission.Resources) != 1 || event.Permission.Resources[0] != "docker ps" {
+		t.Fatalf("permission = %+v", event.Permission)
+	}
+	if len(event.Permission.Save) != 1 || event.Permission.Save[0] != "docker *" {
+		t.Fatalf("permission save = %v", event.Permission.Save)
+	}
+}

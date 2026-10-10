@@ -71,9 +71,25 @@ type Event struct {
 	// Questions carries the questions a question request asked, so they can be
 	// forwarded to the A2A client.
 	Questions []schema.QuestionInfo
+	// Permission carries what a permission request asks for (the action, the
+	// resources it applies to, and what can be remembered on an "always"
+	// approval), so the A2A client can render and answer the request.
+	Permission *PermissionInfo
 
 	// Err is set for EventError.
 	Err error
+}
+
+// PermissionInfo describes a permission request a turn is parked on.
+type PermissionInfo struct {
+	// Action is the permission action being requested (for example "bash").
+	Action string
+	// Resources lists what the action applies to (for example command lines
+	// or file paths).
+	Resources []string
+	// Save lists the resources the caller may ask to remember when approving
+	// with "always"; empty when the request cannot be remembered.
+	Save []string
 }
 
 // Answer is one question answer.

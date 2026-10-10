@@ -429,7 +429,15 @@ func a2aEventFrom(event Event) (server.Event, bool) {
 	case Usage:
 		return server.Event{Kind: server.EventUsage, Usage: e.ProviderMetadata}, true
 	case PermissionAsked:
-		return server.Event{Kind: server.EventAwaitInput, RequestID: e.Request.ID}, true
+		return server.Event{
+			Kind:      server.EventAwaitInput,
+			RequestID: e.Request.ID,
+			Permission: &server.PermissionInfo{
+				Action:    e.Request.Action,
+				Resources: e.Request.Resources,
+				Save:      e.Request.Save,
+			},
+		}, true
 	case QuestionAsked:
 		return server.Event{
 			Kind:       server.EventAwaitInput,
