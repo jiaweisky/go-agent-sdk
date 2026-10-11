@@ -115,6 +115,45 @@ func fetchCard(t *testing.T, baseURL string) *a2a.AgentCard {
 	return &card
 }
 
+// TestCardPaths checks each exposed agent's card path, including a custom
+// Expose.Path override.
+func TestCardPaths(t *testing.T) {
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: agent.ApproveAll,
+		LLM: stubLLM{reply: "x"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	for id, expose := range map[string]*schema.AgentExpose{
+		"build":  {Name: "Build"},
+		"review": {Name: "Review", Path: "/custom/review.json"},
+	} {
+		if err := client.RegisterAgent(id, agent.AgentConfig{Expose: expose}); err != nil {
+			t.Fatalf("register %s: %v", id, err)
+		}
+	}
+	srv, err := server.New(server.Options{Factory: agent.NewA2AFactory(client), Agents: client.Agents().All()})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	got := srv.CardPaths()
+	want := map[string]bool{
+		"/agents/build/.well-known/agent-card.json": true,
+		"/custom/review.json":                       true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("CardPaths = %v, want %d entries", got, len(want))
+	}
+	for _, path := range got {
+		if !want[path] {
+			t.Errorf("unexpected card path %q", path)
+		}
+	}
+}
+
 // TestServerServesAggregateCards guards the discovery endpoint that returns all
 // exposed agents' cards as a JSON array, the shape CodeBuddy's
 // CODEBUDDY_REMOTE_AGENTS_URL expects.
@@ -138,6 +177,45 @@ func TestServerServesAggregateCards(t *testing.T) {
 	}
 	if got := cards[0].SupportedInterfaces; len(got) != 1 || got[0].URL != ts.URL+"/agents/build/" {
 		t.Fatalf("interfaces = %v, want 1 at %s", got, ts.URL+"/agents/build/")
+	}
+}
+
+// TestServerCardsAccessor guards the exported Cards accessor a multiplexing host
+// uses to aggregate cards across server instances onto one origin.
+func TestServerCardsAccessor(t *testing.T) {
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol:    "openai-responses",
+		Credentials: agent.APIKey("test"),
+		Model:       "test-model",
+		Root:        t.TempDir(),
+		Permission:  agent.ApproveAll,
+		LLM:         stubLLM{reply: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Expose: &schema.AgentExpose{Name: "Echo"},
+	}); err != nil {
+		t.Fatalf("register agent: %v", err)
+	}
+
+	srv, err := server.New(server.Options{
+		Factory: agent.NewA2AFactory(client),
+		Agents:  client.Agents().All(),
+		BaseURL: "https://agents.example.com",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	cards := srv.Cards(nil)
+	if len(cards) != 1 {
+		t.Fatalf("cards = %d, want 1", len(cards))
+	}
+	if got := cards[0].SupportedInterfaces; len(got) != 1 || got[0].URL != "https://agents.example.com/agents/build/" {
+		t.Fatalf("interfaces = %v, want 1 at %s", got, "https://agents.example.com/agents/build/")
 	}
 }
 

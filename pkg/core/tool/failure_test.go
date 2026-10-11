@@ -29,4 +29,12 @@ func TestFailurePropagatesUserDecline(t *testing.T) {
 	if !errors.As(got, &failed) || failed.Message != "Unable to do the thing" {
 		t.Fatalf("failure() = %v, want a Failure", got)
 	}
+
+	// A config-denied tool (PermissionBlockedError) is model-facing, not a
+	// decline: the model sees the failure and the turn continues.
+	blocked := failure("Permission denied: question", &core.PermissionBlockedError{})
+	var denied *Failure
+	if !errors.As(blocked, &denied) || denied.Message != "Permission denied: question" {
+		t.Fatalf("failure() = %v, want a model-facing Failure", blocked)
+	}
 }

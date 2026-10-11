@@ -171,7 +171,7 @@ server/                         HTTP API (Go-specific; no direct TS counterpart,
 ├── errors.go                   error envelope + SDK error → status mapping
 ├── sse.go                      SSE writer, heartbeat, wire event envelope
 └── wire.go                     request/response DTOs
-cmd/agentserve/                 standalone command (YAML + flags, no env), like cmd/a2aserve
+cmd/agentd/                     multi-transport server command (YAML config, no env)
 ```
 
 Notes:
@@ -1045,6 +1045,11 @@ Consequences:
 ---
 
 ## 12. `cmd/agentserve`
+
+> **Superseded:** `cmd/agentserve` and `cmd/a2aserve` are replaced by the
+> multi-transport command **`cmd/agentd`** (`docs/DESIGN-AGENTD.md`). This section
+> documents the historical single-transport command; its flat config shape has
+> been folded into `agentd`'s `servers[]` + global `models` config.
 
 A standalone application (not part of the SDK API), parallel to `cmd/a2aserve`:
 **YAML config file + CLI flags, no environment variables**. It builds the

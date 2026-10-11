@@ -1,0 +1,96 @@
+# agentd example configuration.
+#
+# One process serves the configured `servers`; each server is one agent client
+# over one listener. Models are defined once in the global catalog and selected
+# per server by id.
+#
+# Any string value may reference environment variables explicitly: `${VAR}`
+# (required), `${VAR:-default}`, and `$$` for a literal `$`. No environment is
+# read implicitly — only where the file asks for it (shown on apiKey, bearer,
+# workingDirectory below; it works for modelBaseURL, cards.name/description too).
+#
+# `modelBaseURL` is the *base* only: the protocol appends its own path
+# (`/chat/completions`, `/responses`, `/messages`).
+
+models:
+  # deepseek-flash speaks three wire protocols. Each is a separate catalog entry:
+  # `id` is the agent-facing name, `model` is the value actually sent to the
+  # provider. They are equal here but need not be.
+
+  - id: deepseek-flash                        # OpenAI Chat Completions
+    model: deepseek-flash
+    protocol: openai-compatible-chat
+    modelBaseURL: https://api.deepseek.com     # + /chat/completions
+    credentials:
+      apiKey: ${DEEPSEEK_API_KEY:-replace-me}
+    inputModalities: [text, image]
+    contextLimit: 1000000
+    outputLimit: 384000
+
+  - id: deepseek-flash-responses              # OpenAI Responses API
+    model: deepseek-flash
+    protocol: openai-responses
+    modelBaseURL: https://api.deepseek.com     # + /responses
+    credentials:
+      apiKey: ${DEEPSEEK_API_KEY:-replace-me}
+    inputModalities: [text, image]
+    contextLimit: 1000000
+    outputLimit: 384000
+
+  - id: deepseek-flash-anthropic              # Anthropic Messages API
+    model: deepseek-flash
+    protocol: anthropic-messages
+    modelBaseURL: https://api.deepseek.com/anthropic  # + /messages
+    credentials:
+      apiKey: ${DEEPSEEK_API_KEY:-replace-me}
+    inputModalities: [text, image]
+    contextLimit: 1000000
+    outputLimit: 384000
+
+servers:
+  - name: http
+    kind: http
+    listen: 127.0.0.1:8787
+    root: ./var/http
+    workingDirectory: ${AGENTD_WORKDIR:-.}
+    configDirs: [./agents]
+    # Expose all three protocols; a session picks one by id (default: the first).
+    models: [deepseek-flash, deepseek-flash-responses, deepseek-flash-anthropic]
+    defaultModel: deepseek-flash
+    agents: [build]
+    auth:
+      bearer: ${AGENTD_TOKEN:-replace-me}
+    keepAlive: 15s
+
+  # A2A server: the same client assembly, exposed over the A2A protocol on its
+  # own listener (and its own client / state root). Card URLs come from `baseURL`
+  # (or the request origin when omitted).
+  - name: a2a
+    kind: a2a
+    listen: 127.0.0.1:8788
+    root: ./var/a2a
+    workingDirectory: ${AGENTD_WORKDIR:-.}
+    configDirs: [./agents]
+    models: [deepseek-flash]
+    defaultModel: deepseek-flash
+    agents: [build]
+    baseURL: http://127.0.0.1:8788
+    inboundMedia: spool               # spool (default) | inline
+    # Run every tool. `questions: decline` rejects the question tool (an A2A
+    # client only polls task state and cannot answer), ending the turn with the
+    # dismissal instead of parking forever at input-required.
+    inboundPermissions:
+      - { action: "*", resource: "*", effect: allow }
+    questions: decline
+    cards:                            # REQUIRED per exposed agent (name + description)
+      build:
+        name: Build Agent
+        description: "Autonomous coding agent: reads, writes and edits files, runs commands and searches the repository, subject to the inbound permissions."
+        version: "1.0.0"
+        # documentationUrl and provider are optional card metadata (omit them freely):
+        documentationUrl: https://github.com/jiaweisky/go-agent-sdk
+        provider: { organization: jiaweisky, url: https://github.com/jiaweisky }
+        # skills:                     # operator-authored labels; omitted → the card advertises []
+    auth:
+      bearer: ${AGENTD_TOKEN:-replace-me}              # A2A auth is bearer-only
+    keepAlive: 15s

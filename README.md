@@ -160,10 +160,10 @@ and is validated before the handler runs.
   `agent.NewA2AFactory`, and serve it with `a2a/server`.
 - **A2A (client)** — set an agent's `Backend` to the A2A backend to delegate to a
   remote agent; the same path is used by the `task` tool.
-- **A2A server command** — `cmd/a2aserve` runs an A2A server exposing the
-  built-in `build` agent by default. It is configured by a YAML file and CLI
-  flags (no environment variables), with optional bearer auth. See
-  [cmd/a2aserve/README.md](cmd/a2aserve/README.md).
+- **Server command** — `cmd/agentd` serves one agent client per configured
+  server over HTTP/SSE and/or A2A, from a single YAML config (string values may
+  reference `${VAR}`; no implicit environment reads). See
+  [`docs/DESIGN-AGENTD.md`](docs/DESIGN-AGENTD.md).
 
 ## Package layout
 
@@ -185,7 +185,7 @@ go-agent-sdk/
 ├── internal/     engine internals (not importable outside this module)
 │   ├── core/       session, session/runner, database, tool, skill, ...
 │   └── defs/       agent and skill definitions loaded from markdown
-└── cmd/          commands (cmd/a2aserve runs an A2A server)
+└── cmd/          commands (cmd/agentd serves HTTP/SSE and A2A)
 ```
 
 > The public API is `pkg/...`; everything under `internal/` is implementation
@@ -201,7 +201,8 @@ Runnable examples live under `examples/` — see [examples/README.md](examples/R
 |---|---|
 | `examples/tool` | A custom tool plus a permission handler |
 | `examples/chat` | Interactive multi-turn chat, MCP, A2A, skills, subagents |
-| `examples/a2aserver` | The SDK as an A2A server, driven by its own A2A client |
+| `examples/a2a-embedded` | The SDK's A2A library API in-process: multi-turn + HITL with a stub model |
+| `examples/agentd-client` | A client for `cmd/agentd` over both HTTP/SSE and A2A |
 | `examples/adka2a` | A Google ADK agent over A2A for cross-implementation interop |
 
 ```sh

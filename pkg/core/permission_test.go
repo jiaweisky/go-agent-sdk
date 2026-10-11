@@ -7,6 +7,22 @@ import (
 	"time"
 )
 
+// TestPermissionEvaluateLastMatchWins guards that a specific rule after a
+// wildcard rule overrides it, so "allow *" + "deny question" denies question
+// while allowing everything else.
+func TestPermissionEvaluateLastMatchWins(t *testing.T) {
+	rules := PermissionRuleset{
+		{Action: "*", Resource: "*", Effect: PermissionEffectAllow},
+		{Action: "question", Resource: "*", Effect: PermissionEffectDeny},
+	}
+	if got := PermissionEvaluate("question", "*", rules); got.Effect != PermissionEffectDeny {
+		t.Fatalf("question effect = %q, want deny", got.Effect)
+	}
+	if got := PermissionEvaluate("bash", "*", rules); got.Effect != PermissionEffectAllow {
+		t.Fatalf("bash effect = %q, want allow", got.Effect)
+	}
+}
+
 type permTestSessions struct{ agent string }
 
 func (s permTestSessions) Get(sessionID string) (*PermissionSessionInfo, bool, error) {

@@ -142,14 +142,36 @@ func (s *Server) cardsHandler() http.Handler {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		ctx := withRequest(r.Context(), r)
-		cards := make([]*a2a.AgentCard, 0, len(s.exposed))
-		for _, info := range s.exposed {
-			cards = append(cards, buildCard(info, s.cardEndpoint(ctx, info), s.opts.Security))
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(cards)
+		_ = json.NewEncoder(w).Encode(s.Cards(r))
 	})
+}
+
+// Cards returns the AgentCard for every exposed agent. Each card's endpoint is
+// resolved from the configured BaseURL, or from r's origin when BaseURL is unset;
+// with neither, endpoints are returned relative. This lets a caller (a
+// multiplexing host, for example) aggregate cards across several server
+// instances onto one origin; r may be nil when every instance sets BaseURL.
+func (s *Server) Cards(r *http.Request) []*a2a.AgentCard {
+	ctx := context.Background()
+	if r != nil {
+		ctx = withRequest(r.Context(), r)
+	}
+	cards := make([]*a2a.AgentCard, 0, len(s.exposed))
+	for _, info := range s.exposed {
+		cards = append(cards, buildCard(info, s.cardEndpoint(ctx, info), s.opts.Security))
+	}
+	return cards
+}
+
+// CardPaths returns each exposed agent's card path (where its AgentCard is
+// served), in exposure order.
+func (s *Server) CardPaths() []string {
+	paths := make([]string, 0, len(s.exposed))
+	for _, info := range s.exposed {
+		paths = append(paths, s.cardPath(info))
+	}
+	return paths
 }
 
 // cardEndpoint resolves the absolute JSON-RPC URL advertised in a card: the

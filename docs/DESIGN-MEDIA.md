@@ -5,6 +5,11 @@
 > to a **subagent** (each agent may name its own model), so a media-capable model
 > can be used for the specific task that needs it.
 >
+> Note: `cmd/agentserve`/`cmd/a2aserve` were merged into the single command
+> **`cmd/agentd`** and the shared `serveconfig` package became `cmd/agentd/config`
+> (`docs/DESIGN-AGENTD.md`). This document predates that merge; read its command
+> and `serveconfig` references as the current `agentd` equivalents.
+>
 > Status: design proposal (not implemented). Numbers in braces like **{M1}** are
 > decisions; all design decisions are recorded in §8 (test tooling in §7).
 

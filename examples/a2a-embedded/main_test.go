@@ -14,7 +14,7 @@ func TestMultiTurnAndInputRequired(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spins an A2A server")
 	}
-	root, err := os.MkdirTemp("", "a2aserver-test-*")
+	root, err := os.MkdirTemp("", "a2a-embedded-test-*")
 	if err != nil {
 		t.Fatalf("temp root: %v", err)
 	}

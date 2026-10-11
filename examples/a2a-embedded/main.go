@@ -1,4 +1,4 @@
-// Command a2aserver exposes a go-agent-sdk agent over A2A (inbound) and then
+// Command a2a-embedded exposes a go-agent-sdk agent over A2A (inbound) and then
 // calls it with the SDK's own A2A client, so the whole round trip stays inside
 // the SDK. It shows what the chat example only shows from the client side:
 //
@@ -42,15 +42,15 @@ func main() {
 	// A fresh state root per run keeps each run deterministic and re-runnable;
 	// the server's durability (turn table) still applies within the run. The
 	// workspace is also temporary, so the example neither needs nor touches a repo.
-	root, err := os.MkdirTemp("", "a2aserver-*")
+	root, err := os.MkdirTemp("", "a2a-embedded-*")
 	if err != nil {
-		log.Fatalf("a2aserver: %v", err)
+		log.Fatalf("a2a-embedded: %v", err)
 	}
 	defer os.RemoveAll(root)
 
 	serverClient, err := newServerClient(root)
 	if err != nil {
-		log.Fatalf("a2aserver: %v", err)
+		log.Fatalf("a2a-embedded: %v", err)
 	}
 	defer serverClient.Close()
 
@@ -59,7 +59,7 @@ func main() {
 
 	base, shutdown, err := serve(*addr, serverClient)
 	if err != nil {
-		log.Fatalf("a2aserver: %v", err)
+		log.Fatalf("a2a-embedded: %v", err)
 	}
 	defer shutdown()
 	log.Printf("go-agent-sdk A2A server listening at %s", base)
@@ -69,7 +69,7 @@ func main() {
 	lines := readLines(scanner)
 	session, closeCaller, err := dial(ctx, filepath.Join(root, "caller"), base, askOnConsole(lines))
 	if err != nil {
-		log.Fatalf("a2aserver: %v", err)
+		log.Fatalf("a2a-embedded: %v", err)
 	}
 	defer closeCaller()
 

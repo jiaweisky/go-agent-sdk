@@ -103,29 +103,45 @@ The agent card is served at `/.well-known/agent-card.json` and the JSON-RPC
 endpoint at `/invoke`. This example is the cross-implementation peer used to
 verify the wire conventions in `docs/DESIGN-A2A.md`.
 
-## a2aserver
+## a2a-embedded
 
-A standalone example of the SDK as an A2A **server**. `examples/a2aserver` exposes
-a local agent (via `a2a/server` + `NewA2AFactory` + `Server.Handler`) and then
-calls it with the SDK's own A2A client, all in one process, showing the half the
-chat example only shows from the client side:
+An in-process demo of the SDK **library** API for A2A: it exposes a local agent
+(`a2a/server` + `NewA2AFactory` + `Server.Handler`) and calls it with the SDK's own
+A2A client, all in one process. Unlike the `cmd/agentd` command (a config-driven
+product server), it uses a deterministic, credential-free stub model and asserts
+the whole round trip, so it runs and is tested with no setup:
 
 - **multi-turn context** — successive prompts share one A2A context, so the
   exposed agent sees the earlier turns;
 - **human-in-the-loop** — the agent asks a question, the caller answers, and the
   turn resumes (A2A `input-required`).
 
-The agent uses a deterministic, credential-free stub model.
-
 ```sh
-go run ./examples/a2aserver    # or: make a2aserver
+go run ./examples/a2a-embedded    # or: make a2a-embedded
 ```
 
 It is interactive: it starts the A2A server, then reads prompts from stdin and
 prints the replies. Successive prompts share one context, so context persists
 across turns; type a prompt containing "ask" to make the agent ask you a
 question and answer it. Ctrl+D exits (the server also keeps listening for
-external A2A clients). `go test ./examples/a2aserver` drives the same flow.
+external A2A clients). `go test ./examples/a2a-embedded` drives the same flow.
+
+## agentd-client
+
+A minimal Go client for the running `cmd/agentd` server that speaks **both** of
+agentd's transports — the worked reference for a host written in another language
+(e.g. a Python/Node bot):
+
+- **HTTP/SSE** — create a session, send a prompt, stream the turn's events and
+  auto-approve permission requests;
+- **A2A** — discover the agent card, then stream one message over JSON-RPC.
+
+```sh
+go run ./examples/agentd-client -url http://127.0.0.1:8787 -a2a http://127.0.0.1:9099
+```
+
+Either transport can be skipped by leaving its flag empty; `-token` supplies an
+HTTP bearer token when the server requires auth.
 
 ## Not ported
 

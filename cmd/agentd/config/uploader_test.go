@@ -1,4 +1,4 @@
-package serveconfig
+package config
 
 import (
 	"context"
