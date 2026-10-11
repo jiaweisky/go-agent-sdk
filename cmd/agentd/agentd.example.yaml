@@ -76,12 +76,12 @@ servers:
     agents: [build]
     baseURL: http://127.0.0.1:8788
     inboundMedia: spool               # spool (default) | inline
-    # Run every tool. `questions: decline` rejects the question tool (an A2A
-    # client only polls task state and cannot answer), ending the turn with the
-    # dismissal instead of parking forever at input-required.
+    # Work autonomously: run every tool; deny the question tool so a confirmation
+    # request becomes a model-visible failure and the agent keeps working, rather
+    # than parking at input-required (or ending the turn, as `questions: decline`).
     inboundPermissions:
       - { action: "*", resource: "*", effect: allow }
-    questions: decline
+      - { action: "question", resource: "*", effect: deny }
     cards:                            # REQUIRED per exposed agent (name + description)
       build:
         name: Build Agent
