@@ -27,6 +27,7 @@ type builtinDeps struct {
 	agents     *core.Agent
 	task       TaskRunner
 	name       string
+	process    core.AppProcess
 }
 
 // registerBuiltins registers the shipped built-in tools into a registry.
@@ -35,7 +36,10 @@ type builtinDeps struct {
 func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schema.PermissionRuleset) error {
 	mutation := core.NewLocationMutation(&deps.location)
 	files := core.NewFileMutation()
-	process := core.NewAppProcess()
+	process := deps.process
+	if process == nil {
+		process = core.NewAppProcess()
+	}
 	image := core.NewImage(core.DefaultImageConfig())
 	ripgrepService := core.NewRipgrep(process, ripgrep.NewBinary(deps.global))
 	todos := wire.NewSessionTodo(deps.db, deps.events)

@@ -51,6 +51,7 @@ type runtime struct {
 	location       core.Location
 	projectID      schema.ProjectID
 	models         runner.ModelResolver
+	process        core.AppProcess
 	subagentDepth  int
 	name           string
 
@@ -511,6 +512,7 @@ func resolveRuntimePaths(opts *ClientOptions) (directory, home, root string, err
 func initRuntimeState(
 	db *database.Database,
 	directory string,
+	process core.AppProcess,
 	onError func(error),
 ) (core.Event, core.Git, *core.Location, error) {
 	events := core.NewEvent(core.EventConfig{
@@ -521,12 +523,21 @@ func initRuntimeState(
 	if err := core.RegisterSessionProjectors(events); err != nil {
 		return nil, core.Git{}, nil, err
 	}
-	git := core.NewGit(core.NewAppProcess())
+	git := core.NewGit(process)
 	location, err := ensureProject(db, git, directory)
 	if err != nil {
 		return nil, core.Git{}, nil, err
 	}
 	return events, git, location, nil
+}
+
+// appProcess returns the process seam to use: the host-provided one, or the
+// default pass-through when none was injected.
+func appProcess(opts *ClientOptions) core.AppProcess {
+	if opts.Process != nil {
+		return opts.Process
+	}
+	return core.NewAppProcess()
 }
 
 // newRuntime builds the process-wide services: the database and event log, the
@@ -548,7 +559,8 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db.Close()
 		return nil, err
 	}
-	events, git, location, err := initRuntimeState(db, directory, opts.OnError)
+	process := appProcess(opts)
+	events, git, location, err := initRuntimeState(db, directory, process, opts.OnError)
 	if err != nil {
 		return fail(err)
 	}
@@ -584,7 +596,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db: db, events: events, store: store, agents: agents, skills: skills,
 		outputStore: tool.NewCoreOutputStore(toolOutput), toolOutput: toolOutput,
 		permission: permission, question: question, location: *location,
-		projectID: location.Project.ID, models: models,
+		projectID: location.Project.ID, models: models, process: process,
 		subagentDepth: subagentDepth(opts.SubagentDepth),
 		name:          applicationName(opts.Name),
 		hooks:         map[string]*SessionHooks{}, clientTools: opts.Tools,
@@ -615,6 +627,7 @@ func (r *runtime) buildBuiltins(opts *ClientOptions, global core.Global, locale 
 		db: r.db, events: r.events, permission: r.permission, question: r.question,
 		location: r.location, global: global, shell: opts.Shell, skills: r.skills,
 		locale: locale, agents: r.agents, task: &deferredTaskRunner{rt: r}, name: r.name,
+		process: r.process,
 	}
 }
 

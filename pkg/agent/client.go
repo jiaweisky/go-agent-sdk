@@ -71,6 +71,13 @@ type ClientOptions struct {
 	// LLM overrides the default LLM client (route.LLMClient). When nil, a client
 	// is built from ModelInfo/Protocol over the default HTTP transport.
 	LLM route.LLMClient
+	// Process is the execution seam used by every built-in that spawns a process
+	// (bash, ripgrep, and the git used for the project location/snapshots). It is
+	// the single injection point for a host that wants to run those commands
+	// inside an OS sandbox. Nil keeps the default core.NewAppProcess()
+	// (a pass-through), preserving embeddability. The SDK neither provides nor
+	// requires a sandbox implementation.
+	Process core.AppProcess
 
 	// Tools are application-level tools exposed to every session.
 	Tools []Tool
