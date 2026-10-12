@@ -55,6 +55,9 @@ func validateControl(c *ControlConfig) error {
 	if !IsLoopback(c.Listen) && (c.Auth == nil || c.Auth.Bearer == "") {
 		return errors.New("control.listen on a non-loopback address requires control.auth.bearer")
 	}
+	if c.MaxLeases < 0 {
+		return errors.New("control.maxLeases must not be negative")
+	}
 	if c.ProjectListen != "" {
 		if _, _, err := net.SplitHostPort(c.ProjectListen); err != nil {
 			return fmt.Errorf("control.projectListen: %w", err)

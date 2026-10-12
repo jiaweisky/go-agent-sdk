@@ -383,7 +383,8 @@ provisioning **at runtime**. Two options:
    It prepares the view (Part 1 `Runner`), builds a `Client`, binds a listener under
    `control.projectListen` (default `127.0.0.1:0`), and serves it. `control.auth.bearer`, when
    set, guards the API; a non-loopback `control.listen` **requires** it, and `control.projectListen`
-   must be loopback (dynamic instances are served unauthenticated). **Local modes only**
+   must be loopback (dynamic instances are served unauthenticated). `control.maxLeases` caps the
+   live instance count (0 = unlimited). **Local modes only**
    (none/copy/worktree/overlay): `container`/`remote` are still rejected as external — a
    same-process agentd does not orchestrate containers.
 
@@ -399,7 +400,7 @@ exactly one `Client` at a time; read-only projects may be shared.
 - **Create**: runner `Prepare` (copy/mount/clone into `baseDir`) → `run.go` builds the `Client`
   for the view and starts the transport → host records the lease.
 - **Reclaim**: host releases on idle TTL; `Teardown` removes the worktree/overlay/container.
-- **Quotas**: cap concurrent leases (disk/memory); one view + one `Root` per instance. (**Not in agentd**: the opt-in control API does not cap leases — the host/lease layer does.)
+- **Quotas**: cap concurrent leases (disk/memory); one view + one `Root` per instance. The opt-in control API caps the **instance count** via `control.maxLeases` (0 = unlimited); disk/memory quotas remain the host/lease layer's.
 - **Ownership**: one writer per project; multiple readers allowed.
 - **Isolation of state**: each instance has its own `Root`; the view path is also excluded from
   the agent's own `glob/grep`/references so it is not scanned as project content.
@@ -478,8 +479,7 @@ orchestration remain open.
 | S4 ◐ | `bwrap` (Linux) + `seatbelt` (macOS) wrappers shipped; Windows `AppContainer` open | whole-process `bwrap`/container wrapping |
 
 > Not implemented: the Windows **`AppContainer`** wrapper and **whole-process wrapping** (the
-> rest of S4), and per-instance **lease quotas** (§16). `container`/`remote` are never local —
-> host-provisioned (§15).
+> rest of S4). `container`/`remote` are never local — host-provisioned (§15).
 
 ## Part 8 — Decisions and open questions
 

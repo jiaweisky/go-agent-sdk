@@ -21,6 +21,9 @@ type ControlConfig struct {
 	// ProjectListen is the host:port dynamic project instances bind to; the
 	// default (127.0.0.1:0) picks a free loopback port per instance.
 	ProjectListen string `yaml:"projectListen"`
+	// MaxLeases caps the number of live project instances; 0 (the default) is
+	// unlimited. It bounds a control-API caller from exhausting resources.
+	MaxLeases int `yaml:"maxLeases"`
 	// Auth, when set, guards the admin API.
 	Auth *AuthConfig `yaml:"auth"`
 }

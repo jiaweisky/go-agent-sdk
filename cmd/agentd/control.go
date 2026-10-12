@@ -56,6 +56,7 @@ type projectManager struct {
 	ctx           context.Context
 	catalog       config.Catalog
 	projectListen string
+	maxLeases     int
 	runner        isolation.Runner
 
 	mu        sync.Mutex
@@ -73,6 +74,7 @@ func newProjectManager(ctx context.Context, catalog config.Catalog, control *con
 		ctx:           ctx,
 		catalog:       catalog,
 		projectListen: projectListen,
+		maxLeases:     control.MaxLeases,
 		runner:        isolation.DefaultRunner(),
 		instances:     map[string]*controlInstance{},
 		roots:         map[string]string{},
@@ -113,6 +115,9 @@ func (m *projectManager) claim(name, root string) error {
 	}
 	if owner, taken := m.roots[root]; taken {
 		return fmt.Errorf("root %q is already in use by project %q", root, owner)
+	}
+	if m.maxLeases > 0 && len(m.instances)+len(m.reserved) >= m.maxLeases {
+		return fmt.Errorf("lease limit reached (%d)", m.maxLeases)
 	}
 	m.reserved[name] = true
 	m.roots[root] = name

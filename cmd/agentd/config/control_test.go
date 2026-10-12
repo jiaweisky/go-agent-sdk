@@ -34,4 +34,7 @@ func TestValidateControl(t *testing.T) {
 	if err := base(&ControlConfig{Listen: "127.0.0.1:9090", ProjectListen: "0.0.0.0:0"}).Validate(); err == nil {
 		t.Fatal("expected a non-loopback projectListen to be rejected")
 	}
+	if err := base(&ControlConfig{Listen: "127.0.0.1:9090", MaxLeases: -1}).Validate(); err == nil {
+		t.Fatal("expected a negative control.maxLeases to be rejected")
+	}
 }

@@ -125,6 +125,21 @@ func TestManagerRejectsDuplicateNameAndRoot(t *testing.T) {
 	}
 }
 
+func TestManagerEnforcesLeaseCap(t *testing.T) {
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{MaxLeases: 1})
+	t.Cleanup(manager.Close)
+
+	if _, err := manager.Start(testControlRequest(t)); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	second := testControlRequest(t)
+	second.Name = "grp-b"
+	second.Root = t.TempDir()
+	if _, err := manager.Start(second); err == nil {
+		t.Fatal("expected the lease cap to reject the second project")
+	}
+}
+
 func TestControlHandlerCRUDAndAuth(t *testing.T) {
 	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
 	t.Cleanup(manager.Close)
