@@ -66,6 +66,8 @@ type ApplyPatchDeps struct {
 	Mutation   core.LocationMutation
 	Files      core.FileMutation
 	Permission core.Permission
+	// Guard, when set, is consulted before each target is mutated.
+	Guard core.FileWriteGuard
 }
 
 func MakeApplyPatch(deps ApplyPatchDeps) *Def[ApplyPatchInput, ApplyPatchOutput, ApplyPatchOutput] {
@@ -84,7 +86,7 @@ func MakeApplyPatch(deps ApplyPatchDeps) *Def[ApplyPatchInput, ApplyPatchOutput,
 			if err := execCtx.Err(); err != nil {
 				return ApplyPatchOutput{}, err
 			}
-			return executeApplyPatch(deps, input, ctx)
+			return executeApplyPatch(execCtx, deps, input, ctx)
 		},
 	})
 }
@@ -102,13 +104,14 @@ func RegisterApplyPatch(tools Tools, deps ApplyPatchDeps) (func(), error) {
 }
 
 type applyPatchRun struct {
+	execCtx context.Context
 	deps    ApplyPatchDeps
 	ctx     Context
 	applied []ApplyPatchApplied
 }
 
-func executeApplyPatch(deps ApplyPatchDeps, input ApplyPatchInput, ctx Context) (ApplyPatchOutput, error) {
-	run := &applyPatchRun{deps: deps, ctx: ctx, applied: []ApplyPatchApplied{}}
+func executeApplyPatch(execCtx context.Context, deps ApplyPatchDeps, input ApplyPatchInput, ctx Context) (ApplyPatchOutput, error) {
+	run := &applyPatchRun{execCtx: execCtx, deps: deps, ctx: ctx, applied: []ApplyPatchApplied{}}
 	output, err := run.run(input)
 	if err != nil {
 		var failure *Failure
@@ -118,6 +121,17 @@ func executeApplyPatch(deps ApplyPatchDeps, input ApplyPatchInput, ctx Context) 
 		return ApplyPatchOutput{}, run.fail("patch")
 	}
 	return output, nil
+}
+
+// assertFileWriteGuard consults the file-write guard for every target before
+// any file is mutated.
+func (r *applyPatchRun) assertFileWriteGuard(targets []applyPatchTarget) error {
+	for _, t := range targets {
+		if err := guardFileWrite(r.execCtx, r.deps.Guard, t.target.Canonical, core.FileOpApplyPatch); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *applyPatchRun) fail(path string) error {
@@ -161,6 +175,9 @@ func (r *applyPatchRun) run(input ApplyPatchInput) (ApplyPatchOutput, error) {
 		return ApplyPatchOutput{}, err
 	}
 	if err := r.assertEditPermission(targets, source); err != nil {
+		return ApplyPatchOutput{}, err
+	}
+	if err := r.assertFileWriteGuard(targets); err != nil {
 		return ApplyPatchOutput{}, err
 	}
 	prepared, err := r.prepareChanges(targets)

@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,24 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/internal/core/effect"
 )
+
+// FileOp identifies the built-in tool performing a file mutation.
+type FileOp string
+
+const (
+	FileOpWrite      FileOp = "write"
+	FileOpEdit       FileOp = "edit"
+	FileOpApplyPatch FileOp = "apply_patch"
+)
+
+// FileWriteGuard, when supplied to ClientOptions, is consulted before a built-in
+// file mutation (write/edit/apply_patch). A non-nil error aborts the mutation
+// without touching the file; the tool reports it to the model. Nil disables the
+// guard. It complements the process sandbox (ClientOptions.Process), which covers
+// spawned commands but not the file-mutation tools.
+type FileWriteGuard interface {
+	Allow(ctx context.Context, path string, op FileOp) error
+}
 
 type FileMutationTarget struct {
 	Canonical string

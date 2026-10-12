@@ -4,8 +4,8 @@
 > (`cmd/agentd/isolation`, `cmd/agentd/sandbox`, `sandbox.failurePolicy`, the opt-in
 > control API) have landed; the **`bwrap` (Linux)** and **`seatbelt` (macOS)** sandbox
 > wrappers are shipped (best-effort, §8).
-> Still design-only: the Windows `AppContainer` wrapper (§8), the optional `FileWriteGuard`
-> (§7), whole-process wrapping (milestone S4), and **container/remote provisioning** — those
+> Still design-only: the Windows `AppContainer` wrapper (§8), whole-process wrapping (milestone
+> S4), and **container/remote provisioning** — those
 > run as a separate host-provisioned process, so `agentd`'s isolation config rejects the
 > `container`/`remote` modes rather than serving them locally (Part 2 §12, §15).
 > Scope: the changes **go-agent-sdk** itself must make so a host (the Tether IM bridge, or any
@@ -167,8 +167,10 @@ type FileWriteGuard interface {
 ```
 
 This is **secondary**; the OS sandbox that wraps the whole process (Part 2, container) already
-covers file writes and is the recommended first line. **Not implemented** (design-only):
-`FileWriteGuard` does not exist in the SDK yet.
+covers file writes and is the recommended first line. **Implemented**: `ClientOptions.FileWriteGuard`
+is consulted by the `write` / `edit` / `apply_patch` tools before any mutation — `core.FileWriteGuard`
+`Allow(ctx, path, op)` where `op` is the tool (`write`/`edit`/`apply_patch`); a non-nil error aborts
+the mutation (model-facing `Failure`). Nil disables the guard.
 
 ### 8. Reference implementations (optional, build-tagged)
 
@@ -469,13 +471,13 @@ orchestration remain open.
 |---|---|---|
 | S0 ✅ | `ClientOptions.Process` wired into builtins + runtime git; seam test | — |
 | S1 ✅ | (wrappers still optional) | `Runner` (`none`/`copy`/`worktree`) + `isolation` config/validation + `run.go` integration |
-| S2 ✅ | `FileWriteGuard` still optional | `overlay` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.process` wiring |
+| S2 ✅ | `FileWriteGuard` wired into write/edit/apply_patch | `overlay` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.process` wiring |
 | S3 ◐ | — | **control API implemented for local modes**; `container`/`remote` remain host-provisioned |
 | S4 ◐ | `bwrap` (Linux) + `seatbelt` (macOS) wrappers shipped; Windows `AppContainer` open | whole-process `bwrap`/container wrapping |
 
 > Not implemented: the Windows **`AppContainer`** wrapper and **whole-process wrapping** (the
-> rest of S4), the optional **`FileWriteGuard`** (§7), and per-instance **lease quotas** (§16).
-> `container`/`remote` are never local — host-provisioned (§15).
+> rest of S4), and per-instance **lease quotas** (§16). `container`/`remote` are never local —
+> host-provisioned (§15).
 
 ## Part 8 — Decisions and open questions
 

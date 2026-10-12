@@ -63,6 +63,8 @@ type EditDeps struct {
 	Mutation   core.LocationMutation
 	Files      core.FileMutation
 	Permission core.Permission
+	// Guard, when set, is consulted before the file is mutated.
+	Guard core.FileWriteGuard
 }
 
 func MakeEdit(deps EditDeps) *Def[EditInput, EditOutput, EditOutput] {
@@ -80,7 +82,7 @@ func MakeEdit(deps EditDeps) *Def[EditInput, EditOutput, EditOutput] {
 			if err := execCtx.Err(); err != nil {
 				return EditOutput{}, err
 			}
-			result, err := executeEdit(deps, input, ctx)
+			result, err := executeEdit(execCtx, deps, input, ctx)
 			if err != nil {
 				return EditOutput{}, editUnableToEdit(err, input.Path)
 			}
@@ -113,7 +115,7 @@ func EditToModelOutput(output EditOutput, oldString, newString string) string {
 	return strings.Join(lines, "\n")
 }
 
-func executeEdit(deps EditDeps, input EditInput, ctx Context) (EditOutput, error) {
+func executeEdit(execCtx context.Context, deps EditDeps, input EditInput, ctx Context) (EditOutput, error) {
 	source := &core.PermissionSource{
 		Type:      core.PermissionSourceTypeTool,
 		MessageID: ctx.AssistantMessageID,
@@ -159,6 +161,10 @@ func executeEdit(deps EditDeps, input EditInput, ctx Context) (EditOutput, error
 		Source:    source,
 		Agent:     &ctx.Agent,
 	}); err != nil {
+		return EditOutput{}, err
+	}
+
+	if err := guardFileWrite(execCtx, deps.Guard, target.Canonical, core.FileOpEdit); err != nil {
 		return EditOutput{}, err
 	}
 

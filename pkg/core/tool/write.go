@@ -51,6 +51,8 @@ type WriteDeps struct {
 	Mutation   core.LocationMutation
 	Files      core.FileMutation
 	Permission core.Permission
+	// Guard, when set, is consulted before the file is written.
+	Guard core.FileWriteGuard
 }
 
 // Deferred V2 write UX integrations remain visible at the model-facing seam.
@@ -73,7 +75,7 @@ func MakeWrite(deps WriteDeps) *Def[WriteInput, WriteOutput, WriteOutput] {
 			if err := execCtx.Err(); err != nil {
 				return WriteOutput{}, err
 			}
-			result, err := executeWrite(deps, input, ctx)
+			result, err := executeWrite(execCtx, deps, input, ctx)
 			if err != nil {
 				return WriteOutput{}, failure(fmt.Sprintf("Unable to write %s", input.Path), err)
 			}
@@ -82,7 +84,7 @@ func MakeWrite(deps WriteDeps) *Def[WriteInput, WriteOutput, WriteOutput] {
 	})
 }
 
-func executeWrite(deps WriteDeps, input WriteInput, ctx Context) (WriteOutput, error) {
+func executeWrite(execCtx context.Context, deps WriteDeps, input WriteInput, ctx Context) (WriteOutput, error) {
 	kind := core.LocationMutationKindFile
 	source := &core.PermissionSource{
 		Type:      core.PermissionSourceTypeTool,
@@ -117,6 +119,10 @@ func executeWrite(deps WriteDeps, input WriteInput, ctx Context) (WriteOutput, e
 		Source:    source,
 		Agent:     &ctx.Agent,
 	}); err != nil {
+		return WriteOutput{}, err
+	}
+
+	if err := guardFileWrite(execCtx, deps.Guard, target.Canonical, core.FileOpWrite); err != nil {
 		return WriteOutput{}, err
 	}
 

@@ -78,6 +78,11 @@ type ClientOptions struct {
 	// (a pass-through), preserving embeddability. The SDK neither provides nor
 	// requires a sandbox implementation.
 	Process core.AppProcess
+	// FileWriteGuard, when set, is consulted before a built-in file mutation
+	// (write/edit/apply_patch). It is the seam for a host to enforce a boundary on
+	// file writes that the process sandbox (Process) does not cover. Nil disables
+	// the guard.
+	FileWriteGuard core.FileWriteGuard
 
 	// Tools are application-level tools exposed to every session.
 	Tools []Tool

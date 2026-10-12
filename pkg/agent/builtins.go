@@ -28,6 +28,7 @@ type builtinDeps struct {
 	task       TaskRunner
 	name       string
 	process    core.AppProcess
+	fileGuard  core.FileWriteGuard
 }
 
 // registerBuiltins registers the shipped built-in tools into a registry.
@@ -53,17 +54,17 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 			return err
 		},
 		func() error {
-			_, err := tool.RegisterWrite(tools, tool.WriteDeps{Mutation: mutation, Files: files, Permission: deps.permission})
+			_, err := tool.RegisterWrite(tools, tool.WriteDeps{Mutation: mutation, Files: files, Permission: deps.permission, Guard: deps.fileGuard})
 			return err
 		},
 		func() error {
-			_, err := tool.RegisterEdit(tools, tool.EditDeps{Mutation: mutation, Files: files, Permission: deps.permission})
+			_, err := tool.RegisterEdit(tools, tool.EditDeps{Mutation: mutation, Files: files, Permission: deps.permission, Guard: deps.fileGuard})
 			return err
 		},
 		func() error {
 			_, err := tool.RegisterApplyPatch(
 				tools,
-				tool.ApplyPatchDeps{Mutation: mutation, Files: files, Permission: deps.permission},
+				tool.ApplyPatchDeps{Mutation: mutation, Files: files, Permission: deps.permission, Guard: deps.fileGuard},
 			)
 			return err
 		},
