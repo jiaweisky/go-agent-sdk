@@ -379,7 +379,7 @@ func buildServer(ctx context.Context, s config.Server, client *agent.Client, cat
 	}
 	switch s.Kind {
 	case "http":
-		handler, closeStreams, err := buildHTTPHandler(ctx, s, client, infos, uploader, keepAlive)
+		handler, closeStreams, err := buildHTTPHandler(ctx, s, client, infos, uploader, keepAlive, defaultModelFor(s, catalog))
 		if err != nil {
 			return nil, err
 		}
@@ -395,7 +395,7 @@ func buildServer(ctx context.Context, s config.Server, client *agent.Client, cat
 	}
 }
 
-func buildHTTPHandler(ctx context.Context, s config.Server, client *agent.Client, infos []schema.ModelInfo, uploader mediaUploaderFunc, keepAlive time.Duration) (http.Handler, func(), error) {
+func buildHTTPHandler(ctx context.Context, s config.Server, client *agent.Client, infos []schema.ModelInfo, uploader mediaUploaderFunc, keepAlive time.Duration, defaultModel string) (http.Handler, func(), error) {
 	timeout, err := config.InteractionTimeout(s.InteractionTimeout)
 	if err != nil {
 		return nil, nil, err
@@ -404,6 +404,7 @@ func buildHTTPHandler(ctx context.Context, s config.Server, client *agent.Client
 		Auth:                httpAuth(s),
 		Agents:              s.Agents,
 		Models:              infos,
+		DefaultModel:        defaultModel,
 		MediaUploader:       uploader,
 		CORS:                s.CORS,
 		InboundPermissions:  config.PermissionRuleset(s.InboundPermissions),

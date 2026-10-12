@@ -82,8 +82,12 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAgent(w, agentID) {
 		return
 	}
+	modelID := body.Model
+	if modelID == "" {
+		modelID = s.opts.DefaultModel
+	}
 	handle, err := s.client.CreateSession(r.Context(), &agent.SessionConfig{
-		Agent: agentID, Model: body.Model, Title: body.Title, Permissions: s.inbound,
+		Agent: agentID, Model: modelID, Title: body.Title, Permissions: s.inbound,
 		OnQuestion: s.questionOverride(),
 	})
 	if err != nil {

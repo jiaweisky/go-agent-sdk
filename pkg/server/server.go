@@ -30,6 +30,9 @@ type Options struct {
 	// Models is the catalog exposed by GET /api/model, so a client can discover
 	// the models and their media capabilities. Nil lists nothing.
 	Models []schema.ModelInfo
+	// DefaultModel is the model used for a session when the create request omits
+	// one. It is marked in GET /api/model (Default) and applied on create.
+	DefaultModel string
 	// MediaUploader resolves a provider's uploader for POST
 	// /api/session/{id}/file, letting HTTP callers obtain a file reference
 	// Nil disables the endpoint.

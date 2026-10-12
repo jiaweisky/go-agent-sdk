@@ -49,6 +49,8 @@ type agentInfoDTO struct {
 	Hidden      bool   `json:"hidden"`
 	Model       any    `json:"model,omitempty"`
 	Backend     any    `json:"backend,omitempty"`
+	// Default marks the agent used when a create request omits one.
+	Default bool `json:"default,omitempty"`
 }
 
 type skillInfoDTO struct {

@@ -4,19 +4,25 @@ import "net/http"
 
 // modelInfoDTO is one model's discoverable metadata for GET /api/model.
 type modelInfoDTO struct {
-	ID       string   `json:"id"`
-	Protocol string   `json:"protocol"`
-	Input    []string `json:"input,omitempty"`
-	Sources  []string `json:"sources,omitempty"`
+	ID           string   `json:"id"`
+	Protocol     string   `json:"protocol"`
+	Input        []string `json:"input,omitempty"`
+	Sources      []string `json:"sources,omitempty"`
+	ContextLimit int      `json:"contextLimit,omitempty"`
+	OutputLimit  int      `json:"outputLimit,omitempty"`
+	Default      bool     `json:"default,omitempty"`
 }
 
 func (s *Server) handleModelList(w http.ResponseWriter, r *http.Request) {
 	out := make([]modelInfoDTO, 0, len(s.opts.Models))
 	for _, model := range s.opts.Models {
 		dto := modelInfoDTO{
-			ID:       string(model.ID),
-			Protocol: string(model.API.Protocol),
-			Input:    model.Capabilities.Input,
+			ID:           string(model.ID),
+			Protocol:     string(model.API.Protocol),
+			Input:        model.Capabilities.Input,
+			ContextLimit: model.Limit.Context,
+			OutputLimit:  model.Limit.Output,
+			Default:      s.opts.DefaultModel != "" && string(model.ID) == s.opts.DefaultModel,
 		}
 		if model.Capabilities.Media != nil {
 			dto.Sources = model.Capabilities.Media.Sources
@@ -28,12 +34,16 @@ func (s *Server) handleModelList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAgentList(w http.ResponseWriter, r *http.Request) {
 	all := s.client.Agents().All()
+	def := s.defaultAgent()
 	out := make([]agentInfoDTO, 0, len(all))
 	for _, a := range all {
 		if a.Hidden || !s.allowed(string(a.ID)) {
 			continue
 		}
-		dto := agentInfoDTO{ID: string(a.ID), Mode: a.Mode, Hidden: a.Hidden, Backend: a.Backend}
+		dto := agentInfoDTO{
+			ID: string(a.ID), Mode: a.Mode, Hidden: a.Hidden, Backend: a.Backend,
+			Default: def != "" && string(a.ID) == def,
+		}
 		if a.Description != nil {
 			dto.Description = *a.Description
 		}
