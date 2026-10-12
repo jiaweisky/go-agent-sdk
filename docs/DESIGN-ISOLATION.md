@@ -1,9 +1,13 @@
 # Sandbox and project isolation — implementation design (SDK `pkg/` + command `cmd/`)
 
 > Status: **implemented** — Part 1 (`ClientOptions.Process` seam) and Part 2
-> (`cmd/agentd/isolation`, `cmd/agentd/sandbox`, the opt-in control API) have landed.
-> Still design-only: `sandbox.failurePolicy` and container/remote isolation config
-> (those run as a separate host-provisioned process).
+> (`cmd/agentd/isolation`, `cmd/agentd/sandbox`, `sandbox.failurePolicy`, the opt-in
+> control API) have landed.
+> Still design-only: the optional reference sandbox wrappers (`bwrap`/`seatbelt`/
+> AppContainer, §8), the optional `FileWriteGuard` (§7), whole-process wrapping
+> (milestone S4), and **container/remote provisioning** — those run as a separate
+> host-provisioned process, so `agentd`'s isolation config rejects the `container`/
+> `remote` modes rather than serving them locally (Part 2 §12, §15).
 > Scope: the changes **go-agent-sdk** itself must make so a host (the Tether IM bridge, or any
 > embedder) can run agents safely and isolate many conversations from one another. It covers
 > two orthogonal layers:
@@ -11,7 +15,7 @@
 > - **Part 2 — command (`cmd/`, agentd)**: a project/process isolation runner.
 >
 > Relationship: this document is the implementation companion to the responsibility
-> boundary already recorded in `DESIGN-IM-BRIDGE.md` §17 ("sandbox/isolation responsibility
+> boundary already recorded in `DESIGN-IM-BRIDGE.md` §17 (Tether repository) ("sandbox/isolation responsibility
 > boundary and the two designs") and the multi-server model in `DESIGN-AGENTD.md` §7. It
 > does **not** change `DESIGN.md` (the SDK's authoritative design); it specifies the concrete
 > interfaces, wiring points and configuration for the two proposals.
@@ -113,7 +117,7 @@ Process core.AppProcess
 ```
 
 - Reuses the **existing** interface; no new abstraction is invented. `DESIGN-IM-BRIDGE.md`
-  §17.2 proposed the same thing under the name "`Sandbox` hook / `ClientOptions.Process`"; the
+  §17.2 (Tether repository) proposed the same thing under the name "`Sandbox` hook / `ClientOptions.Process`"; the
   `Process` field is that proposal, not a separate mechanism.
 - `RunStream` is already part of `core.AppProcess`, so streaming `bash` output is covered too.
 - Default (`nil`) preserves the status quo and embeddability (tests, CLI, in-process use).
@@ -136,19 +140,18 @@ sandboxed — a subtle hole the test must catch.
 ### 6. Failure policy
 
 A sandbox wrapper may be unavailable at runtime (e.g. `bwrap` missing). Make the policy
-explicit and configurable, defaulting to the status quo:
+explicit and configurable, defaulting to **fail-closed**:
 
-- `fail-open` (**default**): fall back to pass-through and report via `OnError`. Preserves
-  current behaviour; appropriate for trusted single-user desktop use.
-- `fail-closed`: return an error so the command does not run unsandboxed.
+- `fail-closed` (**default**): refuse to start when a named sandbox cannot be built, so a
+  command never runs silently unsandboxed. This is the safe default for any deployment that
+  executes agent commands on behalf of **untrusted users** (e.g. an IM bridge).
+- `fail-open`: log and fall back to pass-through (the status quo); appropriate only for trusted
+  single-user desktop embedding.
 
-The SDK only offers the seam; the wrapper decides. No probing or capability detection belongs
-in core (it would complicate embedding).
-
-> **Deployment guidance**: the default is chosen to preserve current behavior, but any
-> deployment that executes agent commands on behalf of **untrusted users** (e.g. an IM bridge)
-> should set `fail-closed`. Falling back to pass-through there silently removes the boundary
-> the deployment relies on.
+The SDK only offers the seam; the wrapper decides, and no probing/capability detection belongs
+in core (it would complicate embedding). The policy itself is applied by the **command layer**:
+`agentd`'s `sandbox.failurePolicy` resolves `sandbox.process` to an `AppProcess`; a missing
+wrapper fails startup (fail-closed) or is logged and skipped (fail-open).
 
 ### 7. Optional: file-write guard
 
@@ -164,7 +167,8 @@ type FileWriteGuard interface {
 ```
 
 This is **secondary**; the OS sandbox that wraps the whole process (Part 2, container) already
-covers file writes and is the recommended first line.
+covers file writes and is the recommended first line. **Not implemented** (design-only):
+`FileWriteGuard` does not exist in the SDK yet.
 
 ### 8. Reference implementations (optional, build-tagged)
 
@@ -180,7 +184,8 @@ public surface stays small and cross-platform CVE/compat debt stays out of core.
 
 Wrappers are named and registered (e.g. `sandbox.Register("bwrap", factory)`); the command
 layer's `sandbox.process` config value selects one by name, so the config never imports a
-platform-specific package directly.
+platform-specific package directly. **Not implemented** (design-only, milestone S4): the
+registry exists, but no wrapper is shipped, so `sandbox.process` currently only accepts `none`.
 
 ### 9. Non-goals (SDK)
 
@@ -216,11 +221,11 @@ type ProjectSpec struct {
 
 // IsolationSpec describes how to materialize the working directory.
 type IsolationSpec struct {
-    Mode         string   // none | worktree | overlay | copy | bwrap | container
-    BaseDir      string   // where views are created
-    BaseReadOnly bool     // bind the source read-only; required by worktree/overlay
-    Cow          CowSpec  // overlayfs | reflink | clonefile
-    Container    ContainerSpec
+    Mode         string // none | copy | worktree | overlay
+    BaseDir      string // where views are created (required for every mode except none)
+    BaseReadOnly bool   // treat the source as read-only; required by overlay
+    BaseRef      string // worktree base commit-ish; empty means HEAD
+    CowMode      string // overlay CoW: auto | reflink | clonefile
 }
 
 // IsolatedProject is a prepared view plus how to tear it down.
@@ -235,6 +240,9 @@ type Runner interface {
     Prepare(ctx context.Context, p ProjectSpec, iso IsolationSpec) (IsolatedProject, error)
 }
 ```
+
+`container`/`remote` are **external** (host-provisioned, §15); `bwrap` is a **sandbox wrapper**
+(§8), not an isolation mode — the local runner accepts only `none | copy | worktree | overlay`.
 
 `Prepare` is pure filesystem/process setup and is the transport-agnostic part;
 the actual `Serve` (building the `Client` and starting an `http` or `a2a`
@@ -263,6 +271,10 @@ simply not the component that starts it.
 | `copy` | `rsync`/copy | universal, linear disk cost |
 | `bwrap` | namespaces (+ optional CoW view) | filesystem/process/network isolation without a container |
 | `container` | Docker/Podman/K8s; run agentd inside | strongest: fs + process + network + resources |
+
+Only `none`/`copy`/`worktree`/`overlay` are agentd **isolation modes**; `bwrap` is a sandbox
+wrapper (§8), and `container`/`remote` are external — host-provisioned and rejected by the local
+runner (§11, §15).
 
 Selection is a deployment decision, but the recommended default for a writable agent is
 **`overlay` (or `worktree` in a git repo), optionally wrapped in `bwrap`/a container** — one
@@ -352,14 +364,16 @@ provisioning **at runtime**. Two options:
 
    | Method + path | Body / effect |
    |---|---|
-   | `POST /admin/projects` | `{name,kind,root,workingDirectory,configDirs,models,defaultModel,agents,isolation}` → `201 {project_id,kind,server_base,transport}` |
+   | `POST /admin/projects` | `{name,kind,root,workingDirectory,configDirs,models,defaultModel,agents,isolation,auth}` → `201 {project_id,kind,server_base,transport}` |
    | `GET /admin/projects` | list running instances |
    | `DELETE /admin/projects/{id}` | stop the instance and release its view |
 
    It prepares the view (Part 1 `Runner`), builds a `Client`, binds a listener under
    `control.projectListen` (default `127.0.0.1:0`), and serves it. `control.auth.bearer`, when
-   set, guards the API. **Local modes only** (none/copy/worktree/overlay): `container`/`remote`
-   are still rejected as external — a same-process agentd does not orchestrate containers.
+   set, guards the API; a non-loopback `control.listen` **requires** it, and `control.projectListen`
+   must be loopback (dynamic instances are served unauthenticated). **Local modes only**
+   (none/copy/worktree/overlay): `container`/`remote` are still rejected as external — a
+   same-process agentd does not orchestrate containers.
 
 Either way, the **single-owner rule** holds: a writable `(project, transport)` is leased to
 exactly one `Client` at a time; read-only projects may be shared.
@@ -373,7 +387,7 @@ exactly one `Client` at a time; read-only projects may be shared.
 - **Create**: runner `Prepare` (copy/mount/clone into `baseDir`) → `run.go` builds the `Client`
   for the view and starts the transport → host records the lease.
 - **Reclaim**: host releases on idle TTL; `Teardown` removes the worktree/overlay/container.
-- **Quotas**: cap concurrent leases (disk/memory); one view + one `Root` per instance.
+- **Quotas**: cap concurrent leases (disk/memory); one view + one `Root` per instance. (**Not in agentd**: the opt-in control API does not cap leases — the host/lease layer does.)
 - **Ownership**: one writer per project; multiple readers allowed.
 - **Isolation of state**: each instance has its own `Root`; the view path is also excluded from
   the agent's own `glob/grep`/references so it is not scanned as project content.
@@ -393,7 +407,7 @@ Tether.ProjectProvider.release(lease) → supervisor tears the instance down
 ```
 
 - `ProjectLease{project_id, transport, server_base, working_directory, ephemeral}` is unchanged
-  (`DESIGN-IM-BRIDGE.md` §3.7).
+  (`DESIGN-IM-BRIDGE.md` §3.7, Tether repository).
 - `readonly` (from `GET /api/tool?agent=`) selects `mode: none` sharing vs a per-conversation
   view.
 - If the runner is **not** present, Tether falls back to its static `server.pool`; it must not
@@ -427,7 +441,7 @@ stronger than wrapping command-by-command, and it simultaneously provides projec
 
 - **SDK seam**: with a fake `core.AppProcess` injected via `ClientOptions.Process`, assert
   `bash`, `ripgrep` **and** `git` all route through it (guards the `runtime.go` wiring hole).
-- **Failure policy**: `fail-open` falls back to pass-through and reports; `fail-closed` errors.
+- **Failure policy**: `fail-open` falls back to pass-through (logged); `fail-closed` errors.
 - **Runner**: `Prepare` for each mode produces an independent view; two views of the same base
   do not observe each other's writes; `Teardown` removes the view.
 - **Config**: each new field's invalid values fail validation (missing `baseDir`, overlay
@@ -451,12 +465,16 @@ orchestration remain open.
 | S3 ◐ | — | **control API implemented for local modes**; `container`/`remote` remain host-provisioned |
 | S4 ☐ | bwrap/seatbelt wrappers (optional, build-tagged) | whole-process `bwrap`/container wrapping |
 
+> Not implemented: **S4** (the optional `bwrap`/`seatbelt` wrappers and whole-process wrapping),
+> the optional **`FileWriteGuard`** (§7), and per-instance **lease quotas** (§16). `container`/
+> `remote` are never local — host-provisioned (§15).
+
 ## Part 8 — Decisions and open questions
 
 - **D1** Reuse `core.AppProcess` as the seam (no new `CommandRunner` interface).
-- **D2** Default `Process` is nil → `core.NewAppProcess()` (pass-through); failure policy
-  defaults to `fail-open` for general embedding, and **untrusted-facing deployments should set
-  `fail-closed`**.
+- **D2** Default `Process` is nil → `core.NewAppProcess()` (pass-through). When a named sandbox
+  *is* configured but cannot be built, the default is **`fail-closed`** (refuse to start);
+  `fail-open` is the opt-out for trusted desktop embedding.
 - **D3** The runner lives in `cmd/`, transport-agnostic; the SDK contributes only the seam and
   the "one `Client` = one project" primitive.
 - **D4** A writable `(project, transport)` has a single owner; read-only may be shared.
