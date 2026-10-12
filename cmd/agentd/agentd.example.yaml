@@ -94,3 +94,14 @@ servers:
     auth:
       bearer: ${AGENTD_TOKEN:-replace-me}              # A2A auth is bearer-only
     keepAlive: 15s
+
+# Optional admin API: create and destroy isolated project instances at runtime.
+# The host (e.g. an IM bridge) uses it to lease one instance per project/group.
+# Local isolation modes (none/copy/worktree/overlay) are served in-process, each
+# on its own listener under `projectListen`; container/remote instances run in a
+# separate process and are provisioned by the host instead.
+# control:
+#   listen: 127.0.0.1:9090          # admin API bind address
+#   projectListen: 127.0.0.1:0      # where dynamic instances bind (default loopback:0)
+#   auth:
+#     bearer: ${AGENTD_CONTROL_TOKEN:-replace-me}

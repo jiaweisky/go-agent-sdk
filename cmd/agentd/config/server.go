@@ -17,6 +17,11 @@ type Server struct {
 	// WorkingDirectory is the project/worktree root. Empty means the process cwd.
 	WorkingDirectory string   `yaml:"workingDirectory"`
 	ConfigDirs       []string `yaml:"configDirs"`
+	// Isolation, when set, derives a per-server view of the working directory so
+	// several servers can share one source project safely.
+	Isolation *IsolationConfig `yaml:"isolation"`
+	// Sandbox selects the command-execution seam for this server's tools.
+	Sandbox *SandboxConfig `yaml:"sandbox"`
 	// Models is the subset of the global catalog this server exposes; empty
 	// means the whole catalog.
 	Models       []string `yaml:"models"`
@@ -70,6 +75,36 @@ type AuthConfig struct {
 	Bearer   string `yaml:"bearer"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+}
+
+// IsolationConfig derives a per-server view of the working directory.
+type IsolationConfig struct {
+	// Mode is none | copy | worktree | overlay.
+	Mode string `yaml:"mode" json:"mode"`
+	// BaseDir is where views are created (required by every mode but none).
+	BaseDir string `yaml:"baseDir" json:"baseDir"`
+	// BaseReadOnly treats the source as read-only (required by overlay).
+	BaseReadOnly bool `yaml:"baseReadOnly" json:"baseReadOnly"`
+	// BaseRef is the commit-ish a worktree starts from; empty means HEAD.
+	BaseRef string `yaml:"baseRef" json:"baseRef"`
+	// Cow selects the overlay copy-on-write mechanism.
+	Cow *CowConfig `yaml:"cow" json:"cow"`
+}
+
+// CowConfig selects the overlay copy-on-write mechanism.
+type CowConfig struct {
+	// Mode is auto | reflink | clonefile.
+	Mode string `yaml:"mode" json:"mode"`
+}
+
+// SandboxConfig selects the command-execution seam.
+type SandboxConfig struct {
+	// Process names the execution seam: none (default) or a registered wrapper.
+	Process string `yaml:"process" json:"process"`
+	// FailurePolicy is what to do when the named sandbox cannot be built:
+	// fail-closed (default) refuses to start; fail-open warns and runs without
+	// the sandbox.
+	FailurePolicy string `yaml:"failurePolicy" json:"failurePolicy"`
 }
 
 // KeepAliveDuration parses a keepAlive value; empty means the 15s default

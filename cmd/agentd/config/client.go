@@ -162,6 +162,8 @@ type ClientParams struct {
 	SubagentDepth    int
 	TitleAuto        bool
 	DropErroredTurns bool
+	// Process is the command-execution seam; nil keeps the SDK default.
+	Process core.AppProcess
 }
 
 // BuildClient assembles an agent client from ClientParams.
@@ -178,6 +180,7 @@ func BuildClient(p ClientParams) (*agent.Client, error) {
 		MCP:              p.MCP,
 		References:       p.References,
 		DropErroredTurns: p.DropErroredTurns,
+		Process:          p.Process,
 	}
 	if p.SubagentDepth > 0 {
 		opts.SubagentDepth = p.SubagentDepth

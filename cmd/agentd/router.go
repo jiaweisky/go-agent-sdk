@@ -141,7 +141,11 @@ func requestHost(req *http.Request) string {
 	return config.NormalizeHost(host)
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func writeJSON(w http.ResponseWriter, v any) { writeJSONStatus(w, http.StatusOK, v) }
+
+// writeJSONStatus writes v as JSON with an explicit status code.
+func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }

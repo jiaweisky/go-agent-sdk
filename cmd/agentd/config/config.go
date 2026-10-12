@@ -9,6 +9,20 @@ import "errors"
 type Config struct {
 	Models  []ModelConfig `yaml:"models"`
 	Servers []Server      `yaml:"servers"`
+	// Control, when set, exposes an admin API that creates and destroys isolated
+	// project instances at runtime.
+	Control *ControlConfig `yaml:"control"`
+}
+
+// ControlConfig configures the optional project admin API.
+type ControlConfig struct {
+	// Listen is the admin API bind address (required to enable it).
+	Listen string `yaml:"listen"`
+	// ProjectListen is the host:port dynamic project instances bind to; the
+	// default (127.0.0.1:0) picks a free loopback port per instance.
+	ProjectListen string `yaml:"projectListen"`
+	// Auth, when set, guards the admin API.
+	Auth *AuthConfig `yaml:"auth"`
 }
 
 // Catalog builds the global model catalog from the configured entries.

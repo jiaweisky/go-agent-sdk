@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 )
@@ -32,7 +33,39 @@ func (c Config) Validate() error {
 			return err
 		}
 	}
+	if err := validateControl(c.Control); err != nil {
+		return err
+	}
 	return validateRouting(c.Servers)
+}
+
+// validateControl checks the optional admin API configuration.
+func validateControl(c *ControlConfig) error {
+	if c == nil {
+		return nil
+	}
+	if c.Listen == "" {
+		return errors.New("control.listen is required")
+	}
+	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
+		return fmt.Errorf("control.listen: %w", err)
+	}
+	// The admin API can copy arbitrary directories and spawn agents, so a
+	// non-loopback bind must be authenticated (same guard as a served endpoint).
+	if !IsLoopback(c.Listen) && (c.Auth == nil || c.Auth.Bearer == "") {
+		return errors.New("control.listen on a non-loopback address requires control.auth.bearer")
+	}
+	if c.ProjectListen != "" {
+		if _, _, err := net.SplitHostPort(c.ProjectListen); err != nil {
+			return fmt.Errorf("control.projectListen: %w", err)
+		}
+		// Dynamic project instances are served without auth, so they must stay
+		// loopback (the host reaches them locally or proxies them).
+		if !IsLoopback(c.ProjectListen) {
+			return errors.New("control.projectListen must be loopback; dynamic instances are unauthenticated")
+		}
+	}
+	return nil
 }
 
 // validateServer checks one server's fields against the global catalog.
@@ -85,6 +118,65 @@ func validateServerCommon(s Server, catalog Catalog) error {
 	case "", "park", "decline":
 	default:
 		return fmt.Errorf("server %q: questions must be park or decline, got %q", s.Name, s.Questions)
+	}
+	if err := ValidateIsolation(s.Name, s.WorkingDirectory, s.Isolation); err != nil {
+		return err
+	}
+	return validateSandbox(s)
+}
+
+// validateSandbox checks the command-execution seam selection.
+func validateSandbox(s Server) error {
+	if s.Sandbox == nil {
+		return nil
+	}
+	if s.Sandbox.Process == "" {
+		return fmt.Errorf("server %q: sandbox.process is required", s.Name)
+	}
+	switch s.Sandbox.FailurePolicy {
+	case "", "fail-closed", "fail-open":
+	default:
+		return fmt.Errorf("server %q: sandbox.failurePolicy must be fail-closed or fail-open, got %q", s.Name, s.Sandbox.FailurePolicy)
+	}
+	return nil
+}
+
+// ValidateIsolation checks a server's per-view isolation configuration. It is
+// exported so the control API validates a dynamic project's isolation exactly
+// like a configured server's.
+func ValidateIsolation(name, workingDirectory string, iso *IsolationConfig) error {
+	if iso == nil {
+		return nil
+	}
+	mode := iso.Mode
+	switch mode {
+	case "", "none":
+		return nil
+	case "copy", "worktree":
+		if iso.BaseDir == "" {
+			return fmt.Errorf("server %q: isolation.baseDir is required for mode %s", name, mode)
+		}
+	case "overlay":
+		if iso.BaseDir == "" {
+			return fmt.Errorf("server %q: isolation.baseDir is required for mode overlay", name)
+		}
+		if !iso.BaseReadOnly {
+			return fmt.Errorf("server %q: isolation.baseReadOnly is required for mode overlay", name)
+		}
+		if iso.Cow != nil {
+			switch iso.Cow.Mode {
+			case "", "auto", "reflink", "clonefile":
+			default:
+				return fmt.Errorf("server %q: isolation.cow.mode must be auto, reflink or clonefile, got %q", name, iso.Cow.Mode)
+			}
+		}
+	case "container", "remote":
+		return fmt.Errorf("server %q: isolation.mode %s is external; such an instance runs its own agentd and is provisioned by the host", name, mode)
+	default:
+		return fmt.Errorf("server %q: isolation.mode must be none, copy, worktree or overlay, got %q", name, mode)
+	}
+	if workingDirectory == "" {
+		return fmt.Errorf("server %q: isolation mode %s requires workingDirectory", name, mode)
 	}
 	return nil
 }

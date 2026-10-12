@@ -14,8 +14,11 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 
 	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/isolation"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandbox"
 	a2aserver "github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
 	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/server"
 )
@@ -91,18 +94,31 @@ func run(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	var clients []*agent.Client
+	var teardowns []func(context.Context) error
 	defer func() {
 		for _, client := range clients {
 			_ = client.Close()
 		}
+		for i := len(teardowns) - 1; i >= 0; i-- {
+			_ = teardowns[i](context.Background())
+		}
 	}()
 
+	runner := isolation.DefaultRunner()
 	var built []*builtServer
 	for _, s := range cfg.Servers {
 		serverCatalog, err := global.Subset(s.Models, s.DefaultModel)
 		if err != nil {
 			return fmt.Errorf("server %q: %w", s.Name, err)
 		}
+		project, err := runner.Prepare(ctx, projectSpec(s), isolationSpec(s))
+		if err != nil {
+			return fmt.Errorf("server %q: %w", s.Name, err)
+		}
+		if project.Teardown != nil {
+			teardowns = append(teardowns, project.Teardown)
+		}
+		s.WorkingDirectory = project.View
 		uploader := mediaUploader(s)
 		client, err := buildClient(s, serverCatalog, uploader)
 		if err != nil {
@@ -150,6 +166,22 @@ func run(ctx context.Context, cfg config.Config) error {
 			ln:           ln,
 			tls:          entries[0].cfg.TLS,
 			closeStreams: combineClose(entries),
+		})
+	}
+	if cfg.Control != nil {
+		manager := newProjectManager(ctx, global, cfg.Control)
+		defer manager.Close()
+		ln, err := net.Listen("tcp", cfg.Control.Listen)
+		if err != nil {
+			return fmt.Errorf("control listen %s: %w", cfg.Control.Listen, err)
+		}
+		fmt.Fprintf(os.Stderr, "agentd: control API on %s\n", ln.Addr())
+		targets = append(targets, serveTarget{
+			srv: &http.Server{
+				Handler:           newControlHandler(manager, cfg.Control.Auth),
+				ReadHeaderTimeout: 10 * time.Second,
+			},
+			ln: ln,
 		})
 	}
 	return serveAll(ctx, targets)
@@ -251,6 +283,39 @@ func discoveryBaseURL(s config.Server, addr net.Addr) string {
 	return scheme + "://" + host
 }
 
+// projectSpec maps a server to the project it serves.
+func projectSpec(s config.Server) isolation.ProjectSpec {
+	return isolation.ProjectSpec{
+		ProjectID:        s.Name,
+		Root:             s.Root,
+		WorkingDirectory: s.WorkingDirectory,
+		ConfigDirs:       s.ConfigDirs,
+	}
+}
+
+// isolationSpec maps a server's isolation config to a runner spec. A nil config
+// means the default: no isolation (share the working directory).
+func isolationSpec(s config.Server) isolation.IsolationSpec {
+	if s.Isolation == nil {
+		return isolation.IsolationSpec{}
+	}
+	return isolation.IsolationSpec{
+		Mode:         s.Isolation.Mode,
+		BaseDir:      s.Isolation.BaseDir,
+		BaseReadOnly: s.Isolation.BaseReadOnly,
+		BaseRef:      s.Isolation.BaseRef,
+		CowMode:      cowMode(s.Isolation.Cow),
+	}
+}
+
+// cowMode reads the configured copy-on-write mode, defaulting to empty (auto).
+func cowMode(cow *config.CowConfig) string {
+	if cow == nil {
+		return ""
+	}
+	return cow.Mode
+}
+
 // buildClient assembles one server's agent client from its catalog subset.
 func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploaderFunc) (*agent.Client, error) {
 	mcpServers, err := config.MCPServers(s.MCP)
@@ -258,6 +323,10 @@ func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploader
 		return nil, err
 	}
 	references, err := config.ReferenceSources(s.References)
+	if err != nil {
+		return nil, err
+	}
+	process, err := resolveSandbox(s)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +344,27 @@ func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploader
 		SubagentDepth:    s.SubagentDepth,
 		TitleAuto:        s.TitleAuto,
 		DropErroredTurns: s.DropErroredTurns == nil || *s.DropErroredTurns,
+		Process:          process,
 	})
+}
+
+// resolveSandbox returns the server's command-execution seam. No sandbox (or
+// "none") yields nil, the SDK default. When a named sandbox cannot be built,
+// fail-closed (the default) refuses to start; fail-open warns and runs without
+// it.
+func resolveSandbox(s config.Server) (core.AppProcess, error) {
+	if s.Sandbox == nil {
+		return nil, nil
+	}
+	process, err := sandbox.Resolve(s.Sandbox.Process)
+	if err == nil {
+		return process, nil
+	}
+	if s.Sandbox.FailurePolicy == "fail-open" {
+		fmt.Fprintf(os.Stderr, "agentd: server %q: sandbox %q unavailable (%v); running without it\n", s.Name, s.Sandbox.Process, err)
+		return nil, nil
+	}
+	return nil, err
 }
 
 // buildServer mounts one server's transport adapter, dispatching on its kind.
