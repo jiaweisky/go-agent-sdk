@@ -33,7 +33,7 @@ func TestResolveNoneAndEmpty(t *testing.T) {
 }
 
 func TestResolveUnknownErrors(t *testing.T) {
-	if _, err := Resolve("bwrap"); err == nil {
+	if _, err := Resolve("no-such-sandbox"); err == nil {
 		t.Fatal("expected an unknown sandbox name to be rejected")
 	}
 }

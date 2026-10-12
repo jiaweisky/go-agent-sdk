@@ -2,12 +2,12 @@
 
 > Status: **implemented** — Part 1 (`ClientOptions.Process` seam) and Part 2
 > (`cmd/agentd/isolation`, `cmd/agentd/sandbox`, `sandbox.failurePolicy`, the opt-in
-> control API) have landed.
-> Still design-only: the optional reference sandbox wrappers (`bwrap`/`seatbelt`/
-> AppContainer, §8), the optional `FileWriteGuard` (§7), whole-process wrapping
-> (milestone S4), and **container/remote provisioning** — those run as a separate
-> host-provisioned process, so `agentd`'s isolation config rejects the `container`/
-> `remote` modes rather than serving them locally (Part 2 §12, §15).
+> control API) have landed; the **`bwrap` (Linux)** and **`seatbelt` (macOS)** sandbox
+> wrappers are shipped (best-effort, §8).
+> Still design-only: the Windows `AppContainer` wrapper (§8), the optional `FileWriteGuard`
+> (§7), whole-process wrapping (milestone S4), and **container/remote provisioning** — those
+> run as a separate host-provisioned process, so `agentd`'s isolation config rejects the
+> `container`/`remote` modes rather than serving them locally (Part 2 §12, §15).
 > Scope: the changes **go-agent-sdk** itself must make so a host (the Tether IM bridge, or any
 > embedder) can run agents safely and isolate many conversations from one another. It covers
 > two orthogonal layers:
@@ -184,8 +184,16 @@ public surface stays small and cross-platform CVE/compat debt stays out of core.
 
 Wrappers are named and registered (e.g. `sandbox.Register("bwrap", factory)`); the command
 layer's `sandbox.process` config value selects one by name, so the config never imports a
-platform-specific package directly. **Not implemented** (design-only, milestone S4): the
-registry exists, but no wrapper is shipped, so `sandbox.process` currently only accepts `none`.
+platform-specific package directly. **Shipped (best-effort, S4)**: `bwrap` (Linux) and
+`sandbox-exec`/seatbelt (macOS), each behind an OS build tag and registered on import — so
+`sandbox.process: bwrap` / `seatbelt` works out of the box on those platforms. Windows
+(`AppContainer`) is **not** implemented.
+
+> Both wrappers block **writes** outside the project and **network egress**, but do **not**
+> restrict **reads** (the Part 4 "filesystem view" dimension, e.g. `~/.ssh`) — use a container
+> or whole-process wrapping for that. `sandbox.failurePolicy` governs *resolution* at startup
+> only; a wrapper that resolves but fails at exec (e.g. `bwrap` without user namespaces) surfaces
+> as a per-command tool error, not a startup failure.
 
 ### 9. Non-goals (SDK)
 
@@ -463,11 +471,11 @@ orchestration remain open.
 | S1 ✅ | (wrappers still optional) | `Runner` (`none`/`copy`/`worktree`) + `isolation` config/validation + `run.go` integration |
 | S2 ✅ | `FileWriteGuard` still optional | `overlay` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.process` wiring |
 | S3 ◐ | — | **control API implemented for local modes**; `container`/`remote` remain host-provisioned |
-| S4 ☐ | bwrap/seatbelt wrappers (optional, build-tagged) | whole-process `bwrap`/container wrapping |
+| S4 ◐ | `bwrap` (Linux) + `seatbelt` (macOS) wrappers shipped; Windows `AppContainer` open | whole-process `bwrap`/container wrapping |
 
-> Not implemented: **S4** (the optional `bwrap`/`seatbelt` wrappers and whole-process wrapping),
-> the optional **`FileWriteGuard`** (§7), and per-instance **lease quotas** (§16). `container`/
-> `remote` are never local — host-provisioned (§15).
+> Not implemented: the Windows **`AppContainer`** wrapper and **whole-process wrapping** (the
+> rest of S4), the optional **`FileWriteGuard`** (§7), and per-instance **lease quotas** (§16).
+> `container`/`remote` are never local — host-provisioned (§15).
 
 ## Part 8 — Decisions and open questions
 

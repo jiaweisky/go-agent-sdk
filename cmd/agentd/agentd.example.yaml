@@ -58,6 +58,11 @@ servers:
     models: [deepseek-flash, deepseek-flash-responses, deepseek-flash-anthropic]
     defaultModel: deepseek-flash
     agents: [build]
+    # Optional OS sandbox for the commands this server spawns (bash/ripgrep/git):
+    # `bwrap` on Linux, `seatbelt` on macOS (registered wrappers; best-effort).
+    # sandbox:
+    #   process: seatbelt            # none (default) | bwrap | seatbelt
+    #   failurePolicy: fail-closed   # fail-closed (default) | fail-open
     auth:
       bearer: ${AGENTD_TOKEN:-replace-me}
     keepAlive: 15s
