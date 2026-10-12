@@ -42,6 +42,51 @@ func TestSeatbeltProfile(t *testing.T) {
 	}
 }
 
+func TestSeatbeltProfileMasks(t *testing.T) {
+	profile := seatbeltProfileWith("/work", []string{"/home/u/.ssh"})
+	if !strings.Contains(profile, `(deny file-read* (subpath "/home/u/.ssh"))`) {
+		t.Fatalf("profile missing the read mask: %s", profile)
+	}
+}
+
+// TestSeatbeltReadMask verifies a masked credential directory cannot be read,
+// while the working directory stays usable.
+func TestSeatbeltReadMask(t *testing.T) {
+	if _, err := exec.LookPath("sandbox-exec"); err != nil {
+		t.Skip("sandbox-exec not available")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	ssh := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(ssh, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ssh, "id_rsa"), []byte("SECRET"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	process, err := Resolve("seatbelt")
+	if err != nil || process == nil {
+		t.Fatalf("Resolve(seatbelt) = %v, %v", process, err)
+	}
+	dir := t.TempDir()
+	blocked, err := process.Run(context.Background(), "/bin/sh",
+		[]string{"-c", "cat " + filepath.Join(ssh, "id_rsa")}, core.RunOptions{Dir: dir})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if blocked.ExitCode == 0 {
+		t.Fatalf("reading the masked key succeeded (expected a denial): %q", blocked.Stdout)
+	}
+
+	// The working directory is still readable.
+	ok, err := process.Run(context.Background(), "/bin/sh",
+		[]string{"-c", "echo hi"}, core.RunOptions{Dir: dir})
+	if err != nil || ok.ExitCode != 0 {
+		t.Fatalf("the workdir became unusable: %v (exit %d)", err, ok.ExitCode)
+	}
+}
+
 func TestSeatbeltRegistered(t *testing.T) {
 	if p, err := Resolve("seatbelt"); err != nil || p == nil {
 		t.Fatalf("Resolve(seatbelt) = %v, %v", p, err)

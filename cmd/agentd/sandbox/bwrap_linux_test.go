@@ -8,7 +8,7 @@ import (
 )
 
 func TestBwrapLaunch(t *testing.T) {
-	name, argv := bwrapLaunch("/work", "bash", []string{"-c", "echo hi"})
+	name, argv := bwrapLaunchWith("/work", nil, "bash", []string{"-c", "echo hi"})
 	if name != "bwrap" {
 		t.Fatalf("name = %q, want bwrap", name)
 	}
@@ -27,8 +27,30 @@ func TestBwrapLaunch(t *testing.T) {
 	}
 }
 
+func TestBwrapLaunchMasks(t *testing.T) {
+	_, argv := bwrapLaunchWith("/work", []string{"/home/u/.ssh", "/home/u/.aws"}, "ls", nil)
+	maskIndex := indexOfArg(argv, "--tmpfs", "/home/u/.ssh")
+	bindIndex := indexOfArg(argv, "--bind", "/work")
+	if maskIndex < 0 {
+		t.Fatalf("mask tmpfs missing from %v", argv)
+	}
+	if bindIndex < 0 || maskIndex > bindIndex {
+		t.Fatalf("mask must be mounted before the workdir bind: %v", argv)
+	}
+}
+
+// indexOfArg returns the index of the flag whose following arg equals value, or -1.
+func indexOfArg(argv []string, flag, value string) int {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == flag && argv[i+1] == value {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestBwrapLaunchNoDir(t *testing.T) {
-	_, argv := bwrapLaunch("", "ls", nil)
+	_, argv := bwrapLaunchWith("", nil, "ls", nil)
 	for i, arg := range argv {
 		if arg == "--bind" {
 			t.Fatalf("argv has --bind without a dir: %v (index %d)", argv, i)

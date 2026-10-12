@@ -12,11 +12,16 @@ func init() {
 
 // bwrapLaunch wraps a command in bubblewrap (`bwrap`): the whole filesystem is
 // mounted read-only, the working directory is writable, /tmp is a private tmpfs,
-// the network is unshared, and the sandbox dies with its parent. It blocks writes
-// outside the project and network egress but does NOT restrict reads (the whole
-// filesystem stays readable). Best-effort: the SDK ships no guarantee for it; it
-// requires `bwrap` and a kernel with user namespaces enabled.
+// the network is unshared, the sandbox dies with its parent, and the user's
+// sensitive credential directories (see homeReadMasks) are masked with empty
+// tmpfs mounts so they cannot be read. Best-effort: the SDK ships no guarantee
+// for it; it requires `bwrap` and a kernel with user namespaces enabled.
 func bwrapLaunch(dir, command string, args []string) (string, []string) {
+	return bwrapLaunchWith(dir, homeReadMasks(), command, args)
+}
+
+// bwrapLaunchWith is bwrapLaunch with an explicit mask list, for testing.
+func bwrapLaunchWith(dir string, masks []string, command string, args []string) (string, []string) {
 	argv := []string{
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",
@@ -24,6 +29,9 @@ func bwrapLaunch(dir, command string, args []string) (string, []string) {
 		"--tmpfs", "/tmp",
 		"--unshare-net",
 		"--die-with-parent",
+	}
+	for _, mask := range masks {
+		argv = append(argv, "--tmpfs", mask)
 	}
 	if dir != "" {
 		argv = append(argv, "--bind", dir, dir)

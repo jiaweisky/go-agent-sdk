@@ -191,11 +191,13 @@ platform-specific package directly. **Shipped (best-effort, S4)**: `bwrap` (Linu
 `sandbox.process: bwrap` / `seatbelt` works out of the box on those platforms. Windows
 (`AppContainer`) is **not** implemented.
 
-> Both wrappers block **writes** outside the project and **network egress**, but do **not**
-> restrict **reads** (the Part 4 "filesystem view" dimension, e.g. `~/.ssh`) — use a container
-> or whole-process wrapping for that. `sandbox.failurePolicy` governs *resolution* at startup
-> only; a wrapper that resolves but fails at exec (e.g. `bwrap` without user namespaces) surfaces
-> as a per-command tool error, not a startup failure.
+> Both wrappers block **writes** outside the project, **network egress**, and **reads of a
+> denylist** of sensitive `$HOME` directories (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.docker`,
+> `~/.kube`, `~/.config/gcloud`, `~/.config/gh`). It is a denylist, not the Part 4 "filesystem
+> view" allowlist: reads elsewhere are still allowed — use a container or whole-process wrapping
+> for a strict view. `sandbox.failurePolicy` governs *resolution* at startup only; a wrapper that
+> resolves but fails at exec (e.g. `bwrap` without user namespaces) surfaces as a per-command tool
+> error, not a startup failure.
 
 ### 9. Non-goals (SDK)
 
