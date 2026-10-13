@@ -154,24 +154,41 @@ func execInAppContainer(roots []string, command string, args []string) error {
 		return err
 	}
 	capabilities := []windows.SIDAndAttributes{{Sid: capability, Attributes: windows.SE_GROUP_ENABLED}}
-
-	attributeList, err := windows.NewProcThreadAttributeList(1)
-	if err != nil {
-		return err
-	}
-	defer attributeList.Delete()
 	security := securityCapabilities{
 		appContainerSid: sid,
 		capabilities:    &capabilities[0],
 		capabilityCount: uint32(len(capabilities)),
 	}
-	if err := attributeList.Update(
-		procThreadAttributeSecurityCapabilities,
-		unsafe.Pointer(&security),
-		unsafe.Sizeof(security),
-	); err != nil {
+
+	// The re-executed process keeps this process's std handles. A handle the
+	// host left non-inheritable (a redirected output file, say) would dangle in
+	// the child — with bInheritHandles=TRUE the value is copied, the handle is
+	// not — and a dangling std handle inside an AppContainer crashes the child
+	// during initialization (the same failure the per-command spawn() guards
+	// against). Make every std handle inheritable and restrict inheritance to
+	// exactly those handles. HANDLE_LIST entries must be inheritable and must
+	// not repeat.
+	inherited := make([]windows.Handle, 0, 3)
+	for _, id := range []uint32{
+		windows.STD_INPUT_HANDLE, windows.STD_OUTPUT_HANDLE, windows.STD_ERROR_HANDLE,
+	} {
+		handle := stdHandle(id)
+		if handle == 0 {
+			continue
+		}
+		if err := windows.SetHandleInformation(handle, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
+			return err
+		}
+		if !slices.Contains(inherited, handle) {
+			inherited = append(inherited, handle)
+		}
+	}
+
+	attributeList, err := newChildAttributeList(security, inherited)
+	if err != nil {
 		return err
 	}
+	defer attributeList.Delete()
 
 	var startup startupInfoEx
 	startup.startupInfo = windows.StartupInfo{
@@ -315,32 +332,37 @@ func (p *stdioPipes) closeAll() {
 }
 
 // newChildAttributeList builds the process attribute list a spawned child is
-// started with: the AppContainer security capabilities plus an explicit handle
-// list. The caller must Delete the returned list.
+// started with: the AppContainer security capabilities plus, when handles are
+// given, an explicit handle list. The caller must Delete the returned list.
 func newChildAttributeList(
-	sid *windows.SID,
+	security securityCapabilities,
 	inherited []windows.Handle,
 ) (*windows.ProcThreadAttributeListContainer, error) {
-	attributeList, err := windows.NewProcThreadAttributeList(2)
+	attributeCount := uint32(1)
+	if len(inherited) > 0 {
+		attributeCount = 2
+	}
+	attributeList, err := windows.NewProcThreadAttributeList(attributeCount)
 	if err != nil {
 		return nil, err
 	}
-	capabilities := securityCapabilities{appContainerSid: sid}
 	if err := attributeList.Update(
 		procThreadAttributeSecurityCapabilities,
-		unsafe.Pointer(&capabilities),
-		unsafe.Sizeof(capabilities),
+		unsafe.Pointer(&security),
+		unsafe.Sizeof(security),
 	); err != nil {
 		attributeList.Delete()
 		return nil, err
 	}
-	if err := attributeList.Update(
-		procThreadAttributeHandleList,
-		unsafe.Pointer(&inherited[0]),
-		unsafe.Sizeof(inherited[0])*uintptr(len(inherited)),
-	); err != nil {
-		attributeList.Delete()
-		return nil, err
+	if len(inherited) > 0 {
+		if err := attributeList.Update(
+			procThreadAttributeHandleList,
+			unsafe.Pointer(&inherited[0]),
+			unsafe.Sizeof(inherited[0])*uintptr(len(inherited)),
+		); err != nil {
+			attributeList.Delete()
+			return nil, err
+		}
 	}
 	return attributeList, nil
 }
@@ -375,7 +397,7 @@ func spawn(dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr
 		}
 	}()
 
-	attributeList, err := newChildAttributeList(sid, pipes.childHandles())
+	attributeList, err := newChildAttributeList(securityCapabilities{appContainerSid: sid}, pipes.childHandles())
 	if err != nil {
 		return 0, nil, nil, err
 	}
