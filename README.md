@@ -24,6 +24,11 @@ iterators, so it embeds cleanly in a CLI, a service, or a test.
   (`a2a/client`), including human-in-the-loop resume.
 - **Durable sessions** — snapshots, revert/redo, automatic compaction, optional
   automatic titles.
+- **Execution seam & sandboxing** — `ClientOptions.Process` is the single injection
+  point for every command the tools spawn (`bash`, `ripgrep`, `git`), so a host can
+  run them under an OS sandbox; `FileWriteGuard` extends that boundary to file
+  mutations. `cmd/agentd` ships optional `bwrap`/`seatbelt`/`appcontainer` wrappers
+  and per-project isolation.
 
 ## Requirements
 
@@ -109,7 +114,8 @@ The public API lives in `pkg/agent` (`import "github.com/jiaweisky/go-agent-sdk/
 
 `ClientOptions` is where you set the state `Root`, working directory, config
 directories, the default `Model`/`Protocol`/`Credentials`, MCP servers, plugins,
-references, and compaction/title behavior.
+references, compaction/title behavior, and the execution seams (`Process`,
+`FileWriteGuard`, `SearchExcludes`).
 
 ## Protocols and providers
 
@@ -162,8 +168,11 @@ and is validated before the handler runs.
   remote agent; the same path is used by the `task` tool.
 - **Server command** — `cmd/agentd` serves one agent client per configured
   server over HTTP/SSE and/or A2A, from a single YAML config (string values may
-  reference `${VAR}`; no implicit environment reads). See
-  [`docs/DESIGN-AGENTD.md`](docs/DESIGN-AGENTD.md).
+  reference `${VAR}`; no implicit environment reads), with an optional admin API
+  that creates isolated project instances at runtime and per-server command
+  sandboxing / isolation. `cmd/agentd-supervisor` wraps that admin API for a
+  host's `supervisor_command`. See [`docs/DESIGN-AGENTD.md`](docs/DESIGN-AGENTD.md)
+  and [`docs/DESIGN-ISOLATION.md`](docs/DESIGN-ISOLATION.md).
 
 ## Package layout
 
@@ -181,11 +190,13 @@ go-agent-sdk/
 │   ├── mcp/        MCP client and tool adapter
 │   ├── a2a/        A2A protocol: client, a2ago (a2a-go adapter), server
 │   ├── server/     language-agnostic HTTP/SSE API
+│   ├── session/    public session-store interfaces (e.g. TurnStore)
 │   └── jsonschema/ typed JSON Schema AST for tool schemas
 ├── internal/     engine internals (not importable outside this module)
 │   ├── core/       session, session/runner, database, tool, skill, ...
 │   └── defs/       agent and skill definitions loaded from markdown
-└── cmd/          commands (cmd/agentd serves HTTP/SSE and A2A)
+└── cmd/          commands (cmd/agentd: HTTP/SSE + A2A + admin API;
+                  cmd/agentd-supervisor: host supervisor_command)
 ```
 
 > The public API is `pkg/...`; everything under `internal/` is implementation
