@@ -53,6 +53,25 @@ func TestRipgrepGlob(t *testing.T) {
 	}
 }
 
+func TestRipgrepExcludesViewDir(t *testing.T) {
+	path, err := exec.LookPath("rg")
+	if err != nil {
+		t.Skip("ripgrep (rg) not available")
+	}
+	root := t.TempDir()
+	writeRipgrepFixture(t, root, "a.go", "package a\n")
+	writeRipgrepFixture(t, root, ".views/grp/x.go", "package x\n")
+
+	service := NewRipgrep(NewAppProcess(), ripgrepTestBinary{path: path}, ".views/**")
+	entries, err := service.Glob(RipgrepGlobInput{Cwd: root, Pattern: "**/*.go", Limit: 100, Hidden: true})
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Path != "a.go" {
+		t.Fatalf("the view directory was not excluded: %v", entries)
+	}
+}
+
 func TestRipgrepGlobLimit(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"a.go", "b.go", "c.go"} {

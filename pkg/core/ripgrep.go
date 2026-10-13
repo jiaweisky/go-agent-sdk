@@ -76,12 +76,26 @@ type RipgrepBinary interface {
 }
 
 type ripgrepService struct {
-	process AppProcess
-	binary  RipgrepBinary
+	process  AppProcess
+	binary   RipgrepBinary
+	excludes []string
 }
 
-func NewRipgrep(process AppProcess, binary RipgrepBinary) Ripgrep {
-	return &ripgrepService{process: process, binary: binary}
+// NewRipgrep builds the ripgrep service. excludes are extra glob patterns
+// (ripgrep --glob syntax, relative to the search directory) whose paths are
+// omitted from results, in addition to `.git`. They let a host hide generated
+// directories (e.g. an isolation view) from glob/grep.
+func NewRipgrep(process AppProcess, binary RipgrepBinary, excludes ...string) Ripgrep {
+	return &ripgrepService{process: process, binary: binary, excludes: excludes}
+}
+
+// excludeArgs is the --glob=!... argument list shared by Glob/Find/Grep.
+func (s *ripgrepService) excludeArgs() []string {
+	args := []string{"--glob=!**/.git/**"}
+	for _, pattern := range s.excludes {
+		args = append(args, "--glob=!"+pattern)
+	}
+	return args
 }
 
 type ripgrepRunResult[A any] struct {
@@ -198,7 +212,9 @@ func (s *ripgrepService) Glob(input RipgrepGlobInput) ([]FileSystemEntry, error)
 	if input.Follow {
 		args = append(args, "--follow")
 	}
-	args = append(args, "--glob="+input.Pattern, "--glob=!**/.git/**", ".")
+	args = append(args, "--glob="+input.Pattern)
+	args = append(args, s.excludeArgs()...)
+	args = append(args, ".")
 
 	result, err := ripgrepRun(s.process, s.binary, ripgrepRunInput[string]{
 		Cwd:     input.Cwd,
@@ -231,7 +247,8 @@ func (s *ripgrepService) Find(input RipgrepFindInput) ([]FileSystemEntry, error)
 	if input.Pattern != "*" {
 		args = append(args, "--glob="+input.Pattern)
 	}
-	args = append(args, "--glob=!**/.git/**", ".")
+	args = append(args, s.excludeArgs()...)
+	args = append(args, ".")
 
 	result, err := ripgrepRun(s.process, s.binary, ripgrepRunInput[FileSystemEntry]{
 		Cwd:     input.Cwd,
@@ -276,7 +293,8 @@ func (s *ripgrepService) Grep(input RipgrepGrepInput) ([]FileSystemMatch, error)
 	if input.Include != nil && *input.Include != "" {
 		args = append(args, "--glob="+*input.Include)
 	}
-	args = append(args, "--glob=!**/.git/**", "--", input.Pattern)
+	args = append(args, s.excludeArgs()...)
+	args = append(args, "--", input.Pattern)
 	if input.File != nil {
 		args = append(args, *input.File)
 	} else {

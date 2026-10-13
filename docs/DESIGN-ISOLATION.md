@@ -342,7 +342,10 @@ View layout and hygiene:
   must all be unique per instance (see `DESIGN-AGENTD.md` §7 constraint 1).
 - For git projects, keep the worktree outside the source tree or add it to exclusions, and
   exclude the view directory (and `.git`) from the agent's `glob`/`grep` and reference scanning
-  so it is not read back as project content.
+  so it is not read back as project content. **Implemented**: agentd computes, per server, the
+  isolation base directories that sit inside the server's working directory and passes them as
+  `ClientOptions.SearchExcludes` (ripgrep `--glob=!…` patterns) — so `glob`/`grep` omit a view
+  even when it lives under the project. `.git` is always excluded.
 - A `bash` agent inside a `worktree` can still reach the shared object store (`git checkout`
   another branch/object); choose `container` when that escape must be closed.
 

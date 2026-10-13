@@ -83,6 +83,11 @@ type ClientOptions struct {
 	// file writes that the process sandbox (Process) does not cover. Nil disables
 	// the guard.
 	FileWriteGuard core.FileWriteGuard
+	// SearchExcludes are ripgrep --glob patterns (relative to the working
+	// directory) whose paths the glob/grep tools omit from results, on top of
+	// `.git`. A host uses it to hide a generated directory - for example an
+	// isolation view that lives inside the project - from the agent's search.
+	SearchExcludes []string
 
 	// Tools are application-level tools exposed to every session.
 	Tools []Tool

@@ -164,7 +164,8 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 	server.WorkingDirectory = project.View
 
 	uploader := mediaUploader(server)
-	client, err := buildClient(server, catalog, uploader)
+	excludes := isolationExcludes(req.WorkingDirectory, isolationBaseDirs([]config.Server{server}))
+	client, err := buildClient(server, catalog, uploader, excludes)
 	if err != nil {
 		m.teardown(project)
 		return nil, err

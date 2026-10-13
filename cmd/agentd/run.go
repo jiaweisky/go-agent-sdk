@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -105,12 +106,14 @@ func run(ctx context.Context, cfg config.Config) error {
 	}()
 
 	runner := isolation.DefaultRunner()
+	baseDirs := isolationBaseDirs(cfg.Servers)
 	var built []*builtServer
 	for _, s := range cfg.Servers {
 		serverCatalog, err := global.Subset(s.Models, s.DefaultModel)
 		if err != nil {
 			return fmt.Errorf("server %q: %w", s.Name, err)
 		}
+		source := s.WorkingDirectory
 		project, err := runner.Prepare(ctx, projectSpec(s), isolationSpec(s))
 		if err != nil {
 			return fmt.Errorf("server %q: %w", s.Name, err)
@@ -120,7 +123,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 		s.WorkingDirectory = project.View
 		uploader := mediaUploader(s)
-		client, err := buildClient(s, serverCatalog, uploader)
+		client, err := buildClient(s, serverCatalog, uploader, isolationExcludes(source, baseDirs))
 		if err != nil {
 			return fmt.Errorf("server %q: %w", s.Name, err)
 		}
@@ -317,7 +320,7 @@ func cowMode(cow *config.CowConfig) string {
 }
 
 // buildClient assembles one server's agent client from its catalog subset.
-func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploaderFunc) (*agent.Client, error) {
+func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploaderFunc, excludes []string) (*agent.Client, error) {
 	mcpServers, err := config.MCPServers(s.MCP)
 	if err != nil {
 		return nil, err
@@ -345,7 +348,53 @@ func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploader
 		TitleAuto:        s.TitleAuto,
 		DropErroredTurns: s.DropErroredTurns == nil || *s.DropErroredTurns,
 		Process:          process,
+		SearchExcludes:   excludes,
 	})
+}
+
+// isolationBaseDirs collects the configured isolation base directories.
+func isolationBaseDirs(servers []config.Server) []string {
+	var dirs []string
+	for _, s := range servers {
+		if s.Isolation != nil && s.Isolation.BaseDir != "" {
+			dirs = append(dirs, s.Isolation.BaseDir)
+		}
+	}
+	return dirs
+}
+
+// isolationExcludes returns ripgrep globs (relative to source) that hide every
+// base directory sitting inside the server's working directory, so the agent
+// does not read an isolation view back as project content.
+func isolationExcludes(source string, baseDirs []string) []string {
+	var excludes []string
+	for _, base := range baseDirs {
+		if rel, ok := insidePath(source, base); ok {
+			excludes = append(excludes, rel+"/**")
+		}
+	}
+	return excludes
+}
+
+// insidePath reports whether path is inside root, returning its slash-separated
+// relative path when it is. Equal or outside paths return false.
+func insidePath(root, path string) (string, bool) {
+	if root == "" || path == "" {
+		return "", false
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }
 
 // resolveSandbox returns the server's command-execution seam. No sandbox (or

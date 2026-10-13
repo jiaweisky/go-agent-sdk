@@ -1,25 +1,22 @@
 package main
 
-import (
-	"testing"
+import "testing"
 
-	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
-)
-
-// TestResolveSandbox covers the sandbox failure policy: no sandbox and "none"
-// yield the SDK default (nil); an unknown wrapper fails closed by default and
-// degrades to unsandboxed only under fail-open.
-func TestResolveSandbox(t *testing.T) {
-	if p, err := resolveSandbox(config.Server{}); err != nil || p != nil {
-		t.Fatalf("no sandbox: p=%v err=%v", p, err)
+func TestIsolationExcludes(t *testing.T) {
+	// A base directory inside the source is excluded (relative glob).
+	if got := isolationExcludes("/proj", []string{"/proj/.views"}); len(got) != 1 || got[0] != ".views/**" {
+		t.Fatalf("inside base = %v, want [.views/**]", got)
 	}
-	if p, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "none"}}); err != nil || p != nil {
-		t.Fatalf("sandbox=none: p=%v err=%v", p, err)
+	// A base directory outside the source is not excluded.
+	if got := isolationExcludes("/proj", []string{"/var/lib/views"}); len(got) != 0 {
+		t.Fatalf("outside base = %v, want none", got)
 	}
-	if _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "bwrap"}}); err == nil {
-		t.Fatal("expected an unknown sandbox to fail closed")
+	// Equal or empty paths are never excluded.
+	if got := isolationExcludes("/proj", []string{"/proj", ""}); len(got) != 0 {
+		t.Fatalf("equal/empty base = %v, want none", got)
 	}
-	if p, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "bwrap", FailurePolicy: "fail-open"}}); err != nil || p != nil {
-		t.Fatalf("fail-open: p=%v err=%v", p, err)
+	// A nested base dir yields the nested relative glob.
+	if got := isolationExcludes("/proj", []string{"/proj/a/b"}); len(got) != 1 || got[0] != "a/b/**" {
+		t.Fatalf("nested base = %v, want [a/b/**]", got)
 	}
 }

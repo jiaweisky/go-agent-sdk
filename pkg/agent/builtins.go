@@ -29,6 +29,7 @@ type builtinDeps struct {
 	name       string
 	process    core.AppProcess
 	fileGuard  core.FileWriteGuard
+	excludes   []string
 }
 
 // registerBuiltins registers the shipped built-in tools into a registry.
@@ -42,7 +43,7 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 		process = core.NewAppProcess()
 	}
 	image := core.NewImage(core.DefaultImageConfig())
-	ripgrepService := core.NewRipgrep(process, ripgrep.NewBinary(deps.global))
+	ripgrepService := core.NewRipgrep(process, ripgrep.NewBinary(deps.global), deps.excludes...)
 	todos := wire.NewSessionTodo(deps.db, deps.events)
 	directory := string(deps.location.Directory)
 
