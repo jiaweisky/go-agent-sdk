@@ -451,6 +451,24 @@ exactly one `Client` at a time; read-only projects may be shared.
 > protocol (acquire/release) and satisfies it through the control API — a host points
 > `supervisor_command` at it and gains option-1 ergonomics (one short-lived command per request)
 > over option 2, while the host still spawns no agentd itself.
+>
+> **Container/remote provisioning (deployment).** A `container`/`remote` view is an external
+> agentd (in a container/VM/another host) that this process never orchestrates (§11, §15). Two
+> workable host patterns:
+> - **Remote / one agentd per deployment.** Run a containerized agentd whose `control.listen` is
+>   reachable from the host and point the supervisor's `agentd.baseURL` at it; a remote base URL
+>   works unchanged, so no SDK change is needed for `remote`.
+> - **One container per project.** The host runs `agentd` in a container **per project**,
+>   publishing that instance's server port, and returns the published `server_base`.
+>
+> **Constraint — the control API cannot hide behind a container.** Dynamic instances bind
+> `control.projectListen`, which must be loopback (above); a control-API agentd inside a
+> container publishes only its own admin port, so the per-project `server_base` it returns
+> (`127.0.0.1:<port>`) lives *inside* the container and is unreachable from the host.
+> Containerizing the orchestrator therefore only works when the container shares the host network
+> namespace (`--network host` on Linux) or a per-project container publishes its own port. The
+> reference supervisor targets an agentd reachable as-is; container/VM orchestration stays a
+> deployment concern.
 
 ### 16. Lifecycle, ownership and quotas
 
