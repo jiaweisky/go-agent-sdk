@@ -144,20 +144,7 @@ func (m *projectManager) register(name string, instance *controlInstance) {
 // serving it, tearing everything down on any failure so a partial build leaks
 // nothing.
 func (m *projectManager) prepare(req config.ProjectRequest, root string) (*controlInstance, error) {
-	server := config.Server{
-		Name:             req.Name,
-		Kind:             req.Kind,
-		Root:             root,
-		WorkingDirectory: req.WorkingDirectory,
-		ConfigDirs:       req.ConfigDirs,
-		Models:           req.Models,
-		DefaultModel:     req.DefaultModel,
-		Agents:           req.Agents,
-		Isolation:        req.Isolation,
-		Auth:             req.Auth,
-
-		InboundPermissions: req.InboundPermissions,
-	}
+	server := req.ToServer(root)
 	catalog, err := m.catalog.Subset(server.Models, server.DefaultModel)
 	if err != nil {
 		return nil, err

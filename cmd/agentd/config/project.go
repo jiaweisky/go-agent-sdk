@@ -1,6 +1,9 @@
 package config
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // ProjectRequest is the body of the control API's POST /admin/projects: one
 // isolated project instance to create. Root and WorkingDirectory must be
@@ -19,6 +22,9 @@ type ProjectRequest struct {
 	// InboundPermissions overrides the instance's tool policy (same shape as a
 	// server's). Empty means the SDK default (read-only).
 	InboundPermissions []PermissionRule `json:"inboundPermissions,omitempty"`
+	// Sandbox selects the command-execution seam for the instance's tools (same
+	// shape as a server's). Empty means the SDK pass-through.
+	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
 	// Readonly marks a read-only lease. Read-only leases share the source
 	// directory and may coexist (several readers); a writable lease is exclusive.
 	// It is therefore mutually exclusive with Isolation.
@@ -45,5 +51,27 @@ func (r ProjectRequest) Validate() error {
 	if err := validateAuthConfig(r.Kind, r.Auth); err != nil {
 		return err
 	}
+	if err := validateSandboxConfig(r.Sandbox); err != nil {
+		return fmt.Errorf("project %q: %w", r.Name, err)
+	}
 	return ValidateIsolation(r.Name, r.WorkingDirectory, r.Isolation)
+}
+
+// ToServer maps a project request to the config.Server an instance serves. root
+// is the resolved (absolute) state root.
+func (r ProjectRequest) ToServer(root string) Server {
+	return Server{
+		Name:               r.Name,
+		Kind:               r.Kind,
+		Root:               root,
+		WorkingDirectory:   r.WorkingDirectory,
+		ConfigDirs:         r.ConfigDirs,
+		Models:             r.Models,
+		DefaultModel:       r.DefaultModel,
+		Agents:             r.Agents,
+		Isolation:          r.Isolation,
+		InboundPermissions: r.InboundPermissions,
+		Sandbox:            r.Sandbox,
+		Auth:               r.Auth,
+	}
 }

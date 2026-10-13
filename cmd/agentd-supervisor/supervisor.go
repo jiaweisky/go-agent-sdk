@@ -133,6 +133,7 @@ func (s *supervisor) projectRequest(req request) (config.ProjectRequest, string,
 		DefaultModel:     t.DefaultModel,
 		Agents:           t.Agents,
 		Isolation:        iso,
+		Sandbox:          t.Sandbox,
 		Readonly:         req.Readonly,
 		Auth:             t.Auth,
 	}, kind, nil

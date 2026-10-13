@@ -179,16 +179,25 @@ func validateServerCommon(s Server, catalog Catalog) error {
 
 // validateSandbox checks the command-execution seam selection.
 func validateSandbox(s Server) error {
-	if s.Sandbox == nil {
+	if err := validateSandboxConfig(s.Sandbox); err != nil {
+		return fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	return nil
+}
+
+// validateSandboxConfig checks a command-execution seam selection; it is shared
+// by a configured server and a control-API project request.
+func validateSandboxConfig(sandbox *SandboxConfig) error {
+	if sandbox == nil {
 		return nil
 	}
-	if s.Sandbox.Process == "" {
-		return fmt.Errorf("server %q: sandbox.process is required", s.Name)
+	if sandbox.Process == "" {
+		return errors.New("sandbox.process is required")
 	}
-	switch s.Sandbox.FailurePolicy {
+	switch sandbox.FailurePolicy {
 	case "", "fail-closed", "fail-open":
 	default:
-		return fmt.Errorf("server %q: sandbox.failurePolicy must be fail-closed or fail-open, got %q", s.Name, s.Sandbox.FailurePolicy)
+		return fmt.Errorf("sandbox.failurePolicy must be fail-closed or fail-open, got %q", sandbox.FailurePolicy)
 	}
 	return nil
 }

@@ -169,6 +169,27 @@ func TestManagerCloseTearsDownSharedInstance(t *testing.T) {
 	}
 }
 
+func TestManagerWiresSandbox(t *testing.T) {
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	t.Cleanup(manager.Close)
+
+	// An unknown sandbox fails closed while building the instance, proving the
+	// request's sandbox reaches the client assembly (resolveSandbox runs in
+	// prepare, not in Validate).
+	bad := testControlRequest(t)
+	bad.Sandbox = &config.SandboxConfig{Process: "no-such-wrapper"}
+	if _, err := manager.Start(bad); err == nil {
+		t.Fatal("expected the instance sandbox to be resolved and fail closed")
+	}
+
+	// fail-open runs without the sandbox.
+	open := testControlRequest(t)
+	open.Sandbox = &config.SandboxConfig{Process: "no-such-wrapper", FailurePolicy: "fail-open"}
+	if _, err := manager.Start(open); err != nil {
+		t.Fatalf("fail-open sandbox must not fail: %v", err)
+	}
+}
+
 func TestManagerRefusesReaderWhileWriter(t *testing.T) {
 	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
 	t.Cleanup(manager.Close)

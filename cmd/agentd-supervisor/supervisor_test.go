@@ -153,6 +153,23 @@ func TestAcquireReadonlySharesSource(t *testing.T) {
 	}
 }
 
+func TestAcquireCarriesSandbox(t *testing.T) {
+	var created config.ProjectRequest
+	released := ""
+	server := fakeAgentd(t, &created, &released, "")
+	defer server.Close()
+
+	cfg := testConfig(server.URL, "")
+	cfg.Project.Sandbox = &config.SandboxConfig{Process: "seatbelt", FailurePolicy: "fail-open"}
+	sup := newSupervisor(cfg)
+	if _, err := sup.acquire(request{Action: "acquire", ProjectID: "p1"}); err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if created.Sandbox == nil || created.Sandbox.Process != "seatbelt" || created.Sandbox.FailurePolicy != "fail-open" {
+		t.Fatalf("sandbox was not carried into the project request: %+v", created.Sandbox)
+	}
+}
+
 func TestAcquireRejectsUnknownAgent(t *testing.T) {
 	sup := newSupervisor(testConfig("http://example.invalid", ""))
 	if _, err := sup.acquire(request{Action: "acquire", ProjectID: "p1", Agent: "review"}); err == nil {
