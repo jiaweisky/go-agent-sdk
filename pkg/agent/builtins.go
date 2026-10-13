@@ -15,21 +15,21 @@ import (
 
 // builtinDeps are the services the built-in tools register with.
 type builtinDeps struct {
-	db         *database.Database
-	events     core.Event
-	permission core.Permission
-	question   core.Question
-	location   core.Location
-	global     core.Global
-	shell      string
-	skills     tool.SkillLister
-	locale     language.Tag
-	agents     *core.Agent
-	task       TaskRunner
-	name       string
-	process    core.AppProcess
-	fileGuard  core.FileWriteGuard
-	excludes   []string
+	db             *database.Database
+	events         core.Event
+	permission     core.Permission
+	question       core.Question
+	location       core.Location
+	global         core.Global
+	shell          string
+	skills         tool.SkillLister
+	locale         language.Tag
+	agents         *core.Agent
+	task           TaskRunner
+	name           string
+	process        core.AppProcess
+	fileGuard      core.FileWriteGuard
+	searchExcludes []string
 }
 
 // registerBuiltins registers the shipped built-in tools into a registry.
@@ -43,7 +43,7 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 		process = core.NewAppProcess()
 	}
 	image := core.NewImage(core.DefaultImageConfig())
-	ripgrepService := core.NewRipgrep(process, ripgrep.NewBinary(deps.global), deps.excludes...)
+	ripgrepService := core.NewRipgrep(process, ripgrep.NewBinary(deps.global), deps.searchExcludes...)
 	todos := wire.NewSessionTodo(deps.db, deps.events)
 	directory := string(deps.location.Directory)
 

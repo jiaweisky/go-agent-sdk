@@ -16,6 +16,9 @@ type ProjectRequest struct {
 	DefaultModel     string           `json:"defaultModel,omitempty"`
 	Agents           []string         `json:"agents"`
 	Isolation        *IsolationConfig `json:"isolation,omitempty"`
+	// InboundPermissions overrides the instance's tool policy (same shape as a
+	// server's). Empty means the SDK default (read-only).
+	InboundPermissions []PermissionRule `json:"inboundPermissions,omitempty"`
 	// Readonly marks a read-only lease. Read-only leases share the source
 	// directory and may coexist (several readers); a writable lease is exclusive.
 	// It is therefore mutually exclusive with Isolation.

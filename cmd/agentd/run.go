@@ -113,7 +113,6 @@ func run(ctx context.Context, cfg config.Config) error {
 		if err != nil {
 			return fmt.Errorf("server %q: %w", s.Name, err)
 		}
-		source := s.WorkingDirectory
 		project, err := runner.Prepare(ctx, projectSpec(s), isolationSpec(s))
 		if err != nil {
 			return fmt.Errorf("server %q: %w", s.Name, err)
@@ -123,7 +122,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 		s.WorkingDirectory = project.View
 		uploader := mediaUploader(s)
-		client, err := buildClient(s, serverCatalog, uploader, isolationExcludes(source, baseDirs))
+		client, err := buildClient(s, serverCatalog, uploader, isolationExcludes(s.WorkingDirectory, baseDirs))
 		if err != nil {
 			return fmt.Errorf("server %q: %w", s.Name, err)
 		}
@@ -356,11 +355,19 @@ func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploader
 func isolationBaseDirs(servers []config.Server) []string {
 	var dirs []string
 	for _, s := range servers {
-		if s.Isolation != nil && s.Isolation.BaseDir != "" {
-			dirs = append(dirs, s.Isolation.BaseDir)
+		if base := baseDirOf(s.Isolation); base != "" {
+			dirs = append(dirs, base)
 		}
 	}
 	return dirs
+}
+
+// baseDirOf returns an isolation config's base directory ("" when unset).
+func baseDirOf(iso *config.IsolationConfig) string {
+	if iso == nil {
+		return ""
+	}
+	return iso.BaseDir
 }
 
 // isolationExcludes returns ripgrep globs (relative to source) that hide every
@@ -391,10 +398,14 @@ func insidePath(root, path string) (string, bool) {
 		return "", false
 	}
 	rel, err := filepath.Rel(absRoot, absPath)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+	if err != nil {
 		return "", false
 	}
-	return filepath.ToSlash(rel), true
+	rel = filepath.ToSlash(rel)
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return rel, true
 }
 
 // resolveSandbox returns the server's command-execution seam. No sandbox (or

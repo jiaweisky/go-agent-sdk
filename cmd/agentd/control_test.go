@@ -143,6 +143,32 @@ func TestManagerSharesReadOnlyAndRefusesWriter(t *testing.T) {
 	}
 }
 
+func TestManagerCloseTearsDownSharedInstance(t *testing.T) {
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+
+	first := testControlRequest(t)
+	first.Readonly = true
+	instance, err := manager.Start(first)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	second := testControlRequest(t) // same name, shares the instance
+	second.Readonly = true
+	second.Root = t.TempDir()
+	if _, err := manager.Start(second); err != nil {
+		t.Fatalf("shared start: %v", err)
+	}
+
+	manager.Close()
+	if len(manager.List()) != 0 {
+		t.Fatal("Close left a shared instance running")
+	}
+	if resp, err := http.Get(instance.serverBase + "/api/health"); err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("the shared listener was not closed")
+	}
+}
+
 func TestManagerRefusesReaderWhileWriter(t *testing.T) {
 	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
 	t.Cleanup(manager.Close)

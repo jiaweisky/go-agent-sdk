@@ -28,6 +28,9 @@ type controlInstance struct {
 	// share it (a writable lease has readers 1 and is exclusive).
 	readonly bool
 	readers  int
+	// baseDir is the instance's isolation base directory ("" when none), used to
+	// hide views from other instances' searches.
+	baseDir  string
 	cancel   context.CancelFunc
 	done     chan struct{}
 	client   *agent.Client
@@ -152,6 +155,8 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 		Agents:           req.Agents,
 		Isolation:        req.Isolation,
 		Auth:             req.Auth,
+
+		InboundPermissions: req.InboundPermissions,
 	}
 	catalog, err := m.catalog.Subset(server.Models, server.DefaultModel)
 	if err != nil {
@@ -164,8 +169,8 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 	server.WorkingDirectory = project.View
 
 	uploader := mediaUploader(server)
-	excludes := isolationExcludes(req.WorkingDirectory, isolationBaseDirs([]config.Server{server}))
-	client, err := buildClient(server, catalog, uploader, excludes)
+	baseDirs := append(m.activeBaseDirs(), isolationBaseDirs([]config.Server{server})...)
+	client, err := buildClient(server, catalog, uploader, isolationExcludes(server.WorkingDirectory, baseDirs))
 	if err != nil {
 		m.teardown(project)
 		return nil, err
@@ -190,6 +195,7 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 		workingDirectory: project.View,
 		readonly:         req.Readonly,
 		readers:          1,
+		baseDir:          baseDirOf(req.Isolation),
 		cancel:           cancel,
 		done:             make(chan struct{}),
 		client:           client,
@@ -206,13 +212,19 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 // the instance down and releases its view. A shared read-only instance is only
 // torn down once every reader has released.
 func (m *projectManager) Stop(id string) bool {
+	return m.stop(id, false)
+}
+
+// stop releases a lease. force ignores the reader count (used on shutdown so a
+// shared read-only instance is always torn down).
+func (m *projectManager) stop(id string, force bool) bool {
 	m.mu.Lock()
 	instance, ok := m.instances[id]
 	if !ok {
 		m.mu.Unlock()
 		return false
 	}
-	if instance.readonly && instance.readers > 1 {
+	if !force && instance.readonly && instance.readers > 1 {
 		instance.readers--
 		m.mu.Unlock()
 		return true
@@ -241,10 +253,24 @@ func (m *projectManager) List() []*controlInstance {
 	return out
 }
 
-// Close stops every instance (used on shutdown).
+// activeBaseDirs returns the isolation base directories of the running
+// instances, so a new instance can hide their views from its own searches.
+func (m *projectManager) activeBaseDirs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var dirs []string
+	for _, instance := range m.instances {
+		if instance.baseDir != "" {
+			dirs = append(dirs, instance.baseDir)
+		}
+	}
+	return dirs
+}
+
+// Close stops every instance (used on shutdown), regardless of the reader count.
 func (m *projectManager) Close() {
 	for _, instance := range m.List() {
-		m.Stop(instance.id)
+		m.stop(instance.id, true)
 	}
 }
 

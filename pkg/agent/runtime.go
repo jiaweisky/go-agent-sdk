@@ -627,7 +627,7 @@ func (r *runtime) buildBuiltins(opts *ClientOptions, global core.Global, locale 
 		db: r.db, events: r.events, permission: r.permission, question: r.question,
 		location: r.location, global: global, shell: opts.Shell, skills: r.skills,
 		locale: locale, agents: r.agents, task: &deferredTaskRunner{rt: r}, name: r.name,
-		process: r.process, fileGuard: opts.FileWriteGuard, excludes: opts.SearchExcludes,
+		process: r.process, fileGuard: opts.FileWriteGuard, searchExcludes: opts.SearchExcludes,
 	}
 }
 
