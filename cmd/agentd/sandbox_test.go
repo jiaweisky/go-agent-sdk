@@ -61,14 +61,24 @@ func TestResolveSandbox(t *testing.T) {
 // resolves to and checks it enforces the boundary end to end: a write outside
 // the working directory is denied, a write inside succeeds.
 func TestResolveSandboxBlocksOutsideWrite(t *testing.T) {
-	wrappers := map[string]string{"darwin": "seatbelt", "linux": "bwrap"}
+	wrappers := map[string]string{"darwin": "seatbelt", "linux": "bwrap", "windows": "appcontainer"}
+	shells := map[string]string{"darwin": "/bin/sh", "linux": "/bin/sh", "windows": "cmd"}
 	binaries := map[string]string{"seatbelt": "sandbox-exec", "bwrap": "bwrap"}
 	wrapper, ok := wrappers[runtime.GOOS]
 	if !ok {
 		t.Skip("no per-command sandbox for " + runtime.GOOS)
 	}
-	if _, err := exec.LookPath(binaries[wrapper]); err != nil {
-		t.Skipf("%s is not available", binaries[wrapper])
+	if binary, needs := binaries[wrapper]; needs {
+		if _, err := exec.LookPath(binary); err != nil {
+			t.Skipf("%s is not available", binary)
+		}
+	}
+	shell := shells[runtime.GOOS]
+	quote := func(command string) []string {
+		if runtime.GOOS == "windows" {
+			return []string{"/c", command}
+		}
+		return []string{"-c", command}
 	}
 	process, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: wrapper}})
 	if err != nil || process == nil {
@@ -81,8 +91,8 @@ func TestResolveSandboxBlocksOutsideWrite(t *testing.T) {
 	dir := t.TempDir()
 
 	outside := filepath.Join(home, ".agentd-resolve-sandbox-deny-test")
-	blocked, err := process.Run(context.Background(), "/bin/sh",
-		[]string{"-c", "echo bad > " + outside}, core.RunOptions{Dir: dir})
+	blocked, err := process.Run(context.Background(), shell,
+		quote("echo bad > "+outside), core.RunOptions{Dir: dir})
 	if err != nil {
 		t.Fatalf("denial run errored unexpectedly: %v", err)
 	}
@@ -91,8 +101,8 @@ func TestResolveSandboxBlocksOutsideWrite(t *testing.T) {
 		t.Fatalf("the resolved sandbox allowed a write outside the workdir: %s", outside)
 	}
 
-	inside, err := process.Run(context.Background(), "/bin/sh",
-		[]string{"-c", "echo ok > inside.txt"}, core.RunOptions{Dir: dir})
+	inside, err := process.Run(context.Background(), shell,
+		quote("echo ok > inside.txt"), core.RunOptions{Dir: dir})
 	if err != nil || inside.ExitCode != 0 {
 		t.Fatalf("the workdir became unusable: %v (exit %d)", err, inside.ExitCode)
 	}

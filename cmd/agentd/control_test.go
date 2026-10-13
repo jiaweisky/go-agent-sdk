@@ -172,6 +172,7 @@ func TestManagerCloseTearsDownSharedInstance(t *testing.T) {
 func TestManagerWiresSandbox(t *testing.T) {
 	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
 	t.Cleanup(manager.Close)
+	defer manager.Close() // release agent.db before t.TempDir cleanup (see TestManagerRefusesReaderWhileWriter)
 
 	// An unknown sandbox fails closed while building the instance, proving the
 	// request's sandbox reaches the client assembly (resolveSandbox runs in
