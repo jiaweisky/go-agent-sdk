@@ -2,11 +2,11 @@
 
 > Status: **implemented** — Part 1 (`ClientOptions.Process` seam) and Part 2
 > (`cmd/agentd/isolation`, `cmd/agentd/sandbox`, `sandbox.failurePolicy`, the opt-in
-> control API) have landed; the **`bwrap` (Linux)** and **`seatbelt` (macOS)** sandbox
-> wrappers are shipped (best-effort, §8), including **whole-process wrapping** (the
-> top-level `wrap` block re-execs agentd inside the wrapper, §8.1).
-> Still design-only: the Windows `AppContainer` wrapper (§8) and
-> **container/remote provisioning** — those
+> control API) have landed; the **`bwrap` (Linux)**, **`seatbelt` (macOS)** and
+> **`appcontainer` (Windows, best-effort)** sandbox wrappers are shipped (§8), including
+> **whole-process wrapping** (the top-level `wrap` block re-execs agentd inside the
+> wrapper, §8.1).
+> Still design-only: **container/remote provisioning** — those
 > run as a separate host-provisioned process, so `agentd`'s isolation config rejects the
 > `container`/`remote` modes rather than serving them locally (Part 2 §12, §15).
 > Scope: the changes **go-agent-sdk** itself must make so a host (the Tether IM bridge, or any
@@ -187,18 +187,24 @@ public surface stays small and cross-platform CVE/compat debt stays out of core.
 
 Wrappers are named and registered (e.g. `sandbox.Register("bwrap", factory)`); the command
 layer's `sandbox.process` config value selects one by name, so the config never imports a
-platform-specific package directly. **Shipped (best-effort, S4)**: `bwrap` (Linux) and
-`sandbox-exec`/seatbelt (macOS), each behind an OS build tag and registered on import — so
-`sandbox.process: bwrap` / `seatbelt` works out of the box on those platforms. Windows
-(`AppContainer`) is **not** implemented.
+platform-specific package directly. **Shipped (best-effort, S4)**: `bwrap` (Linux),
+`sandbox-exec`/seatbelt (macOS) and `appcontainer` (Windows), each behind an OS build tag and
+registered on import — so `sandbox.process: bwrap` / `seatbelt` / `appcontainer` works out of
+the box on those platforms.
 
-> Both wrappers block **writes** outside the project, **network egress**, and **reads of a
+> `bwrap` and `seatbelt` block **writes** outside the project, **network egress**, and **reads of a
 > denylist** of sensitive `$HOME` directories (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.docker`,
 > `~/.kube`, `~/.config/gcloud`, `~/.config/gh`). It is a denylist, not the Part 4 "filesystem
 > view" allowlist: reads elsewhere are still allowed — use a container or whole-process wrapping
 > for a strict view. `sandbox.failurePolicy` governs *resolution* at startup only; a wrapper that
 > resolves but fails at exec (e.g. `bwrap` without user namespaces) surfaces as a per-command tool
 > error, not a startup failure.
+
+> The Windows `appcontainer` wrapper creates an AppContainer profile, grants it the run
+> directory (`icacls`), and launches the command with
+> `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` (no network, no filesystem access outside the
+> granted directory). It is **best-effort and unverified on a real Windows host**; whole-process
+> isolation there remains a Job Object / container deployment concern (Part 4).
 
 #### 8.1 Whole-process wrapping
 
@@ -523,11 +529,11 @@ orchestration remain open.
 | S1 ✅ | (wrappers still optional) | `Runner` (`none`/`copy`/`worktree`) + `isolation` config/validation + `run.go` integration |
 | S2 ✅ | `FileWriteGuard` wired into write/edit/apply_patch | `overlay` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.process` wiring |
 | S3 ◐ | — | **control API implemented for local modes**; `container`/`remote` remain host-provisioned |
-| S4 ◐ | `bwrap` (Linux) + `seatbelt` (macOS) wrappers shipped; Windows `AppContainer` open | whole-process `bwrap`/`seatbelt` wrapping shipped (top-level `wrap`, §8.1) |
+| S4 ✅ | `bwrap` (Linux) + `seatbelt` (macOS) shipped; `appcontainer` (Windows, best-effort) | whole-process `bwrap`/`seatbelt` wrapping shipped (top-level `wrap`, §8.1) |
 
-> Not implemented: the Windows **`AppContainer`** wrapper (the rest of S4).
-> `container`/`remote` are never local — host-provisioned (§15). Container
-> wrapping of the whole process remains a deployment concern (Part 4).
+> The Windows `appcontainer` wrapper is best-effort and unverified on a real host.
+> `container`/`remote` are never local — host-provisioned (§15). Whole-process isolation
+> on Windows remains a Job Object / container deployment concern (Part 4).
 
 ## Part 8 — Decisions and open questions
 
