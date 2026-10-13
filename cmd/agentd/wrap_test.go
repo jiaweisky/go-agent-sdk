@@ -50,3 +50,18 @@ func TestWrapProcessNoop(t *testing.T) {
 		t.Fatalf("an already-wrapped process must not re-exec: %v", err)
 	}
 }
+
+func TestWrapProcessFailurePolicy(t *testing.T) {
+	// An unknown wrapper name never resolves, so fail-closed refuses to start...
+	err := wrapProcess(config.Config{Wrap: &config.WrapConfig{Process: "no-such-wrapper"}})
+	if err == nil {
+		t.Fatal("expected fail-closed to reject an unknown whole-process wrapper")
+	}
+	// ...and fail-open warns and runs unwrapped.
+	err = wrapProcess(config.Config{
+		Wrap: &config.WrapConfig{Process: "no-such-wrapper", FailurePolicy: "fail-open"},
+	})
+	if err != nil {
+		t.Fatalf("fail-open must not fail: %v", err)
+	}
+}

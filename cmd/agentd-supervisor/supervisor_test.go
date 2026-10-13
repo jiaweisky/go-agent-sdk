@@ -199,6 +199,32 @@ func TestControlErrorPropagates(t *testing.T) {
 	}
 }
 
+func TestReleaseIgnoresMissingProject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	sup := newSupervisor(testConfig(server.URL, ""))
+	if err := sup.release(request{Action: "release", ProjectID: "gone"}); err != nil {
+		t.Fatalf("releasing a missing project must succeed: %v", err)
+	}
+}
+
+func TestAcquireRequiresServerBase(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"data":{"project_id":"p1"}}`))
+	}))
+	defer server.Close()
+
+	sup := newSupervisor(testConfig(server.URL, ""))
+	if _, err := sup.acquire(request{Action: "acquire", ProjectID: "p1"}); err == nil {
+		t.Fatal("expected a missing server_base to fail")
+	}
+}
+
 func TestUnknownActionFails(t *testing.T) {
 	sup := newSupervisor(testConfig("http://example.invalid", ""))
 	if _, err := sup.handle(request{Action: "nope"}); err == nil {
