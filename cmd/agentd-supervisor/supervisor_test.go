@@ -146,6 +146,9 @@ func TestAcquireReadonlySharesSource(t *testing.T) {
 	if created.Isolation != nil {
 		t.Fatalf("read-only project must not request an isolated view: %+v", created.Isolation)
 	}
+	if !created.Readonly {
+		t.Fatal("a read-only acquire must send readonly=true")
+	}
 }
 
 func TestAcquireRejectsUnknownAgent(t *testing.T) {

@@ -428,7 +428,7 @@ provisioning **at runtime**. Two options:
 
    | Method + path | Body / effect |
    |---|---|
-   | `POST /admin/projects` | `{name,kind,root,workingDirectory,configDirs,models,defaultModel,agents,isolation,auth}` → `201 {project_id,kind,server_base,transport}` |
+   | `POST /admin/projects` | `{name,kind,root,workingDirectory,configDirs,models,defaultModel,agents,isolation,readonly,auth}` → `201 {project_id,kind,server_base,transport,working_directory,readonly}` |
    | `GET /admin/projects` | list running instances |
    | `DELETE /admin/projects/{id}` | stop the instance and release its view |
 
@@ -441,7 +441,11 @@ provisioning **at runtime**. Two options:
    same-process agentd does not orchestrate containers.
 
 Either way, the **single-owner rule** holds: a writable `(project, transport)` is leased to
-exactly one `Client` at a time; read-only projects may be shared.
+exactly one `Client` at a time; read-only projects may be shared. The control API makes this
+explicit with a `readonly` request field: several read-only leases of one project **share a
+single instance** (a reader count; the last release tears it down), while a writable lease is
+exclusive and is refused while any lease exists (and vice versa). `readonly` is mutually
+exclusive with `isolation` — a read-only lease shares the source directory.
 
 > Implementation note: the control API is the "agentd is the orchestrator for local views"
 > path. Container/VM orchestration remains a deployment concern; run a containerized agentd and

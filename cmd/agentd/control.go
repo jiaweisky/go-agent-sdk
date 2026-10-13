@@ -24,10 +24,14 @@ type controlInstance struct {
 	serverBase       string
 	root             string
 	workingDirectory string
-	cancel           context.CancelFunc
-	done             chan struct{}
-	client           *agent.Client
-	teardown         func(context.Context) error
+	// readonly marks a shared read-only lease; readers counts how many leases
+	// share it (a writable lease has readers 1 and is exclusive).
+	readonly bool
+	readers  int
+	cancel   context.CancelFunc
+	done     chan struct{}
+	client   *agent.Client
+	teardown func(context.Context) error
 }
 
 // projectManager creates and destroys isolated project instances at runtime.
@@ -64,9 +68,10 @@ func newProjectManager(ctx context.Context, catalog config.Catalog, control *con
 	}
 }
 
-// Start prepares a project, builds its client, binds a listener and serves it. It
-// claims the name and root up front (so concurrent creates cannot race or share a
-// root) and releases them on any failure.
+// Start prepares a project, builds its client, binds a listener and serves it. A
+// read-only request shares an existing read-only instance; every other case
+// creates a new instance, claiming the name and root up front (so concurrent
+// creates cannot race or share a root) and releasing them on any failure.
 func (m *projectManager) Start(req config.ProjectRequest) (*controlInstance, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
@@ -75,8 +80,9 @@ func (m *projectManager) Start(req config.ProjectRequest) (*controlInstance, err
 	if err != nil {
 		return nil, fmt.Errorf("root: %w", err)
 	}
-	if err := m.claim(req.Name, root); err != nil {
-		return nil, err
+	shared, err := m.reserve(req, root)
+	if err != nil || shared != nil {
+		return shared, err
 	}
 	instance, err := m.prepare(req, root)
 	if err != nil {
@@ -87,23 +93,32 @@ func (m *projectManager) Start(req config.ProjectRequest) (*controlInstance, err
 	return instance, nil
 }
 
-// claim reserves a project's name and root while it is being built, so
-// concurrent creates cannot race or share a root.
-func (m *projectManager) claim(name, root string) error {
+// reserve claims the project's name and root while it is being built, or returns
+// an existing read-only instance to share. It performs the whole decision under
+// one lock so concurrent creates cannot race, share a root, or split a
+// read-only lease from its instance.
+func (m *projectManager) reserve(req config.ProjectRequest, root string) (*controlInstance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, exists := m.instances[name]; exists || m.reserved[name] {
-		return fmt.Errorf("project %q already exists", name)
+	if existing := m.instances[req.Name]; existing != nil {
+		if req.Readonly && existing.readonly {
+			existing.readers++
+			return existing, nil
+		}
+		return nil, fmt.Errorf("project %q already exists", req.Name)
+	}
+	if m.reserved[req.Name] {
+		return nil, fmt.Errorf("project %q is being created", req.Name)
 	}
 	if owner, taken := m.roots[root]; taken {
-		return fmt.Errorf("root %q is already in use by project %q", root, owner)
+		return nil, fmt.Errorf("root %q is already in use by project %q", root, owner)
 	}
 	if m.maxLeases > 0 && len(m.instances)+len(m.reserved) >= m.maxLeases {
-		return fmt.Errorf("lease limit reached (%d)", m.maxLeases)
+		return nil, fmt.Errorf("lease limit reached (%d)", m.maxLeases)
 	}
-	m.reserved[name] = true
-	m.roots[root] = name
-	return nil
+	m.reserved[req.Name] = true
+	m.roots[root] = req.Name
+	return nil, nil
 }
 
 // release frees a claim taken by claim.
@@ -172,6 +187,8 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 		serverBase:       publicBaseURL(server, ln.Addr()),
 		root:             root,
 		workingDirectory: project.View,
+		readonly:         req.Readonly,
+		readers:          1,
 		cancel:           cancel,
 		done:             make(chan struct{}),
 		client:           client,
@@ -184,18 +201,24 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 	return instance, nil
 }
 
-// Stop shuts down a project instance and releases its view.
+// Stop releases one lease on a project instance and, when it is the last, shuts
+// the instance down and releases its view. A shared read-only instance is only
+// torn down once every reader has released.
 func (m *projectManager) Stop(id string) bool {
 	m.mu.Lock()
 	instance, ok := m.instances[id]
-	if ok {
-		delete(m.instances, id)
-		delete(m.roots, instance.root)
-	}
-	m.mu.Unlock()
 	if !ok {
+		m.mu.Unlock()
 		return false
 	}
+	if instance.readonly && instance.readers > 1 {
+		instance.readers--
+		m.mu.Unlock()
+		return true
+	}
+	delete(m.instances, id)
+	delete(m.roots, instance.root)
+	m.mu.Unlock()
 	instance.cancel()
 	select {
 	case <-instance.done:
@@ -274,6 +297,7 @@ func (h *controlHandler) list(w http.ResponseWriter, r *http.Request) {
 		Kind             string `json:"kind"`
 		ServerBase       string `json:"server_base"`
 		WorkingDirectory string `json:"working_directory"`
+		Readonly         bool   `json:"readonly"`
 	}
 	instances := h.manager.List()
 	items := make([]item, 0, len(instances))
@@ -283,6 +307,7 @@ func (h *controlHandler) list(w http.ResponseWriter, r *http.Request) {
 			Kind:             instance.kind,
 			ServerBase:       instance.serverBase,
 			WorkingDirectory: instance.workingDirectory,
+			Readonly:         instance.readonly,
 		})
 	}
 	writeJSONStatus(w, http.StatusOK, map[string]any{"data": items})
@@ -309,6 +334,7 @@ func (h *controlHandler) create(w http.ResponseWriter, r *http.Request) {
 		"server_base":       instance.serverBase,
 		"transport":         instance.kind,
 		"working_directory": instance.workingDirectory,
+		"readonly":          instance.readonly,
 	}})
 }
 

@@ -16,6 +16,10 @@ type ProjectRequest struct {
 	DefaultModel     string           `json:"defaultModel,omitempty"`
 	Agents           []string         `json:"agents"`
 	Isolation        *IsolationConfig `json:"isolation,omitempty"`
+	// Readonly marks a read-only lease. Read-only leases share the source
+	// directory and may coexist (several readers); a writable lease is exclusive.
+	// It is therefore mutually exclusive with Isolation.
+	Readonly bool `json:"readonly,omitempty"`
 	// Auth, when set, guards the instance's transport endpoints.
 	Auth *AuthConfig `json:"auth,omitempty"`
 }
@@ -31,6 +35,9 @@ func (r ProjectRequest) Validate() error {
 		return errors.New("root is required")
 	case len(r.Agents) == 0:
 		return errors.New("at least one agent is required")
+	}
+	if r.Readonly && r.Isolation != nil {
+		return errors.New("readonly shares the source directory; isolation is not allowed")
 	}
 	if err := validateAuthConfig(r.Kind, r.Auth); err != nil {
 		return err

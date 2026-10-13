@@ -100,6 +100,63 @@ func TestManagerRejectsExternalMode(t *testing.T) {
 	}
 }
 
+func TestManagerSharesReadOnlyAndRefusesWriter(t *testing.T) {
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	t.Cleanup(manager.Close)
+
+	// Two read-only acquires of the same project name share one instance.
+	first := testControlRequest(t)
+	first.Readonly = true
+	a, err := manager.Start(first)
+	if err != nil {
+		t.Fatalf("read-only start: %v", err)
+	}
+	second := testControlRequest(t) // same name
+	second.Readonly = true
+	second.Root = t.TempDir() // ignored: sharing reuses the instance
+	b, err := manager.Start(second)
+	if err != nil {
+		t.Fatalf("shared read-only start: %v", err)
+	}
+	if a != b {
+		t.Fatal("read-only acquires did not share the instance")
+	}
+
+	// A writable acquire of the same project is refused while readers exist.
+	writable := testControlRequest(t)
+	if _, err := manager.Start(writable); err == nil {
+		t.Fatal("expected a writable acquire to be refused while read-only leases exist")
+	}
+
+	// Releasing one reader keeps the shared instance; the last removes it.
+	if !manager.Stop("grp-a") {
+		t.Fatal("first stop failed")
+	}
+	if len(manager.List()) != 1 {
+		t.Fatal("the shared instance was removed before the last reader released")
+	}
+	if !manager.Stop("grp-a") {
+		t.Fatal("second stop failed")
+	}
+	if len(manager.List()) != 0 {
+		t.Fatal("the shared instance was not removed")
+	}
+}
+
+func TestManagerRefusesReaderWhileWriter(t *testing.T) {
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	t.Cleanup(manager.Close)
+
+	if _, err := manager.Start(testControlRequest(t)); err != nil {
+		t.Fatalf("writable start: %v", err)
+	}
+	reader := testControlRequest(t)
+	reader.Readonly = true
+	if _, err := manager.Start(reader); err == nil {
+		t.Fatal("expected a read-only acquire to be refused while a writable lease exists")
+	}
+}
+
 func TestManagerRejectsDuplicateNameAndRoot(t *testing.T) {
 	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
 	t.Cleanup(manager.Close)
