@@ -24,6 +24,7 @@ agentd.yaml
 /agentd
 /agentd.exe
 /agentd-supervisor
+/agentd-supervisor.exe
 /agentd-client
 /a2a-embedded
 /chat
