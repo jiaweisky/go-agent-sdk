@@ -136,6 +136,13 @@ func TestAcquireReadonlySharesSource(t *testing.T) {
 	}
 }
 
+func TestAcquireRejectsUnknownAgent(t *testing.T) {
+	sup := newSupervisor(testConfig("http://example.invalid", ""))
+	if _, err := sup.acquire(request{Action: "acquire", ProjectID: "p1", Agent: "review"}); err == nil {
+		t.Fatal("expected an agent outside the template's agents to be rejected")
+	}
+}
+
 func TestReleaseDeletesProject(t *testing.T) {
 	var created config.ProjectRequest
 	released := ""

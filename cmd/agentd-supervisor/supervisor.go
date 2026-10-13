@@ -9,17 +9,20 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
 
-// request is one supervisor_command invocation body (the wire contract enforced
-// by Tether's SupervisorProjectProvider).
+// request is one supervisor_command invocation body (the protocol a host
+// enforces on its supervisor_command).
 type request struct {
 	Action    string `json:"action"`
 	ProjectID string `json:"project_id"`
+	// Kind is the host's conversation kind (informational); the agentd server
+	// kind comes from the project template.
 	Kind      string `json:"kind"`
 	Agent     string `json:"agent"`
 	Readonly  bool   `json:"readonly"`
@@ -66,6 +69,9 @@ func (s *supervisor) acquire(req request) (*lease, error) {
 		return nil, errors.New("agentd.baseURL is required")
 	}
 	t := s.cfg.Project
+	if req.Agent != "" && !slices.Contains(t.Agents, req.Agent) {
+		return nil, fmt.Errorf("agent %q is not exposed by the project template (agents: %v)", req.Agent, t.Agents)
+	}
 	kind := t.Kind
 	if kind == "" {
 		kind = "http"
