@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -39,7 +40,36 @@ func (c Config) Validate() error {
 	if err := validateWrap(c.Wrap); err != nil {
 		return err
 	}
-	return validateRouting(c.Servers)
+	if err := validateRouting(c.Servers); err != nil {
+		return err
+	}
+	return validateInstanceSeparation(c.Servers)
+}
+
+// validateInstanceSeparation enforces the hard constraint that each server has
+// its own state root: a Root cannot be shared (sqlite and snapshots would
+// collide, and one server's session would be invisible to the other).
+func validateInstanceSeparation(servers []Server) error {
+	roots := map[string]string{}
+	for _, s := range servers {
+		root := resolvePath(s.Root)
+		if prev, ok := roots[root]; ok {
+			return fmt.Errorf("servers %q and %q share the state root %q; each server needs its own root", prev, s.Name, s.Root)
+		}
+		roots[root] = s.Name
+	}
+	return nil
+}
+
+// resolvePath normalizes a path for comparison; an empty path stays empty.
+func resolvePath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(path)
 }
 
 // validateWrap checks the optional whole-process sandbox configuration.

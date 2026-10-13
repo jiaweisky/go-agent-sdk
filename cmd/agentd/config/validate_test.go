@@ -25,6 +25,32 @@ func testCards() map[string]CardConfig {
 	return map[string]CardConfig{"build": {Name: "Build Agent", Description: "A build agent."}}
 }
 
+func TestValidateRejectsSharedRoot(t *testing.T) {
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/same", Agents: []string{"build"}},
+			{Name: "b", Kind: "http", Listen: "127.0.0.1:2", Root: "/same", Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected two servers sharing a state root to be rejected")
+	}
+}
+
+func TestValidateAllowsDistinctRoots(t *testing.T) {
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}},
+			{Name: "b", Kind: "http", Listen: "127.0.0.1:2", Root: "/b", Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("distinct roots must validate: %v", err)
+	}
+}
+
 func TestValidateRejectsDuplicateListen(t *testing.T) {
 	cfg := Config{
 		Models: []ModelConfig{testModel()},
