@@ -416,8 +416,16 @@ func openaiChatLowerMessages(request *schema.LLMRequest, profile MediaEncodingPr
 }
 
 func openaiChatDecodeEvent(frame string) (any, error) {
+	frame = strings.TrimSpace(frame)
 	if frame == "" || frame == "[DONE]" {
 		return nil, nil
+	}
+	// Defensive: some proxies occasionally let an unstripped SSE prefix through
+	// to the decoder. Tolerate a leading "data:" and retry.
+	if rest, ok := strings.CutPrefix(frame, "data:"); ok {
+		if inner := strings.TrimSpace(rest); strings.HasPrefix(inner, "{") || strings.HasPrefix(inner, "[") {
+			frame = inner
+		}
 	}
 	var evt openaiChatEvent
 	if err := json.Unmarshal([]byte(frame), &evt); err != nil {

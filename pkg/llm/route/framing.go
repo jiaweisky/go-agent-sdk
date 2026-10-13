@@ -52,7 +52,21 @@ func sseFraming(reader io.Reader) iter.Seq2[string, error] {
 				continue
 			}
 			if found {
-				data.WriteString(strings.TrimPrefix(value, " "))
+				v := strings.TrimPrefix(value, " ")
+				// Defensive: some proxies emit consecutive SSE events as
+				// adjacent `data:` lines without a blank-line separator. The
+				// SSE spec joins them, but two concatenated JSON objects are
+				// never a valid single event; flush each as its own frame.
+				if data.Len() > 0 && looksCompleteJSON(data.String()) && looksCompleteJSON(v) {
+					msg := strings.TrimSuffix(data.String(), "\n")
+					data.Reset()
+					if msg != "" && msg != "[DONE]" {
+						if !yield(msg, nil) {
+							return
+						}
+					}
+				}
+				data.WriteString(v)
 			}
 			data.WriteString("\n")
 		}
@@ -60,4 +74,12 @@ func sseFraming(reader io.Reader) iter.Seq2[string, error] {
 			yield("", err)
 		}
 	}
+}
+
+// looksCompleteJSON reports whether s (a buffered data payload) ends like a
+// complete JSON value, so an adjacent data line starting a new object must not
+// be joined onto it.
+func looksCompleteJSON(s string) bool {
+	s = strings.TrimRight(strings.TrimSpace(s), "\n")
+	return strings.HasSuffix(s, "}") || strings.HasSuffix(s, "]")
 }
