@@ -1,18 +1,18 @@
 package core
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"os"
 	"os/exec"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
 )
 
 // ErrTimedOut is the cause carried by an AppProcessError when a run exceeds its
@@ -100,13 +100,6 @@ func NewAppProcess() AppProcess {
 	return &appProcess{}
 }
 
-func describeCommand(command string, args []string) string {
-	if len(args) == 0 {
-		return command
-	}
-	return command + " " + strings.Join(args, " ")
-}
-
 func (p *appProcess) command(ctx context.Context, command string, args []string, options RunOptions) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, command, args...)
 	if options.Dir != "" {
@@ -132,18 +125,6 @@ func (p *appProcess) command(ctx context.Context, command string, args []string,
 	return cmd
 }
 
-func collectOutput(r *bytes.Buffer, max *int) ([]byte, bool) {
-	data := r.Bytes()
-	if max == nil {
-		return data, false
-	}
-	truncated := len(data) > *max
-	if truncated {
-		data = data[:*max]
-	}
-	return data, truncated
-}
-
 func (p *appProcess) Run(
 	ctx context.Context,
 	command string,
@@ -154,8 +135,7 @@ func (p *appProcess) Run(
 	if len(options) > 0 {
 		opts = options[0]
 	}
-	description := describeCommand(command, args)
-
+	description := util.DescribeCommand(command, args)
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
@@ -189,7 +169,7 @@ func (p *appProcess) Run(
 	}
 
 	if opts.CombineOutput {
-		output, outputTruncated := collectOutput(&combined, opts.MaxOutputBytes)
+		output, outputTruncated := util.Truncate(combined.Bytes(), opts.MaxOutputBytes)
 		return &RunResult{
 			Command:         description,
 			ExitCode:        exitCode,
@@ -200,8 +180,8 @@ func (p *appProcess) Run(
 		}, nil
 	}
 
-	out, stdoutTruncated := collectOutput(&stdout, opts.MaxOutputBytes)
-	errOut, stderrTruncated := collectOutput(&stderr, opts.MaxErrorBytes)
+	out, stdoutTruncated := util.Truncate(stdout.Bytes(), opts.MaxOutputBytes)
+	errOut, stderrTruncated := util.Truncate(stderr.Bytes(), opts.MaxErrorBytes)
 	return &RunResult{
 		Command:         description,
 		ExitCode:        exitCode,
@@ -222,7 +202,7 @@ func (p *appProcess) RunStream(
 	if len(options) > 0 {
 		opts = options[0]
 	}
-	description := describeCommand(command, args)
+	description := util.DescribeCommand(command, args)
 
 	return func(yield func(string, error) bool) {
 		if opts.Timeout > 0 {
@@ -269,7 +249,7 @@ func (p *appProcess) RunStream(
 		// The parent must release the write end, or the read never reaches EOF.
 		write.Close()
 
-		stopped, readFailure := streamReadLines(read, yield)
+		stopped, readFailure := util.StreamReadLines(read, yield)
 		read.Close()
 
 		if stopped {
@@ -291,27 +271,6 @@ func (p *appProcess) RunStream(
 		}
 		if err := streamExitError(cmd, waitErr, stderr.String(), opts.OkExitCodes, description); err != nil {
 			yield("", err)
-		}
-	}
-}
-
-// streamReadLines yields each stdout line until EOF, reporting whether the
-// consumer stopped early and any non-EOF read failure.
-func streamReadLines(read *os.File, yield func(string, error) bool) (bool, error) {
-	var readFailure error
-	reader := bufio.NewReader(read)
-	for {
-		line, readErr := reader.ReadString('\n')
-		if line = strings.TrimSuffix(line, "\n"); line != "" {
-			if !yield(line, nil) {
-				return true, nil
-			}
-		}
-		if readErr != nil {
-			if !errors.Is(readErr, io.EOF) {
-				readFailure = readErr
-			}
-			return false, readFailure
 		}
 	}
 }

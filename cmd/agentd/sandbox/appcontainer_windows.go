@@ -3,7 +3,6 @@
 package sandbox
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -12,6 +11,7 @@ import (
 	"iter"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -20,6 +20,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 
@@ -94,25 +95,38 @@ func appContainerSID(name string) (*windows.SID, error) {
 	return sid, nil
 }
 
+// grantedDirs remembers directories already granted to the profile, so the
+// (comparatively slow) icacls call runs once per directory, not per command.
+var grantedDirs sync.Map
+
 // grantAccess gives the sandbox profile modify access to dir, so the wrapped
 // command can read and write its run directory (and, by inheritance, children).
 func grantAccess(dir string, sid *windows.SID) error {
 	if dir == "" {
 		return nil
 	}
+	if _, ok := grantedDirs.Load(dir); ok {
+		return nil
+	}
 	out, err := exec.Command("icacls", dir, "/grant", "*"+sid.String()+":(OI)(CI)M").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("grant %s on %s: %w: %s", sid, dir, err, strings.TrimSpace(string(out)))
 	}
+	grantedDirs.Store(dir, struct{}{})
 	return nil
 }
 
 // spawn starts the command inside the AppContainer, returning the process handle
 // and the readable ends of its stdout (and stderr, unless merged into stdout).
-func spawn(dir, commandLine string, envBlock []uint16, mergeStderr bool) (windows.Handle, *os.File, *os.File, error) {
+func spawn(dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr bool) (windows.Handle, *os.File, *os.File, error) {
 	sid, err := appContainerSID(containerName)
 	if err != nil {
 		return 0, nil, nil, err
+	}
+	if dir == "" {
+		if dir, err = os.Getwd(); err != nil {
+			return 0, nil, nil, err
+		}
 	}
 	if err := grantAccess(dir, sid); err != nil {
 		return 0, nil, nil, err
@@ -193,13 +207,11 @@ func spawn(dir, commandLine string, envBlock []uint16, mergeStderr bool) (window
 		closeAll(outRead, outWrite, stdinRead, stdinWrite, errRead)
 		return 0, nil, nil, err
 	}
-	var dirPtr *uint16
-	if dir != "" {
-		if dirPtr, err = windows.UTF16PtrFromString(dir); err != nil {
-			attributeList.Delete()
-			closeAll(outRead, outWrite, stdinRead, stdinWrite, errRead)
-			return 0, nil, nil, err
-		}
+	dirPtr, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		attributeList.Delete()
+		closeAll(outRead, outWrite, stdinRead, stdinWrite, errRead)
+		return 0, nil, nil, err
 	}
 	var info windows.ProcessInformation
 	err = windows.CreateProcess(
@@ -212,14 +224,19 @@ func spawn(dir, commandLine string, envBlock []uint16, mergeStderr bool) (window
 	if !mergeStderr {
 		windows.CloseHandle(errWrite)
 	}
-	// Closing the parent's stdin write end gives the child EOF immediately.
-	windows.CloseHandle(stdinWrite)
 	windows.CloseHandle(stdinRead)
 	if err != nil {
-		closeAll(outRead, errRead)
+		closeAll(stdinWrite, outRead, errRead)
 		return 0, nil, nil, err
 	}
 	windows.CloseHandle(info.Thread)
+	// Feed stdin (when given) and close the write end so the child sees EOF.
+	stdinFile := os.NewFile(uintptr(stdinWrite), "stdin")
+	if len(stdin) > 0 {
+		go func() { _, _ = stdinFile.Write(stdin); _ = stdinFile.Close() }()
+	} else {
+		_ = stdinFile.Close()
+	}
 	stderr := (*os.File)(nil)
 	if !mergeStderr {
 		stderr = os.NewFile(uintptr(errRead), "stderr")
@@ -293,14 +310,14 @@ func (p *appContainerProcess) Run(
 	if len(options) > 0 {
 		opts = options[0]
 	}
-	description := describeCommand(command, args)
+	description := util.DescribeCommand(command, args)
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
 	commandLine := windows.ComposeCommandLine(append([]string{command}, args...))
-	process, stdout, stderr, err := spawn(opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), opts.CombineOutput)
+	process, stdout, stderr, err := spawn(opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), opts.Stdin, opts.CombineOutput)
 	if err != nil {
 		return nil, &core.AppProcessError{Command: description, Cause: err}
 	}
@@ -328,7 +345,7 @@ func (p *appContainerProcess) Run(
 	}
 	if opts.CombineOutput {
 		merged := append(stdoutBuf.Bytes(), stderrBuf.Bytes()...)
-		output, truncated := truncate(merged, opts.MaxOutputBytes)
+		output, truncated := util.Truncate(merged, opts.MaxOutputBytes)
 		return &core.RunResult{
 			Command:         description,
 			ExitCode:        int(exitCode),
@@ -338,8 +355,8 @@ func (p *appContainerProcess) Run(
 			OutputTruncated: truncated,
 		}, nil
 	}
-	out, stdoutTruncated := truncate(stdoutBuf.Bytes(), opts.MaxOutputBytes)
-	errOut, stderrTruncated := truncate(stderrBuf.Bytes(), opts.MaxErrorBytes)
+	out, stdoutTruncated := util.Truncate(stdoutBuf.Bytes(), opts.MaxOutputBytes)
+	errOut, stderrTruncated := util.Truncate(stderrBuf.Bytes(), opts.MaxErrorBytes)
 	return &core.RunResult{
 		Command:         description,
 		ExitCode:        int(exitCode),
@@ -360,7 +377,7 @@ func (p *appContainerProcess) RunStream(
 	if len(options) > 0 {
 		opts = options[0]
 	}
-	description := describeCommand(command, args)
+	description := util.DescribeCommand(command, args)
 	return func(yield func(string, error) bool) {
 		if opts.Timeout > 0 {
 			var cancel context.CancelFunc
@@ -368,7 +385,7 @@ func (p *appContainerProcess) RunStream(
 			defer cancel()
 		}
 		commandLine := windows.ComposeCommandLine(append([]string{command}, args...))
-		process, stdout, stderr, err := spawn(opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), opts.IncludeStderr)
+		process, stdout, stderr, err := spawn(opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), nil, opts.IncludeStderr)
 		if err != nil {
 			yield("", &core.AppProcessError{Command: description, Cause: err})
 			return
@@ -378,7 +395,7 @@ func (p *appContainerProcess) RunStream(
 		if stderr != nil {
 			go func() { _, _ = io.Copy(io.Discard, stderr); _ = stderr.Close() }()
 		}
-		stopped, readFailure := streamReadLines(stdout, yield)
+		stopped, readFailure := util.StreamReadLines(stdout, yield)
 		_ = stdout.Close()
 		exitCode, waitErr := wait(ctx, process, opts.Timeout)
 		if stopped {
@@ -396,57 +413,10 @@ func (p *appContainerProcess) RunStream(
 			yield("", &core.AppProcessError{Command: description, Cause: waitErr})
 			return
 		}
-		if len(opts.OkExitCodes) > 0 && !containsInt(opts.OkExitCodes, int(exitCode)) {
+		if len(opts.OkExitCodes) > 0 && !slices.Contains(opts.OkExitCodes, int(exitCode)) {
 			code := int(exitCode)
 			empty := ""
 			yield("", &core.AppProcessError{Command: description, ExitCode: &code, Stderr: &empty})
 		}
 	}
-}
-
-// streamReadLines yields each stdout line until EOF, reporting whether the
-// consumer stopped early and any non-EOF read failure.
-func streamReadLines(read *os.File, yield func(string, error) bool) (bool, error) {
-	var readFailure error
-	reader := bufio.NewReader(read)
-	for {
-		line, readErr := reader.ReadString('\n')
-		if line = strings.TrimSuffix(line, "\n"); line != "" {
-			if !yield(line, nil) {
-				return true, nil
-			}
-		}
-		if readErr != nil {
-			if !errors.Is(readErr, io.EOF) {
-				readFailure = readErr
-			}
-			return false, readFailure
-		}
-	}
-}
-
-// describeCommand is core's command-description helper, duplicated here because
-// it is unexported in package core.
-func describeCommand(command string, args []string) string {
-	if len(args) == 0 {
-		return command
-	}
-	return command + " " + strings.Join(args, " ")
-}
-
-// truncate clips data to an optional byte limit, reporting whether it was cut.
-func truncate(data []byte, max *int) ([]byte, bool) {
-	if max == nil || len(data) <= *max {
-		return data, false
-	}
-	return data[:*max], true
-}
-
-func containsInt(values []int, value int) bool {
-	for _, item := range values {
-		if item == value {
-			return true
-		}
-	}
-	return false
 }

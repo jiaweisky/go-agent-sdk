@@ -5,6 +5,8 @@ package sandbox
 import (
 	"syscall"
 	"testing"
+
+	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
 )
 
 func TestAppContainerRegistered(t *testing.T) {
@@ -30,21 +32,12 @@ func TestEnvBlockExtends(t *testing.T) {
 }
 
 func TestTruncate(t *testing.T) {
-	if got, cut := truncate([]byte("abcd"), nil); string(got) != "abcd" || cut {
+	if got, cut := util.Truncate([]byte("abcd"), nil); string(got) != "abcd" || cut {
 		t.Fatalf("unbounded truncate = %q, %v", got, cut)
 	}
 	limit := 2
-	if got, cut := truncate([]byte("abcd"), &limit); string(got) != "ab" || !cut {
+	if got, cut := util.Truncate([]byte("abcd"), &limit); string(got) != "ab" || !cut {
 		t.Fatalf("bounded truncate = %q, %v", got, cut)
-	}
-}
-
-func TestDescribeAndContains(t *testing.T) {
-	if describeCommand("ls", nil) != "ls" || describeCommand("ls", []string{"-l"}) != "ls -l" {
-		t.Fatal("describeCommand is wrong")
-	}
-	if !containsInt([]int{1, 2}, 2) || containsInt([]int{1, 2}, 3) {
-		t.Fatal("containsInt is wrong")
 	}
 }
 

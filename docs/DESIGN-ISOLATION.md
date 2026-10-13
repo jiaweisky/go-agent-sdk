@@ -225,9 +225,10 @@ wrap:
   passing its own args and the same environment plus the sentinel. The child
   re-runs `runMain`, sees the sentinel, and serves.
 - The wrapper allows **writes only** under the computed roots — each server's
-  `root`, `workingDirectory`, `isolation.baseDir` and `configDirs`, plus the
-  system temp dir. Unlike the per-command wrapper it **keeps the network up**,
-  because the process serves listeners and calls the model.
+  `root`, `workingDirectory` and `isolation.baseDir`, plus the system temp dir
+  (config dirs are read-only for the agent, so they are not write roots). Unlike
+  the per-command wrapper it **keeps the network up**, because the process serves
+  listeners and calls the model.
 - Unix only: `syscall.Exec` has no Windows equivalent, so `wrap` on Windows is a
   startup error; Windows whole-process isolation is a container / Job Object
   deployment concern (Part 4).

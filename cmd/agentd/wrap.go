@@ -44,8 +44,9 @@ func wrapProcess(cfg config.Config) error {
 }
 
 // wrapRoots is the set of directories the wrapped process may write: every
-// server's state root, working directory, isolation base and config dirs, plus
-// the system temp dir. Order is stable and duplicates are removed.
+// server's state root, working directory and isolation base, plus the system
+// temp dir. Config dirs are read-only for the agent, so they are not included.
+// Order is stable and duplicates are removed.
 func wrapRoots(cfg config.Config) []string {
 	var roots []string
 	add := func(path string) {
@@ -65,9 +66,6 @@ func wrapRoots(cfg config.Config) []string {
 		add(s.WorkingDirectory)
 		if s.Isolation != nil {
 			add(s.Isolation.BaseDir)
-		}
-		for _, dir := range s.ConfigDirs {
-			add(dir)
 		}
 	}
 	return roots
