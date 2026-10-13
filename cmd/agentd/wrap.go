@@ -38,9 +38,10 @@ func wrapProcess(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	name, argv := launcher(wrapRoots(cfg), executable, os.Args[1:])
+	// The sentinel marks the child as already wrapped so it does not recurse.
+	os.Setenv(wrappedEnv, w.Process)
 	fmt.Fprintf(os.Stderr, "agentd: entering whole-process sandbox %q\n", w.Process)
-	return execReplace(name, argv, append(os.Environ(), wrappedEnv+"="+w.Process))
+	return launcher(wrapRoots(cfg), executable, os.Args[1:])
 }
 
 // wrapRoots is the set of directories the wrapped process may write: every

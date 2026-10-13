@@ -2,13 +2,11 @@ package sandbox
 
 import "fmt"
 
-// ProcessLauncher rewrites the whole-process invocation into its sandboxed
-// equivalent. Unlike the per-command launcher, it takes every directory the
-// wrapped process may write (its state roots, working directories and config
-// dirs), and it must not cut the network, because the process serves listeners
-// and calls the model. command is the executable to wrap; the returned argv
-// excludes argv[0].
-type ProcessLauncher func(roots []string, command string, args []string) (string, []string)
+// ProcessLauncher takes over the current process, launching command (with args)
+// under the sandbox with write access to roots. It does not return on success.
+// Unlike the per-command launcher, it must not cut the network, because the
+// process serves listeners and calls the model.
+type ProcessLauncher func(roots []string, command string, args []string) error
 
 var processRegistry = map[string]ProcessLauncher{}
 

@@ -123,9 +123,9 @@ func TestSeatbeltProcessEnforcesWrites(t *testing.T) {
 		t.Skip("sandbox-exec not available")
 	}
 	root := t.TempDir()
-	name, argv := seatbeltProcessLaunch([]string{root}, "/bin/sh",
+	argv := seatbeltProcessArgs([]string{root}, "/bin/sh",
 		[]string{"-c", "echo hi > " + filepath.Join(root, "inside.txt")})
-	if out, err := exec.Command(name, argv...).CombinedOutput(); err != nil {
+	if out, err := exec.Command("sandbox-exec", argv...).CombinedOutput(); err != nil {
 		t.Fatalf("write inside a wrapped root was denied: %v (%s)", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(root, "inside.txt")); err != nil {
@@ -137,8 +137,8 @@ func TestSeatbeltProcessEnforcesWrites(t *testing.T) {
 		t.Skip("no home directory")
 	}
 	outside := filepath.Join(home, ".agentd-wrap-deny-test")
-	_, denyArgv := seatbeltProcessLaunch([]string{root}, "/bin/sh", []string{"-c", "echo bad > " + outside})
-	if err := exec.Command(name, denyArgv...).Run(); err == nil {
+	denyArgv := seatbeltProcessArgs([]string{root}, "/bin/sh", []string{"-c", "echo bad > " + outside})
+	if err := exec.Command("sandbox-exec", denyArgv...).Run(); err == nil {
 		_ = os.Remove(outside)
 		t.Fatalf("write outside the wrapped roots was allowed: %s", outside)
 	}

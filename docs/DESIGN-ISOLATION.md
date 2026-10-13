@@ -4,7 +4,7 @@
 > (`cmd/agentd/isolation`, `cmd/agentd/sandbox`, `sandbox.failurePolicy`, the opt-in
 > control API) have landed; the **`bwrap` (Linux)**, **`seatbelt` (macOS)** and
 > **`appcontainer` (Windows, best-effort)** sandbox wrappers are shipped (§8), including
-> **whole-process wrapping** (the top-level `wrap` block re-execs agentd inside the
+> **whole-process wrapping** (the top-level `wrap` block launches agentd inside the
 > wrapper, §8.1).
 > Still design-only: **container/remote provisioning** — those
 > run as a separate host-provisioned process, so `agentd`'s isolation config rejects the
@@ -229,9 +229,12 @@ wrap:
   (config dirs are read-only for the agent, so they are not write roots). Unlike
   the per-command wrapper it **keeps the network up**, because the process serves
   listeners and calls the model.
-- Unix only: `syscall.Exec` has no Windows equivalent, so `wrap` on Windows is a
-  startup error; Windows whole-process isolation is a container / Job Object
-  deployment concern (Part 4).
+- Unix replaces the process image (`syscall.Exec`); Windows has no such call, so
+  it launches agentd in an AppContainer and waits for it, exiting with the child's
+  status (best-effort, §8): the profile gets the `internetClientServer` capability
+  (to serve and call the model) and a loopback exemption is attempted for the
+  listener ports. Container / Job-Object wrapping remains the stronger deployment
+  option (Part 4).
 - `wrap.failurePolicy` mirrors `sandbox.failurePolicy`: `fail-closed` (default)
   refuses to start when the wrapper is unavailable; `fail-open` warns and runs
   unwrapped.
@@ -530,11 +533,10 @@ orchestration remain open.
 | S1 ✅ | (wrappers still optional) | `Runner` (`none`/`copy`/`worktree`) + `isolation` config/validation + `run.go` integration |
 | S2 ✅ | `FileWriteGuard` wired into write/edit/apply_patch | `overlay` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.process` wiring |
 | S3 ◐ | — | **control API implemented for local modes**; `container`/`remote` remain host-provisioned |
-| S4 ✅ | `bwrap` (Linux) + `seatbelt` (macOS) shipped; `appcontainer` (Windows, best-effort) | whole-process `bwrap`/`seatbelt` wrapping shipped (top-level `wrap`, §8.1) |
+| S4 ✅ | `bwrap` (Linux) + `seatbelt` (macOS) shipped; `appcontainer` (Windows, best-effort) | whole-process `bwrap`/`seatbelt`/`appcontainer` wrapping shipped (top-level `wrap`, §8.1) |
 
-> The Windows `appcontainer` wrapper is best-effort and unverified on a real host.
-> `container`/`remote` are never local — host-provisioned (§15). Whole-process isolation
-> on Windows remains a Job Object / container deployment concern (Part 4).
+> The Windows `appcontainer` wrapper (per-command and whole-process) is best-effort and
+> unverified on a real host. `container`/`remote` are never local — host-provisioned (§15).
 
 ## Part 8 — Decisions
 

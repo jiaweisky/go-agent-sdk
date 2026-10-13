@@ -64,11 +64,8 @@ func TestBwrapRegistered(t *testing.T) {
 	}
 }
 
-func TestBwrapProcessLaunch(t *testing.T) {
-	name, argv := bwrapProcessLaunch([]string{"/work", "/state"}, "/usr/bin/agentd", []string{"-config", "c.yaml"})
-	if name != "bwrap" {
-		t.Fatalf("name = %q, want bwrap", name)
-	}
+func TestBwrapProcessArgs(t *testing.T) {
+	argv := bwrapProcessArgs([]string{"/work", "/state"}, "/usr/bin/agentd", []string{"-config", "c.yaml"})
 	want := []string{
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",

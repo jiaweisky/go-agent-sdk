@@ -26,6 +26,7 @@ import (
 
 func init() {
 	Register("appcontainer", func() core.AppProcess { return &appContainerProcess{} })
+	RegisterProcess("appcontainer", execInAppContainer)
 }
 
 // appContainerProcess runs every command inside a Windows AppContainer: a
@@ -108,12 +109,115 @@ func grantAccess(dir string, sid *windows.SID) error {
 	if _, ok := grantedDirs.Load(dir); ok {
 		return nil
 	}
-	out, err := exec.Command("icacls", dir, "/grant", "*"+sid.String()+":(OI)(CI)M").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("grant %s on %s: %w: %s", sid, dir, err, strings.TrimSpace(string(out)))
+	if err := icacls(dir, sid, "(OI)(CI)M"); err != nil {
+		return err
 	}
 	grantedDirs.Store(dir, struct{}{})
 	return nil
+}
+
+// icacls grants the profile SID the given rights mask on path.
+func icacls(path string, sid *windows.SID, rights string) error {
+	out, err := exec.Command("icacls", path, "/grant", "*"+sid.String()+":"+rights).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("icacls %s: %w: %s", path, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// execInAppContainer re-launches agentd inside the AppContainer profile with the
+// internetClientServer capability (so it can serve listeners and call the
+// model), granting write access to roots and read/execute to the agentd binary,
+// then waits and exits with the child's status. Best-effort: an AppContainer
+// blocks loopback by default, so it also attempts a loopback exemption for the
+// profile (the host may need to configure one itself).
+func execInAppContainer(roots []string, command string, args []string) error {
+	sid, err := appContainerSID(containerName)
+	if err != nil {
+		return err
+	}
+	for _, root := range roots {
+		if err := grantAccess(root, sid); err != nil {
+			return err
+		}
+	}
+	// The binary itself must be readable and executable by the profile.
+	if err := icacls(command, sid, "(RX)"); err != nil {
+		return err
+	}
+	exemptLoopback(sid)
+
+	capability, err := windows.CreateWellKnownSid(windows.WinCapabilityInternetClientServerSid)
+	if err != nil {
+		return err
+	}
+	capabilities := []windows.SIDAndAttributes{{Sid: capability, Attributes: windows.SE_GROUP_ENABLED}}
+
+	attributeList, err := windows.NewProcThreadAttributeList(1)
+	if err != nil {
+		return err
+	}
+	defer attributeList.Delete()
+	security := securityCapabilities{
+		appContainerSid: sid,
+		capabilities:    &capabilities[0],
+		capabilityCount: uint32(len(capabilities)),
+	}
+	if err := attributeList.Update(
+		procThreadAttributeSecurityCapabilities,
+		unsafe.Pointer(&security),
+		unsafe.Sizeof(security),
+	); err != nil {
+		return err
+	}
+
+	var startup startupInfoEx
+	startup.startupInfo = windows.StartupInfo{
+		Cb:        uint32(unsafe.Sizeof(startup)),
+		Flags:     windows.STARTF_USESTDHANDLES,
+		StdInput:  stdHandle(windows.STD_INPUT_HANDLE),
+		StdOutput: stdHandle(windows.STD_OUTPUT_HANDLE),
+		StdErr:    stdHandle(windows.STD_ERROR_HANDLE),
+	}
+	startup.attributeList = attributeList.List()
+
+	commandPtr, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{command}, args...)))
+	if err != nil {
+		return err
+	}
+	var info windows.ProcessInformation
+	if err := windows.CreateProcess(
+		nil, commandPtr, nil, nil, true,
+		windows.CREATE_UNICODE_ENVIRONMENT|extendedStartupInfoPresent,
+		nil, nil, &startup.startupInfo, &info,
+	); err != nil {
+		return err
+	}
+	windows.CloseHandle(info.Thread)
+	_, _ = windows.WaitForSingleObject(info.Process, windows.INFINITE)
+	var exitCode uint32
+	_ = windows.GetExitCodeProcess(info.Process, &exitCode)
+	windows.CloseHandle(info.Process)
+	os.Exit(int(exitCode))
+	return nil
+}
+
+// stdHandle returns a standard handle, or 0 (which makes the child inherit it).
+func stdHandle(id uint32) windows.Handle {
+	handle, err := windows.GetStdHandle(id)
+	if err != nil {
+		return 0
+	}
+	return handle
+}
+
+// exemptLoopback best-effort exempts the profile SID from the AppContainer
+// loopback block so the bound listener stays reachable. A failure is logged, not
+// fatal: the host may configure the exemption itself.
+func exemptLoopback(sid *windows.SID) {
+	if out, err := exec.Command("CheckNetIsolation.exe", "LoopbackExempt", "-a", "-p="+sid.String()).CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "appcontainer: loopback exemption failed (%v): %s\n", err, strings.TrimSpace(string(out)))
+	}
 }
 
 // spawn starts the command inside the AppContainer, returning the process handle

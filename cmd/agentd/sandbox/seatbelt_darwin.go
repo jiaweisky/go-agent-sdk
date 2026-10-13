@@ -14,7 +14,7 @@ func init() {
 	Register("seatbelt", func() core.AppProcess {
 		return sandboxed{inner: core.NewAppProcess(), launch: seatbeltLaunch}
 	})
-	RegisterProcess("seatbelt", seatbeltProcessLaunch)
+	RegisterProcess("seatbelt", seatbeltProcess)
 }
 
 // seatbeltLaunch wraps a command in the macOS seatbelt sandbox (`sandbox-exec`):
@@ -27,13 +27,18 @@ func seatbeltLaunch(dir, command string, args []string) (string, []string) {
 	return "sandbox-exec", append(argv, args...)
 }
 
-// seatbeltProcessLaunch wraps the whole process in seatbelt: writes are allowed
-// only under roots (and the system temporary directories) and reads of the
-// sensitive home directories are denied; the network stays up, because the
-// process serves listeners and calls the model.
-func seatbeltProcessLaunch(roots []string, command string, args []string) (string, []string) {
-	argv := []string{"-p", seatbeltProcessProfile(roots), command}
-	return "sandbox-exec", append(argv, args...)
+// seatbeltProcess wraps the whole process in seatbelt: writes are allowed only
+// under roots (and the system temporary directories) and reads of the sensitive
+// home directories are denied; the network stays up, because the process serves
+// listeners and calls the model.
+func seatbeltProcess(roots []string, command string, args []string) error {
+	return execReplace("sandbox-exec", seatbeltProcessArgs(roots, command, args))
+}
+
+// seatbeltProcessArgs is the sandbox-exec argument vector (excluding the program
+// name).
+func seatbeltProcessArgs(roots []string, command string, args []string) []string {
+	return append([]string{"-p", seatbeltProcessProfile(roots), command}, args...)
 }
 
 // seatbeltProfile renders an SBPL profile: default-allow, then deny the network
