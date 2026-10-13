@@ -204,17 +204,26 @@ func ripgrepInterpret[A any](code int, stderr, pattern string, collected []A) (*
 	return &ripgrepRunResult[A]{Items: collected, Partial: code == 2}, nil
 }
 
-func (s *ripgrepService) Glob(input RipgrepGlobInput) ([]FileSystemEntry, error) {
+// filesArgs builds the argument vector for a `--files` listing: the optional
+// search pattern, the hidden/follow switches, the fixed exclusions, and the cwd
+// root.
+func (s *ripgrepService) filesArgs(pattern string, hidden, follow bool) []string {
 	args := []string{"--no-config", "--files"}
-	if input.Hidden {
+	if hidden {
 		args = append(args, "--hidden")
 	}
-	if input.Follow {
+	if follow {
 		args = append(args, "--follow")
 	}
-	args = append(args, "--glob="+input.Pattern)
+	if pattern != "" {
+		args = append(args, "--glob="+pattern)
+	}
 	args = append(args, s.excludeArgs()...)
-	args = append(args, ".")
+	return append(args, ".")
+}
+
+func (s *ripgrepService) Glob(input RipgrepGlobInput) ([]FileSystemEntry, error) {
+	args := s.filesArgs(input.Pattern, input.Hidden, input.Follow)
 
 	result, err := ripgrepRun(s.process, s.binary, ripgrepRunInput[string]{
 		Cwd:     input.Cwd,
@@ -237,18 +246,12 @@ func (s *ripgrepService) Glob(input RipgrepGlobInput) ([]FileSystemEntry, error)
 }
 
 func (s *ripgrepService) Find(input RipgrepFindInput) ([]FileSystemEntry, error) {
-	args := []string{"--no-config", "--files"}
-	if input.Hidden {
-		args = append(args, "--hidden")
+	// Find's "*" pattern means every file, which is the absence of a --glob.
+	pattern := input.Pattern
+	if pattern == "*" {
+		pattern = ""
 	}
-	if input.Follow {
-		args = append(args, "--follow")
-	}
-	if input.Pattern != "*" {
-		args = append(args, "--glob="+input.Pattern)
-	}
-	args = append(args, s.excludeArgs()...)
-	args = append(args, ".")
+	args := s.filesArgs(pattern, input.Hidden, input.Follow)
 
 	result, err := ripgrepRun(s.process, s.binary, ripgrepRunInput[FileSystemEntry]{
 		Cwd:     input.Cwd,
