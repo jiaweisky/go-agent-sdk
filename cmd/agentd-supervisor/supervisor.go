@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
@@ -42,7 +43,7 @@ type supervisor struct {
 }
 
 func newSupervisor(cfg supervisorConfig) *supervisor {
-	return &supervisor{cfg: cfg, client: &http.Client{}}
+	return &supervisor{cfg: cfg, client: &http.Client{Timeout: 30 * time.Second}}
 }
 
 // handle dispatches one request; a non-nil lease is printed for acquire.
@@ -79,7 +80,7 @@ func (s *supervisor) acquire(req request) (*lease, error) {
 	if req.Readonly {
 		isolation = nil
 	}
-	body := projectRequest{
+	body := config.ProjectRequest{
 		Name:             req.ProjectID,
 		Kind:             kind,
 		Root:             filepath.Join(t.RootBase, sanitizeID(req.ProjectID)),
@@ -93,9 +94,10 @@ func (s *supervisor) acquire(req request) (*lease, error) {
 	}
 	var response struct {
 		Data struct {
-			ProjectID  string `json:"project_id"`
-			ServerBase string `json:"server_base"`
-			Transport  string `json:"transport"`
+			ProjectID        string `json:"project_id"`
+			ServerBase       string `json:"server_base"`
+			Transport        string `json:"transport"`
+			WorkingDirectory string `json:"working_directory"`
 		} `json:"data"`
 	}
 	if err := s.do(http.MethodPost, "/admin/projects", body, &response); err != nil {
@@ -104,11 +106,16 @@ func (s *supervisor) acquire(req request) (*lease, error) {
 	if response.Data.ServerBase == "" {
 		return nil, errors.New("agentd returned no server_base")
 	}
+	// Prefer the view agentd actually prepared; fall back to the source.
+	workingDirectory := response.Data.WorkingDirectory
+	if workingDirectory == "" {
+		workingDirectory = t.WorkingDirectory
+	}
 	return &lease{
 		ProjectID:        req.ProjectID,
 		Transport:        transport,
 		ServerBase:       response.Data.ServerBase,
-		WorkingDirectory: t.WorkingDirectory,
+		WorkingDirectory: workingDirectory,
 		Ephemeral:        true,
 	}, nil
 }
@@ -165,20 +172,6 @@ func (s *supervisor) do(method, path string, body any, out any) error {
 		return json.NewDecoder(response.Body).Decode(out)
 	}
 	return nil
-}
-
-// projectRequest mirrors the agentd control API's POST /admin/projects body.
-type projectRequest struct {
-	Name             string                  `json:"name"`
-	Kind             string                  `json:"kind"`
-	Root             string                  `json:"root"`
-	WorkingDirectory string                  `json:"workingDirectory"`
-	ConfigDirs       []string                `json:"configDirs,omitempty"`
-	Models           []string                `json:"models,omitempty"`
-	DefaultModel     string                  `json:"defaultModel,omitempty"`
-	Agents           []string                `json:"agents"`
-	Isolation        *config.IsolationConfig `json:"isolation,omitempty"`
-	Auth             *config.AuthConfig      `json:"auth,omitempty"`
 }
 
 // sanitizeID makes a project id safe as a single path element.

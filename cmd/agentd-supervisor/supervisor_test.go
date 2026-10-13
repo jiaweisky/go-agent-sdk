@@ -44,7 +44,7 @@ project:
 
 // fakeAgentd is a stub of agentd's control API. It records the created project
 // body and the released id, and fails requests whose Authorization is wrong.
-func fakeAgentd(t *testing.T, created *projectRequest, released *string, token string) *httptest.Server {
+func fakeAgentd(t *testing.T, created *config.ProjectRequest, released *string, token string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token != "" && r.Header.Get("Authorization") != "Bearer "+token {
@@ -59,9 +59,10 @@ func fakeAgentd(t *testing.T, created *projectRequest, released *string, token s
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
-				"project_id":  created.Name,
-				"server_base": "http://127.0.0.1:9999",
-				"transport":   created.Kind,
+				"project_id":        created.Name,
+				"server_base":       "http://127.0.0.1:9999",
+				"transport":         created.Kind,
+				"working_directory": "/var/lib/agentd/views/" + created.Name,
 			}})
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/admin/projects/"):
 			*released = strings.TrimPrefix(r.URL.Path, "/admin/projects/")
@@ -89,7 +90,7 @@ func testConfig(baseURL, token string) supervisorConfig {
 }
 
 func TestAcquireCreatesProjectAndReturnsLease(t *testing.T) {
-	var created projectRequest
+	var created config.ProjectRequest
 	released := ""
 	server := fakeAgentd(t, &created, &released, "ctl")
 	defer server.Close()
@@ -101,6 +102,9 @@ func TestAcquireCreatesProjectAndReturnsLease(t *testing.T) {
 	}
 	if got.ServerBase != "http://127.0.0.1:9999" || got.ProjectID != "wecom/group/42" || !got.Ephemeral {
 		t.Fatalf("lease = %+v", got)
+	}
+	if got.WorkingDirectory != "/var/lib/agentd/views/wecom/group/42" {
+		t.Fatalf("working directory = %q, want the view reported by agentd", got.WorkingDirectory)
 	}
 	if created.Name != "wecom/group/42" || created.Kind != "http" {
 		t.Fatalf("posted name/kind = %q/%q", created.Name, created.Kind)
@@ -118,7 +122,7 @@ func TestAcquireCreatesProjectAndReturnsLease(t *testing.T) {
 }
 
 func TestAcquireReadonlySharesSource(t *testing.T) {
-	var created projectRequest
+	var created config.ProjectRequest
 	released := ""
 	server := fakeAgentd(t, &created, &released, "")
 	defer server.Close()
@@ -133,7 +137,7 @@ func TestAcquireReadonlySharesSource(t *testing.T) {
 }
 
 func TestReleaseDeletesProject(t *testing.T) {
-	var created projectRequest
+	var created config.ProjectRequest
 	released := ""
 	server := fakeAgentd(t, &created, &released, "")
 	defer server.Close()

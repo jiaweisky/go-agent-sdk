@@ -27,8 +27,8 @@ func testCatalog(t *testing.T) config.Catalog {
 	return catalog
 }
 
-func testControlRequest(t *testing.T) controlRequest {
-	return controlRequest{
+func testControlRequest(t *testing.T) config.ProjectRequest {
+	return config.ProjectRequest{
 		Name:             "grp-a",
 		Kind:             "http",
 		Root:             t.TempDir(),

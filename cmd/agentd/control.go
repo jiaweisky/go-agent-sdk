@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,22 +17,7 @@ import (
 	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
-// controlRequest is the body of POST /admin/projects: a project instance to
-// create. Root and WorkingDirectory must be absolute host paths; Isolation is
-// optional (default: none).
-type controlRequest struct {
-	Name             string                  `json:"name"`
-	Kind             string                  `json:"kind"`
-	Root             string                  `json:"root"`
-	WorkingDirectory string                  `json:"workingDirectory"`
-	ConfigDirs       []string                `json:"configDirs"`
-	Models           []string                `json:"models"`
-	DefaultModel     string                  `json:"defaultModel"`
-	Agents           []string                `json:"agents"`
-	Isolation        *config.IsolationConfig `json:"isolation"`
-	// Auth, when set, guards the instance's transport endpoints.
-	Auth *config.AuthConfig `json:"auth"`
-}
+// controlRequest is the control API's create body (config.ProjectRequest).
 
 // controlInstance is one running dynamic project.
 type controlInstance struct {
@@ -85,8 +69,8 @@ func newProjectManager(ctx context.Context, catalog config.Catalog, control *con
 // Start prepares a project, builds its client, binds a listener and serves it. It
 // claims the name and root up front (so concurrent creates cannot race or share a
 // root) and releases them on any failure.
-func (m *projectManager) Start(req controlRequest) (*controlInstance, error) {
-	if err := req.validate(); err != nil {
+func (m *projectManager) Start(req config.ProjectRequest) (*controlInstance, error) {
+	if err := req.Validate(); err != nil {
 		return nil, err
 	}
 	root, err := filepath.Abs(req.Root)
@@ -143,7 +127,7 @@ func (m *projectManager) register(name string, instance *controlInstance) {
 // prepare builds the view, client, handler and listener for a project and starts
 // serving it, tearing everything down on any failure so a partial build leaks
 // nothing.
-func (m *projectManager) prepare(req controlRequest, root string) (*controlInstance, error) {
+func (m *projectManager) prepare(req config.ProjectRequest, root string) (*controlInstance, error) {
 	server := config.Server{
 		Name:             req.Name,
 		Kind:             req.Kind,
@@ -259,28 +243,6 @@ func (m *projectManager) teardown(project isolation.IsolatedProject) {
 	_ = project.Teardown(ctx)
 }
 
-func (r controlRequest) validate() error {
-	switch {
-	case r.Name == "":
-		return errors.New("name is required")
-	case r.Kind != "http" && r.Kind != "a2a":
-		return errors.New("kind must be http or a2a")
-	case r.Root == "":
-		return errors.New("root is required")
-	case len(r.Agents) == 0:
-		return errors.New("at least one agent is required")
-	}
-	if r.Auth != nil {
-		if r.Auth.Bearer == "" && r.Auth.Password == "" {
-			return errors.New("auth requires bearer or a password")
-		}
-		if r.Kind == "a2a" && r.Auth.Bearer == "" {
-			return errors.New("a2a auth is bearer-only")
-		}
-	}
-	return config.ValidateIsolation(r.Name, r.WorkingDirectory, r.Isolation)
-}
-
 // controlHandler serves the admin API.
 type controlHandler struct {
 	manager *projectManager
@@ -333,7 +295,7 @@ func (h *controlHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeControlError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	var req controlRequest
+	var req config.ProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeControlError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -344,10 +306,11 @@ func (h *controlHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"data": map[string]any{
-		"project_id":  instance.id,
-		"kind":        instance.kind,
-		"server_base": instance.serverBase,
-		"transport":   instance.kind,
+		"project_id":        instance.id,
+		"kind":              instance.kind,
+		"server_base":       instance.serverBase,
+		"transport":         instance.kind,
+		"working_directory": instance.workingDirectory,
 	}})
 }
 
