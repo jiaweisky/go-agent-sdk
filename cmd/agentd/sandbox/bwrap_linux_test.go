@@ -63,3 +63,44 @@ func TestBwrapRegistered(t *testing.T) {
 		t.Fatalf("Resolve(bwrap) = %v, %v", p, err)
 	}
 }
+
+func TestBwrapProcessLaunch(t *testing.T) {
+	name, argv := bwrapProcessLaunch([]string{"/work", "/state"}, "/usr/bin/agentd", []string{"-config", "c.yaml"})
+	if name != "bwrap" {
+		t.Fatalf("name = %q, want bwrap", name)
+	}
+	want := []string{
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--proc", "/proc",
+		"--tmpfs", "/tmp",
+		"--die-with-parent",
+		"--bind", "/work", "/work",
+		"--bind", "/state", "/state",
+		"--", "/usr/bin/agentd", "-config", "c.yaml",
+	}
+	if !reflect.DeepEqual(argv, want) {
+		t.Fatalf("argv = %v, want %v", argv, want)
+	}
+	// The whole process serves listeners and calls the model, so it must not
+	// unshare the network (unlike the per-command wrapper).
+	if indexOf(argv, "--unshare-net") >= 0 {
+		t.Fatalf("whole-process wrapper must keep the network: %v", argv)
+	}
+}
+
+func TestBwrapProcessRegistered(t *testing.T) {
+	if l, err := ResolveProcess("bwrap"); err != nil || l == nil {
+		t.Fatalf("ResolveProcess(bwrap) = %v, %v", l, err)
+	}
+}
+
+// indexOf returns the index of an exact flag, or -1.
+func indexOf(argv []string, flag string) int {
+	for i, arg := range argv {
+		if arg == flag {
+			return i
+		}
+	}
+	return -1
+}

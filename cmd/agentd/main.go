@@ -44,6 +44,11 @@ func runMain(args []string) error {
 		fmt.Fprintf(os.Stderr, "agentd: configuration %s is valid\n", fl.config)
 		return nil
 	}
+	// Wrap, when configured, re-executes agentd inside a whole-process sandbox
+	// (does not return on success).
+	if err := wrapProcess(cfg); err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return run(ctx, cfg)

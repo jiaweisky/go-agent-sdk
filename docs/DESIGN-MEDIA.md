@@ -10,7 +10,8 @@
 > (`docs/DESIGN-AGENTD.md`). This document predates that merge; read its command
 > and `serveconfig` references as the current `agentd` equivalents.
 >
-> Status: design proposal (not implemented). Numbers in braces like **{M1}** are
+> Status: **implemented** (phases P0–P10 landed, including the subagent delivery
+> path P9). Numbers in braces like **{M1}** are
 > decisions; all design decisions are recorded in §8 (test tooling in §7).
 
 ## Change log

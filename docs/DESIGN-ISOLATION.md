@@ -3,9 +3,10 @@
 > Status: **implemented** — Part 1 (`ClientOptions.Process` seam) and Part 2
 > (`cmd/agentd/isolation`, `cmd/agentd/sandbox`, `sandbox.failurePolicy`, the opt-in
 > control API) have landed; the **`bwrap` (Linux)** and **`seatbelt` (macOS)** sandbox
-> wrappers are shipped (best-effort, §8).
-> Still design-only: the Windows `AppContainer` wrapper (§8), whole-process wrapping (milestone
-> S4), and **container/remote provisioning** — those
+> wrappers are shipped (best-effort, §8), including **whole-process wrapping** (the
+> top-level `wrap` block re-execs agentd inside the wrapper, §8.1).
+> Still design-only: the Windows `AppContainer` wrapper (§8) and
+> **container/remote provisioning** — those
 > run as a separate host-provisioned process, so `agentd`'s isolation config rejects the
 > `container`/`remote` modes rather than serving them locally (Part 2 §12, §15).
 > Scope: the changes **go-agent-sdk** itself must make so a host (the Tether IM bridge, or any
@@ -199,6 +200,35 @@ platform-specific package directly. **Shipped (best-effort, S4)**: `bwrap` (Linu
 > resolves but fails at exec (e.g. `bwrap` without user namespaces) surfaces as a per-command tool
 > error, not a startup failure.
 
+#### 8.1 Whole-process wrapping
+
+The per-command wrappers confine each spawned command; the SDK's own file writes
+and the process's own authority are untouched. For a stronger boundary, a
+top-level `wrap` block re-executes agentd inside the wrapper, so the **whole
+process** shares one confinement:
+
+```yaml
+wrap:
+  process: bwrap          # none (default) | bwrap (Linux) | seatbelt (macOS)
+  failurePolicy: fail-closed   # fail-closed (default) | fail-open
+```
+
+- On startup (after `-check`), if `wrap.process` names a registered
+  whole-process wrapper and the process is not already wrapped (env
+  `AGENTD_SANDBOXED`), agentd re-execs itself under the wrapper (`syscall.Exec`),
+  passing its own args and the same environment plus the sentinel. The child
+  re-runs `runMain`, sees the sentinel, and serves.
+- The wrapper allows **writes only** under the computed roots — each server's
+  `root`, `workingDirectory`, `isolation.baseDir` and `configDirs`, plus the
+  system temp dir. Unlike the per-command wrapper it **keeps the network up**,
+  because the process serves listeners and calls the model.
+- Unix only: `syscall.Exec` has no Windows equivalent, so `wrap` on Windows is a
+  startup error; Windows whole-process isolation is a container / Job Object
+  deployment concern (Part 4).
+- `wrap.failurePolicy` mirrors `sandbox.failurePolicy`: `fail-closed` (default)
+  refuses to start when the wrapper is unavailable; `fail-open` warns and runs
+  unwrapped.
+
 ### 9. Non-goals (SDK)
 
 - Three-platform sandbox profiles in core; that is long-term security debt.
@@ -338,6 +368,18 @@ Validation (fail-fast, like the rest of `config.Validate`):
 - `sandbox.process` is required when `sandbox` is set; `sandbox.failurePolicy` is
   `fail-closed` (default) or `fail-open`. A name that matches no registered wrapper fails
   startup (fail-closed) or logs and runs without the sandbox (fail-open).
+
+Whole-process wrapping is a **top-level** `wrap` block (§8.1), not a per-server
+field, because it applies to the whole process:
+
+```yaml
+wrap:
+  process: seatbelt
+  failurePolicy: fail-closed
+```
+
+`wrap.process` is required when `wrap` is set; `wrap.failurePolicy` is
+`fail-closed` (default) or `fail-open`.
 
 ### 14. Integration into `run.go`
 
@@ -481,10 +523,11 @@ orchestration remain open.
 | S1 ✅ | (wrappers still optional) | `Runner` (`none`/`copy`/`worktree`) + `isolation` config/validation + `run.go` integration |
 | S2 ✅ | `FileWriteGuard` wired into write/edit/apply_patch | `overlay` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.process` wiring |
 | S3 ◐ | — | **control API implemented for local modes**; `container`/`remote` remain host-provisioned |
-| S4 ◐ | `bwrap` (Linux) + `seatbelt` (macOS) wrappers shipped; Windows `AppContainer` open | whole-process `bwrap`/container wrapping |
+| S4 ◐ | `bwrap` (Linux) + `seatbelt` (macOS) wrappers shipped; Windows `AppContainer` open | whole-process `bwrap`/`seatbelt` wrapping shipped (top-level `wrap`, §8.1) |
 
-> Not implemented: the Windows **`AppContainer`** wrapper and **whole-process wrapping** (the
-> rest of S4). `container`/`remote` are never local — host-provisioned (§15).
+> Not implemented: the Windows **`AppContainer`** wrapper (the rest of S4).
+> `container`/`remote` are never local — host-provisioned (§15). Container
+> wrapping of the whole process remains a deployment concern (Part 4).
 
 ## Part 8 — Decisions and open questions
 
@@ -497,9 +540,9 @@ orchestration remain open.
 - **D4** A writable `(project, transport)` has a single owner; read-only may be shared.
 - **D5** Provisioning supports both a host supervisor *and* an opt-in in-process control API;
   the control API covers local modes only, container/remote stay host-provisioned.
-- **Open**: whether `Prepare` should also apply the sandbox (wrap the process) or leave that to
-  the deployment layer — proposal: the runner *may* wrap (`bwrap` mode), but the recommended
-  strongest form is a container around the whole process.
+- **D6** Whole-process wrapping is a **top-level `wrap` block** that re-execs agentd inside the
+  wrapper (§8.1); `Prepare` does not apply the sandbox per view. The recommended strongest form
+  for a fully untrusted tenant remains a container/VM around the whole process (deployment).
 - **Open**: whether git operations themselves should run through the same sandbox wrapper when
   the project is a git repo (currently `runtime.go` uses the process seam for `Git`; confirm it
   is acceptable to sandbox `git` at startup).

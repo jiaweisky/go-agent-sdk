@@ -36,7 +36,26 @@ func (c Config) Validate() error {
 	if err := validateControl(c.Control); err != nil {
 		return err
 	}
+	if err := validateWrap(c.Wrap); err != nil {
+		return err
+	}
 	return validateRouting(c.Servers)
+}
+
+// validateWrap checks the optional whole-process sandbox configuration.
+func validateWrap(w *WrapConfig) error {
+	if w == nil {
+		return nil
+	}
+	if w.Process == "" {
+		return errors.New(`wrap.process is required (use "none" to disable)`)
+	}
+	switch w.FailurePolicy {
+	case "", "fail-closed", "fail-open":
+	default:
+		return fmt.Errorf("wrap.failurePolicy must be fail-closed or fail-open, got %q", w.FailurePolicy)
+	}
+	return nil
 }
 
 // validateControl checks the optional admin API configuration.

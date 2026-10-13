@@ -1,6 +1,6 @@
 # go-agent-sdk HTTP API design
 
-> Status: **draft (design only; not implemented)**
+> Status: **implemented** (Phases 0–5; see the status note in §14).
 > Scope: a language-agnostic HTTP API for go-agent-sdk, so hosts written in other
 > languages (Python / Node / Java / …) can drive the SDK across a process boundary
 > Relationship: this document is a sub-volume of `docs/DESIGN.md`, covering only

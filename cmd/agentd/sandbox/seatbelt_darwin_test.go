@@ -93,6 +93,57 @@ func TestSeatbeltRegistered(t *testing.T) {
 	}
 }
 
+func TestSeatbeltProcessProfile(t *testing.T) {
+	profile := seatbeltProcessProfileWith([]string{"/work", "/state"}, nil)
+	for _, want := range []string{
+		"(version 1)", "(allow default)", "(deny file-write*)",
+		`(subpath "/work")`, `(subpath "/state")`, `(subpath "/private/tmp")`,
+	} {
+		if !strings.Contains(profile, want) {
+			t.Errorf("whole-process profile missing %q: %s", want, profile)
+		}
+	}
+	// The whole process serves listeners and calls the model, so the network
+	// must stay up (unlike the per-command profile).
+	if strings.Contains(profile, "(deny network*)") {
+		t.Errorf("whole-process profile must keep the network: %s", profile)
+	}
+}
+
+func TestSeatbeltProcessRegistered(t *testing.T) {
+	if l, err := ResolveProcess("seatbelt"); err != nil || l == nil {
+		t.Fatalf("ResolveProcess(seatbelt) = %v, %v", l, err)
+	}
+}
+
+// TestSeatbeltProcessEnforcesWrites runs the whole-process profile for real: a
+// write under an allowed root succeeds, a write outside every root is denied.
+func TestSeatbeltProcessEnforcesWrites(t *testing.T) {
+	if _, err := exec.LookPath("sandbox-exec"); err != nil {
+		t.Skip("sandbox-exec not available")
+	}
+	root := t.TempDir()
+	name, argv := seatbeltProcessLaunch([]string{root}, "/bin/sh",
+		[]string{"-c", "echo hi > " + filepath.Join(root, "inside.txt")})
+	if out, err := exec.Command(name, argv...).CombinedOutput(); err != nil {
+		t.Fatalf("write inside a wrapped root was denied: %v (%s)", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "inside.txt")); err != nil {
+		t.Fatalf("inside.txt was not written: %v", err)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	outside := filepath.Join(home, ".agentd-wrap-deny-test")
+	_, denyArgv := seatbeltProcessLaunch([]string{root}, "/bin/sh", []string{"-c", "echo bad > " + outside})
+	if err := exec.Command(name, denyArgv...).Run(); err == nil {
+		_ = os.Remove(outside)
+		t.Fatalf("write outside the wrapped roots was allowed: %s", outside)
+	}
+}
+
 // TestSeatbeltEnforcesWrites runs a real command through the wrapper: a write
 // under the working directory succeeds, and a write outside the allowed roots
 // (the user's home) is denied.

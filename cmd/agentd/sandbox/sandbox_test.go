@@ -48,3 +48,18 @@ func TestResolveRegistered(t *testing.T) {
 		t.Fatal("expected a registered sandbox to return a process")
 	}
 }
+
+func TestResolveProcessNoneAndEmpty(t *testing.T) {
+	for _, name := range []string{"", "none"} {
+		launcher, err := ResolveProcess(name)
+		if err != nil || launcher != nil {
+			t.Fatalf("resolve process %q = %v, %v (want nil, nil)", name, launcher, err)
+		}
+	}
+}
+
+func TestResolveProcessUnknownErrors(t *testing.T) {
+	if _, err := ResolveProcess("no-such-wrapper"); err == nil {
+		t.Fatal("expected an unknown whole-process wrapper to be rejected")
+	}
+}

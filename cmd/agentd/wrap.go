@@ -1,0 +1,74 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+
+	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandbox"
+)
+
+// wrappedEnv marks a process already inside the whole-process sandbox so the
+// re-exec does not recurse.
+const wrappedEnv = "AGENTD_SANDBOXED"
+
+// wrapProcess re-executes agentd inside the configured whole-process sandbox, so
+// every server and every tool shares one confinement. It is a no-op when no wrap
+// is configured or the process is already wrapped; otherwise it does not return
+// (it replaces the process image).
+func wrapProcess(cfg config.Config) error {
+	w := cfg.Wrap
+	if w == nil || w.Process == "" || w.Process == "none" {
+		return nil
+	}
+	if os.Getenv(wrappedEnv) != "" {
+		return nil
+	}
+	launcher, err := sandbox.ResolveProcess(w.Process)
+	if err != nil {
+		if w.FailurePolicy == "fail-open" {
+			fmt.Fprintf(os.Stderr, "agentd: whole-process sandbox %q unavailable (%v); running unwrapped\n", w.Process, err)
+			return nil
+		}
+		return err
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	name, argv := launcher(wrapRoots(cfg), executable, os.Args[1:])
+	fmt.Fprintf(os.Stderr, "agentd: entering whole-process sandbox %q\n", w.Process)
+	return execReplace(name, argv, append(os.Environ(), wrappedEnv+"="+w.Process))
+}
+
+// wrapRoots is the set of directories the wrapped process may write: every
+// server's state root, working directory, isolation base and config dirs, plus
+// the system temp dir. Order is stable and duplicates are removed.
+func wrapRoots(cfg config.Config) []string {
+	var roots []string
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+		if !slices.Contains(roots, path) {
+			roots = append(roots, path)
+		}
+	}
+	add(os.TempDir())
+	for _, s := range cfg.Servers {
+		add(s.Root)
+		add(s.WorkingDirectory)
+		if s.Isolation != nil {
+			add(s.Isolation.BaseDir)
+		}
+		for _, dir := range s.ConfigDirs {
+			add(dir)
+		}
+	}
+	return roots
+}

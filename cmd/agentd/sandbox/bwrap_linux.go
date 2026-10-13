@@ -8,6 +8,27 @@ func init() {
 	Register("bwrap", func() core.AppProcess {
 		return sandboxed{inner: core.NewAppProcess(), launch: bwrapLaunch}
 	})
+	RegisterProcess("bwrap", bwrapProcessLaunch)
+}
+
+// bwrapProcessLaunch wraps the whole process in bubblewrap: the filesystem is
+// read-only, every writable root is bound read-write, /tmp is a private tmpfs,
+// and the sandbox dies with its parent. Unlike the per-command wrapper it does
+// **not** unshare the network, because the process serves listeners and calls
+// the model. Best-effort: requires `bwrap` and user namespaces.
+func bwrapProcessLaunch(roots []string, command string, args []string) (string, []string) {
+	argv := []string{
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--proc", "/proc",
+		"--tmpfs", "/tmp",
+		"--die-with-parent",
+	}
+	for _, root := range roots {
+		argv = append(argv, "--bind", root, root)
+	}
+	argv = append(argv, "--", command)
+	return "bwrap", append(argv, args...)
 }
 
 // bwrapLaunch wraps a command in bubblewrap (`bwrap`): the whole filesystem is

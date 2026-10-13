@@ -12,6 +12,21 @@ type Config struct {
 	// Control, when set, exposes an admin API that creates and destroys isolated
 	// project instances at runtime.
 	Control *ControlConfig `yaml:"control"`
+	// Wrap, when set, re-executes agentd inside a whole-process sandbox so every
+	// server and every tool shares one confinement. It is stronger than the
+	// per-server sandbox.process (which wraps only spawned commands: bash,
+	// ripgrep, git) and covers the SDK's own file writes too. Unix only.
+	Wrap *WrapConfig `yaml:"wrap"`
+}
+
+// WrapConfig selects a whole-process sandbox for the agentd process.
+type WrapConfig struct {
+	// Process names the whole-process sandbox: none (default) or a wrapper
+	// registered for whole-process use (bwrap on Linux, seatbelt on macOS).
+	Process string `yaml:"process" json:"process"`
+	// FailurePolicy is what to do when the named sandbox cannot be built:
+	// fail-closed (default) refuses to start; fail-open warns and runs unwrapped.
+	FailurePolicy string `yaml:"failurePolicy" json:"failurePolicy"`
 }
 
 // ControlConfig configures the optional project admin API.
