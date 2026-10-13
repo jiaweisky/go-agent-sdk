@@ -535,8 +535,11 @@ stronger than wrapping command-by-command, and it simultaneously provides projec
 - **Config**: each new field's invalid values fail validation (missing `baseDir`, overlay
   without `baseReadOnly`, unknown runtime/process).
 - **Integration**: two `servers[]` entries sharing a base but with distinct views do not cross
-  sessions; a shared read-only directory is allowed; a shared writable one is rejected at
-  validation.
+  sessions. A shared read-only directory is allowed; a shared **writable** directory is rejected
+  at the **lease layer**, not by static config — like Kubernetes `ReadWriteOnce` vs
+  `ReadWriteMany`, the access mode is a runtime decision (the host knows `readonly`; the static
+  config does not). The control API enforces it by rejecting a duplicate project name / shared
+  root, and static validation only enforces one `Root` per `servers[]` entry (D8).
 - **Sandbox (optional)**: on Linux/macOS CI, a `bwrap`/`seatbelt` wrapper blocks a write to a
   path outside the view and blocks network egress; skipped where the sandbox is absent.
 
@@ -575,3 +578,9 @@ orchestration remain open.
   client exercises it at construction (`pkg/agent/process_test.go`
   `TestClientUsesInjectedProcess`). Sandboxing `git` is intended; a deployment that needs `git`
   to reach a `.git` outside the view must grant it explicitly (whole-process roots, §8.1).
+- **D8** The "one writer per project" and root-uniqueness constraints are enforced at the
+  **runtime/lease layer**, not by static config (industry norm: K8s `ReadWriteOnce`/`ReadWriteMany`
+  access modes, enforced at mount). Static validation enforces one `Root` per `servers[]` entry;
+  the control API enforces one instance per project name / root. A shared *writable* working
+  directory is therefore a host/lease decision, not a config error — `readonly` is unknown to the
+  static config.
