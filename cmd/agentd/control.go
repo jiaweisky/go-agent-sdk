@@ -17,8 +17,6 @@ import (
 	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 )
 
-// controlRequest is the control API's create body (config.ProjectRequest).
-
 // controlInstance is one running dynamic project.
 type controlInstance struct {
 	id               string

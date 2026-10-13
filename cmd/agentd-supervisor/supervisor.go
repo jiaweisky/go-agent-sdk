@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/isolation"
 )
 
 // request is one supervisor_command invocation body (the protocol a host
@@ -68,36 +69,15 @@ func (s *supervisor) acquire(req request) (*lease, error) {
 	if s.cfg.Agentd.BaseURL == "" {
 		return nil, errors.New("agentd.baseURL is required")
 	}
-	t := s.cfg.Project
-	if req.Agent != "" && !slices.Contains(t.Agents, req.Agent) {
-		return nil, fmt.Errorf("agent %q is not exposed by the project template (agents: %v)", req.Agent, t.Agents)
-	}
-	kind := t.Kind
-	if kind == "" {
-		kind = "http"
+	body, kind, err := s.projectRequest(req)
+	if err != nil {
+		return nil, err
 	}
 	transport := req.Transport
 	if transport == "" {
 		transport = kind
 	}
-	// A read-only conversation shares the source directory (mode none); a
-	// writable one gets the template's isolated view.
-	isolation := t.Isolation
-	if req.Readonly {
-		isolation = nil
-	}
-	body := config.ProjectRequest{
-		Name:             req.ProjectID,
-		Kind:             kind,
-		Root:             filepath.Join(t.RootBase, sanitizeID(req.ProjectID)),
-		WorkingDirectory: t.WorkingDirectory,
-		ConfigDirs:       t.ConfigDirs,
-		Models:           t.Models,
-		DefaultModel:     t.DefaultModel,
-		Agents:           t.Agents,
-		Isolation:        isolation,
-		Auth:             t.Auth,
-	}
+
 	var response struct {
 		Data struct {
 			ProjectID        string `json:"project_id"`
@@ -115,7 +95,7 @@ func (s *supervisor) acquire(req request) (*lease, error) {
 	// Prefer the view agentd actually prepared; fall back to the source.
 	workingDirectory := response.Data.WorkingDirectory
 	if workingDirectory == "" {
-		workingDirectory = t.WorkingDirectory
+		workingDirectory = s.cfg.Project.WorkingDirectory
 	}
 	return &lease{
 		ProjectID:        req.ProjectID,
@@ -124,6 +104,37 @@ func (s *supervisor) acquire(req request) (*lease, error) {
 		WorkingDirectory: workingDirectory,
 		Ephemeral:        true,
 	}, nil
+}
+
+// projectRequest builds the control-API body for a project from the template,
+// applying the read-only rule (share the source) and rejecting an agent the
+// template does not expose. It also returns the agentd server kind.
+func (s *supervisor) projectRequest(req request) (config.ProjectRequest, string, error) {
+	t := s.cfg.Project
+	if req.Agent != "" && !slices.Contains(t.Agents, req.Agent) {
+		return config.ProjectRequest{}, "", fmt.Errorf(
+			"agent %q is not exposed by the project template (agents: %v)", req.Agent, t.Agents)
+	}
+	kind := t.Kind
+	if kind == "" {
+		kind = "http"
+	}
+	iso := t.Isolation
+	if req.Readonly {
+		iso = nil
+	}
+	return config.ProjectRequest{
+		Name:             req.ProjectID,
+		Kind:             kind,
+		Root:             filepath.Join(t.RootBase, isolation.SanitizeComponent(req.ProjectID)),
+		WorkingDirectory: t.WorkingDirectory,
+		ConfigDirs:       t.ConfigDirs,
+		Models:           t.Models,
+		DefaultModel:     t.DefaultModel,
+		Agents:           t.Agents,
+		Isolation:        iso,
+		Auth:             t.Auth,
+	}, kind, nil
 }
 
 func (s *supervisor) release(req request) error {
@@ -178,10 +189,4 @@ func (s *supervisor) do(method, path string, body any, out any) error {
 		return json.NewDecoder(response.Body).Decode(out)
 	}
 	return nil
-}
-
-// sanitizeID makes a project id safe as a single path element.
-func sanitizeID(id string) string {
-	replaced := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(id)
-	return strings.Trim(replaced, " .")
 }

@@ -240,16 +240,26 @@ func validateAgentCards(s Server) error {
 }
 
 func validateAuth(s Server) error {
-	if s.Auth != nil {
-		if s.Auth.Bearer == "" && s.Auth.Password == "" {
-			return errors.New("auth requires bearer or a password (username defaults to opencode)")
-		}
-		if s.Kind == "a2a" && s.Auth.Bearer == "" {
-			return errors.New("a2a auth is bearer-only")
-		}
+	if err := validateAuthConfig(s.Kind, s.Auth); err != nil {
+		return err
 	}
 	if !IsLoopback(s.Listen) && !s.AllowInsecure && s.Auth == nil {
 		return errors.New("refusing to bind a non-loopback address without auth; set auth, bind loopback, or allowInsecure")
+	}
+	return nil
+}
+
+// validateAuthConfig checks an auth block's shape for a transport kind: a
+// bearer token or a username/password, bearer-only for a2a. Nil is valid.
+func validateAuthConfig(kind string, auth *AuthConfig) error {
+	if auth == nil {
+		return nil
+	}
+	if auth.Bearer == "" && auth.Password == "" {
+		return errors.New("auth requires bearer or a password (username defaults to opencode)")
+	}
+	if kind == "a2a" && auth.Bearer == "" {
+		return errors.New("a2a auth is bearer-only")
 	}
 	return nil
 }

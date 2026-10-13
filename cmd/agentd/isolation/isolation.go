@@ -292,15 +292,15 @@ func viewPath(p ProjectSpec, iso IsolationSpec) (string, error) {
 	if id == "" {
 		return "", errors.New("isolation requires a project id")
 	}
-	component := sanitizeComponent(id)
+	component := SanitizeComponent(id)
 	if component == "" {
 		return "", fmt.Errorf("isolation project id %q is not usable as a path element", p.ProjectID)
 	}
 	return filepath.Join(iso.BaseDir, component), nil
 }
 
-// sanitizeComponent makes an identifier safe to use as a single path element.
-func sanitizeComponent(value string) string {
+// SanitizeComponent makes an identifier safe to use as a single path element.
+func SanitizeComponent(value string) string {
 	replaced := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(value)
 	return strings.Trim(replaced, " .")
 }

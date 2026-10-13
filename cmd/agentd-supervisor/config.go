@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
 
@@ -11,6 +13,17 @@ import (
 type supervisorConfig struct {
 	Agentd  endpoint        `yaml:"agentd"`
 	Project projectTemplate `yaml:"project"`
+}
+
+// Validate checks the fields the supervisor needs to serve requests.
+func (c supervisorConfig) Validate() error {
+	if c.Agentd.BaseURL == "" {
+		return errors.New("agentd.baseURL is required")
+	}
+	if len(c.Project.Agents) == 0 {
+		return errors.New("project.agents is required")
+	}
+	return nil
 }
 
 // endpoint is a running agentd's control (admin) API.

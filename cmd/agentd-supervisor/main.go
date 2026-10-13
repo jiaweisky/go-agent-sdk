@@ -29,13 +29,16 @@ func run(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	var req request
-	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
-		return fmt.Errorf("read request: %w", err)
-	}
 	var cfg supervisorConfig
 	if err := config.Load(*configPath, &cfg); err != nil {
 		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	var req request
+	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
+		return fmt.Errorf("read request: %w", err)
 	}
 	lease, err := newSupervisor(cfg).handle(req)
 	if err != nil {

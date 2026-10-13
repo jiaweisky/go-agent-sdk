@@ -42,6 +42,18 @@ project:
 	}
 }
 
+func TestSupervisorConfigValidate(t *testing.T) {
+	if err := (supervisorConfig{}).Validate(); err == nil {
+		t.Fatal("expected a missing agentd.baseURL to fail validation")
+	}
+	if err := (supervisorConfig{Agentd: endpoint{BaseURL: "http://x"}}).Validate(); err == nil {
+		t.Fatal("expected a template without agents to fail validation")
+	}
+	if err := testConfig("http://x", "").Validate(); err != nil {
+		t.Fatalf("a complete config must validate: %v", err)
+	}
+}
+
 // fakeAgentd is a stub of agentd's control API. It records the created project
 // body and the released id, and fails requests whose Authorization is wrong.
 func fakeAgentd(t *testing.T, created *config.ProjectRequest, released *string, token string) *httptest.Server {

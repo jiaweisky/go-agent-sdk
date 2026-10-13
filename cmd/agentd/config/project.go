@@ -32,13 +32,8 @@ func (r ProjectRequest) Validate() error {
 	case len(r.Agents) == 0:
 		return errors.New("at least one agent is required")
 	}
-	if r.Auth != nil {
-		if r.Auth.Bearer == "" && r.Auth.Password == "" {
-			return errors.New("auth requires bearer or a password")
-		}
-		if r.Kind == "a2a" && r.Auth.Bearer == "" {
-			return errors.New("a2a auth is bearer-only")
-		}
+	if err := validateAuthConfig(r.Kind, r.Auth); err != nil {
+		return err
 	}
 	return ValidateIsolation(r.Name, r.WorkingDirectory, r.Isolation)
 }
