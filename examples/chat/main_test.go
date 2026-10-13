@@ -30,6 +30,13 @@ func TestExpandPath(t *testing.T) {
 		{"tilde", "~/server.js", filepath.Join(home, "server.js")},
 		{"bare tilde", "~", home},
 		{"unset var", "$AGENT_UNSET/server.js", "/server.js"},
+		// Below: the branch boundaries. A variable is only natively joined
+		// when it starts the path, is set and is followed by a separator;
+		// everything else keeps os.ExpandEnv's textual behavior.
+		{"dollar alone", "$", "$"},
+		{"var with suffix", "$HOME-x/y", home + "-x/y"},
+		{"unset var then tilde", "$AGENT_UNSET~/y", filepath.Join(home, "y")},
+		{"mid path var", "/tmp/$HOME/x", "/tmp/" + home + "/x"},
 	}
 	for _, c := range cases {
 		if got := expandPath(c.in); got != c.want {

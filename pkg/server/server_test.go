@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -985,7 +986,14 @@ func TestMCPToolMaterialization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo root: %v", err)
 	}
-	binary := filepath.Join(t.TempDir(), "notesmcp")
+	// The output name must carry the .exe suffix on Windows: go build keeps an
+	// extensionless name, and exec.Command appends .exe when spawning, so an
+	// extensionless binary is never found.
+	name := "notesmcp"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	binary := filepath.Join(t.TempDir(), name)
 	build := exec.Command("go", "build", "-o", binary, "./examples/notesmcp")
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {

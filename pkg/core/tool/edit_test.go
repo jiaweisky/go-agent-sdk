@@ -344,7 +344,8 @@ func TestEdit_AbsoluteExternalPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("eval symlinks: %v", err)
 	}
-	expectedResource := filepath.Join(canonicalExternal, "outside.txt")
+	// The model-facing resource path uses forward slashes on every platform.
+	expectedResource := filepath.ToSlash(filepath.Join(canonicalExternal, "outside.txt"))
 	if value, _ := result.Result.Value.(string); !strings.Contains(value, "Edited file successfully: "+expectedResource) {
 		t.Fatalf("unexpected model output: %v", result.Result.Value)
 	}

@@ -125,14 +125,25 @@ func TestAbsolutePathConversions(t *testing.T) {
 	for _, convert := range []struct {
 		name string
 		fn   func(string) (string, error)
+		want func(string) string
 	}{
-		{name: "column", fn: func(path string) (string, error) {
-			return AbsolutePathColumn(schema.AbsolutePath(path))
-		}},
-		{name: "driver", fn: func(path string) (string, error) {
-			value, err := AbsolutePathFromDriver(path)
-			return string(value), err
-		}},
+		{
+			name: "column",
+			fn: func(path string) (string, error) {
+				return AbsolutePathColumn(schema.AbsolutePath(path))
+			},
+			// Columns store the slash-form storage path.
+			want: storagePath,
+		},
+		{
+			name: "driver",
+			fn: func(path string) (string, error) {
+				value, err := AbsolutePathFromDriver(path)
+				return string(value), err
+			},
+			// The driver converts back to the platform form.
+			want: func(path string) string { return path },
+		},
 	} {
 		t.Run(convert.name, func(t *testing.T) {
 			abs := filepath.Join(t.TempDir(), "file")
@@ -140,8 +151,8 @@ func TestAbsolutePathConversions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("absolute path rejected: %v", err)
 			}
-			if got != abs {
-				t.Fatalf("got %q, want %q", got, abs)
+			if got != convert.want(abs) {
+				t.Fatalf("got %q, want %q", got, convert.want(abs))
 			}
 			if _, err := convert.fn("relative/file"); err == nil {
 				t.Fatal("relative path should be rejected")

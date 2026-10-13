@@ -42,6 +42,8 @@ const (
 	// procThreadAttributeSecurityCapabilities is
 	// PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES.
 	procThreadAttributeSecurityCapabilities = 0x00020009
+	// procThreadAttributeHandleList is PROC_THREAD_ATTRIBUTE_HANDLE_LIST.
+	procThreadAttributeHandleList = 0x00020002
 	// extendedStartupInfoPresent makes CreateProcess read the attribute list.
 	extendedStartupInfoPresent = 0x00080000
 )
@@ -220,9 +222,134 @@ func exemptLoopback(sid *windows.SID) {
 	}
 }
 
-// spawn starts the command inside the AppContainer, returning the process handle
-// and the readable ends of its stdout (and stderr, unless merged into stdout).
-func spawn(dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr bool) (windows.Handle, *os.File, *os.File, error) {
+// stdioPipes owns the pipe ends for one spawned child. The child receives the
+// child* ends (its stdin read end and stdout write end, plus a stderr write
+// end unless stderr is merged into stdout); the parent keeps the ends it needs
+// to feed stdin and read output.
+type stdioPipes struct {
+	childStdin       windows.Handle
+	childStdout      windows.Handle
+	childStderr      windows.Handle // same as childStdout when merged
+	parentStdinWrite windows.Handle
+	parentStdoutRead windows.Handle
+	parentStderrRead windows.Handle // 0 when merged
+}
+
+// newStdioPipes creates the pipes. On failure every end created so far is
+// closed, so the caller holds nothing.
+func newStdioPipes(mergeStderr bool) (*stdioPipes, error) {
+	pipe := func() (read, write windows.Handle, err error) {
+		var sa windows.SecurityAttributes
+		sa.Length = uint32(unsafe.Sizeof(sa))
+		sa.InheritHandle = 1
+		if err = windows.CreatePipe(&read, &write, &sa, 0); err != nil {
+			return 0, 0, err
+		}
+		// The parent must not let a read end leak into the child.
+		if err = windows.SetHandleInformation(read, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
+			windows.CloseHandle(read)
+			windows.CloseHandle(write)
+			return 0, 0, err
+		}
+		return read, write, nil
+	}
+
+	p := &stdioPipes{}
+	fail := func(err error) (*stdioPipes, error) {
+		p.closeAll()
+		return nil, err
+	}
+	var err error
+	if p.parentStdoutRead, p.childStdout, err = pipe(); err != nil {
+		return fail(err)
+	}
+	if p.childStdin, p.parentStdinWrite, err = pipe(); err != nil {
+		return fail(err)
+	}
+	// Unlike the other read ends, the stdin read end IS handed to the child,
+	// so it must stay inheritable.
+	if err := windows.SetHandleInformation(p.childStdin, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
+		return fail(err)
+	}
+	if mergeStderr {
+		p.childStderr = p.childStdout
+	} else if p.parentStderrRead, p.childStderr, err = pipe(); err != nil {
+		return fail(err)
+	}
+	return p, nil
+}
+
+// childHandles lists the ends the child is started with, as
+// PROC_THREAD_ATTRIBUTE_HANDLE_LIST requires them: each handle once, all
+// inheritable.
+func (p *stdioPipes) childHandles() []windows.Handle {
+	handles := []windows.Handle{p.childStdin, p.childStdout}
+	if p.childStderr != p.childStdout {
+		handles = append(handles, p.childStderr)
+	}
+	return handles
+}
+
+// closeChildEnds releases the parent's copies of the ends the child received.
+// Call it once the child is running, so the child sees EOF when the parent
+// stops writing.
+func (p *stdioPipes) closeChildEnds() {
+	for _, handle := range p.childHandles() {
+		windows.CloseHandle(handle)
+	}
+}
+
+// closeAll releases every end still held by the parent.
+func (p *stdioPipes) closeAll() {
+	all := []windows.Handle{
+		p.childStdin, p.childStdout, p.parentStdinWrite, p.parentStdoutRead,
+	}
+	if p.childStderr != p.childStdout {
+		all = append(all, p.childStderr, p.parentStderrRead)
+	}
+	for _, handle := range all {
+		if handle != 0 {
+			windows.CloseHandle(handle)
+		}
+	}
+}
+
+// newChildAttributeList builds the process attribute list a spawned child is
+// started with: the AppContainer security capabilities plus an explicit handle
+// list. The caller must Delete the returned list.
+func newChildAttributeList(
+	sid *windows.SID,
+	inherited []windows.Handle,
+) (*windows.ProcThreadAttributeListContainer, error) {
+	attributeList, err := windows.NewProcThreadAttributeList(2)
+	if err != nil {
+		return nil, err
+	}
+	capabilities := securityCapabilities{appContainerSid: sid}
+	if err := attributeList.Update(
+		procThreadAttributeSecurityCapabilities,
+		unsafe.Pointer(&capabilities),
+		unsafe.Sizeof(capabilities),
+	); err != nil {
+		attributeList.Delete()
+		return nil, err
+	}
+	if err := attributeList.Update(
+		procThreadAttributeHandleList,
+		unsafe.Pointer(&inherited[0]),
+		unsafe.Sizeof(inherited[0])*uintptr(len(inherited)),
+	); err != nil {
+		attributeList.Delete()
+		return nil, err
+	}
+	return attributeList, nil
+}
+
+// spawn starts the command inside the AppContainer, returning the process
+// handle and the readable ends of its stdout (and stderr, unless merged into
+// stdout). On error nothing survives: every pipe end is closed and the returned
+// handles and files are invalid.
+func spawn(dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr bool) (process windows.Handle, stdout, stderr *os.File, err error) {
 	sid, err := appContainerSID(containerName)
 	if err != nil {
 		return 0, nil, nil, err
@@ -236,116 +363,68 @@ func spawn(dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr
 		return 0, nil, nil, err
 	}
 
-	var sa windows.SecurityAttributes
-	sa.Length = uint32(unsafe.Sizeof(sa))
-	sa.InheritHandle = 1
-	newPipe := func() (windows.Handle, windows.Handle, error) {
-		var read, write windows.Handle
-		if err := windows.CreatePipe(&read, &write, &sa, 0); err != nil {
-			return 0, 0, err
-		}
-		// The parent must not let the read end leak into the child.
-		if err := windows.SetHandleInformation(read, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
-			windows.CloseHandle(read)
-			windows.CloseHandle(write)
-			return 0, 0, err
-		}
-		return read, write, nil
-	}
-	closeAll := func(handles ...windows.Handle) {
-		for _, handle := range handles {
-			if handle != 0 {
-				windows.CloseHandle(handle)
-			}
-		}
-	}
-
-	outRead, outWrite, err := newPipe()
+	pipes, err := newStdioPipes(mergeStderr)
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	stdinRead, stdinWrite, err := newPipe()
-	if err != nil {
-		closeAll(outRead, outWrite)
-		return 0, nil, nil, err
-	}
-	var errRead, errWrite windows.Handle
-	if !mergeStderr {
-		if errRead, errWrite, err = newPipe(); err != nil {
-			closeAll(outRead, outWrite, stdinRead, stdinWrite)
-			return 0, nil, nil, err
+	// On success the ends are handed on (output files, the stdin writer) or
+	// released via closeChildEnds; on any failure nothing may survive.
+	defer func() {
+		if err != nil {
+			pipes.closeAll()
 		}
-	} else {
-		errWrite = outWrite
-	}
+	}()
 
-	attributeList, err := windows.NewProcThreadAttributeList(1)
+	attributeList, err := newChildAttributeList(sid, pipes.childHandles())
 	if err != nil {
-		closeAll(outRead, outWrite, stdinRead, stdinWrite, errRead)
 		return 0, nil, nil, err
 	}
-	capabilities := securityCapabilities{appContainerSid: sid}
-	if err := attributeList.Update(
-		procThreadAttributeSecurityCapabilities,
-		unsafe.Pointer(&capabilities),
-		unsafe.Sizeof(capabilities),
-	); err != nil {
-		attributeList.Delete()
-		closeAll(outRead, outWrite, stdinRead, stdinWrite, errRead)
-		return 0, nil, nil, err
-	}
+	defer attributeList.Delete()
 
-	var startup startupInfoEx
-	startup.startupInfo = windows.StartupInfo{
-		Cb:        uint32(unsafe.Sizeof(startup)),
-		Flags:     windows.STARTF_USESTDHANDLES,
-		StdInput:  stdinRead,
-		StdOutput: outWrite,
-		StdErr:    errWrite,
+	// Inside an AppContainer, CreateProcess with bInheritHandles=TRUE corrupts
+	// child initialization (STATUS_DLL_INIT_FAILED / access violation) when any
+	// inheritable handle is copied. The explicit handle list restricts
+	// inheritance to exactly the std pipe handles, which avoids that.
+	startup := startupInfoEx{
+		startupInfo: windows.StartupInfo{
+			Cb:        uint32(unsafe.Sizeof(startupInfoEx{})),
+			Flags:     windows.STARTF_USESTDHANDLES,
+			StdInput:  pipes.childStdin,
+			StdOutput: pipes.childStdout,
+			StdErr:    pipes.childStderr,
+		},
+		attributeList: attributeList.List(),
 	}
-	startup.attributeList = attributeList.List()
-
 	commandPtr, err := windows.UTF16PtrFromString(commandLine)
 	if err != nil {
-		attributeList.Delete()
-		closeAll(outRead, outWrite, stdinRead, stdinWrite, errRead)
 		return 0, nil, nil, err
 	}
 	dirPtr, err := windows.UTF16PtrFromString(dir)
 	if err != nil {
-		attributeList.Delete()
-		closeAll(outRead, outWrite, stdinRead, stdinWrite, errRead)
 		return 0, nil, nil, err
 	}
 	var info windows.ProcessInformation
-	err = windows.CreateProcess(
+	if err = windows.CreateProcess(
 		nil, commandPtr, nil, nil, true,
 		windows.CREATE_UNICODE_ENVIRONMENT|extendedStartupInfoPresent,
 		&envBlock[0], dirPtr, &startup.startupInfo, &info,
-	)
-	attributeList.Delete()
-	windows.CloseHandle(outWrite)
-	if !mergeStderr {
-		windows.CloseHandle(errWrite)
-	}
-	windows.CloseHandle(stdinRead)
-	if err != nil {
-		closeAll(stdinWrite, outRead, errRead)
+	); err != nil {
 		return 0, nil, nil, err
 	}
 	windows.CloseHandle(info.Thread)
+	pipes.closeChildEnds()
+
 	// Feed stdin (when given) and close the write end so the child sees EOF.
-	stdinFile := os.NewFile(uintptr(stdinWrite), "stdin")
+	stdinFile := os.NewFile(uintptr(pipes.parentStdinWrite), "stdin")
 	if len(stdin) > 0 {
 		go func() { _, _ = stdinFile.Write(stdin); _ = stdinFile.Close() }()
 	} else {
 		_ = stdinFile.Close()
 	}
-	stderr := (*os.File)(nil)
 	if !mergeStderr {
-		stderr = os.NewFile(uintptr(errRead), "stderr")
+		stderr = os.NewFile(uintptr(pipes.parentStderrRead), "stderr")
 	}
-	return info.Process, os.NewFile(uintptr(outRead), "stdout"), stderr, nil
+	return info.Process, os.NewFile(uintptr(pipes.parentStdoutRead), "stdout"), stderr, nil
 }
 
 // envBlock renders the child environment (base = os.Environ() unless a non-nil

@@ -122,7 +122,9 @@ func TestAcquireCreatesProjectAndReturnsLease(t *testing.T) {
 		t.Fatalf("posted name/kind = %q/%q", created.Name, created.Kind)
 	}
 	// The project id is sanitized into a single path element under rootBase.
-	if created.Root != "/var/lib/agentd/projects/wecom_group_42" {
+	// Compare via filepath.Join so the assertion holds with platform-native
+	// separators.
+	if created.Root != filepath.Join("/var/lib/agentd/projects", "wecom_group_42") {
 		t.Fatalf("root = %q", created.Root)
 	}
 	if created.Isolation == nil || created.Isolation.Mode != "worktree" {

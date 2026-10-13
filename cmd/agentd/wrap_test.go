@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -18,18 +19,27 @@ func TestWrapRoots(t *testing.T) {
 		{Root: "/state/a"}, // duplicate state root across servers
 	}}
 	roots := wrapRoots(cfg)
-	for _, want := range []string{"/state/a", "/work/a", "/views"} {
+	// wrapRoots normalizes every entry through filepath.Abs, so the expected
+	// values must go through the same conversion to stay platform-neutral.
+	abs := func(path string) string {
+		result, err := filepath.Abs(path)
+		if err != nil {
+			t.Fatalf("abs %q: %v", path, err)
+		}
+		return result
+	}
+	for _, want := range []string{abs("/state/a"), abs("/work/a"), abs("/views")} {
 		if !slices.Contains(roots, want) {
 			t.Fatalf("roots %v missing %q", roots, want)
 		}
 	}
 	// Config dirs are read-only for the agent, so they are not write roots.
-	if slices.Contains(roots, "/cfg") {
+	if slices.Contains(roots, abs("/cfg")) {
 		t.Fatalf("config dirs must not be write roots: %v", roots)
 	}
 	count := 0
 	for _, root := range roots {
-		if root == "/state/a" {
+		if root == abs("/state/a") {
 			count++
 		}
 	}

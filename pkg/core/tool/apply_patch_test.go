@@ -318,7 +318,8 @@ func TestApplyPatch_ExternalDirectoryScopeDeduplicated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantResource := filepath.Join(canonical, "*")
+	// Permission resources use forward slashes on every platform.
+	wantResource := filepath.ToSlash(filepath.Join(canonical, "*"))
 	if !reflect.DeepEqual(permission.assertions[0].Resources, []string{wantResource}) {
 		t.Fatalf("unexpected external resources: %#v", permission.assertions[0].Resources)
 	}

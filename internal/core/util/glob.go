@@ -54,15 +54,18 @@ func GlobScan(pattern string, options GlobOptions) ([]string, error) {
 func globPattern(pattern, cwd string, options GlobOptions) ([]string, error) {
 	slashPattern := filepath.ToSlash(pattern)
 	absolute := filepath.IsAbs(pattern)
+	// format renders one match: absolute results keep the platform's native
+	// separators (as filepath.Abs produces them); relative results are
+	// slash-normalized like every other tool output.
 	format := func(full string) string {
 		if absolute || options.Absolute {
 			return full
 		}
 		rel, err := filepath.Rel(cwd, full)
 		if err != nil {
-			return full
+			return filepath.ToSlash(full)
 		}
-		return rel
+		return filepath.ToSlash(rel)
 	}
 
 	if !strings.ContainsAny(slashPattern, "*?[{") {

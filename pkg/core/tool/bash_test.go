@@ -5,6 +5,7 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -192,7 +193,10 @@ func TestBash_StructuredOutput(t *testing.T) {
 	if run.Command != bashDefaultShell() {
 		t.Fatalf("unexpected shell: %q", run.Command)
 	}
-	if len(run.Args) != 2 || run.Args[0] != "-c" || run.Args[1] != "pwd" {
+	// Assert against the implementation's own platform-specific argv builder,
+	// so the test holds on POSIX (sh -c) and Windows (cmd /d /s /c) alike.
+	wantArgs := bashShellArgs("pwd")
+	if !slices.Equal(run.Args, wantArgs) {
 		t.Fatalf("unexpected shell args: %#v", run.Args)
 	}
 	if run.Options.Dir != realRoot {

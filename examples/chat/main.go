@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
 	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
@@ -415,18 +416,60 @@ func weatherMCP() []agent.MCPConfig {
 	}}
 }
 
-// expandPath expands $VAR references and a leading ~ in a configured path, so a
-// .env can write $HOME/... or ~/... (the dotenv loader stores the value
+// expandPath expands $VAR references and a leading ~ in a configured path, so
+// a .env can write $HOME/... or ~/... (the dotenv loader stores the value
 // verbatim; the shell is not involved).
+//
+// One case is special: a leading "$VAR/" or "${VAR}/" whose variable is set is
+// joined natively with the remainder, so the result does not mix the expanded
+// value's separators with the literal rest. Everything else — unset variables,
+// variables that do not start the path, variable names with trailing text —
+// keeps os.ExpandEnv's textual semantics. "~" resolves from $HOME first, then
+// the platform home directory (USERPROFILE on Windows), and stays verbatim
+// when no home directory is known.
 func expandPath(path string) string {
 	if path == "" {
 		return ""
 	}
+	if dir, rest, ok := expandLeadingDir(path); ok {
+		return filepath.Join(dir, rest)
+	}
 	path = os.ExpandEnv(path)
 	if path == "~" || strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/"))
+		home := os.Getenv("HOME")
+		if home == "" {
+			home, _ = os.UserHomeDir()
+		}
+		if home != "" {
+			return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/"))
 		}
 	}
 	return path
+}
+
+// expandLeadingDir reports whether path starts with "$VAR" or "${VAR}" whose
+// variable is set and is followed by a path separator, returning the variable's
+// value and the separator-rooted remainder.
+func expandLeadingDir(path string) (dir, rest string, ok bool) {
+	if braced, has := strings.CutPrefix(path, "${"); has {
+		end := strings.Index(braced, "}")
+		if end < 0 {
+			return "", "", false
+		}
+		dir, rest = os.Getenv(braced[:end]), braced[end+1:]
+	} else if tail, has := strings.CutPrefix(path, "$"); has {
+		end := strings.IndexFunc(tail, func(r rune) bool {
+			return r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		})
+		if end < 0 {
+			return "", "", false
+		}
+		dir, rest = os.Getenv(tail[:end]), tail[end:]
+	} else {
+		return "", "", false
+	}
+	if dir == "" || (rest[0] != '/' && rest[0] != '\\') {
+		return "", "", false
+	}
+	return dir, rest, true
 }

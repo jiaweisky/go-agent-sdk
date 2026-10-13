@@ -172,6 +172,9 @@ func TestManagerCloseTearsDownSharedInstance(t *testing.T) {
 func TestManagerRefusesReaderWhileWriter(t *testing.T) {
 	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
 	t.Cleanup(manager.Close)
+	// Close before the test returns: t.TempDir removal runs during cleanup,
+	// and Windows cannot delete agent.db while the instance still holds it.
+	defer manager.Close()
 
 	if _, err := manager.Start(testControlRequest(t)); err != nil {
 		t.Fatalf("writable start: %v", err)
@@ -186,6 +189,7 @@ func TestManagerRefusesReaderWhileWriter(t *testing.T) {
 func TestManagerRejectsDuplicateNameAndRoot(t *testing.T) {
 	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
 	t.Cleanup(manager.Close)
+	defer manager.Close() // release agent.db before t.TempDir cleanup (see above)
 
 	root := t.TempDir()
 	first := testControlRequest(t)
@@ -212,6 +216,7 @@ func TestManagerRejectsDuplicateNameAndRoot(t *testing.T) {
 func TestManagerEnforcesLeaseCap(t *testing.T) {
 	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{MaxLeases: 1})
 	t.Cleanup(manager.Close)
+	defer manager.Close() // release agent.db before t.TempDir cleanup (see above)
 
 	if _, err := manager.Start(testControlRequest(t)); err != nil {
 		t.Fatalf("first start: %v", err)
