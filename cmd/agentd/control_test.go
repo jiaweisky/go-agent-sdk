@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -166,6 +167,27 @@ func TestControlHandlerCRUDAndAuth(t *testing.T) {
 	}
 	if code := doControl(t, http.MethodDelete, server.URL+"/admin/projects/grp-a", "", "s3cret"); code != http.StatusNotFound {
 		t.Fatalf("second delete = %d, want 404", code)
+	}
+}
+
+func TestControlHandlerDeleteSlashedID(t *testing.T) {
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	t.Cleanup(manager.Close)
+	server := httptest.NewServer(newControlHandler(manager, nil))
+	defer server.Close()
+
+	// A project id may contain slashes (a conversation key); the delete route
+	// must capture the whole remainder, not a single path segment.
+	req := testControlRequest(t)
+	req.Name = "wecom/group/42"
+	if _, err := manager.Start(req); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if code := doControl(t, http.MethodDelete, server.URL+"/admin/projects/"+url.PathEscape(req.Name), "", ""); code != http.StatusNoContent {
+		t.Fatalf("delete slashed id = %d, want 204", code)
+	}
+	if len(manager.List()) != 0 {
+		t.Fatal("the project was not removed")
 	}
 }
 

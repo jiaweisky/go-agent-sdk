@@ -292,7 +292,7 @@ func newControlHandler(manager *projectManager, auth *config.AuthConfig) http.Ha
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/projects", handler.list)
 	mux.HandleFunc("POST /admin/projects", handler.create)
-	mux.HandleFunc("DELETE /admin/projects/{id}", handler.delete)
+	mux.HandleFunc("DELETE /admin/projects/{id...}", handler.delete)
 	return mux
 }
 
