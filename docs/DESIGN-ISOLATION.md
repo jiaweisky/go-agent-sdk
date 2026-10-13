@@ -394,6 +394,11 @@ exactly one `Client` at a time; read-only projects may be shared.
 > Implementation note: the control API is the "agentd is the orchestrator for local views"
 > path. Container/VM orchestration remains a deployment concern; run a containerized agentd and
 > reach it directly, or wrap it with a host supervisor.
+>
+> **Reference supervisor:** `cmd/agentd-supervisor` implements the `supervisor_command` JSON
+> protocol (acquire/release) and satisfies it through the control API — a host points
+> `supervisor_command` at it and gains option-1 ergonomics (one short-lived command per request)
+> over option 2, while the host still spawns no agentd itself.
 
 ### 16. Lifecycle, ownership and quotas
 

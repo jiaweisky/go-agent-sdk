@@ -22,6 +22,7 @@ agentd.yaml
 # Built command/example binaries at the repo root (a manual `go build ./cmd/...`
 # or `./examples/...` writes here; the Makefile builds into /bin instead)
 /agentd
+/agentd-supervisor
 /agentd-client
 /a2a-embedded
 /chat

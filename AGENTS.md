@@ -181,8 +181,9 @@ go-agent-sdk/                       opencode TS
   It uses `net/http` with plain Go structs, keeps `jsonschema` confined to `core/tool`,
   and deliberately does **not** do schema-first/OpenAPI codegen.
 - `cmd/` holds standalone commands: `cmd/agentd` (multi-transport server: HTTP/SSE
-  and/or A2A, one client per configured server) and `cmd/agentd/config` (its shared
-  configuration/builder package).
+  and/or A2A, one client per configured server) with its shared package
+  `cmd/agentd/config`, and `cmd/agentd-supervisor` (a host supervisor that speaks the
+  `supervisor_command` JSON protocol and fronts agentd's control API).
 - Effect's `Context.Tag` + `Layer` (DI) is not ported; constructor injection is used instead.
 
 ## Directory/file name alignment with opencode
