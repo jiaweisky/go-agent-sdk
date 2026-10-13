@@ -49,7 +49,7 @@
 - Part 5 — Non-goals and red lines
 - Part 6 — Testing
 - Part 7 — Milestones
-- Part 8 — Decisions and open questions
+- Part 8 — Decisions
 
 ---
 
@@ -536,7 +536,7 @@ orchestration remain open.
 > `container`/`remote` are never local — host-provisioned (§15). Whole-process isolation
 > on Windows remains a Job Object / container deployment concern (Part 4).
 
-## Part 8 — Decisions and open questions
+## Part 8 — Decisions
 
 - **D1** Reuse `core.AppProcess` as the seam (no new `CommandRunner` interface).
 - **D2** Default `Process` is nil → `core.NewAppProcess()` (pass-through). When a named sandbox
@@ -550,6 +550,8 @@ orchestration remain open.
 - **D6** Whole-process wrapping is a **top-level `wrap` block** that re-execs agentd inside the
   wrapper (§8.1); `Prepare` does not apply the sandbox per view. The recommended strongest form
   for a fully untrusted tenant remains a container/VM around the whole process (deployment).
-- **Open**: whether git operations themselves should run through the same sandbox wrapper when
-  the project is a git repo (currently `runtime.go` uses the process seam for `Git`; confirm it
-  is acceptable to sandbox `git` at startup).
+- **D7** `git` runs through the **same** process seam as `bash`/`ripgrep` — one injection applies
+  everywhere: `runtime.go` builds `Git` from `ClientOptions.Process`, and a git-repo-backed
+  client exercises it at construction (`pkg/agent/process_test.go`
+  `TestClientUsesInjectedProcess`). Sandboxing `git` is intended; a deployment that needs `git`
+  to reach a `.git` outside the view must grant it explicitly (whole-process roots, §8.1).

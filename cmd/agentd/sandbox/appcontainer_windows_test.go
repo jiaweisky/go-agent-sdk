@@ -3,15 +3,56 @@
 package sandbox
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/internal/core/util"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 
 func TestAppContainerRegistered(t *testing.T) {
 	if p, err := Resolve("appcontainer"); err != nil || p == nil {
 		t.Fatalf("Resolve(appcontainer) = %v, %v", p, err)
+	}
+}
+
+// TestAppContainerEnforcesWrites runs a real command through the wrapper: a
+// write under the run directory succeeds, and a write outside it (the user's
+// home) is denied because the AppContainer has no access there.
+func TestAppContainerEnforcesWrites(t *testing.T) {
+	process, err := Resolve("appcontainer")
+	if err != nil || process == nil {
+		t.Fatalf("Resolve(appcontainer) = %v, %v", process, err)
+	}
+	dir := t.TempDir()
+	inside, err := process.Run(context.Background(), "cmd",
+		[]string{"/c", "echo hi > inside.txt"}, core.RunOptions{Dir: dir})
+	if err != nil {
+		t.Fatalf("write inside the run dir errored: %v", err)
+	}
+	if inside.ExitCode != 0 {
+		t.Fatalf("write inside the run dir was denied (exit %d): %s", inside.ExitCode, inside.Stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "inside.txt")); err != nil {
+		t.Fatalf("inside.txt was not written: %v", err)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	outside := filepath.Join(home, "agentd-appcontainer-deny-test.txt")
+	denied, err := process.Run(context.Background(), "cmd",
+		[]string{"/c", "echo bad > " + outside}, core.RunOptions{Dir: dir})
+	if err != nil {
+		t.Fatalf("denial run errored unexpectedly: %v", err)
+	}
+	if denied.ExitCode == 0 {
+		_ = os.Remove(outside)
+		t.Fatalf("write outside the AppContainer was allowed: %s", outside)
 	}
 }
 
