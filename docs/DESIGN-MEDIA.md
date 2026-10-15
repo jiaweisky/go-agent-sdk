@@ -18,6 +18,7 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-15 | Added **§4.12 inbound media delivery policy ({M16})**: the model owner (operator) configures how inbound media reaches the model (`media:` block — `inlineLimitBytes`, `prefer`, `upload`, `downsample`, `spool`, `fetchURL`, `maxBytes`); the SDK applies it to **every** inbound media, HTTP and A2A alike; a caller-declared source overrides when feasible. Revises {M10} (source may be operator-chosen), the size stance (§4.5/§9, operator-declared), and {M4} (`inboundMedia` retained as fallback). Recorded as a Go-side deviation in `AGENTS.md`. |
 | 2026-10-07 | First draft: current-state analysis, per-model provider config, OpenAI audio, a2aserve inbound media, size policy, subagent binding |
 | 2026-10-07 | Expanded test plan: local **Ollama** harness (`qwen3-vl:2b`, `nemotron3:33b` — OpenAI-compatible, both Text+Image only), the main×subagent **capability matrix**, and where audio/video are validated (Gemini + request-capturing stub) |
 | 2026-10-07 | Added media **sources/transport** ({M7}: inline / external URL / Files-API `file_id`, per-protocol support, `FileUploader` hook) and **image detail** ({M8}), per DeepSeek's vision + Files API (three image-input modes, `file` block, `detail`) |
@@ -378,6 +379,9 @@ Recommendation: default `spool` (unchanged), add `inline` opt-in.
   This supersedes the earlier idea of a catalog `MaxInlineBytes` policy and of
   omitting on a size cap. Keep only a **memory-safety bound** on decoded bytes (to
   avoid OOM when decoding inline base64), not a media-size policy.
+  > **Revised by {M16} §4.12:** size handling returns as an **operator-declared** policy on the
+  > server (`inlineLimitBytes` / `maxBytes`), not a hidden SDK cap and not a catalog
+  > `MaxInlineBytes`. With no `media:` configured, this section stands as written.
 - The `session.next.attachment.omitted` event still gains a **`reason`** for the
   cases the planner *does* omit — `unsupported_type` | `unsupported_modality` |
   `unsupported_source` | `unsupported_role` | `invalid_payload`. This touches a
@@ -565,6 +569,8 @@ type MediaPart struct {
 
 `Source` is **declared by the input** (blank infers: `data:` → inline,
 `http(s)://` → url), never chosen by an SDK preference ({M10}).
+> **Revised by {M16} (§4.12):** an *operator* delivery policy ({M13} `media:` block) chooses the
+> default source and the input may override it; the SDK still never *guesses* the source.
 
 **Axis 1 — model capability (data).** `schema.ModelInfo.Capabilities` is already
 host-supplied and per model. Add a constraints descriptor additively, so existing
@@ -825,7 +831,8 @@ omissions/rejections.
 **cmd/a2aserve (A2A)**
 - Config: `models:` catalog + `inboundMedia: spool | inline`.
 - Inbound: `{M4b}` maps `fileWithBytes` → `inline`, `fileWithUri` → `url`, admitted
-  as `MessageOptions.Files`.
+  as `MessageOptions.Files`; **delivery to the model then follows the operator policy
+  (`{M16}` §4.12)** — the same engine HTTP uses.
 - **AgentCard.** `inputModes`/`outputModes` are **derived from the agent's model
   media capabilities** (true → `text/plain`; image/audio/video → the protocol's
   MIME sets), replacing the fixed text+image `DefaultInputModes`
@@ -841,6 +848,81 @@ omissions/rejections.
 **Cross-surface invariant (3 verbs).** Every surface must be able to **attach**,
 **advertise** (the target model's modalities/sources), and **report** (typed
 omission/rejection reason).
+
+### 4.12 Inbound media delivery policy — **{M16}**
+
+> Revises {M10} (§4.10) and the size stance (§4.5 / §9): the *source* of an inbound attachment
+> is no longer only caller-declared — the **operator** (the model owner) configures the delivery
+> policy, and the SDK executes it for **every** inbound media, whatever the transport.
+
+**Why.** The delivery decision (inline / url / provider `file`, downsample, spool) depends on
+`model ∩ protocol ∩ size ∩ uploader`, which is known only to the model owner. Delegating it to
+the caller works only when caller == operator (Tether, an HTTP bridge); a **remote A2A caller
+cannot** do it (no model/provider knowledge, no credentials), and any HTTP caller that is not
+the operator hits the same wall. So the policy belongs to the operator, applied uniformly.
+
+**Ownership.**
+- **Caller** — provides the bytes; **may** supply an existing reference (`file_id` / `url`) or a
+  quality intent. A caller-declared source **overrides** the policy when feasible.
+- **Operator** — configures the policy (below), once, per server.
+- **SDK** — the pipeline: planner / adapt / upload / downsample / spool.
+
+**Config** (SDK `ClientOptions`; agentd maps `servers[].media`). This is the *delivery policy* —
+distinct from the *capability* block `models[].media` (`input` / `sources`), which declares what
+the model accepts:
+
+```yaml
+media:
+  inlineLimitBytes: 262144          # <= this: inline
+  prefer: [file, inline]            # first feasible source the policy may pick (url is caller-only)
+  upload: true                      # large media -> provider Files API (needs an uploader)
+  downsample: true                  # else shrink to fit the inline limit
+  spool: { dir: "{Root}/data/spool" }   # last resort: keep on disk (NEVER the workspace),
+                                        # referenced by path
+  fetchURL: true                    # allow a caller-supplied url source (the provider fetches it)
+  maxBytes: 52428800                # hard skip above this (noted, not silent)
+```
+
+`spool.dir` is the last-resort disk location — a managed directory under `{Root}`, **never the
+workspace** (which may be a read-only shared source); the A2A `inboundMedia: spool`
+(`DESIGN-A2A` §4.2) uses the same mechanism.
+
+**Algorithm (per inbound attachment).**
+- **Reference-only (the caller gave a `file_id`, or a `url`):** a `file_id` is honored **as-is**;
+  a `url` is honored **as-is only when `fetchURL` is allowed**, else omitted/spooled. Neither is
+  fetched, downsampled, or re-uploaded by the SDK (`{M10}`).
+- **Byte-backed (an `inline` payload, or a raw A2A part):** if the caller declared a source,
+  honor it when feasible; otherwise pick the **first feasible** `prefer` entry — `file` (needs
+  protocol + `upload` + an uploader) or `inline` (size ≤ limit, or a successful `downsample`);
+  if none → **spool**, else **omit with a typed reason**.
+
+`url` is **caller-only**: the SDK does not host a URL and never turns bytes into a `url`, so
+`url` is not a `prefer` target. Never drop silently.
+
+**Downsample.**
+- **Images** are shrunk **inside the SDK, in pure Go** — reuse `core.NewImage` (`golang.org/x/image`
+  decode/resize + PNG/JPEG re-encode, no external tool).
+- **Audio/video** need an external transcoder (Go has no AV codecs), so they go through a **host
+  hook**; the default wiring shells out to **`ffmpeg`** when it is on `PATH`. It is **soft-fail**:
+  if the tool is missing, or the input is too large for it, the media is left as-is and the
+  algorithm falls through to the next `prefer` entry / spool. `ffmpeg` stays out of core.
+
+**Validation.** `prefer` may contain `file | inline` (a `url` is caller-only and never a
+`prefer` target); any unknown name is a **config error** at load. An entry infeasible for the
+current model/protocol is **skipped** — `prefer` is an *order of attempts*, not a guarantee, and
+it is server-level (it spans several
+models and the protocol narrows further), so it is **not** a subset of any model's `sources`. A
+deployment that *requires* a source (`require`, fail-closed) is a separate switch, not `prefer`.
+
+**Safety ({M10}).** The SDK still never *guesses*, *fetches*, or *reads a path* — the **operator**
+declares the permissions (`upload`, `fetchURL`, `spool`). With `media:` unset, behavior is
+unchanged (inline-first + caller-declared source) → backward compatible.
+
+**Scope.** HTTP and A2A inbound feed the **same** engine. The A2A `inboundMedia: spool | inline`
+is retained as the fallback; source selection is governed by `media.prefer`. The A2A card
+advertises media *types* only (standard A2A has no source field), so the accepted sources are
+documented, not card-advertised. Outbound A2A is unchanged (§4.11: a provider `file` ref is
+omitted).
 
 ## 5. What does **not** change
 - `llmschema.MediaPart` / `schema.PromptFileAttachment` stay wire-generic; {M7}
@@ -1135,7 +1217,9 @@ the implementation must meet:
 - **Limits — no interception.** The SDK enforces **no** count/size caps; the
   provider is the authority and its reject surfaces as a typed `provider_error`.
   Keep only a **memory-safety bound** on decoded bytes (to avoid OOM), not a
-  media-size policy. URL fetch timeouts are provider-side.
+  media-size policy. URL fetch timeouts are provider-side. *(Operator-declared thresholds per
+  {M16} §4.12 — `inlineLimitBytes` / `maxBytes` — are a **declared policy**, not a hidden SDK
+  cap; unset means no such policy.)*
 - **Concurrency and caching.** The planner is pure and stateless. Uploads are
   deduplicated by content hash (`provider + hash → ref`, expiry-aware); there is an
   existing keyed-mutex/weak-cache pattern in `core`. `MediaUploader`

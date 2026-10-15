@@ -179,7 +179,13 @@ servers:
     defaultModel: deepseek-chat
     baseURL: https://agents.example.com
     agents: [ build ]                   # exposed agents
-    inboundMedia: spool                 # spool | inline
+    inboundMedia: spool                 # spool | inline (fallback; see `media:`)
+    media:                              # inbound media delivery policy (operator-owned, {M16})
+      inlineLimitBytes: 262144
+      prefer: [file, inline]            # first feasible source the policy may pick (url is caller-only)
+      upload: true                      # large media -> provider Files API (needs mediaUpload)
+      downsample: true
+      fetchURL: true
     cards: { build: { name: ..., description: ... } }   # REQUIRED per exposed agent (name + description)
     auth: { bearer: sk-... }            # A2A auth is bearer-only
     dropErroredTurns: true
@@ -221,6 +227,7 @@ full `ModelConfig`; a server only selects **ids**:
 |---|---|---|
 | `name` / `kind` / `listen` / `root` / `workingDirectory` / `configDirs` / `models` / `defaultModel` / `host` / `mount` | both | bind + routing + models |
 | `mediaUpload` / `inboundPermissions` / `keepAlive` / `dropErroredTurns` / `tls` / `allowInsecure` | both | `dropErroredTurns` defaults **true** |
+| `media` | both | inbound media delivery policy (operator-owned, `DESIGN-MEDIA` {M16}): `inlineLimitBytes` / `prefer` / `upload` / `downsample` / `spool` / `fetchURL` / `maxBytes`; unset = inline-first (unchanged) |
 | `questions` | both | the `question` tool policy: `park` or `decline`; default **`decline`** for a2a (an A2A client polls task state and cannot answer), **`park`** for http |
 | `auth` | both | http allows `bearer` **or** `username`/`password` (`username` defaults `opencode`); **a2a is bearer-only** |
 | `agents` | both | http = reachable allow-list; a2a = exposed agents |

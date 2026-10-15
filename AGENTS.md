@@ -25,6 +25,7 @@ The Go code in both documents is illustrative only; details such as function sig
 **Exception list**:
 - **V1 alignment** (not in v2 core, but implemented): the `task` tool and child sessions (`task.go` / `task_run.go`), and automatic title generation (`TitleConfig` / `ensureTitle`).
 - **Deliberately excluded within v2 scope**: the `websearch` tool — v2 core `tool/websearch.ts` is implemented and registered, but the MVP's built-in tool scope is limited to 11 (see `docs/DESIGN.md`).
+- **Go-side deviation (not in v2 core)**: the **inbound media delivery policy** (`docs/DESIGN-MEDIA.md` {M16} §4.12) — the source of an inbound attachment (inline / url / provider `file`) is chosen by an **operator-configured policy** (`media:`), with the caller only overriding it, instead of being caller-declared only. Discussed and confirmed with the user.
 
 ### Porting scope: legacy / v1 code is not ported by default
 
