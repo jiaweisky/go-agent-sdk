@@ -173,7 +173,7 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 		m.abandon(project, client, cancel)
 		return nil, fmt.Errorf("bind project listener: %w", err)
 	}
-	srv := &http.Server{Handler: newRouter([]*builtServer{built}), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: newRouter([]*builtServer{built}, nil, nil), ReadHeaderTimeout: 10 * time.Second}
 	instance := &controlInstance{
 		id:               req.Name,
 		kind:             req.Kind,

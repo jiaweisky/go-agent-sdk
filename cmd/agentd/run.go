@@ -89,7 +89,7 @@ type serveTarget struct {
 // run builds one client per configured server, groups the servers by listener,
 // and serves until ctx is canceled. Every client created is closed on return, so
 // a mid-build failure leaks nothing.
-func run(ctx context.Context, cfg config.Config) error {
+func run(ctx context.Context, cfg config.Config, admin *adminDoc) error {
 	global, err := cfg.Catalog()
 	if err != nil {
 		return err
@@ -164,7 +164,7 @@ func run(ctx context.Context, cfg config.Config) error {
 			}
 		}
 		targets = append(targets, serveTarget{
-			srv:          &http.Server{Handler: newRouter(entries), ReadHeaderTimeout: 10 * time.Second},
+			srv:          &http.Server{Handler: newRouter(entries, admin, ln.Addr()), ReadHeaderTimeout: 10 * time.Second},
 			ln:           ln,
 			tls:          entries[0].cfg.TLS,
 			closeStreams: combineClose(entries),

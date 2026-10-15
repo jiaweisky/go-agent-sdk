@@ -47,7 +47,7 @@ func TestRouterDispatch(t *testing.T) {
 		stubServer("root", "", "", "http", nil),
 		stubServer("mounted", "", "/api2", "http", nil),
 		stubServer("hosted", "h.example.com", "", "http", nil),
-	})
+	}, nil, nil)
 	cases := []struct{ host, path, want string }{
 		{"x", "/foo", "root"},
 		{"x", "/api2/bar", "mounted"},
@@ -67,7 +67,7 @@ func TestRouterPrefersForwardedHost(t *testing.T) {
 	h := newRouter([]*builtServer{
 		stubServer("root", "", "", "http", nil),
 		stubServer("hosted", "h.example.com", "", "http", nil),
-	})
+	}, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "http://internal/foo", nil)
 	req.Host = "internal"
 	req.Header.Set("X-Forwarded-Host", "h.example.com")
@@ -85,7 +85,7 @@ func TestRouterDiscovery(t *testing.T) {
 		stubServer("root", "", "", "http", nil),
 		stubServer("a2a-a", "", "/agents-a", "a2a", cardSet("A")),
 		defaulted,
-	})
+	}, nil, nil)
 	// Origin-root single card = the default A2A entry.
 	if got := routeBody(t, h, "x", "/.well-known/agent-card.json"); !strings.Contains(got, `"B"`) {
 		t.Errorf("root card = %q, want B", got)

@@ -14,6 +14,7 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-15 | Added **§5.3 admin read-only endpoints**: `GET /api/config` (whitelist-redacted, structured, with provenance) and `GET /api/info` (version/pid/listen/servers). Served by agentd's router on each listener's origin-root server with that server's credential (not public by default); global scope; `?section=`/`&server=` filters; `schemaVersion`; read-only, no hot reload. Loader gains `LoadWithEnv` (records expanded `${VAR}` names). |
 | 2026-10-11 | First draft: motivation, current state, target architecture, config, lifecycle, constraints, migration, testing, decisions (D1–D4). |
 | 2026-10-11 | Added §5.1 (streamlined config-driven CLI, D5) and §5.2 (routing / in-process multiplexing, D6/D7); clarified the `ClientOptions` drift is **config-only** — agents/subagents/skills still load from `configDirs` in both commands. |
 | 2026-10-11 | Configuration settled: a `servers[]` list (renamed from `transports`; per-entry `kind`) with per-server settings, and a **single global `models` catalog** selected per server by id subset + `defaultModel`; camelCase keys, inline secrets (D8); A2A `baseURL` optional. |
@@ -413,6 +414,42 @@ still has its **own `Client`** (own `Root`/isolation), its own auth, and its own
 **Out of scope here.** The same goal via an **external reverse proxy**
 (Caddy/nginx/Traefik) doing host/path routing in front of per-entry listeners — A2A already
 emits proxy-correct card URLs — is a deployment choice, not an `agentd` feature.
+
+### 5.3 Admin read-only endpoints (`/api/config`, `/api/info`)
+
+An operator (e.g. an IM bridge's admin) can read agentd's **effective** configuration and
+runtime info without the config file — useful across machines.
+
+| Method + path | Body |
+|---|---|
+| `GET /api/config` | the loaded config, structurally identical to the YAML, secrets redacted, with provenance |
+| `GET /api/info` | `{version, pid, listen, servers[], a2a[]}` for the listener it is served on |
+
+- **Served by agentd's router** (not `pkg/server`), on each listener's **origin-root** server,
+  using that server's credential. It is **not** public by default — only an explicit
+  `publicRoutes` entry makes it anonymous. A dynamic control-API instance's router carries no
+  admin doc, so it never serves these.
+- **Scope: global** (the whole process config), **not** per-server. In a multi-tenant
+  deployment (servers with distinct credentials) any authenticated client can read the whole
+  config; the operator should keep agentd single-tenant or expose it on a dedicated server.
+  This is documented, not enforced.
+- **`/api/config` query**: `?section=models|servers|control|wrap` (omit for all),
+  `&server=<name>` (filter `servers[]`). An unknown `section` → `400`.
+- **Redaction (fail-closed whitelist)**: the response is a dedicated DTO; unlisted fields are
+  omitted. Secrets are **never** returned — `models[].credentials.apiKey`/`aws.*`,
+  `servers[].auth.bearer|password`, `servers[].tls`, `servers[].mcp[]` internals,
+  `servers[].mediaUpload.header|value|fields`, `control.auth.*` become
+  `{"configured": bool, "redacted": true}` (or `{"configured": false}`). Expanded `${VAR}`
+  values are treated as secret; only the variable **names** are reported. Credential-bearing
+  URLs (`references[].repository`, `mediaUpload.url`) have their userinfo stripped, so an
+  `https://user:token@host/...` cannot leak its secret.
+- **Provenance**: `sources[]` reports the config `file` path and the `env` variable names
+  expanded while loading (`config.LoadWithEnv`).
+- **Errors**: `401` (missing/invalid credential), `400` (bad `section`), `405` (non-GET),
+  `404` (no origin-root server), matching the `/api/*` envelope `{error, message}`.
+- **Stability**: `schemaVersion` (currently `1`); the endpoints are experimental — fields are
+  only added, a removal bumps the version. Read-only (no PATCH) and no hot reload: the config
+  is loaded at startup (`--check` validates it); restart to change it.
 
 ## 6. Build and lifecycle
 

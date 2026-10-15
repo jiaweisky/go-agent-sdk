@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -12,17 +14,21 @@ import (
 
 // router dispatches one listener's requests to its servers: by Host first, then
 // the longest matching Mount, then the root server. It also serves the
-// origin-root discovery endpoints.
+// origin-root discovery endpoints and the read-only admin endpoints.
 type router struct {
-	hosts  []*builtServer // entries with Host set
-	mounts []*builtServer // entries with Mount set
-	root   *builtServer   // entry with neither Host nor Mount
-	a2a    []*builtServer // every A2A entry (for the aggregate)
-	defA2A *builtServer   // the A2A entry that owns the origin-root card
+	hosts   []*builtServer // entries with Host set
+	mounts  []*builtServer // entries with Mount set
+	root    *builtServer   // entry with neither Host nor Mount
+	a2a     []*builtServer // every A2A entry (for the aggregate)
+	defA2A  *builtServer   // the A2A entry that owns the origin-root card
+	entries []*builtServer // every entry on this listener
+
+	admin *adminDoc // nil on a dynamic instance router
+	addr  net.Addr  // this listener's bound address
 }
 
-func newRouter(entries []*builtServer) http.Handler {
-	r := &router{}
+func newRouter(entries []*builtServer, admin *adminDoc, addr net.Addr) http.Handler {
+	r := &router{entries: entries, admin: admin, addr: addr}
 	for _, e := range entries {
 		if e.cfg.Host != "" {
 			r.hosts = append(r.hosts, e)
@@ -48,6 +54,9 @@ func newRouter(entries []*builtServer) http.Handler {
 
 func (r *router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.serveDiscovery(w, req) {
+		return
+	}
+	if r.serveAdmin(w, req) {
 		return
 	}
 	if e := r.matchHost(req); e != nil {
@@ -126,6 +135,87 @@ func (r *router) serveDiscovery(w http.ResponseWriter, req *http.Request) bool {
 		return true
 	}
 	return false
+}
+
+// serveAdmin handles the read-only admin endpoints (/api/config, /api/info),
+// reporting whether it served the request. It is served on the listener's
+// origin-root server and uses that server's credential; a publicRoutes entry is
+// the only way to make it anonymous. Dynamic-instance routers have no admin doc,
+// so they never serve it.
+func (r *router) serveAdmin(w http.ResponseWriter, req *http.Request) bool {
+	if r.admin == nil {
+		return false
+	}
+	path := req.URL.Path
+	if path != "/api/config" && path != "/api/info" {
+		return false
+	}
+	if req.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeAdminError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only GET is supported")
+		return true
+	}
+	if !r.authorizeAdmin(w, req) {
+		return true
+	}
+	if path == "/api/config" {
+		r.serveConfig(w, req)
+	} else {
+		r.serveInfo(w)
+	}
+	return true
+}
+
+// authorizeAdmin enforces the origin-root server's credential (an explicit
+// publicRoutes entry is the only way to skip it), writing 404/401 on failure.
+func (r *router) authorizeAdmin(w http.ResponseWriter, req *http.Request) bool {
+	entry := r.root
+	if entry == nil {
+		writeAdminError(w, http.StatusNotFound, "not_found", "no server serves this listener")
+		return false
+	}
+	if entry.cfg.Auth == nil || publicPath(entry.cfg.PublicRoutes, req.URL.Path) || authorized(req, entry.cfg.Auth) {
+		return true
+	}
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	writeAdminError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+	return false
+}
+
+func (r *router) serveConfig(w http.ResponseWriter, req *http.Request) {
+	query := req.URL.Query()
+	section := query.Get("section")
+	if !validSection(section) {
+		writeAdminError(w, http.StatusBadRequest, "bad_request", "section must be models, servers, control or wrap")
+		return
+	}
+	sources := []sourceView{{Kind: "file", Path: r.admin.path}}
+	if len(r.admin.env) > 0 {
+		sources = append(sources, sourceView{Kind: "env", Expanded: r.admin.env})
+	}
+	writeJSONStatus(w, http.StatusOK, configResponse{
+		SchemaVersion: adminSchemaVersion,
+		Sources:       sources,
+		Config:        buildConfigDocument(r.admin.config, section, query.Get("server")),
+	})
+}
+
+func (r *router) serveInfo(w http.ResponseWriter) {
+	info := infoResponse{Version: r.admin.version, PID: os.Getpid()}
+	if r.addr != nil {
+		info.Listen = r.addr.String()
+	}
+	for _, e := range r.entries {
+		info.Servers = append(info.Servers, e.cfg.Name)
+		if e.cfg.Kind != "a2a" || r.addr == nil {
+			continue
+		}
+		base := publicBaseURL(e.cfg, r.addr)
+		for _, path := range e.cardPaths {
+			info.A2A = append(info.A2A, base+path)
+		}
+	}
+	writeJSONStatus(w, http.StatusOK, info)
 }
 
 // requestHost returns the request's host (preferring X-Forwarded-Host behind a

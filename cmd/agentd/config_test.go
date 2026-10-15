@@ -36,7 +36,7 @@ func TestRunRoutesByPort(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- run(ctx, cfg) }()
+	go func() { done <- run(ctx, cfg, nil) }()
 	defer func() {
 		cancel()
 		if err := <-done; err != nil {
@@ -63,7 +63,7 @@ func TestRunServesHTTP(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- run(ctx, cfg) }()
+	go func() { done <- run(ctx, cfg, nil) }()
 
 	waitForStatus(t, "http://"+addr+"/api/health")
 

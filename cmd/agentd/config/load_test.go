@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -74,5 +75,45 @@ models:
 	var cfg Config
 	if err := Load(writeTempConfig(t, body), &cfg); err == nil {
 		t.Fatal("expected an undefined-variable error")
+	}
+}
+
+func TestLoadWithEnvCollectsNames(t *testing.T) {
+	t.Setenv("AGENTD_TEST_KEY", "secret-value")
+	body := `
+models:
+  - id: m
+    model: ${AGENTD_TEST_KEY}
+    protocol: openai-compatible-chat
+    credentials:
+      apiKey: ${AGENTD_TEST_KEY:-fallback}
+`
+	var cfg Config
+	names, err := LoadWithEnv(writeTempConfig(t, body), &cfg)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !reflect.DeepEqual(names, []string{"AGENTD_TEST_KEY"}) {
+		t.Fatalf("names = %v, want [AGENTD_TEST_KEY]", names)
+	}
+	if len(cfg.Models) != 1 || cfg.Models[0].Model != "secret-value" {
+		t.Fatalf("model = %+v", cfg.Models)
+	}
+}
+
+func TestLoadWithEnvNoRefs(t *testing.T) {
+	body := `
+models:
+  - id: m
+    model: m
+    protocol: openai-compatible-chat
+`
+	var cfg Config
+	names, err := LoadWithEnv(writeTempConfig(t, body), &cfg)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("names = %v, want none", names)
 	}
 }
