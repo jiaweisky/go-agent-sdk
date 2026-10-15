@@ -57,9 +57,14 @@ import (
 func main() {
 	ctx := context.Background()
 
+	// Root is required: the SDK never picks a state location for you. Keep it
+	// stable — not os.TempDir(), which is shared and subject to pruning.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		panic(err)
+	}
 	client, err := agent.NewClient(&agent.ClientOptions{
-		// Root is required: the SDK never picks a state location for you.
-		Root:        filepath.Join(os.TempDir(), "go-agent-sdk"),
+		Root:        filepath.Join(home, ".local", "share", "go-agent-sdk"),
 		Model:       "gpt-4o-mini",
 		Protocol:    "openai-responses",
 		Credentials: agent.APIKey(os.Getenv("OPENAI_API_KEY")),

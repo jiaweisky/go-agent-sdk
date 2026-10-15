@@ -1129,7 +1129,7 @@ the implementation must meet:
 - **Security.** The SDK never fetches a URL and never reads a path from an
   attachment ({M7}); provider-side URL fetch (SSRF) is the provider's concern
   (documented server flags, e.g. vLLM `--allowed-media-domains`). A2A inbound
-  spooling is confined to the workspace with sanitized names (no traversal). Size
+  spooling is confined to the SDK state root with sanitized names (no traversal). Size
   is bounded **before** decode; declared MIME is validated against the block's
   expectations (providers may sniff content).
 - **Limits — no interception.** The SDK enforces **no** count/size caps; the

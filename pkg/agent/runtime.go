@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/jiaweisky/go-agent-sdk/internal/core/database"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/installation"
+	"github.com/jiaweisky/go-agent-sdk/internal/core/instructions"
 	coreproject "github.com/jiaweisky/go-agent-sdk/internal/core/project"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/reference"
 	"github.com/jiaweisky/go-agent-sdk/internal/core/session"
@@ -50,6 +52,7 @@ type runtime struct {
 	snapshot       *core.Snapshot
 	location       core.Location
 	projectID      schema.ProjectID
+	global         core.Global
 	models         runner.ModelResolver
 	process        core.AppProcess
 	subagentDepth  int
@@ -549,6 +552,13 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		return nil, err
 	}
 	global := core.NewGlobal(root, home)
+	// The temp directory advertised to the model (and inherited by every spawned
+	// command) lives under the OS temp directory, not under Root, so it stays
+	// writable inside an OS sandbox. It must exist before any turn runs.
+	global.Tmp = agentTempDir(root)
+	if err := core.EnsureDir(global.Tmp); err != nil {
+		return nil, err
+	}
 
 	db, err := openDatabase(global, opts.DatabaseMaxConns)
 	if err != nil {
@@ -559,7 +569,13 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db.Close()
 		return nil, err
 	}
+	// Only the default pass-through is wrapped with the state temp directory; a
+	// host-provided seam (a sandbox) owns command execution and may not permit
+	// writes to that directory.
 	process := appProcess(opts)
+	if opts.Process == nil {
+		process = withTempEnv(process, global.Tmp)
+	}
 	events, git, location, err := initRuntimeState(db, directory, process, opts.OnError)
 	if err != nil {
 		return fail(err)
@@ -596,7 +612,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 		db: db, events: events, store: store, agents: agents, skills: skills,
 		outputStore: tool.NewCoreOutputStore(toolOutput), toolOutput: toolOutput,
 		permission: permission, question: question, location: *location,
-		projectID: location.Project.ID, models: models, process: process,
+		projectID: location.Project.ID, models: models, process: process, global: global,
 		subagentDepth: subagentDepth(opts.SubagentDepth),
 		name:          applicationName(opts.Name),
 		hooks:         map[string]*SessionHooks{}, clientTools: opts.Tools,
@@ -617,7 +633,7 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	// Connect MCP last: it creates the only client whose lifetime rt.close
 	// owns, so an earlier startup failure never leaves one connected.
 	rt.connectMCP(ctx, opts.MCP)
-	go rt.runToolOutputCleanup(lifetime)
+	go rt.runRetentionCleanup(lifetime)
 	return rt, nil
 }
 
@@ -637,6 +653,8 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 	r.a2aBackendPool = newA2ABackendPool(r.askBackendQuestion)
 	r.a2aBackendPool.persistTask = r.persistRemoteTask
 	r.a2aBackendPool.loadTask = r.loadRemoteTask
+	systemContext := systemcontext.NewRegistry()
+	registerBuiltinContext(systemContext, r.location, global)
 	r.runner = runner.NewLLMRunner(runner.LLMRunner{
 		Events:            appEvents{events: r.events},
 		LLM:               chooseLLM(opts),
@@ -648,7 +666,7 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		Models:            r.models,
 		Store:             r.store,
 		Location:          r.location,
-		SystemContext:     systemcontext.NewRegistry(),
+		SystemContext:     systemContext,
 		SkillGuidance:     skill.NewGuidance(r.skills, ruleEvaluator{}, locale),
 		ReferenceGuidance: reference.NewGuidance(referenceLister{reference: r.reference}, locale),
 		Compaction:        compactionSettings(opts),
@@ -663,6 +681,27 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		r.publishSessionStatus(id, schema.SessionStatusBusy{Type: "busy"})
 		defer r.publishSessionStatus(id, schema.SessionStatusIdle{Type: "idle"})
 		return r.runner.Run(ctx, runner.RunInput{SessionID: id, Force: force})
+	})
+}
+
+// registerBuiltinContext adds the built-in system-context sources: the
+// environment block (working directory, workspace root, git repo, platform and
+// the preferred temp directory) and today's date.
+func registerBuiltinContext(registry *systemcontext.Registry, location core.Location, global core.Global) {
+	_, _ = registry.Register(systemcontext.Entry{
+		Key: "core/builtins",
+		Load: func() (systemcontext.SystemContext, error) {
+			return systemcontext.Combine(
+				instructions.Date(time.Now),
+				instructions.EnvironmentSource(instructions.Environment{
+					WorkingDirectory: string(location.Directory),
+					WorkspaceRoot:    string(location.Project.Directory),
+					IsGitRepo:        location.Vcs != nil && location.Vcs.Type == schema.ProjectVcsGit,
+					Platform:         goruntime.GOOS,
+					TempDirectory:    global.Tmp,
+				}),
+			), nil
+		},
 	})
 }
 
@@ -869,23 +908,26 @@ func snapshotterFor(snapshot *core.Snapshot) runner.Snapshotter {
 	return snapshot
 }
 
-const toolOutputCleanupInterval = time.Hour
+const retentionCleanupInterval = time.Hour
 
-// runToolOutputCleanup periodically prunes expired tool-output files until the
-// context is cancelled.
-func (r *runtime) runToolOutputCleanup(ctx context.Context) {
-	if r.toolOutput == nil {
-		return
+// runRetentionCleanup periodically prunes expired SDK-managed files (tool
+// output and spooled A2A attachments) until the context is cancelled.
+func (r *runtime) runRetentionCleanup(ctx context.Context) {
+	sweep := func() {
+		if r.toolOutput != nil {
+			_ = r.toolOutput.Cleanup()
+		}
+		_ = core.CleanupA2ASpool(r.global.Data)
 	}
-	_ = r.toolOutput.Cleanup()
-	ticker := time.NewTicker(toolOutputCleanupInterval)
+	sweep()
+	ticker := time.NewTicker(retentionCleanupInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_ = r.toolOutput.Cleanup()
+			sweep()
 		}
 	}
 }

@@ -2104,14 +2104,14 @@ func TestClientCleanupToolOutput(t *testing.T) {
 	}
 }
 
-func TestRuntimeToolOutputCleanupStopsOnCancel(t *testing.T) {
+func TestRuntimeRetentionCleanupStopsOnCancel(t *testing.T) {
 	store := core.NewToolOutputStore(core.Global{Data: t.TempDir()}, core.ToolOutputSettings{})
-	rt := &runtime{toolOutput: store}
+	rt := &runtime{toolOutput: store, global: core.Global{Data: t.TempDir()}}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		rt.runToolOutputCleanup(ctx)
+		rt.runRetentionCleanup(ctx)
 	}()
 	cancel()
 	select {

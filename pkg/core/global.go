@@ -17,6 +17,10 @@ type Global struct {
 	Data  string
 	Cache string
 	State string
+	// Tmp is the temporary directory advertised to the model and inherited by
+	// spawned commands. NewGlobal derives it under Root, but an embedder may
+	// relocate it — the agent points it under the OS temp directory so it stays
+	// writable inside an OS sandbox.
 	Tmp   string
 	Bin   string
 	Log   string
@@ -30,7 +34,7 @@ type Global struct {
 //	data/   session database, snapshots, references, plans, tool output, logs
 //	cache/  downloaded binaries and skill content (disposable)
 //	state/  runtime state (reserved)
-//	tmp/    scratch space
+//	tmp/    scratch space (the agent relocates it under the OS temp dir)
 func NewGlobal(root, home string) Global {
 	data := filepath.Join(root, "data")
 	cache := filepath.Join(root, "cache")

@@ -28,7 +28,9 @@ type ClientOptions struct {
 	//	{Root}/data/   session database, snapshots, references, tool output, logs
 	//	{Root}/cache/  downloaded binaries and skill content
 	//	{Root}/state/  runtime state (reserved)
-	//	{Root}/tmp/    scratch space
+	//
+	// The temporary directory advertised to the model is placed under the OS
+	// temp directory, not Root, so it stays writable inside a sandbox.
 	Root string
 	// DatabaseMaxConns overrides the SQLite connection-pool size. Zero uses the
 	// default (database.DefaultMaxConns). WAL keeps reads concurrent; writes

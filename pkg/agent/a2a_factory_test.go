@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func newA2ATestSession(t *testing.T, mode string) *a2aSession {
 		t.Fatalf("create session: %v", err)
 	}
 	t.Cleanup(func() { _ = session.Close() })
-	return &a2aSession{session: session, inboundMedia: mode, turns: map[string]*a2aTurn{}}
+	return &a2aSession{session: session, inboundMedia: mode, spoolDir: core.A2ASpoolDir(client.rt.global.Data), turns: map[string]*a2aTurn{}}
 }
 
 func TestMaterializeInlineDeliversMedia(t *testing.T) {
@@ -54,6 +55,26 @@ func TestMaterializeInlineDeliversMedia(t *testing.T) {
 	}
 }
 
+func TestA2AFactoryAllowsReadingSpool(t *testing.T) {
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-compatible-chat", Credentials: APIKey("k"), Model: "m",
+		Root: t.TempDir(), WorkingDirectory: t.TempDir(), Permission: ApproveAll, LLM: &capturingLLM{},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	factory := NewA2AFactory(client).(*a2aFactory)
+	spooled := filepath.Join(core.A2ASpoolDir(client.rt.global.Data), "turn-1", "a.png")
+	// Inbound sessions deny external_directory, but the spool lives outside the
+	// workspace, so reading it must still be allowed or the feature is dead.
+	effective := core.PermissionMerge(core.DefaultAgentPermissions(client.rt.global), factory.permissionsFor(server.Workspace{}))
+	if got := core.PermissionEvaluate("external_directory", spooled, effective).Effect; got != schema.PermissionEffectAllow {
+		t.Fatalf("reading a spooled attachment must be allowed, got %s", got)
+	}
+}
+
 func TestMaterializeSpoolWritesPaths(t *testing.T) {
 	session := newA2ATestSession(t, "spool")
 	prompt, files, err := session.materialize("t2", server.SendRequest{
@@ -66,8 +87,8 @@ func TestMaterializeSpoolWritesPaths(t *testing.T) {
 	if len(files) != 0 {
 		t.Fatalf("spool should not inline media, got %v", files)
 	}
-	if !strings.Contains(prompt, ".a2a") || !strings.Contains(prompt, "a.png") {
-		t.Fatalf("prompt = %q, want a spooled path", prompt)
+	if !strings.Contains(prompt, session.spoolDir) || !strings.Contains(prompt, "a.png") {
+		t.Fatalf("prompt = %q, want a spooled path under %q", prompt, session.spoolDir)
 	}
 }
 

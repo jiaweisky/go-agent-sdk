@@ -668,9 +668,10 @@ func TestServerAcceptsNativeOptions(t *testing.T) {
 
 func TestServerWritesInboundAttachment(t *testing.T) {
 	workspace := t.TempDir()
+	root := t.TempDir()
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
-		Model: "test-model", Root: t.TempDir(), WorkingDirectory: workspace,
+		Model: "test-model", Root: root, WorkingDirectory: workspace,
 		Permission: agent.ApproveAll, LLM: stubLLM{reply: "ok"},
 	})
 	if err != nil {
@@ -710,14 +711,14 @@ func TestServerWritesInboundAttachment(t *testing.T) {
 	}
 
 	var written string
-	_ = filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, err error) error {
-		if err == nil && !entry.IsDir() && strings.Contains(path, "attachments") {
+	_ = filepath.WalkDir(filepath.Join(root, "data", "a2a-spool"), func(path string, entry fs.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() {
 			written = path
 		}
 		return nil
 	})
 	if written == "" {
-		t.Fatal("inbound attachment was not written to the workspace")
+		t.Fatal("inbound attachment was not spooled under the state root")
 	}
 	if data, err := os.ReadFile(written); err != nil || string(data) != "payload" {
 		t.Fatalf("attachment content = %q, %v", data, err)

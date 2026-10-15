@@ -114,10 +114,15 @@ func DefaultAgentPermissions(global Global) PermissionRuleset {
 }
 
 // readonlyExternalDirectoryRules is shared by the default ruleset and the
-// explore agent: external reads ask, except the tool-output and temp directories.
+// explore agent: external reads ask, except the tool-output, A2A spool and temp
+// directories.
 func readonlyExternalDirectoryRules(global Global) PermissionRuleset {
 	rules := PermissionRuleset{{Action: "external_directory", Resource: "*", Effect: PermissionEffectAsk}}
-	for _, resource := range []string{filepath.Join(global.Data, "tool-output", "*"), filepath.Join(global.Tmp, "*")} {
+	for _, resource := range []string{
+		filepath.Join(global.Data, "tool-output", "*"),
+		filepath.Join(global.Data, A2ASpoolManagedDirectory, "*"),
+		filepath.Join(global.Tmp, "*"),
+	} {
 		rules = append(rules, PermissionRule{
 			Action: "external_directory", Resource: resource, Effect: PermissionEffectAllow,
 		})

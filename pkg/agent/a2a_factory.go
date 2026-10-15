@@ -12,6 +12,7 @@ import (
 
 	coresession "github.com/jiaweisky/go-agent-sdk/internal/core/session"
 	"github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/session"
 )
@@ -29,6 +30,9 @@ type a2aFactory struct {
 	client       *Client
 	permissions  schema.PermissionRuleset
 	inboundMedia string
+	// spoolDir is where spooled inbound attachments are written (under the state
+	// root's data directory, never the workspace).
+	spoolDir string
 	// questions is "park" (default) or "decline".
 	questions string
 }
@@ -109,7 +113,13 @@ func NewA2AFactory(client *Client, opts ...A2AFactoryOption) server.Factory {
 		// Permissions stay held; questions resolve through handlers again.
 		client.HoldQuestions(false)
 	}
-	return &a2aFactory{client: client, permissions: config.Permissions, inboundMedia: config.InboundMedia, questions: config.Questions}
+	return &a2aFactory{
+		client:       client,
+		permissions:  config.Permissions,
+		inboundMedia: config.InboundMedia,
+		spoolDir:     core.A2ASpoolDir(client.rt.global.Data),
+		questions:    config.Questions,
+	}
 }
 
 // CreateSession implements server.Factory. The SDK client is bound to one
@@ -125,7 +135,7 @@ func (f *a2aFactory) CreateSession(ctx context.Context, req server.SessionReques
 		return nil, err
 	}
 	f.client.rt.markInbound(schema.SessionID(session.ID()))
-	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia}, nil
+	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia, spoolDir: f.spoolDir}, nil
 }
 
 // ResumeSession implements server.Factory. The inbound/workspace ruleset is
@@ -151,7 +161,7 @@ func (f *a2aFactory) ResumeSession(
 		return nil, err
 	}
 	f.client.rt.markInbound(schema.SessionID(session.ID()))
-	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia}, nil
+	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia, spoolDir: f.spoolDir}, nil
 }
 
 // questionOverride returns the per-session question handler enforcing the
@@ -199,12 +209,20 @@ func containsPermissionRule(rules schema.PermissionRuleset, rule schema.Permissi
 }
 
 // permissionsFor picks the ruleset a session runs under: the resolved
-// workspace's when it supplies one, otherwise the factory's inbound default.
+// workspace's when it supplies one, otherwise the factory's inbound default. The
+// SDK spool directory is always appended as an external_directory allow, so an
+// inbound session (which denies external_directory) can still read the
+// attachment the caller sent — the rule follows the deny, so it wins.
 func (f *a2aFactory) permissionsFor(workspace server.Workspace) schema.PermissionRuleset {
+	rules := f.permissions
 	if len(workspace.Permissions) > 0 {
-		return workspace.Permissions
+		rules = workspace.Permissions
 	}
-	return f.permissions
+	return append(append(schema.PermissionRuleset{}, rules...), schema.PermissionRule{
+		Action:   "external_directory",
+		Resource: filepath.Join(f.spoolDir, "*"),
+		Effect:   schema.PermissionEffectAllow,
+	})
 }
 
 // a2aSession bridges *Session to server.Session. Each turn forwards its event
@@ -217,6 +235,8 @@ type a2aSession struct {
 
 	// inboundMedia is "spool" or "inline".
 	inboundMedia string
+	// spoolDir is where "spool" mode writes inbound attachments.
+	spoolDir string
 
 	mu    sync.Mutex
 	turns map[string]*a2aTurn
@@ -305,14 +325,13 @@ func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string,
 		return req.Prompt, nil, nil
 	}
 	inline := s.inboundMedia == "inline"
-	root := filepath.Join(string(s.session.client.rt.location.Directory), ".a2a")
-	dir := filepath.Join(root, "attachments", turnID)
+	dir := filepath.Join(s.spoolDir, turnID)
 	var files []schema.PromptFileAttachment
 	var builder strings.Builder
 	builder.WriteString(req.Prompt)
 	builder.WriteString("\n\n[attachments]")
 	for _, file := range req.Files {
-		attachment, note, err := materializeA2AFile(root, dir, inline, file)
+		attachment, note, err := materializeA2AFile(dir, inline, file)
 		if err != nil {
 			return "", nil, err
 		}
@@ -331,7 +350,7 @@ func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string,
 // url-source attachment; otherwise raw bytes are written into dir and referenced
 // by path. It returns the native attachment (nil when none applies) and the
 // prompt note describing the file.
-func materializeA2AFile(root, dir string, inline bool, file server.File) (*schema.PromptFileAttachment, string, error) {
+func materializeA2AFile(dir string, inline bool, file server.File) (*schema.PromptFileAttachment, string, error) {
 	name := file.Name
 	if name == "" {
 		name = file.MIME
@@ -348,9 +367,6 @@ func materializeA2AFile(root, dir string, inline bool, file server.File) (*schem
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, "", fmt.Errorf("write attachment: %w", err)
 		}
-		if err := ensureA2AIgnore(root); err != nil {
-			return nil, "", fmt.Errorf("write attachment: %w", err)
-		}
 		path := filepath.Join(dir, filepath.Base(name))
 		if err := os.WriteFile(path, file.Data, 0o644); err != nil {
 			return nil, "", fmt.Errorf("write attachment: %w", err)
@@ -363,17 +379,6 @@ func materializeA2AFile(root, dir string, inline bool, file server.File) (*schem
 		return nil, file.URI, nil
 	}
 	return nil, "", nil
-}
-
-// ensureA2AIgnore drops a .gitignore inside the .a2a directory so attachments
-// are not captured by git or the snapshot service (which honors repo ignores),
-// without touching the project's own .gitignore or leaving the workspace.
-func ensureA2AIgnore(root string) error {
-	path := filepath.Join(root, ".gitignore")
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	return os.WriteFile(path, []byte("*\n"), 0o644)
 }
 
 func (s *a2aSession) Resume(ctx context.Context, turnID string) iter.Seq2[server.Event, error] {

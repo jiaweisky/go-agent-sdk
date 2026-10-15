@@ -181,9 +181,10 @@ func TestA2AInboundOmissionNotice(t *testing.T) {
 	}
 }
 
-// TestA2AInboundSpool verifies spool mode end to end: the raw part is written
-// into the workspace (not inlined) and the turn still completes. The read-tool
-// loop is not exercised because the available vLLM has no tool calling enabled.
+// TestA2AInboundSpool verifies spool mode end to end: the raw part is spooled
+// under the state root's data directory (not inlined, not written into the
+// workspace) and the turn still completes. The read-tool loop is not exercised
+// because the available vLLM has no tool calling enabled.
 func TestA2AInboundSpool(t *testing.T) {
 	baseURL, model := vllmEnv(t)
 	workspace := t.TempDir()
@@ -198,7 +199,7 @@ func TestA2AInboundSpool(t *testing.T) {
 		t.Fatalf("state = %s", result.state)
 	}
 	if !spooledFileExists(workspace, png) {
-		t.Fatal("the inbound attachment was not written into the workspace")
+		t.Fatal("the inbound attachment was not spooled under the state root")
 	}
 }
 
@@ -360,12 +361,12 @@ func newVLLMMediaSpoolClient(t *testing.T, baseURL, model, workspace string) *ag
 	return client
 }
 
-// spooledFileExists reports whether a file under the workspace's .a2a directory
-// has exactly the given bytes.
-func spooledFileExists(workspace string, want []byte) bool {
+// spooledFileExists reports whether a spooled attachment under the state root's
+// data/a2a-spool directory has exactly the given bytes.
+func spooledFileExists(root string, want []byte) bool {
 	found := false
-	_ = filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.Contains(path, ".a2a") {
+	_ = filepath.WalkDir(filepath.Join(root, "data", "a2a-spool"), func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
 			return nil
 		}
 		if data, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(data, want) {
