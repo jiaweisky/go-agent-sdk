@@ -217,20 +217,17 @@ share one protocol, endpoint, credential and modality list.
   base64, fails validation, and is omitted.
 - **G8 — image detail level.** Providers accept a `detail` hint
   (`low`/`high`/`original`/`auto`); the SDK has no way to express it.
-- **G9 — subagent delivery (the headline blocker).** The design's recommended
-  pattern (§1, §4.6) is "keep the main model cheap and delegate media to a
-  multimodal subagent". Per-agent model resolution already exists, but a child
-  session is seeded from the `task` prompt **text only**: `TaskInput` has no
-  attachment field (`task.go`) and `runChildSession` admits
-  `Prompt{Text: prompt}` (`task_run.go`). The main model cannot see the media
-  either, so it cannot forward it. Consequently an attachment can reach a
-  multimodal model **only if that model is the session's own model**; the
-  subagent pattern does not work as written. This is not a routing gap (G1/G2)
-  but a delivery gap, and it gates the stated outcome.
+- **G9 — subagent delivery.** The design's recommended pattern (§1, §4.6) is
+  "keep the main model cheap and delegate media to a multimodal subagent".
+  Per-agent model resolution exists, and the child session admits attachments
+  (`TaskRunInput.Files` → `runChildSession` seeds `Prompt{Text, Files}`), with the
+  media-capable `read` tool emitting image/audio/video/pdf. The main model still
+  never sees the media (its own gate omits it), so it cannot forward the bytes;
+  delivery is the read-tool/host path (§4.6). Closed.
 
-> Note: G1/G2 are the enabler (per-model routing); **G9 is the gating gap** for
-> the subagent outcome. G3/G4/G7 are protocol/transport follow-ups; G5/G8 are
-> per-part policy; G6 is docs/tests.
+> Note: G1/G2 are the enabler (per-model routing); G9 (subagent delivery) is
+> closed (§4.6). G3/G4/G7 are protocol/transport follow-ups; G5/G8 are per-part
+> policy; G6 is docs/tests.
 
 ## 4. Design
 
@@ -416,30 +413,28 @@ Recommendation: default `spool` (unchanged), add `inline` opt-in.
 ### 4.6 Subagent usage (the user-facing outcome) — **{M6}**
 
 The motivation (§1) keeps the main model cheap and delegates media to a multimodal
-subagent. Per-agent models exist ({M1}/{M2}), but the **delivery path does not**
-(G9): the `task` tool input is text-only and the child is seeded with
-`Prompt{Text: prompt}` (`task.go`, `task_run.go`), so an attachment on the parent
-never reaches the child — and the main model cannot forward it (it never receives
-the media; its own gate omits it). **Closing this is part of the deliverable.**
-Both paths are in scope:
+subagent. Per-agent models exist ({M1}/{M2}) and the delivery paths are
+implemented; the one inherent constraint is that the main model never receives the
+media (its own gate omits it), so it cannot forward bytes it never sees — an
+attachment reaches a multimodal model via one of:
 
 - **{M6a} Session-level multimodal model.** The session's own model is multimodal,
-  so attachments gate directly against it. Ship first (it exercises the whole media
-  pipeline); it is not the endpoint.
+  so attachments gate directly against it. It exercises the whole media pipeline;
+  it is not the endpoint.
 - **{M6b} The child loads media from a reference.** The `task` prompt/metadata
   carries a reference — the spooled A2A path, a provider ref, or a host path — and
-  the child loads it via a media-capable `read` tool. Requires `read` to emit
-  audio/video as media (currently image-only) and the child agent to run with it.
-- **{M6c} The `task` tool carries attachments.** Add a files/`Reference` field to
-  `TaskInput` and admit them in `runChildSession`. The parent model cannot emit the
-  bytes, so a host or an earlier structured step supplies the reference; this
-  covers caller-driven flows and forwarding a parent's attachment by id.
+  the child loads it via the media-capable `read` tool, which emits images and
+  audio/video/pdf as media (`readSupportedMediaMIMEs`).
+- **{M6c} The `task` tool carries attachments.** `TaskRunInput.Files` carries the
+  `PromptFileAttachment`s the child session is admitted with (`runChildSession`
+  seeds `Prompt{Text, Files}`). The model-driven `task` tool leaves it empty — a
+  model cannot emit bytes; a host or an earlier structured step supplies the
+  reference, covering caller-driven flows and forwarding a parent's attachment by
+  id.
 
-Choose and specify the mechanism ({M6b} as the general child path, {M6c} for
-explicit forwarding), with the **same planner/gate applied in the child session**.
-Do not declare the subagent outcome done until it is implemented and E2E-tested.
+The **same planner/gate applies in the child session**; E2E coverage is in §7.
 
-The agent/catalog mechanics are unchanged once delivery is solved:
+The agent/catalog mechanics:
 1. Add a catalog entry for the multimodal model (e.g. `gemini-2.5-flash`).
 2. Define an agent that names it, e.g. `defs`/code:
    ```markdown
