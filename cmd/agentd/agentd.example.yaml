@@ -19,7 +19,7 @@ models:
 
   - id: deepseek-flash                        # OpenAI Chat Completions
     model: deepseek-flash
-    protocol: openai-compatible-chat
+    protocol: deepseek-chat
     modelBaseURL: https://api.deepseek.com     # + /chat/completions
     credentials:
       apiKey: ${DEEPSEEK_API_KEY:-replace-me}
@@ -63,6 +63,33 @@ servers:
     # sandbox:
     #   process: seatbelt            # none (default) | bwrap | seatbelt
     #   failurePolicy: fail-closed   # fail-closed (default) | fail-open
+    # Inbound media delivery policy (operator-owned; see docs/DESIGN-MEDIA.md §4.12).
+    # Unset keeps the caller-declared behavior (inline-first, with a file fallback).
+    # media:
+    #   inlineLimitBytes: 262144              # size budget: over this cannot be inlined
+    #   prefer: [file, inline]                # first feasible source (url is caller-only)
+    #   upload: true                          # large media -> provider Files API (needs mediaUpload + model sources incl. file)
+    #   downsample: true                      # over budget -> shrink first, whatever source is picked next
+    #   spool: { dir: "{Root}/data/spool" }   # last resort: on disk, under the state root
+    #   fetchURL: true                        # allow a caller-supplied url source
+    #   maxBytes: 52428800                    # hard skip above this
+    # Provider-independent media store ({M17}/{M18}); serves the model edge (url)
+    # and the A2A file exchange (ingest). Backends: http | local | s3 | cos.
+    # Credentials validate BOTH writes (upload) and reads (download); omit them
+    # for an anonymous/public origin or bucket. `s3` is S3-compatible (AWS S3 /
+    # MinIO, and COS via its S3 endpoint); the native `cos` backend drives Tencent
+    # COS over its own REST API (SHA1-signed):
+    # storage:
+    #   backend: http                         # http | local | s3 | cos
+    #   url: https://store.example/x/
+    #   auth: bearer                          # none | basic | bearer (write AND read)
+    #   token: ${STORE_TOKEN}                 # basic → username/password; or a custom header/value
+    #   presignSecret: ${NGINX_SECURE_LINK}   # optional: sign urls (nginx secure_link md5+expires)
+    #   presignURL: https://signer.example/sign   # OR an external signer (POST {key,method,expires})
+    # storage:
+    #   backend: cos                          # http | local | s3 | cos
+    #   cos: { region: ap-guangzhou, bucket: my-bucket-1250000000,
+    #          secretID: ${COS_SECRET_ID}, secretKey: ${COS_SECRET_KEY} }
     auth:
       bearer: ${AGENTD_TOKEN:-replace-me}
     keepAlive: 15s

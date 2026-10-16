@@ -10,14 +10,27 @@
 > (`docs/DESIGN-AGENTD.md`). This document predates that merge; read its command
 > and `serveconfig` references as the current `agentd` equivalents.
 >
-> Status: **implemented** (phases P0–P10 landed, including the subagent delivery
-> path P9). Numbers in braces like **{M1}** are
-> decisions; all design decisions are recorded in §8 (test tooling in §7).
+> Status: **P0–P13 implemented.** P12 = {M17} reference hosting (per-modality capability, the
+> provider-independent `MediaStore`, the provider-bound `MediaUploader`). P13 = {M18} A2A file
+> exchange: the card **storage extension**, the store's `Get`/`Target`/`Reserve`, the
+> `PUT`/`GET(Range)` ingest endpoints, inbound `FileWithUri` resolution (materialized to a local
+> path), and **A2A outbound** (a large file is uploaded to a *peer's* advertised target when its
+> card advertises ingestion). The card advertises both **`reference`** (the server ingest endpoint) and **`broker`**
+> (a per-file presigned slot) modes; the **S3-compatible** backend covers AWS S3 / MinIO (and COS via its S3 endpoint), and a **native `cos`** backend drives Tencent COS over its own REST API. Numbers in braces like **{M1}** are decisions; all design decisions are recorded in
+> §8 (test tooling in §7).
 
 ## Change log
 
 | Date | Change |
 |---|---|
+| 2026-10-15 | Clear limit errors: agentd HTTP (413) and A2A ingest (413/415) now name the exact limit / allowed media types; the SDK omission path carries a **`detail`** hint (e.g. `limit <N> bytes`) on the `AttachmentOmitted` event and the durable event. |
+| 2026-10-15 | Per-modality sizes: `inlineLimitBytes` / `maxBytes` are now per modality (image/audio/video/file) with a `default`; audio/video downsampling is wired to a host **ffmpeg** hook (images stay in-process); the spool dir is read-allowed; agentd gains an HTTP **request-body cap** (413). |
+| 2026-10-15 | Real-provider pass: **DeepSeek is image-only** — its Files API rejects pdf/text, and its anthropic/responses document blocks return 200 but are substituted with "[Unsupported Document]" (so documents are for Claude/Gemini/Bedrock). Added the missing **`openai-responses` `input_file`** lowering (pdf: `file_data`/`file_id`) + registry MIMEs + body schema. |
+| 2026-10-15 | DeepSeek split into its **own protocol/profile** (`deepseek-chat`, image + `file` block) so `openai-compatible-chat` (vLLM) no longer advertises a `file` block; added agentd **`mediaUpload.expiresAfter`** (provider-side `expires_after`); clarified that provider-side deletion stays the host's. |
+| 2026-10-15 | Closed the remaining lowering gaps: **Anthropic `file` source** (`source.type=file`), **Gemini/Gemini+Bedrock documents** (pdf), **Bedrock (Nova) `video`**, and **DeepSeek's `file` block** on `openai-compatible-chat` (`{"type":"file","file_id"}`). Only DeepSeek's `file_data` inline variant is intentionally omitted (`image_url` covers inline). |
+| 2026-10-15 | Audit pass: **Anthropic `document` lowering added** (`image`/`document` block for pdf, inline/url); corrected §2.3/§4.8 (Bedrock `document` **is** lowered; only Bedrock `video`(Nova) and Gemini documents are not) and clarified that a **provider rejection fails the turn** (`session.next.step.failed`) rather than being a `provider_error` omission reason. |
+| 2026-10-15 | Added **{M18} A2A file exchange + AgentCard projection (§4.13)**: any A2A client discovers a server **from its card** (the standard), so the per-modality capability model **projects onto it** (standard `inputModes`/`outputModes` + a **storage extension** with the ingest contract). The provider-independent `MediaStore` gains `Get`/`Target`/`Reserve` and serves the A2A edge **bidirectionally** (receiver-driven D1/D2/D3); inbound `FileWithUri` resolves to a local `Get` (spool-equivalent) or a peer url; references materialize to **local paths** for the CLI (CodeBuddy/Codex/Claude). |
+| 2026-10-15 | Added **{M17} reference hosting (§4.10 Axis 3)**: a non-inline form comes from one of **two hosts** returning `Reference{Source, Value, ExpiresAt}` — the **provider-independent `MediaStore`** (object storage → `url`; one per client, reused across providers) and the **provider-bound `MediaUploader(providerID)`** (its Files API → `file_id`/`fileUri`). A provider only declares which forms it accepts and does not care where a url is hosted, so `url` is **no longer caller-only** (an operator-hosted url is the only way to reach a url-fetching provider such as **vLLM**; a caller-supplied url stays gated by `fetchURL`); form→host is fixed, so `prefer` stays in wire forms. Capability is now **per modality**. Fixes the §4.10 transition table, Axis 1, `{M10}`/`{M12}` wording, and the §4.12 `url`-caller-only rule. |
 | 2026-10-15 | Added **§4.12 inbound media delivery policy ({M16})**: the model owner (operator) configures how inbound media reaches the model (`media:` block — `inlineLimitBytes`, `prefer`, `upload`, `downsample`, `spool`, `fetchURL`, `maxBytes`); the SDK applies it to **every** inbound media, HTTP and A2A alike; a caller-declared source overrides when feasible. Revises {M10} (source may be operator-chosen), the size stance (§4.5/§9, operator-declared), and {M4} (`inboundMedia` retained as fallback). Recorded as a Go-side deviation in `AGENTS.md`. |
 | 2026-10-07 | First draft: current-state analysis, per-model provider config, OpenAI audio, a2aserve inbound media, size policy, subagent binding |
 | 2026-10-07 | Expanded test plan: local **Ollama** harness (`qwen3-vl:2b`, `nemotron3:33b` — OpenAI-compatible, both Text+Image only), the main×subagent **capability matrix**, and where audio/video are validated (Gemini + request-capturing stub) |
@@ -106,20 +119,26 @@ accept (see §4.10).
 |---|---|---|---|---|
 | `openai-chat` | yes | **yes** | no | `image_url` / `input_audio` |
 | `openai-compatible-chat` | yes | **yes** | **yes** | `image_url` / `input_audio` / `audio_url` / `video_url` |
-| `openai-responses` | yes | **no** | no | `input_image` |
-| `anthropic-messages` | yes | no | no | `image` block |
-| `gemini` | yes | **yes** | **yes** | generic `inlineData` / `fileData` |
-| `bedrock-converse` | yes | no | no | `image` / `document` block |
+| `deepseek-chat` | yes | no | no | `image_url` / `file` block (`file_id`) |
+| `openai-responses` | yes | **no** | no | `input_image` / `input_file` (pdf) |
+| `anthropic-messages` | yes | no | no | `image` / `document` block (pdf) |
+| `gemini` | yes | **yes** | **yes** | generic `inlineData` / `fileData` (images/audio/video + pdf documents) |
+| `bedrock-converse` | yes | no | no | `image` / `document` / `video` (Nova) block |
 
 > **Scope of this table — SDK code, not server capability.** These columns say
 > what *this SDK's lowering functions emit*, not what a provider accepts. The
 > `openai-compatible-chat` row carries audio/video via the vLLM extension blocks
 > (`input_audio`/`audio_url`/`video_url`), while `openai-chat` (OpenAI proper)
 > carries audio via `input_audio` but no video; both are driven by the protocol's
-> `MediaEncodingProfile` ({M3}/P4, §4.3). Conversely a protocol may support blocks
-> we do not lower yet: Bedrock Converse also carries `document` and `video` (Nova)
-> blocks alongside `image` (§4.8), and Anthropic `document` blocks are not lowered
-> (a `file` source is therefore omitted for `anthropic-messages`).
+> `MediaEncodingProfile` ({M3}/P4, §4.3). All blocks listed above **are** lowered:
+> images/audio/video everywhere the wire carries them, plus pdf **documents** for
+> Gemini, Anthropic, and Bedrock, and (Nova) **video** for Bedrock. Plain text
+> (.txt/.csv/.md) is Files-API-only (a `file` source) on Anthropic, per its docs.
+> A provider `file` reference is lowered for `deepseek-chat` (DeepSeek
+> `{"type":"file","file_id"}`), OpenAI Responses, Gemini (`fileData`), Bedrock
+> (`s3Location`), and Anthropic (`source.type=file`, needs `anthropic-beta`). The one
+> deliberate omission is DeepSeek's `file_data` inline variant — `image_url` already
+> covers inline bytes, and there is no per-attachment block selector.
 
 > **Key finding:** **Gemini already supports audio and video** on the wire today.
 > `geminiMediaMIMEs` = images + `videoMIMEs` + `audioMIMEs`
@@ -334,7 +353,7 @@ their lowering/descriptors must diverge.
 
 **`openai-responses` — its own block names and roles:**
 - Content blocks are `input_image` (`image_url` **or** `file_id`, mutually
-  exclusive), `input_file` (`file_id`/`file_data`/`file_url`) and `input_text`;
+  exclusive), `input_file` (`file_id`/`file_data`, pdf) and `input_text`;
   **audio is not supported** — OpenAI directs the audio-chat pattern to Chat
   Completions. These differ from chat's `image_url`/`input_audio`, so Responses
   gets its **own** `BlockKind`s and profile — do not reuse the chat lowerer.
@@ -375,7 +394,7 @@ Recommendation: default `spool` (unchanged), add `inline` opt-in.
 ### 4.5 Size / large-media policy — **{M5}**
 
 - **No interception.** The SDK enforces **no** media size or count caps; the
-  provider is the authority and its rejection surfaces as a typed `provider_error`.
+  provider is the authority and its rejection **fails the turn** (`session.next.step.failed`) — there is no omission `reason` for it.
   This supersedes the earlier idea of a catalog `MaxInlineBytes` policy and of
   omitting on a size cap. Keep only a **memory-safety bound** on decoded bytes (to
   avoid OOM when decoding inline base64), not a media-size policy.
@@ -411,7 +430,7 @@ Both paths are in scope:
   carries a reference — the spooled A2A path, a provider ref, or a host path — and
   the child loads it via a media-capable `read` tool. Requires `read` to emit
   audio/video as media (currently image-only) and the child agent to run with it.
-- **{M6c} The `task` tool carries attachments.** Add a files/`MediaRef` field to
+- **{M6c} The `task` tool carries attachments.** Add a files/`Reference` field to
   `TaskInput` and admit them in `runChildSession`. The parent model cannot emit the
   bytes, so a host or an earlier structured step supplies the reference; this
   covers caller-driven flows and forwarding a parent's attachment by id.
@@ -503,9 +522,10 @@ source and the role. Unsupported source/type/modality/role → omit +
 | Protocol | inline | url | file |
 |---|---|---|---|
 | `openai-chat` | yes | yes | no (OpenAI proper; `input_file` documents are a distinct block, not this `file` source) |
-| `openai-compatible-chat` | yes | yes | provider-specific: DeepSeek `file`+`file_id`; **not vLLM** |
+| `openai-compatible-chat` | yes | yes | no (vLLM has no Files API) |
+| `deepseek-chat` | yes | yes | yes (DeepSeek `file` + `file_id`) |
 | `openai-responses` | yes | yes | yes (DeepSeek `input_image` + `file_id`) |
-| `anthropic-messages` | yes | yes | no (document block not lowered) |
+| `anthropic-messages` | yes | yes | yes (`image`/`document` `source.type=file`; needs `anthropic-beta` for DeepSeek) |
 | `gemini` | yes (`inlineData`) | yes (`fileData.fileUri`) | via Files API `fileUri` |
 | `bedrock-converse` | yes (`bytes`) | no | yes (`s3Location`, `s3://…`) |
 
@@ -519,13 +539,15 @@ generic file block) and Bedrock Converse a **`video`** block (Nova). These are
 `BlockKind`s chosen by modality, not sources — the planner picks the source, the
 protocol picks image vs document vs video.
 
-**Files API upload — host responsibility, optional hook.** Uploading is a
-side-effecting provider call with storage/quota/expiry semantics (DeepSeek:
-`POST /files`, `purpose=user_data`, 64 MiB, optional `expires_after`). Per
-`AGENTS.md` (no provider/credential infrastructure in the SDK), the SDK
-**references** `file_id`s; uploading is the host's job via the `MediaUploader`
-hook ({M7a}, {M12}). The hook returns a resolved ref (id *or* URI, see §4.10),
-which the planner writes onto the part before re-checking `file` feasibility.
+**Reference hosting — host responsibility, optional hook.** Producing a non-inline source is a
+side-effecting call with storage/quota/expiry semantics. Which form is available is **per
+modality** (DeepSeek: image only), and **two** hosts produce them ({M17}, §4.10 Axis 3): the
+provider Files API (`file_id`; DeepSeek needs the form field `purpose=user_data`, and its
+Anthropic wire the header `anthropic-beta: files-api-2025-04-14`) and object storage (`url`). Per
+`AGENTS.md` (no provider/credential infrastructure in the SDK), the SDK **references** file
+ids/urls; hosting is the host's job via `MediaUploader(providerID)` (provider-bound) and
+`MediaStore` (provider-independent) — the planner writes the produced source onto the part before
+re-checking feasibility.
 
 ### 4.9 Image detail level — **{M8}**
 
@@ -534,7 +556,7 @@ Add an optional `Detail` (`low` | `high` | `original` | `auto`) to
 (`openai-chat`/`openai-responses` `detail`; ignored elsewhere). Default: unset
 (provider default).
 
-### 4.10 Extensibility architecture — **{M9}**, **{M13}**, **{M14}**
+### 4.10 Extensibility architecture — **{M9}**, **{M13}**, **{M14}**, **{M17}**
 
 The hard part is not any single model but the **three axes that vary
 independently**:
@@ -542,13 +564,14 @@ independently**:
 1. **Model capability** — which modalities a model accepts, and the constraints
    (sources, inline size).
 2. **Wire protocol** — what a protocol can express and how it encodes it.
-3. **Provider API** — extra endpoints (file upload/list/delete), URL fetching,
-   quotas, expiry.
+3. **Reference hosting** — where bytes are put and what reference comes back
+   (a provider Files API → `file_id`, or object storage → url), plus its
+   lifecycle (upload/list/delete, quotas, expiry).
 
 A design that hardcodes any axis into the others resists change. Keep each axis in
 **one extension point**, introduce **one canonical media value**, and put every
 decision in **one pure planner** — so a new model is data, a new protocol is a
-file + a registry entry, a new provider API is a host hook, and the call sites
+file + a registry entry, a new hosting backend is a host hook, and the call sites
 (`to_llm_message.go`) never change.
 
 **One canonical media value.** Every input (host attachment, A2A file part, tool
@@ -571,10 +594,14 @@ type MediaPart struct {
 `http(s)://` → url), never chosen by an SDK preference ({M10}).
 > **Revised by {M16} (§4.12):** an *operator* delivery policy ({M13} `media:` block) chooses the
 > default source and the input may override it; the SDK still never *guesses* the source.
+> **Revised by {M17} (§4.10 Axis 3):** the *source* may also be **produced by a host** (upload →
+> `file_id` or url), so `url` is **no longer caller-only** — operator-hosted urls are valid.
 
 **Axis 1 — model capability (data).** `schema.ModelInfo.Capabilities` is already
 host-supplied and per model. Add a constraints descriptor additively, so existing
-hosts that set only `Input` keep working:
+hosts that set only `Input` keep working. Capability is **per modality**: a model may
+accept an external `url` for images but nothing for plain files (DeepSeek: image
+`{inline,url,file}`, audio/video/file rejected):
 
 ```go
 type ModelCapabilities struct {
@@ -583,8 +610,16 @@ type ModelCapabilities struct {
     Output []string
     Media  *ModelMediaCapability `json:"media,omitempty"` // new
 }
+// MediaForms: the wire forms a model accepts for one modality.
+type MediaForms struct {
+    Inline bool // bytes carried in the request
+    URL    bool // an external http(s) url the provider fetches
+    File   bool // the provider's own file reference (its Files API)
+}
 type ModelMediaCapability struct {
-    Sources []string // inline,url,file this model accepts; empty = protocol decides
+    // forms per modality (image|audio|video|file). A modality not listed is not
+    // accepted. A nil descriptor means "no gate" (the protocol decides).
+    Forms map[string]MediaForms `json:"forms,omitempty"`
 }
 ```
 
@@ -642,35 +677,87 @@ factory. A **new provider extension** = a new profile (data) or a new `BlockKind
 encoder (code) + a registry entry; a **genuinely different API** = a new protocol
 file (like `gemini`). Either way the call sites (`to_llm_message.go`) never change.
 
-**Axis 3 — provider API (code, host-injected).** Split by kind:
+**Axis 3 — reference hosting (code, host-injected).** A non-inline form needs a **host** to put
+the bytes somewhere and hand back a reference. There are **two** kinds, distinguished by whether
+they are bound to the model provider:
 
-- **Declarative** request shaping (headers/body/path/variant) is already
-  expressible with `ModelInfo.API` + `ModelRequest` + variants — **no new code**.
-  Example: DeepSeek's Anthropic Files API needs the header
-  `anthropic-beta: files-api-2025-04-14`; a header is config, not a hook.
-- **Side-effecting** endpoints are hidden behind a host hook (constructor
-  injection, like `Credentials`), so the SDK never owns credentials or
-  infrastructure:
+| host | bound to provider? | form | reuse |
+|---|---|---|---|
+| **object storage** (S3 / COS / nginx) | **no** | `url` | one store feeds every provider that fetches urls (vLLM…) |
+| **provider Files API** | **yes** (its `file_id`/`fileUri`) | `file` | one per provider (OpenAI / DeepSeek / Gemini…) |
+
+The provider **only declares which forms it accepts** (Axis 1) and **does not care where a `url`
+is hosted** — an operator-hosted url and a caller-supplied url look identical to it. Its own
+Files API, by contrast, is **strongly bound** to it (a `file_id` is meaningless to another
+provider).
+
+> **Revised by {M17}:** `url` is **no longer caller-only**. An operator-hosted url is valid (the
+> *only* way to reach a url-fetching provider with no Files API, such as vLLM) and is
+> **provider-agnostic**. A **caller-supplied** url stays gated by `fetchURL` (§4.12); an
+> **operator-hosted** url is produced by the `MediaStore`.
+
+Two hooks, one per kind, so the provider-independent store is **not** re-implemented per provider:
 
 ```go
-// MediaRef is a resolved provider reference to uploaded media: the source kind
-// ("file") plus the provider's id/uri (DeepSeek/OpenAI file_id, Gemini fileUri).
-type MediaRef struct {
-    Source MediaSource
-    ID     string
+// Reference is a host-produced reference: its form, its value, and an optional expiry.
+type Reference struct {
+    Source    MediaSource // "url" (object storage) | "file" (provider Files API)
+    Value     string      // https://…             | file_id / fileUri
+    ExpiresAt *time.Time  // nil = never (the host owns lifecycle)
 }
 
-type MediaUploader interface {
-    Upload(ctx context.Context, part llmschema.MediaPart) (MediaRef, error)
+// UploadTarget is how a peer may write bytes to the store (advertised on the AgentCard, §4.13).
+type UploadTarget struct {
+    URL       string            // where to write
+    Method    string            // e.g. "PUT"
+    Headers   map[string]string // auth for the write (empty = public / presigned)
+    Reference string            // the reference to send back afterwards
+    Expires   time.Time         // zero = no expiry (static target)
 }
-// ClientOptions.MediaUploader resolves one per provider id (see {M12}).
+
+// MediaStore is the process's provider-independent storage: it hosts bytes, reads them
+// back, and advertises how a peer may write to it (the A2A edge, §4.13).
+// Put serves the model edge; Get/Target/Reserve serve the A2A edge (§4.13).
+type MediaStore interface {
+    Put(ctx context.Context, part llmschema.MediaPart) (Reference, error) // write → Reference (Source == "url")
+    Get(ctx context.Context, ref Reference) (io.ReadCloser, error)        // read back (A2A inbound)
+    Target() UploadTarget                                                 // advertised static upload target (A2A)
+    Reserve(ctx context.Context, name, mime string, size int64) (UploadTarget, error) // brokered per-file slot (A2A)
+}
+ClientOptions.MediaStore MediaStore
+
+// Provider-bound: its Files API → a file reference. Resolved per provider id.
+type MediaUploader interface {
+    Upload(ctx context.Context, part llmschema.MediaPart) (Reference, error) // Source == "file"
+}
+ClientOptions.MediaUploader func(providerID schema.ProviderID) MediaUploader
 ```
 
-The SDK only *calls* it during adaptation; absent a hook there is no conversion. A
-**new provider API** = one `MediaUploader` the host registers. Adaptation is a
-**closed loop**: upload → write the returned ref back onto the part
-(`Source = file`) → re-check `file` feasibility → encode; a `MediaRef` (not a bare
-id) is needed because providers return an id *or* a URI.
+- **Which host a form uses is fixed:** `inline` → none; `url` → `MediaStore` (or a caller-supplied
+  url); `file` → `MediaUploader(providerID)`. So `prefer` stays in **wire forms** and needs no
+  "origin" dimension.
+- **Two edges, one store.** `Put` serves the **model edge** (upload → url the provider fetches);
+  `Get`/`Target`/`Reserve` serve the **A2A inbound** edge (a peer writes to our advertised target, we
+  read it back and hand the CLI a local path). **A2A outbound** is the mirror: a scheme-keyed
+  **sender-side uploader** writes to the **peer's** advertised `UploadTarget` (not our store). The
+  provider-bound `MediaUploader` belongs **only** to the model edge.
+- **Declarative quirks** (endpoint path, headers, body fields, variant) stay `ModelInfo.API` +
+  `ModelRequest` + variants — **no new code** (e.g. DeepSeek's `purpose=user_data` field and its
+  Anthropic `anthropic-beta` header are config).
+- **Both kinds are extensible:** a resumable upload (Gemini), SigV4 signing (S3), a plain object
+  store, or a new Files API — each is one `MediaStore`/`MediaUploader` implementation.
+- **Lifecycle belongs to the host**; the SDK never deletes provider-side. A host reclaims a
+  reference by its own means (provider `expires_after`, an object-store lifecycle rule, a presigned
+  url TTL). agentd's `mediaUpload.expiresAfter` (seconds) requests a provider file lifetime —
+  it is sent as the Files API `expires_after[anchor]=created_at` + `expires_after[seconds]=N`
+  (DeepSeek/OpenAI convention) — and unset leaves the file permanent. The `Reference.ExpiresAt`
+  the host reports bounds only the SDK's content-hash upload cache.
+
+The SDK *calls* the host only during adaptation, then **re-checks the produced form** against
+the protocol: a `file` ref needs a protocol that can emit a `file` block, a `url` ref needs one
+that can emit a `url` block (both derive from `Encodings`, Axis 2); a form the protocol cannot
+emit is skipped and the next option (or an omission) applies. A `Reference` (not a bare id) is
+needed because the value is an id **or** a url.
 
 **The planner — one pure function.** `mediaPolicyForModel` becomes a planner that
 decides, per part, `Encode` / `Upload` / `Omit(reason)`, from the two descriptors
@@ -678,18 +765,18 @@ plus the runtime's abilities:
 
 ```
 feasible(part, model, proto, role) =
-    modality(part.MIME) ∈ model.Input                 # empty = unconstrained
+    modality(part.MIME) ∈ model.Input                  # empty = unconstrained
   ∧ part.MIME ∈ proto.MIMEs
-  ∧ part.Source ∈ proto.Sources
-  ∧ (model.Sources empty ∨ part.Source ∈ model.Sources)
+  ∧ part.Source ∈ proto.Sources                         # inline | url | file (wire form)
+  ∧ (model.Media empty ∨ (modality, part.Source) ∈ model.Media.Forms)  # per-modality forms
   ∧ role ∈ proto.Roles
   ∧ (part.Source != inline ∨ withinSafetyBound(part)) # OOM guard only, not a size cap
 ```
 
-Every set in the formula follows one rule: **empty = unconstrained** (`model.Input`
-empty = any modality; empty `MIMEs`/`Sources`/`Roles` = allow all). A
-protocol/model that allows nothing declares a non-empty set that matches nothing;
-an empty set never silently means "none".
+Every *set* in the formula follows one rule: **empty = unconstrained** (`model.Input`
+empty = any modality; empty `MIMEs`/`Sources`/`Roles` = allow all), and a nil `model.Media`
+descriptor = "no capability gate". A protocol/model that allows nothing declares a
+non-empty set that matches nothing; an empty set never silently means "none".
 
 **Consequence for unknown models.** Empty `Input` is **not** "text-only" — it is
 "no modality gate", so protocol-supported media is sent even if the model does not
@@ -701,44 +788,46 @@ is sent and the provider is the authority — on rejection the turn fails
 (`session.next.step.failed`) and `DropErroredTurns` (default on in both commands)
 excludes that turn from later contexts so the session is not wedged.
 
-Real source transitions are one-directional:
+Real source transitions the SDK performs itself, via a host:
 
 | transition | needs | feasible |
 |---|---|---|
-| inline → file | `MediaUploader` | yes (adapt) |
+| inline → file | the provider's `MediaUploader` | yes (upload) |
+| inline → url | the (provider-independent) `MediaStore` | yes (upload) |
 | file → inline | fetch content | no (SDK never fetches) |
-| url → inline | fetch content | no |
-| any → url | hosting | no |
+| url → inline | fetch content | no (SDK never fetches) |
 
-So: use the declared source if feasible; else, if it is `inline` and an uploader
-is available and `file` is feasible, upload and re-encode; else omit with a
-`reason` and publish `session.next.attachment.omitted`. The SDK never reads a path
-or fetches a URL.
+So: with a delivery policy (§4.12) pick the first feasible source — inline as-is, else a
+host-produced `url`/`file`; without a policy, use the declared source if feasible, else adapt
+`inline → file` when the provider's uploader is present, else omit with a `reason` and publish
+`session.next.attachment.omitted`. The SDK never reads a path and never fetches a URL; when it
+*produces* a url it is the `MediaStore` that uploaded the bytes (the provider does the fetching).
 
 **Choosing the source and encoding — config declares capability, not method.**
 The provider catalog does **not** pick the transport; it declares which sources
-are accepted (`Sources`). The *encodings* belong to the **protocol profile**
+(**per modality**) are accepted. The *encodings* belong to the **protocol profile**
 (§4.10 below), not the catalog. The method is chosen per attachment:
 
-1. **The input declares `Source`** — bytes → `inline`, a public link → `url`, an
-   uploaded id → `file` (URI scheme is only a fallback: `data:`→inline,
-   `http(s)://`→url; explicit wins). The SDK never guesses, never fetches, never
-   reads a path.
-2. **The model ∩ protocol descriptors filter it.** A declared source outside the
-   intersection is *adapted* (only `inline → file`, via a `MediaUploader`) or
-   omitted with a `reason`. No size/count cap is applied (§4.5).
+1. **The source is chosen** — by the input, or by the operator delivery policy (§4.12). The
+   input declares `Source` (bytes → `inline`, a public link → `url`, an uploaded id → `file`;
+   the URI scheme is only a fallback: `data:`→inline, `http(s)://`→url; explicit wins); the
+   policy may instead have a **host** *produce* a non-inline source — `url` via the `MediaStore`,
+   `file` via the provider's `MediaUploader`. The SDK never guesses, never fetches, never reads a path.
+2. **The model ∩ protocol descriptors filter it.** A source outside the intersection is either
+   *hosted* into a feasible one (`inline → url`/`file`, via the matching host) or omitted with a
+   `reason`. No size/count cap is applied (§4.5).
 3. **Among the encodings of a feasible `(modality, source)`,** the profile's
    ordered list picks the **first** match. This is why DeepSeek image `inline` may
    be a data URL *or* `file`+`file_data`, and vLLM audio `inline` may be
    `input_audio` or `audio_url` — the protocol's fixed order decides, with **no
    per-attachment override** (add one only when a real caller needs it).
 
-Concretely: a DeepSeek entry says `sources: [inline, url, file]` — whether a given
-image travels as a data URL, an external URL or a `file_id` follows from how the
-attachment arrived (and its size); a vLLM entry says `sources: [inline, url]`, so a
-`file`-declared part is omitted (no Files API) while inline/url lower to
-`image_url`/`input_audio`/`video_url`. The user picks the *source* by how they
-supply the media; the *encoding* is the protocol's fixed order.
+Concretely: a DeepSeek entry accepts, for **images**, `{inline, url, file}` (audio/video/file:
+none) — whether a given image travels as a data URL, a url or a `file_id` follows from the input
+or the policy; a vLLM entry accepts, for image/audio/video, `{inline, url}` — a `file_id` cannot be
+sent, but the same bytes can be **hosted as a url** (the `MediaStore`) and lowered to
+`image_url`/`input_audio`/`video_url`. The *source* is chosen by the input or the policy; the
+*encoding* is the protocol's fixed order.
 
 **Handoff.** The planner resolves the final `Source` and writes it back onto the
 `MediaPart`; the protocol's lowering reads **only** that resolved value and never
@@ -758,13 +847,14 @@ descriptor; there is **no** server-wide capability value. The planner is evaluat
 on the **target session's** model (`mediaPolicyForModel(model, agent)`), which is
 what lets a text-only main model and a multimodal model coexist.
 
-**Provider hooks are keyed by provider — {M12}.** A catalog may span providers,
-only some of which have a Files API, so the uploader resolves per provider id,
-mirroring `Credentials(providerID)`:
+**Host resolution — {M12}.** The two hosts resolve differently (Axis 3, {M17}): the
+**provider-independent** `MediaStore` is **one per client** (it does not care which provider
+consumes the url), while the **provider-bound** `MediaUploader` resolves **per provider id**,
+mirroring `Credentials(providerID)` — some providers have a Files API, some (vLLM) have none:
 
 ```go
-// ClientOptions.MediaUploader: nil, or a per-provider resolver.
-func(providerID schema.ProviderID) MediaUploader   // returning nil = no file API
+ClientOptions.MediaStore     MediaStore                                     // nil = cannot self-host a url
+ClientOptions.MediaUploader  func(providerID schema.ProviderID) MediaUploader // nil = no Files API
 ```
 
 **Extension recipes**
@@ -775,7 +865,8 @@ func(providerID schema.ProviderID) MediaUploader   // returning nil = no file AP
 | a new modality (e.g. `pdf`) | `MediaModality` mapping + protocol MIME lists | small code |
 | a provider extending an existing protocol (e.g. vLLM `video_url`) | one `MediaEncodingProfile` (+ maybe one `BlockKind` encoder) + registry entry | data / small code |
 | a new wire protocol | one protocol file (lowering + body schema) + registry entry | code |
-| a new provider upload API | one `MediaUploader` impl, host-injected | code/host |
+| a new provider Files API | one `MediaUploader` impl (per provider), host-injected | code/host |
+| a new object-storage backend (S3/COS/nginx → url) | one `MediaStore` impl (per client), host-injected | code/host |
 | a new provider declarative quirk | config (headers/body/path/variant) | data |
 | a new source kind (e.g. base64 chunking) | enum + descriptor `Sources` + resolver branch | code |
 
@@ -797,16 +888,16 @@ omissions/rejections.
 - Capability: `ClientOptions.ModelInfo(id).Capabilities.Media.Sources`;
   `Credentials(providerID)`; new `ClientOptions.MediaUploader(providerID)`.
 - **Outcomes (new).** Add a high-level `AttachmentOmitted` event
-  (`Name`, `MIME`, `Reason`) to `events.go` — today the event list has **no** such
+  (`Name`, `MIME`, `Reason`, `Detail` — a fixable hint such as the accepted size limit) to `events.go` — today the event list has **no** such
   event, so a Go host cannot perceive an omission (or its new `reason`) without
   reading durable rows.
 - **Tool authors.** `core/tool.FileContent` (the tool-facing type, `tool.go`) gains
   `Source`/`FileID` too — not only `schema.ToolFileContent` — so a tool can return
   audio/video/URL media.
-- **`MediaRef` contract.** Carries an optional expiry (so the content-hash cache can
+- **`Reference` contract.** Carries an optional expiry (so the content-hash cache can
   evict and re-upload), and the resolved ref is **persisted** on the message (as
-  `PromptFileAttachment.FileID`) so a rebuilt turn or a restart reuses it instead
-  of re-uploading.
+  `PromptFileAttachment.FileID` for `file`, or `URI` for `url`) so a rebuilt turn or a
+  restart reuses it instead of re-uploading.
 
 **cmd/agentserve (HTTP/SSE)**
 - Config: the `models:` catalog (in `serveconfig`) with per-entry
@@ -818,32 +909,36 @@ omissions/rejections.
 - **New `GET /api/model`** (alongside `/api/agent|skill|tool`, `server/server.go`):
   lists catalog ids with protocol, modalities and accepted sources, so a caller
   knows what it may send.
-- **Large media / `file` source — expose an upload endpoint.** Add
-  `POST /api/session/{id}/file` backed by the host `MediaUploader` for the
-  session's model provider; it returns the resolved ref (`fileId`), which the
-  caller then sends as `files: [{source:"file", fileId:"…"}]`. A `file` ref is
-  **provider-bound**: if the session's model/provider changes, the caller must
-  re-upload (a mismatch surfaces as a `provider_error`). `inline`/`url` remain
-  available without uploading.
+- **Large media / non-inline source — expose an upload endpoint.** Add
+  `POST /api/session/{id}/file` backed by the host `MediaUploader` ({M17}) for the
+  session's model provider; it returns the resolved ref (a `file_id` **or** an
+  operator-hosted url), which the caller then sends as
+  `files: [{source:"file", fileId:"…"}]` / `[{source:"url", uri:"…"}]`. A provider
+  `file_id` is **provider-bound**: if the session's model/provider changes, the
+  caller must re-upload (a mismatch fails the turn at the provider); an
+  object-hosted url is not. `inline`/`url` remain available without uploading.
 - Omission is visible via the existing SSE `/api/session/{id}/event`; ensure
   `reason` is in the payload.
 
-**cmd/a2aserve (A2A)**
-- Config: `models:` catalog + `inboundMedia: spool | inline`.
+**cmd/a2aserve (A2A)** (see §4.13 / {M18} for the file-exchange data plane)
+- Config: `models:` catalog + `inboundMedia: spool | inline` + a `storage` backend.
 - Inbound: `{M4b}` maps `fileWithBytes` → `inline`, `fileWithUri` → `url`, admitted
   as `MessageOptions.Files`; **delivery to the model then follows the operator policy
-  (`{M16}` §4.12)** — the same engine HTTP uses.
+  (`{M16}` §4.12)** — the same engine HTTP uses. With a `storage` store (§4.13), a peer
+  may instead upload out-of-band and send a URI we read back locally.
 - **AgentCard.** `inputModes`/`outputModes` are **derived from the agent's model
   media capabilities** (true → `text/plain`; image/audio/video → the protocol's
   MIME sets), replacing the fixed text+image `DefaultInputModes`
-  (`a2a/server/card.go`); explicit card config overrides.
+  (`a2a/server/card.go`); explicit card config overrides. The **storage extension**
+  ({M18}) advertises the ingest contract.
 - **Outbound** (SDK as A2A client): `inline` → `fileWithBytes`, `url` →
-  `fileWithUri`. A provider `file` ref is **omitted with a reason** — it names
-  *our* provider's object and is not portable across A2A (the remote agent has no
-  access to it); a caller that must forward such media resolves it to inline/url
-  first.
-- **Omission.** Map `session.next.attachment.omitted` onto an A2A event/status so a
-  remote caller learns media was dropped (`a2aEventFrom` does not map it today).
+  `fileWithUri`; with a peer that advertises ingestion, large files are uploaded to the
+  peer's target and sent by reference (§4.13). A provider `file` ref is **omitted with a
+  reason** — it names *our* provider's object and is not portable across A2A (the remote
+  agent has no access to it); a caller that must forward such media resolves it to
+  inline/url first.
+- **Omission.** A dropped attachment reaches the remote caller as an A2A status/notice
+  (`a2aEventFrom` maps the SDK `AttachmentOmitted` event → `server.EventNotice`).
 
 **Cross-surface invariant (3 verbs).** Every surface must be able to **attach**,
 **advertise** (the target model's modalities/sources), and **report** (typed
@@ -873,14 +968,19 @@ the model accepts:
 
 ```yaml
 media:
-  inlineLimitBytes: 262144          # <= this: inline
-  prefer: [file, inline]            # first feasible source the policy may pick (url is caller-only)
-  upload: true                      # large media -> provider Files API (needs an uploader)
-  downsample: true                  # else shrink to fit the inline limit
+  inlineLimitBytes:                 # per-modality size budget (raw bytes); over it cannot be inlined
+    default: 262144                 # a bare number sets every modality
+    video: 2097152
+  prefer: [file, inline]            # order of wire forms the policy attempts: inline | url | file
+  upload: true                      # allow producing a non-inline form: url via the MediaStore, file via the provider's Files API
+  downsample: true                  # over budget -> shrink first (images in-process; audio/video via the host ffmpeg hook), whatever source is picked next
   spool: { dir: "{Root}/data/spool" }   # last resort: keep on disk (NEVER the workspace),
                                         # referenced by path
-  fetchURL: true                    # allow a caller-supplied url source (the provider fetches it)
-  maxBytes: 52428800                # hard skip above this (noted, not silent)
+  fetchURL: true                    # accept a caller-supplied url (the provider fetches it)
+  maxBytes:                         # per-modality hard ceiling (skipped above, with a reason)
+    default: 67108864
+    image: 33554432
+    video: 268435456
 ```
 
 `spool.dir` is the last-resort disk location — a managed directory under `{Root}`, **never the
@@ -888,41 +988,103 @@ workspace** (which may be a read-only shared source); the A2A `inboundMedia: spo
 (`DESIGN-A2A` §4.2) uses the same mechanism.
 
 **Algorithm (per inbound attachment).**
-- **Reference-only (the caller gave a `file_id`, or a `url`):** a `file_id` is honored **as-is**;
-  a `url` is honored **as-is only when `fetchURL` is allowed**, else omitted/spooled. Neither is
-  fetched, downsampled, or re-uploaded by the SDK (`{M10}`).
-- **Byte-backed (an `inline` payload, or a raw A2A part):** if the caller declared a source,
-  honor it when feasible; otherwise pick the **first feasible** `prefer` entry — `file` (needs
-  protocol + `upload` + an uploader) or `inline` (size ≤ limit, or a successful `downsample`);
-  if none → **spool**, else **omit with a typed reason**.
+- **Reference-only (the input already carries a `file_id` or url):** a `file_id` is honored
+  **as-is**; a **caller-supplied** url is honored **as-is only when `fetchURL` is allowed**, else
+  omitted/spooled. Neither is fetched, downsampled, or re-uploaded by the SDK (`{M10}`).
+- **Byte-backed (an `inline` payload, or a raw A2A part):** when the payload is over
+  `inlineLimitBytes` and `downsample` is on, it is **shrunk first** (independent of `prefer`), so the
+  budget holds whichever source is picked next. Then: if the caller declared a source, honor it when
+  feasible; otherwise pick the **first feasible** `prefer` entry — `inline` (payload ≤ limit), `url`
+  (needs the `MediaStore` + a protocol that emits a `url` block), or `file` (needs the provider's
+  `MediaUploader` + `upload` + a protocol that emits a `file` block); if none → **spool**, else
+  **omit with a typed reason**.
 
-`url` is **caller-only**: the SDK does not host a URL and never turns bytes into a `url`, so
-`url` is not a `prefer` target. Never drop silently.
+`url` is **no longer caller-only** ({M17}, §4.10 Axis 3): an **operator-hosted** url (via the
+provider-independent `MediaStore`) is valid — the only way to reach a provider that fetches urls
+(vLLM) — and is provider-agnostic; a **caller-supplied** url stays gated by `fetchURL`. Never drop
+silently.
 
 **Downsample.**
+- Applies whenever a byte-backed payload exceeds its modality's `inlineLimitBytes` and `downsample` is on — it is
+  **not** tied to `prefer`: a `file` upload receives the shrunk bytes too (set `downsample: false`
+  to upload the original). With `inlineLimitBytes` unset/0 there is no budget, so nothing is shrunk.
 - **Images** are shrunk **inside the SDK, in pure Go** — reuse `core.NewImage` (`golang.org/x/image`
   decode/resize + PNG/JPEG re-encode, no external tool).
 - **Audio/video** need an external transcoder (Go has no AV codecs), so they go through a **host
   hook**; the default wiring shells out to **`ffmpeg`** when it is on `PATH`. It is **soft-fail**:
-  if the tool is missing, or the input is too large for it, the media is left as-is and the
-  algorithm falls through to the next `prefer` entry / spool. `ffmpeg` stays out of core.
+  if the tool is missing, or the input is too large for it, the media is left at full size (still
+  bounded by `inlineLimitBytes`/`maxBytes`). `ffmpeg` stays out of core.
 
-**Validation.** `prefer` may contain `file | inline` (a `url` is caller-only and never a
-`prefer` target); any unknown name is a **config error** at load. An entry infeasible for the
-current model/protocol is **skipped** — `prefer` is an *order of attempts*, not a guarantee, and
+**Validation.** `prefer` may contain `inline | url | file`; any unknown name is a **config
+error** at load. An entry infeasible for the current model / protocol / host is **skipped** —
+`prefer` is an *order of attempts*, not a guarantee, and
 it is server-level (it spans several
 models and the protocol narrows further), so it is **not** a subset of any model's `sources`. A
 deployment that *requires* a source (`require`, fail-closed) is a separate switch, not `prefer`.
 
 **Safety ({M10}).** The SDK still never *guesses*, *fetches*, or *reads a path* — the **operator**
-declares the permissions (`upload`, `fetchURL`, `spool`). With `media:` unset, behavior is
-unchanged (inline-first + caller-declared source) → backward compatible.
+declares the capabilities (hosting via `upload`: the `MediaStore` for urls, the provider
+`MediaUploader` for file refs; `fetchURL` for caller-supplied urls; `spool`). The spool dir is
+read-allowed for the agent's tools, and audio/video downsampling goes through the host's
+`ffmpeg` hook (images are shrunk in process). With `media:` unset, behavior is unchanged
+(inline-first + caller-declared source) → backward compatible.
 
 **Scope.** HTTP and A2A inbound feed the **same** engine. The A2A `inboundMedia: spool | inline`
-is retained as the fallback; source selection is governed by `media.prefer`. The A2A card
-advertises media *types* only (standard A2A has no source field), so the accepted sources are
-documented, not card-advertised. Outbound A2A is unchanged (§4.11: a provider `file` ref is
-omitted).
+is retained as the fallback; source selection is governed by `media.prefer`. A2A capability and
+file exchange are **card-advertised** (§4.13) — standard `inputModes`/`outputModes` for media types,
+plus a storage extension for the ingest contract; outbound A2A uses that exchange too.
+
+### 4.13 A2A file exchange and AgentCard projection — **{M18}**
+
+**Why.** An A2A `FilePart` is either inline bytes (`FileWithBytes`) or a URI (`FileWithUri`). A2A
+standardizes the *shapes* but **not the policy** — when to inline, where a reference points, how it
+is reachable/authorized. Large media inline is impractical (base64 +33%, whole-message buffering,
+undisclosed server caps; video/audio often cannot be returned at all). **Any A2A client discovers a
+server's capabilities from its AgentCard** (that is the standard), so the card is the single
+discovery surface — and our capability model **projects onto it**.
+
+**Card projection (one model → the card).** The agent's per-modality `{inline,url,file}` capability
+(Axis 1 ∩ Axis 2) plus the `MediaStore` config project deterministically:
+
+| internal | card field |
+|---|---|
+| media types the agent can receive / emit | standard `defaultInputModes` / `defaultOutputModes` |
+| the ingest capability (`schemes`, `mediaTypes`, `maxInlineBytes`, `maxBytes`, `modes`) | `capabilities.extensions[].params` (a **storage extension**) |
+
+A2A has **no** standard field for sources (`inline`/`url`/`file`) and **no** upload API, so the
+file-exchange contract (including "large files go by reference") is carried by the extension. A
+client that ignores it falls back to the A2A baseline (inline bytes); one that supports it reads the
+advertised target and modes.
+
+**Bidirectional data plane.** §4.10 Axis 3's provider-independent `MediaStore` (`Put`/`Get`/
+`Target`/`Reserve`) covers **our** side; the peer side is a scheme-keyed **sender-side uploader**:
+
+| edge | who writes | via | who reads |
+|---|---|---|---|
+| model edge ({M17}) | **we** | `MediaStore.Put` → url | the **provider** fetches |
+| A2A inbound | the **peer** | our advertised `Target`/`Reserve` | **we** `MediaStore.Get` → materialize |
+| A2A outbound | **we** | a sender uploader → the **peer's** advertised target | the **peer** |
+
+Delivery modes (receiver-driven): **D1 inline** (fallback), **D2 shared store** (a URL we/they read),
+**D3 brokered slot** (a per-file presigned target). **Not D4** (the sender publishing to its *own*
+store): it would force the receiver to reach the sender and pass its SSRF policy; receiver-driven
+avoids this. The provider-bound `MediaUploader` is **not** used here — a `file_id` is meaningless to a
+peer.
+
+**Inbound URI resolution.** A `FileWithUri` that names **our** `MediaStore` is read back locally (`Get`),
+equivalent to spooling; a URI pointing at a **peer's external store** is a `url` source the model
+provider fetches (subject to `fetchURL` / the provider's SSRF policy). An unrecognized scheme is
+omitted with a reason.
+
+**CLI materialization.** A reference never enters prompt text: `Get` writes the bytes into a managed
+directory and the CLI receives a **local path** (its `file_args`/`image_args`, or the spool note) —
+the model gets a handle, not the bytes. This is what keeps the coding CLIs (CodeBuddy / Codex /
+Claude CLI, fronted as A2A agents) compatible: they consume local paths.
+
+**Ownership.** SDK: the `MediaStore`/`MediaUploader` interfaces, the A2A inbound/outbound hooks, and
+the **card projection rule** (`pkg/a2a/server`). agentd: the storage backends (`http`/`local`/`s3`/`cos`; S3-compatible covers AWS S3 / MinIO / COS, and the native `cos` backend drives Tencent COS over its own SHA1-signed REST API), the card emission data, and the `PUT`/`GET`(Range) endpoints. A store's credential validates **both** writes and reads: `http` supports `none`/`basic`/`bearer` (plus a custom header) and optional signing via nginx secure_link (`presignSecret`) or an external signer (`presignURL`); `s3`/`cos` are signed with their own scheme, or **anonymous** when no credentials are configured (public bucket). A **secured** A2A ingest endpoint is authenticated by the server's bearer, which the outbound client sends on its ingest uploads too. The card field names follow an
+A2A **storage extension** contract (modeled on harbor's `extensions/storage.md`; a concrete schema is
+to be written alongside this doc).
 
 ## 5. What does **not** change
 - `llmschema.MediaPart` / `schema.PromptFileAttachment` stay wire-generic; {M7}
@@ -955,6 +1117,9 @@ The gate itself is refactored from three scattered checks into one planner
 | P8 | {M8}: image `detail` option. |
 | P9 | {M6b}/{M6c}: the subagent delivery path (read-tool media, or task-tool attachments). |
 | P10 | {M15} consumer surfaces (§4.11): SDK `AttachmentOmitted` event + `core/tool.FileContent`; agentserve `GET /api/model`; a2aserve model-derived card modes + omission mapping + outbound `Source`. |
+| P11 | {M16} operator delivery policy (§4.12): `core.MediaPolicy` on `ClientOptions` + agentd `servers[].media` (source selection `prefer` / `inlineLimitBytes` / `upload` / `fetchURL` / `maxBytes`, image downsample, spool last resort); omits with typed `too_large` / `url_not_allowed` reasons. |
+| P12 | {M17} reference hosting (§4.10 Axis 3): **two hosts** — provider-independent `MediaStore` (object storage → url) and provider-bound `MediaUploader(providerID)` (Files API → file ref), both returning `Reference{Source, Value, ExpiresAt}`; **per-modality capability** (Axis 1); `url` allowed in `prefer` (url→store, file→uploader); agentd `storage` + per-provider `mediaUpload`; honor `ExpiresAt` for cache eviction. |
+| P13 | {M18} A2A file exchange (§4.13): broaden `MediaStore` with `Get`/`Target`/`Reserve`; project capability onto the **AgentCard** (standard modes + a storage extension); agentd storage (**`http`**/**`local`** backends) + `PUT`/`GET(Range)` ingest endpoints; inbound `FileWithUri` resolution + materialization; **A2A outbound** (upload to a peer's advertised target); backends `http`/`local`/`s3`; the card **`broker`** mode. **Done.** |
 
 Phases are **implementation order, not scope**: every phase is required for the
 full capability — there is no MVP cut. P1–P3 stand up the pipeline and the
@@ -1099,7 +1264,7 @@ The stub asserts the exact `MediaPart` (MIME + source + base64) that reaches
 ### 7.4 Unit and other
 - **Planner ({M13})**: table tests over `(modality, source, role, size) × model
   descriptor × protocol descriptor` asserting `Encode` / `Upload` / `Omit(reason)`;
-  adaptation is only `inline → file`; source defaults from the URI.
+  adaptation is only `inline → file`/`url` (via a host); source defaults from the URI.
 - **Single source of truth**: a test that each protocol's lowering accepts exactly
   the MIME/source set its `ProtocolMediaSupport` declares (and `body_schema.go`
   covers it), so the gate and lowering cannot drift.
@@ -1150,7 +1315,8 @@ exact request body.
 4. **`read` tool media — in scope (P9):** it is the {M6b} subagent-delivery
    enabler, not optional.
 5. **Uploader — expose `MediaUploader`** ({M7a}/{M12}); the host implements it, the
-   SDK calls it during `inline → file` adaptation.
+   SDK calls it during adaptation to produce a non-inline ref (`inline → file`/`url`,
+   {M17}).
 6. **Delivery — both paths in scope:** the session's own model ({M6a}) and the
    subagent path ({M6b}/{M6c}) (§4.6).
 7. **`detail` — per-attachment**; unset = provider default; ignored where
@@ -1160,8 +1326,9 @@ exact request body.
 9. **Back-compat — additive `Source`/`FileID`; omission event gains `reason`**
    (additive, durable version bump).
 10. **Caps — do not intercept.** The SDK enforces **no** count/size caps; the
-    provider is the authority and its rejection surfaces as a typed
-    `provider_error`. Consequence: the current `ValidateMedia` size bound is
+    provider is the authority and its rejection **fails the turn**
+    (`session.next.step.failed`, which `DropErroredTurns` excludes from later
+    contexts). Consequence: the current `ValidateMedia` size bound is
     revisited — keep only base64 well-formedness plus a memory-safety bound, and
     stop omitting on a media-size cap.
 11. **Cloud E2E — yes.** E2E runs the real providers with **whatever credentials
@@ -1171,10 +1338,10 @@ exact request body.
 12. **Upload caching — SDK-side.** Dedup by content hash (`provider + hash → ref`,
     expiry-aware); the host only performs the upload. `MediaUploader` stays
     idempotent.
-13. **`MediaRef` expiry + ref persistence.** `MediaRef` carries an optional expiry
+13. **`Reference` expiry + ref persistence.** `Reference` carries an optional expiry
     for the dedup cache; the resolved ref is persisted on the message
-    (`PromptFileAttachment.FileID`) so rebuilt turns / restarts reuse it instead of
-    re-uploading.
+    (`PromptFileAttachment.FileID` for `file`, `URI` for `url`) so rebuilt turns /
+    restarts reuse it instead of re-uploading.
 14. **Consumer surfaces — all three (§4.11).** SDK: an `AttachmentOmitted` event +
     `Source`/`FileID` on `core/tool.FileContent`. agentserve: `GET /api/model` and a
     config-file-only catalog. a2aserve: model-derived card modes, omission mapping,
@@ -1183,19 +1350,46 @@ exact request body.
     `POST /api/session/{id}/file` (host `MediaUploader`) so HTTP callers can use the
     `file` source (provider-bound; re-upload on provider change). a2aserve outbound
     maps `inline`→`fileWithBytes`, `url`→`fileWithUri`, and **omits** a provider
-    `file` ref (not portable across A2A).
+    `file` ref (not portable across A2A); with a peer that advertises ingestion, large
+    files go by reference via the {M18} exchange.
 
-All design decisions are resolved. Remaining choices are **test tooling**, not
-design — see §7.5.
+16. **Reference hosting — two hosts, one provider-independent ({M17}, §4.10 Axis 3).** A non-inline
+    form comes from a host returning `Reference{Source, Value, ExpiresAt}`: the
+    **provider-independent `MediaStore`** (object storage → `url`; one per client, reused across
+    providers, since a provider does not care where a url is hosted) and the **provider-bound
+    `MediaUploader(providerID)`** (its Files API → `file_id`/`fileUri`). `url` is **no longer
+    caller-only** — an operator-hosted url is valid (the only way to reach a url-fetching provider
+    such as vLLM); a caller-supplied url stays gated by `fetchURL`. Which host a form uses is fixed
+    (`url`→store, `file`→provider uploader), so `prefer` stays in wire forms. Capability is **per
+    modality** (Axis 1): DeepSeek image `{inline,url,file}`, audio/video/file none. Lifecycle belongs
+    to the host (`ExpiresAt`); the SDK only evicts its upload cache. The produced form must match a
+    protocol block (Axis 2); a mismatch falls through to the next option.
 
-**Architecture (decided):** the **source is declared by the input** and feasibility
-is `model ∩ protocol` ({M10}); capabilities are **per model at every layer**
-({M11}); provider hooks are **keyed by provider id** ({M12}); a new model is data
+17. **A2A file exchange + AgentCard projection ({M18}, §4.13).** Any A2A client discovers a server
+    **from its AgentCard** (the standard); our per-modality capability model **projects onto it** —
+    standard `inputModes`/`outputModes` for media types, plus a **storage extension** carrying the
+    ingest contract (`schemes`/`mediaTypes`/`maxInlineBytes`/`maxBytes`/`modes`), since A2A has no
+    source field or upload API. The **same provider-independent `MediaStore`** gains `Get`/`Target`/
+    `Reserve` and serves the A2A edge bidirectionally (receiver-driven D1 inline / D2 shared store /
+    D3 brokered slot; **not D4**). An inbound `FileWithUri` naming our store is read back locally
+    (spool-equivalent); a peer's external url is a `url` source (SSRF/`fetchURL`). References
+    materialize to **local paths** for the CLI; the provider-bound `MediaUploader` is not used here.
+
+All design decisions are resolved. Remaining choices are **test tooling** (§7.5).
+
+**Architecture (decided):** the **source** is declared by the input, chosen by the operator
+policy, or **produced by a host** (upload → `file_id`/url), and feasibility is
+`model ∩ protocol` ({M10}); capabilities are **per model at every layer**
+({M11}); reference hosts are **two** — a provider-independent `MediaStore` for urls and a
+per-provider `MediaUploader` for file refs ({M12}); a new model is data
 and a new protocol is one file + a registry entry, all decided by **one planner**
 over a single canonical media value ({M13}); a protocol is a **factory
-parameterized by an encoding profile** ({M14}). DeepSeek's vision / Files API facts
-(three sources, 48/32/64 MiB, `file_data`, the Anthropic beta header) are confirmed
-against the current docs.
+parameterized by an encoding profile** ({M14}); `url` (self-hosted) and `file` (provider Files
+API) are **two hosts, one of them provider-independent** ({M17}); capability is **per modality**;
+the A2A edge is a **card-projected, bidirectional file exchange over the same `MediaStore`**
+({M18}). DeepSeek's vision / Files API facts
+(three sources, 48/32/64 MiB, `file_data`, the Anthropic beta header) and vLLM's
+url-fetching multimodal inputs are confirmed against the current docs.
 
 ## 9. Production requirements (industrial-grade)
 
@@ -1205,17 +1399,20 @@ the implementation must meet:
 - **Typed outcomes and observability.** Every media decision is one of
   `Encode`/`Upload`/`Omit(reason)` with a **typed reason**
   (`unsupported_type` | `unsupported_modality` | `unsupported_source` |
-  `unsupported_role` | `invalid_payload` | `too_large` | `provider_error`), emitted
-  on the durable omission event and surfaced in metrics. Errors carry no media
+  `unsupported_role` | `invalid_payload` | `too_large` | `url_not_allowed`), emitted
+  on the durable omission event and surfaced in metrics, with a **`detail`** hint where the
+  fix is concrete (e.g. `too_large` → `limit <N> bytes`). A **provider rejection** is not an
+  omission reason: it fails the turn (`session.next.step.failed`). Errors carry no media
   bytes or secrets (reuse the transport redaction).
 - **Security.** The SDK never fetches a URL and never reads a path from an
-  attachment ({M7}); provider-side URL fetch (SSRF) is the provider's concern
-  (documented server flags, e.g. vLLM `--allowed-media-domains`). A2A inbound
+  attachment ({M7}); when a host *produces* a url the bytes were uploaded by the host, and the
+  provider-side fetch (SSRF) is the provider's concern (documented server flags, e.g. vLLM
+  `--allowed-media-domains`, and operator-side reachability / presigning). A2A inbound
   spooling is confined to the SDK state root with sanitized names (no traversal). Size
   is bounded **before** decode; declared MIME is validated against the block's
   expectations (providers may sniff content).
 - **Limits — no interception.** The SDK enforces **no** count/size caps; the
-  provider is the authority and its reject surfaces as a typed `provider_error`.
+  provider is the authority and its reject fails the turn (`session.next.step.failed`).
   Keep only a **memory-safety bound** on decoded bytes (to avoid OOM), not a
   media-size policy. URL fetch timeouts are provider-side. *(Operator-declared thresholds per
   {M16} §4.12 — `inlineLimitBytes` / `maxBytes` — are a **declared policy**, not a hidden SDK

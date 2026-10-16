@@ -697,6 +697,10 @@ type ClientOptions struct {
     OutputLimit      int                       // override the model output budget (tokens); 0 uses ModelInfo's limit
     Credentials      CredentialProvider        // provider → secret (APIKey / AWS)
     LLM              route.LLMClient           // optional: inject a custom LLM client
+    MediaUploader    func(schema.ProviderID) schema.MediaUploader // provider-bound Files API uploader (→ file_id/fileUri)
+    MediaStore       schema.MediaStore         // provider-independent store (→ url); nil disables url hosting
+    MediaPolicy      *core.MediaPolicy         // operator-owned inbound media delivery policy (inline|url|file|spool; per-modality size limits); nil keeps caller-declared (DESIGN-MEDIA §4.12, {M16}/{M17})
+    MediaTranscode   func(core.MediaTranscodeRequest) (core.MediaTranscodeResult, bool) // audio/video downsample hook; images are shrunk in process
 
     // Tools and extensions
     Tools            []Tool                    // application-level tools
