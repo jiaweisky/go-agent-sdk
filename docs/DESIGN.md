@@ -37,11 +37,11 @@ Based on the above design, the first version (MVP) implements the following core
 | root package `agent` | `NewClient` / `CreateSession` / `Send` / `On` / `RegisterAgent` | Public API (implemented, see §11) |
 | `schema/` | Base types | JSON Schema, ID generation |
 
-### Not included (deferred to later versions)
+### Not included (out of scope or deferred)
 
-| Module | Reason for deferral |
+| Module | Reason |
 |---|---|
-| `lsp` tool | Not on the core path; to be added later |
+| `lsp` tool | Out of scope; not planned |
 | Provider facade (preset base URLs for OpenRouter / xAI / Azure / Cloudflare / GitHub Copilot / Google / Bedrock) | Protocols and facades are implemented; the `agent` layer uses `Protocol` + `ModelInfo`, and facades are only for callers using the `llm` package directly (see §5.4) |
 | `bash` advanced features (tree-sitter, arity, background tasks, progress stream) | See the TODO in `core/tool/bash.go` |
 | `edit` advanced features (fuzzy match, formatter, watcher, snapshot, LSP) | See the TODO in `core/tool/edit.go` |
@@ -244,7 +244,7 @@ go-agent-sdk/                            opencode TS
 
 > The above is only a **representative** tree, not the complete list (`schema/` has about 42 files, `core/` has many more modules).
 
-> Implemented: the module root package `agent` public API, the core/session main loop, 12 built-in tools + `task`, Skill, MCP, Plugin (narrowed), the Reference service. Not yet ported: the `lsp` tool.
+> Implemented: the module root package `agent` public API, the core/session main loop, 12 built-in tools + `task`, Skill, MCP, Plugin (narrowed), the Reference service. Deliberately not developed: the `lsp` tool (out of scope).
 
 > **A2A (Agent2Agent)**: a Go-specific capability (no TS counterpart); see `docs/DESIGN-A2A.md` for design and implementation; inbound/outbound, HITL, the `turn` first-class entity, and the Phase 5 productionization components have all landed.
 
@@ -569,7 +569,7 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 | Question | `question` | ✅ ported (`core/tool/question.go`) |
 | Skill | `skill` | ✅ ported (`core/tool/skill.go`) |
 | TodoWrite | `todowrite` | ✅ ported (`core/tool/todowrite.go`) |
-| LSP | `lsp` | to be ported (lives in the opencode v1 layer) |
+| LSP | `lsp` | not developed (out of scope; lives in the opencode v1 layer) |
 | ApplyPatch | `apply_patch` | ✅ ported (`core/tool/apply_patch.go`) |
 
 ## 8. MCP integration
