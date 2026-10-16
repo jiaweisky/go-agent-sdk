@@ -28,11 +28,13 @@ type ModelCapabilities struct {
 	Media  *ModelMediaCapability `json:"media,omitempty"`
 }
 
-// ModelMediaCapability is a model's media constraints: which sources it accepts
-// (inline, url, file). Input modalities stay in ModelCapabilities.Input; an empty
-// Input means "unconstrained", not "text only".
+// ModelMediaCapability is a model's media constraints: the wire forms it accepts,
+// **per modality**. Key the map by modality ("image"|"audio"|"video"|"file") and
+// list the forms it accepts ("inline"|"url"|"file"); an absent modality is not
+// accepted. Input modalities stay in ModelCapabilities.Input; an empty Input means
+// "unconstrained", not "text only", and a nil capability means "no gate".
 type ModelMediaCapability struct {
-	Sources []string `json:"sources,omitempty"`
+	Forms map[string][]string `json:"forms,omitempty"`
 }
 
 // ModelCostTier is one pricing tier.

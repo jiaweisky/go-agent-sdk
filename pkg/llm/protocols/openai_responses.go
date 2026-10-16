@@ -3,6 +3,7 @@ package protocols
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/internal/llm/protocols/utils"
@@ -28,6 +29,15 @@ type openaiResponsesInputImage struct {
 	ImageURL string  `json:"image_url,omitempty"`
 	FileID   *string `json:"file_id,omitempty"`
 	Detail   string  `json:"detail,omitempty"`
+}
+
+// openaiResponsesInputFile carries a document (pdf): a file_id, or inline bytes
+// as a data URL in file_data with a filename.
+type openaiResponsesInputFile struct {
+	Type     string  `json:"type"`
+	FileID   *string `json:"file_id,omitempty"`
+	Filename string  `json:"filename,omitempty"`
+	FileData string  `json:"file_data,omitempty"`
 }
 type openaiResponsesOutputText struct {
 	Type string `json:"type"`
@@ -281,9 +291,63 @@ func openaiResponsesLowerUserContent(part schema.ContentPart) (any, error) {
 	case schema.TextPart:
 		return openaiResponsesInputText{Type: "input_text", Text: p.Text}, nil
 	case schema.MediaPart:
-		return openaiResponsesLowerImage(p)
+		return openaiResponsesLowerMedia(p)
 	}
 	return nil, fmt.Errorf("OpenAI Responses user content only supports text and media")
+}
+
+// openaiResponsesDocumentMIMEs are the media types Responses carries in an
+// `input_file` block (pdf documents).
+var openaiResponsesDocumentMIMEs = []string{"application/pdf"}
+
+// openaiResponsesMediaMIMEs is every media type an OpenAI Responses message
+// carries (images + documents).
+func openaiResponsesMediaMIMEs() []string {
+	return append(append([]string{}, imageMIMEs...), openaiResponsesDocumentMIMEs...)
+}
+
+// openaiResponsesMediaMIMESet is the lookup set for the Responses descriptor.
+var openaiResponsesMediaMIMESet = mediaMIMESet(openaiResponsesMediaMIMEs())
+
+// openaiResponsesDocumentMIMESet is the set of Response document types that
+// reject a url source (input_file takes a file_id or inline data, not a url).
+var openaiResponsesDocumentMIMESet = mediaMIMESet(openaiResponsesDocumentMIMEs)
+
+// openaiResponsesLowerMedia lowers a media part to `input_image` (images) or
+// `input_file` (documents).
+func openaiResponsesLowerMedia(part schema.MediaPart) (any, error) {
+	if slices.Contains(openaiResponsesDocumentMIMEs, strings.ToLower(part.MediaType)) {
+		return openaiResponsesLowerDocument(part)
+	}
+	return openaiResponsesLowerImage(part)
+}
+
+// openaiResponsesLowerDocument lowers a document part: a file source becomes a
+// file_id, inline bytes become a file_data data URL with a filename.
+func openaiResponsesLowerDocument(part schema.MediaPart) (any, error) {
+	source := part.Source
+	if source == "" {
+		source = schema.MediaSourceInline
+	}
+	name := ""
+	if part.Filename != nil {
+		name = *part.Filename
+	}
+	switch source {
+	case schema.MediaSourceFile:
+		id, _ := part.Data.(string)
+		if strings.TrimSpace(id) == "" {
+			return nil, InvalidRequest("OpenAI Responses document file id is empty")
+		}
+		return openaiResponsesInputFile{Type: "input_file", FileID: &id}, nil
+	case schema.MediaSourceInline:
+		media, err := utils.ValidateMedia("OpenAI Responses", part, mediaMIMESet(openaiResponsesDocumentMIMEs))
+		if err != nil {
+			return nil, err
+		}
+		return openaiResponsesInputFile{Type: "input_file", Filename: name, FileData: media.DataURL}, nil
+	}
+	return nil, InvalidRequest("OpenAI Responses does not support a url document source")
 }
 
 // openaiResponsesLowerImage lowers an image part: inline bytes become a data
@@ -319,7 +383,7 @@ func openaiResponsesLowerToolResultContentItem(item schema.ToolContent) (any, er
 	case schema.ToolTextContent:
 		return openaiResponsesInputText{Type: "input_text", Text: v.Text}, nil
 	case schema.ToolFileContent:
-		return openaiResponsesLowerImage(schema.MediaPart{Type: "media", MediaType: v.Mime, Source: v.Source, Data: toolFileData(v), Filename: v.Name})
+		return openaiResponsesLowerMedia(schema.MediaPart{Type: "media", MediaType: v.Mime, Source: v.Source, Data: toolFileData(v), Filename: v.Name})
 	}
 	return openaiResponsesInputText{Type: "input_text", Text: fmt.Sprint(item)}, nil
 }

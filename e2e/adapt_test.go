@@ -22,10 +22,10 @@ type recordingUploader struct {
 	mu    sync.Mutex
 	calls int
 	data  []byte
-	ref   schema.MediaRef
+	ref   schema.Reference
 }
 
-func (u *recordingUploader) Upload(_ context.Context, media schema.MediaUpload) (schema.MediaRef, error) {
+func (u *recordingUploader) Upload(_ context.Context, media schema.MediaUpload) (schema.Reference, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.calls++
@@ -50,7 +50,7 @@ func TestGeminiFileSourceAdaptation(t *testing.T) {
 	shim := geminiShim(t, strings.TrimSuffix(baseURL, "/"))
 	defer shim.Close()
 
-	uploader := &recordingUploader{ref: schema.MediaRef{Source: "file", ID: "file://" + dir + "/s-l960.jpg"}}
+	uploader := &recordingUploader{ref: schema.Reference{Source: "file", Value: "file://" + dir + "/s-l960.jpg"}}
 	png := solidPNG(t, color.RGBA{R: 255, A: 255})
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Root:          t.TempDir(),
@@ -64,7 +64,7 @@ func TestGeminiFileSourceAdaptation(t *testing.T) {
 				return schema.ModelInfo{}, err
 			}
 			info.Capabilities.Input = []string{"text", "image"}
-			info.Capabilities.Media = &schema.ModelMediaCapability{Sources: []string{"file"}}
+			info.Capabilities.Media = &schema.ModelMediaCapability{Forms: map[string][]string{"image": {"file"}}}
 			return info, nil
 		},
 	})

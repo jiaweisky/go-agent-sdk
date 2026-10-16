@@ -30,6 +30,17 @@ type BedrockDocumentContent struct {
 	BedrockSource BedrockSource `json:"source"`
 }
 
+// VideoBlock is a Bedrock (Nova) video content block.
+type VideoBlock struct {
+	Video VideoContent `json:"video"`
+}
+
+// VideoContent is a Bedrock video payload.
+type VideoContent struct {
+	Format        string        `json:"format"`
+	BedrockSource BedrockSource `json:"source"`
+}
+
 // BedrockSource is a Bedrock media source: base64 bytes, or an S3 location.
 type BedrockSource struct {
 	Bytes      string             `json:"bytes,omitempty"`
@@ -59,6 +70,13 @@ var documentFormats = map[string]string{
 	"text/html":     "html",
 	"text/plain":    "txt",
 	"text/markdown": "md",
+}
+
+// videoFormats are the video types Bedrock (Nova) carries.
+var videoFormats = map[string]string{
+	"video/mp4":       "mp4",
+	"video/webm":      "webm",
+	"video/quicktime": "mov",
 }
 
 func documentBlock(part schema.MediaPart, format string, source BedrockSource) DocumentBlock {
@@ -92,14 +110,25 @@ func documentMIMESet() map[string]struct{} {
 	return m
 }
 
-// BedrockMediaMIMEs returns the MIME types Bedrock Converse can carry: images
-// and documents.
+func videoMIMESet() map[string]struct{} {
+	m := make(map[string]struct{}, len(videoFormats))
+	for k := range videoFormats {
+		m[k] = struct{}{}
+	}
+	return m
+}
+
+// BedrockMediaMIMEs returns the MIME types Bedrock Converse can carry: images,
+// documents, and (Nova) video.
 func BedrockMediaMIMEs() []string {
-	values := make([]string, 0, len(imageFormats)+len(documentFormats))
+	values := make([]string, 0, len(imageFormats)+len(documentFormats)+len(videoFormats))
 	for mime := range imageFormats {
 		values = append(values, mime)
 	}
 	for mime := range documentFormats {
+		values = append(values, mime)
+	}
+	for mime := range videoFormats {
 		values = append(values, mime)
 	}
 	return values
@@ -114,7 +143,8 @@ func BedrockLower(part schema.MediaPart) (any, error) {
 	}
 	imageFormat, isImage := imageFormats[mime]
 	docFormat, isDoc := documentFormats[mime]
-	if !isImage && !isDoc {
+	videoFormat, isVideo := videoFormats[mime]
+	if !isImage && !isDoc && !isVideo {
 		return nil, fmt.Errorf("Bedrock Converse does not support media type %s", part.MediaType)
 	}
 
@@ -124,28 +154,35 @@ func BedrockLower(part schema.MediaPart) (any, error) {
 		if strings.TrimSpace(uri) == "" {
 			return nil, fmt.Errorf("Bedrock Converse media reference is empty")
 		}
-		s3 := &BedrockS3Location{URI: uri}
-		if isImage {
-			return ImageBlock{Image: ImageContent{Format: imageFormat, BedrockSource: BedrockSource{S3Location: s3}}}, nil
+		ref := BedrockSource{S3Location: &BedrockS3Location{URI: uri}}
+		switch {
+		case isImage:
+			return ImageBlock{Image: ImageContent{Format: imageFormat, BedrockSource: ref}}, nil
+		case isVideo:
+			return VideoBlock{Video: VideoContent{Format: videoFormat, BedrockSource: ref}}, nil
+		default:
+			return documentBlock(part, docFormat, ref), nil
 		}
-		return documentBlock(part, docFormat, BedrockSource{S3Location: s3}), nil
 	}
 
-	if isImage {
+	switch {
+	case isImage:
 		media, err := ValidateMedia("Bedrock Converse", part, imageMIMESet())
 		if err != nil {
 			return nil, err
 		}
-		return ImageBlock{
-			Image: ImageContent{
-				Format:        imageFormat,
-				BedrockSource: BedrockSource{Bytes: media.Base64},
-			},
-		}, nil
+		return ImageBlock{Image: ImageContent{Format: imageFormat, BedrockSource: BedrockSource{Bytes: media.Base64}}}, nil
+	case isVideo:
+		media, err := ValidateMedia("Bedrock Converse", part, videoMIMESet())
+		if err != nil {
+			return nil, err
+		}
+		return VideoBlock{Video: VideoContent{Format: videoFormat, BedrockSource: BedrockSource{Bytes: media.Base64}}}, nil
+	default:
+		media, err := ValidateMedia("Bedrock Converse", part, documentMIMESet())
+		if err != nil {
+			return nil, err
+		}
+		return documentBlock(part, docFormat, BedrockSource{Bytes: media.Base64}), nil
 	}
-	media, err := ValidateMedia("Bedrock Converse", part, documentMIMESet())
-	if err != nil {
-		return nil, err
-	}
-	return documentBlock(part, docFormat, BedrockSource{Bytes: media.Base64}), nil
 }

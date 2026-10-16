@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
@@ -151,14 +152,15 @@ type modelView struct {
 	ModelBaseURL    string          `json:"modelBaseURL,omitempty"`
 	InputModalities []string        `json:"inputModalities,omitempty"`
 	Media           *mediaView      `json:"media,omitempty"`
+	Headers         []string        `json:"headers,omitempty"` // header names only; values are not returned
 	Credentials     credentialsView `json:"credentials"`
 	ContextLimit    int             `json:"contextLimit"`
 	OutputLimit     int             `json:"outputLimit"`
 }
 
 type mediaView struct {
-	Input   []string `json:"input,omitempty"`
-	Sources []string `json:"sources,omitempty"`
+	Input []string            `json:"input,omitempty"`
+	Forms map[string][]string `json:"forms,omitempty"`
 }
 
 type credentialsView struct {
@@ -189,6 +191,8 @@ type serverView struct {
 	Mount              string               `json:"mount,omitempty"`
 	Default            bool                 `json:"default,omitempty"`
 	MediaUpload        *mediaUploadView     `json:"mediaUpload,omitempty"`
+	Media              *inboundMediaView    `json:"media,omitempty"`
+	Storage            *storageView         `json:"storage,omitempty"`
 	MCP                []mcpView            `json:"mcp,omitempty"`
 	References         []referenceView      `json:"references,omitempty"`
 	InboundPermissions []permissionRuleView `json:"inboundPermissions,omitempty"`
@@ -205,9 +209,11 @@ type serverView struct {
 	SubscriberCapacity  int      `json:"subscriberCapacity,omitempty"`
 	PublicRoutes        []string `json:"publicRoutes,omitempty"`
 	CORS                []string `json:"cors,omitempty"`
+	MaxBodyBytes        int64    `json:"maxBodyBytes,omitempty"`
 	// A2A-only.
-	BaseURL      string `json:"baseURL,omitempty"`
-	InboundMedia string `json:"inboundMedia,omitempty"`
+	BaseURL      string              `json:"baseURL,omitempty"`
+	Cards        map[string]cardView `json:"cards,omitempty"`
+	InboundMedia string              `json:"inboundMedia,omitempty"`
 
 	KeepAlive string `json:"keepAlive,omitempty"`
 }
@@ -230,12 +236,104 @@ type sandboxView struct {
 }
 
 type mediaUploadView struct {
-	URL       string `json:"url,omitempty"`
-	IDField   string `json:"idField,omitempty"`
-	ExpiresIn int    `json:"expiresIn,omitempty"`
-	Header    secret `json:"header"`
-	Value     secret `json:"value"`
-	Fields    secret `json:"fields"`
+	URL          string `json:"url,omitempty"`
+	IDField      string `json:"idField,omitempty"`
+	ExpiresIn    int    `json:"expiresIn,omitempty"`
+	ExpiresAfter int    `json:"expiresAfter,omitempty"`
+	Header       secret `json:"header"`
+	Value        secret `json:"value"`
+	Fields       secret `json:"fields"`
+}
+
+type inboundMediaView struct {
+	InlineLimitBytes *mediaSizeLimitView `json:"inlineLimitBytes,omitempty"`
+	Prefer           []string            `json:"prefer,omitempty"`
+	Upload           bool                `json:"upload,omitempty"`
+	Downsample       bool                `json:"downsample,omitempty"`
+	SpoolDir         string              `json:"spoolDir,omitempty"`
+	FetchURL         bool                `json:"fetchURL,omitempty"`
+	MaxBytes         *mediaSizeLimitView `json:"maxBytes,omitempty"`
+}
+
+// mediaSizeLimitView is a per-modality byte budget. It mirrors
+// config.MediaSizeLimit with camelCase JSON names, and is omitted entirely when
+// no budget is configured.
+type mediaSizeLimitView struct {
+	Default int64 `json:"default,omitempty"`
+	Image   int64 `json:"image,omitempty"`
+	Audio   int64 `json:"audio,omitempty"`
+	Video   int64 `json:"video,omitempty"`
+	File    int64 `json:"file,omitempty"`
+}
+
+// storageView is the redacted media-store config. Credential-bearing URLs have
+// their userinfo stripped; every secret becomes a configured/redacted marker.
+type storageView struct {
+	Backend        string          `json:"backend,omitempty"`
+	URL            string          `json:"url,omitempty"`
+	Auth           string          `json:"auth,omitempty"`
+	Username       string          `json:"username,omitempty"`
+	Password       secret          `json:"password"`
+	Token          secret          `json:"token"`
+	Header         string          `json:"header,omitempty"`
+	Value          secret          `json:"value"`
+	PresignSecret  secret          `json:"presignSecret"`
+	PresignURL     string          `json:"presignURL,omitempty"`
+	PresignTTL     string          `json:"presignTTL,omitempty"`
+	Root           string          `json:"root,omitempty"`
+	ServeBaseURL   string          `json:"serveBaseURL,omitempty"`
+	S3             *s3StorageView  `json:"s3,omitempty"`
+	COS            *cosStorageView `json:"cos,omitempty"`
+	MediaTypes     []string        `json:"mediaTypes,omitempty"`
+	MaxInlineBytes int64           `json:"maxInlineBytes,omitempty"`
+	MaxBytes       int64           `json:"maxBytes,omitempty"`
+}
+
+type s3StorageView struct {
+	Endpoint   string `json:"endpoint,omitempty"`
+	Region     string `json:"region,omitempty"`
+	Bucket     string `json:"bucket,omitempty"`
+	AccessKey  secret `json:"accessKey"`
+	SecretKey  secret `json:"secretKey"`
+	PathStyle  bool   `json:"pathStyle,omitempty"`
+	PresignTTL string `json:"presignTTL,omitempty"`
+}
+
+type cosStorageView struct {
+	Region       string `json:"region,omitempty"`
+	Bucket       string `json:"bucket,omitempty"`
+	SecretID     secret `json:"secretID"`
+	SecretKey    secret `json:"secretKey"`
+	SessionToken secret `json:"sessionToken"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	PresignTTL   string `json:"presignTTL,omitempty"`
+}
+
+// cardView mirrors an operator-authored AgentCard override; cards carry no
+// secrets.
+type cardView struct {
+	Name             string        `json:"name,omitempty"`
+	Description      string        `json:"description,omitempty"`
+	Version          string        `json:"version,omitempty"`
+	DocumentationURL string        `json:"documentationUrl,omitempty"`
+	IconURL          string        `json:"iconUrl,omitempty"`
+	Provider         *providerView `json:"provider,omitempty"`
+	Skills           []skillView   `json:"skills,omitempty"`
+}
+
+type providerView struct {
+	Organization string `json:"organization,omitempty"`
+	URL          string `json:"url,omitempty"`
+}
+
+type skillView struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags,omitempty"`
+	Examples    []string `json:"examples,omitempty"`
+	InputModes  []string `json:"inputModes,omitempty"`
+	OutputModes []string `json:"outputModes,omitempty"`
 }
 
 type mcpView struct {
@@ -329,7 +427,14 @@ func modelViewOf(m config.ModelConfig) modelView {
 		Credentials:     credentialsView{APIKey: redact(m.Credentials.APIKey)},
 	}
 	if m.Media != nil {
-		v.Media = &mediaView{Input: m.Media.Input, Sources: m.Media.Sources}
+		v.Media = &mediaView{Input: m.Media.Input, Forms: m.Media.Forms}
+	}
+	if len(m.Headers) > 0 {
+		v.Headers = make([]string, 0, len(m.Headers))
+		for name := range m.Headers {
+			v.Headers = append(v.Headers, name)
+		}
+		sort.Strings(v.Headers)
 	}
 	if a := m.Credentials.AWS; a != nil {
 		v.Credentials.AWS = &awsView{
@@ -366,7 +471,9 @@ func serverViewOf(s config.Server) serverView {
 		SubscriberCapacity:  s.SubscriberCapacity,
 		PublicRoutes:        s.PublicRoutes,
 		CORS:                s.CORS,
+		MaxBodyBytes:        s.MaxBodyBytes,
 		BaseURL:             s.BaseURL,
+		Cards:               cardViews(s.Cards),
 		InboundMedia:        s.InboundMedia,
 		KeepAlive:           s.KeepAlive,
 		Auth:                authViewOf(s.Auth),
@@ -374,10 +481,102 @@ func serverViewOf(s config.Server) serverView {
 		Isolation:           isolationViewOf(s.Isolation),
 		Sandbox:             sandboxViewOf(s.Sandbox),
 		MediaUpload:         mediaUploadViewOf(s.MediaUpload),
+		Media:               inboundMediaViewOf(s.Media),
+		Storage:             storageViewOf(s.Storage),
 		MCP:                 mcpViews(s.MCP),
 		References:          referenceViews(s.References),
 		InboundPermissions:  permissionRuleViews(s.InboundPermissions),
 	}
+}
+
+func storageViewOf(s *config.StorageConfig) *storageView {
+	if s == nil {
+		return nil
+	}
+	return &storageView{
+		Backend:        s.Backend,
+		URL:            sanitizeURL(s.URL),
+		Auth:           s.Auth,
+		Username:       s.Username,
+		Password:       redact(s.Password),
+		Token:          redact(s.Token),
+		Header:         s.Header,
+		Value:          redact(s.Value),
+		PresignSecret:  redact(s.PresignSecret),
+		PresignURL:     sanitizeURL(s.PresignURL),
+		PresignTTL:     s.PresignTTL,
+		Root:           s.Root,
+		ServeBaseURL:   sanitizeURL(s.ServeBaseURL),
+		S3:             s3StorageViewOf(s.S3),
+		COS:            cosStorageViewOf(s.COS),
+		MediaTypes:     s.MediaTypes,
+		MaxInlineBytes: s.MaxInlineBytes,
+		MaxBytes:       s.MaxBytes,
+	}
+}
+
+func s3StorageViewOf(s *config.S3Config) *s3StorageView {
+	if s == nil {
+		return nil
+	}
+	return &s3StorageView{
+		Endpoint:   sanitizeURL(s.Endpoint),
+		Region:     s.Region,
+		Bucket:     s.Bucket,
+		AccessKey:  redact(s.AccessKey),
+		SecretKey:  redact(s.SecretKey),
+		PathStyle:  s.PathStyle,
+		PresignTTL: s.PresignTTL,
+	}
+}
+
+func cosStorageViewOf(c *config.COSConfig) *cosStorageView {
+	if c == nil {
+		return nil
+	}
+	return &cosStorageView{
+		Region:       c.Region,
+		Bucket:       c.Bucket,
+		SecretID:     redact(c.SecretID),
+		SecretKey:    redact(c.SecretKey),
+		SessionToken: redact(c.SessionToken),
+		Endpoint:     sanitizeURL(c.Endpoint),
+		PresignTTL:   c.PresignTTL,
+	}
+}
+
+func cardViews(cards map[string]config.CardConfig) map[string]cardView {
+	if len(cards) == 0 {
+		return nil
+	}
+	views := make(map[string]cardView, len(cards))
+	for agent, card := range cards {
+		views[agent] = cardViewOf(card)
+	}
+	return views
+}
+
+func cardViewOf(c config.CardConfig) cardView {
+	v := cardView{
+		Name:             c.Name,
+		Description:      c.Description,
+		Version:          c.Version,
+		DocumentationURL: sanitizeURL(c.DocumentationURL),
+		IconURL:          sanitizeURL(c.IconURL),
+	}
+	if c.Provider != nil {
+		v.Provider = &providerView{Organization: c.Provider.Organization, URL: sanitizeURL(c.Provider.URL)}
+	}
+	if len(c.Skills) > 0 {
+		v.Skills = make([]skillView, 0, len(c.Skills))
+		for _, s := range c.Skills {
+			v.Skills = append(v.Skills, skillView{
+				ID: s.ID, Name: s.Name, Description: s.Description,
+				Tags: s.Tags, Examples: s.Examples, InputModes: s.InputModes, OutputModes: s.OutputModes,
+			})
+		}
+	}
+	return v
 }
 
 func isolationViewOf(iso *config.IsolationConfig) *isolationView {
@@ -403,13 +602,40 @@ func mediaUploadViewOf(up *config.MediaUploadConfig) *mediaUploadView {
 		return nil
 	}
 	return &mediaUploadView{
-		URL:       sanitizeURL(up.URL),
-		IDField:   up.IDField,
-		ExpiresIn: up.ExpiresIn,
-		Header:    redact(up.Header),
-		Value:     redact(up.Value),
-		Fields:    redactSet(len(up.Fields) > 0),
+		URL:          sanitizeURL(up.URL),
+		IDField:      up.IDField,
+		ExpiresIn:    up.ExpiresIn,
+		ExpiresAfter: up.ExpiresAfter,
+		Header:       redact(up.Header),
+		Value:        redact(up.Value),
+		Fields:       redactSet(len(up.Fields) > 0),
 	}
+}
+
+func inboundMediaViewOf(m *config.InboundMediaConfig) *inboundMediaView {
+	if m == nil {
+		return nil
+	}
+	view := &inboundMediaView{
+		InlineLimitBytes: mediaSizeLimitViewOf(m.InlineLimitBytes),
+		Prefer:           m.Prefer,
+		Upload:           m.Upload,
+		Downsample:       m.Downsample,
+		FetchURL:         m.FetchURL,
+		MaxBytes:         mediaSizeLimitViewOf(m.MaxBytes),
+	}
+	if m.Spool != nil {
+		view.SpoolDir = m.Spool.Dir
+	}
+	return view
+}
+
+// mediaSizeLimitViewOf mirrors a media size budget, or nil when it is unset.
+func mediaSizeLimitViewOf(m config.MediaSizeLimit) *mediaSizeLimitView {
+	if m == (config.MediaSizeLimit{}) {
+		return nil
+	}
+	return &mediaSizeLimitView{Default: m.Default, Image: m.Image, Audio: m.Audio, Video: m.Video, File: m.File}
 }
 
 func tlsView(tls *config.TLS) *secret {

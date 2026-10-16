@@ -157,6 +157,8 @@ type ClientParams struct {
 	// Catalog resolves per-model metadata and credentials.
 	Catalog          Catalog
 	MediaUploader    func(schema.ProviderID) schema.MediaUploader
+	Media            *core.MediaPolicy
+	Store            schema.MediaStore
 	MCP              []agent.MCPConfig
 	References       map[string]core.ReferenceSource
 	SubagentDepth    int
@@ -180,6 +182,9 @@ func BuildClient(p ClientParams) (*agent.Client, error) {
 		ModelInfo:        p.Catalog.ModelInfo,
 		Credentials:      p.Catalog.Credentials,
 		MediaUploader:    p.MediaUploader,
+		MediaPolicy:      p.Media,
+		MediaStore:       p.Store,
+		MediaTranscode:   FFmpegTranscoder(),
 		MCP:              p.MCP,
 		References:       p.References,
 		DropErroredTurns: p.DropErroredTurns,

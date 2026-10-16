@@ -15,7 +15,10 @@ import (
 // declared roles.
 type mediaPolicy struct {
 	reason func(role, mime, source, data string) string
-	omit   func(messageID schema.MessageID, name, mime, reason string)
+	// detail adds a human hint (e.g. the accepted size limit) to the omission
+	// note and event for a reason it applies to. Nil omits it.
+	detail func(role, mime, source, data string) string
+	omit   func(messageID schema.MessageID, name, mime, reason, detail string)
 }
 
 // allows reports whether the model can carry a part in a role.
@@ -31,14 +34,17 @@ func (p mediaPolicy) omitNote(messageID schema.MessageID, name *string, role, mi
 	if name != nil && *name != "" {
 		value = *name
 	}
-	reason := ""
+	reason, detail := "", ""
 	if p.reason != nil {
 		reason = p.reason(role, mime, source, data)
 	}
-	if p.omit != nil {
-		p.omit(messageID, value, mime, reason)
+	if p.detail != nil {
+		detail = p.detail(role, mime, source, data)
 	}
-	return omittedMediaNote(value, mime, reason)
+	if p.omit != nil {
+		p.omit(messageID, value, mime, reason, detail)
+	}
+	return omittedMediaNote(value, mime, reason, detail)
 }
 
 // attachmentDecision is the resolved outcome for one file attachment: its
@@ -104,9 +110,16 @@ func llmMedia(file schema.PromptFileAttachment) llmschema.ContentPart {
 // omittedMediaNote replaces an attachment the target model cannot accept
 // (unsupported type/modality/source/role, or malformed payload), so the model
 // still learns something was attached instead of the turn failing.
-func omittedMediaNote(name, mime, reason string) string {
+func omittedMediaNote(name, mime, reason, detail string) string {
 	if name == "" {
 		name = mime
+	}
+	if detail != "" {
+		if reason == "" {
+			reason = detail
+		} else {
+			reason = reason + "; " + detail
+		}
 	}
 	if reason == "" {
 		return fmt.Sprintf("[attachment omitted: %s (%s); it could not be sent to the selected model]", name, mime)

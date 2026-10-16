@@ -55,6 +55,10 @@ var openaiChatUserContentSchema = jsonschema.Union(
 			jsonschema.Required("url", jsonschema.String()),
 		)),
 	),
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("file")),
+		jsonschema.Required("file_id", jsonschema.String()),
+	),
 )
 
 var openaiChatMessageSchema = jsonschema.Union(
@@ -135,9 +139,22 @@ var openaiResponsesInputImageSchema = jsonschema.Union(
 	),
 )
 
+var openaiResponsesInputFileSchema = jsonschema.Union(
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("input_file")),
+		jsonschema.Required("file_id", jsonschema.String()),
+	),
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("input_file")),
+		jsonschema.Required("file_data", jsonschema.String()),
+		jsonschema.Optional("filename", jsonschema.String()),
+	),
+)
+
 var openaiResponsesInputContentSchema = jsonschema.Union(
 	openaiResponsesInputTextSchema,
 	openaiResponsesInputImageSchema,
+	openaiResponsesInputFileSchema,
 )
 
 var openaiResponsesOutputTextSchema = jsonschema.Object(
@@ -261,10 +278,20 @@ var anthropicImageSourceSchema = jsonschema.Union(
 		jsonschema.Required("type", jsonschema.Literal("url")),
 		jsonschema.Required("url", jsonschema.String()),
 	),
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("file")),
+		jsonschema.Required("file_id", jsonschema.String()),
+	),
 )
 
 var anthropicImageBlockSchema = jsonschema.Object(
 	jsonschema.Required("type", jsonschema.Literal("image")),
+	jsonschema.Required("source", anthropicImageSourceSchema),
+	jsonschema.Optional("cache_control", anthropicCacheControlSchema),
+)
+
+var anthropicDocumentBlockSchema = jsonschema.Object(
+	jsonschema.Required("type", jsonschema.Literal("document")),
 	jsonschema.Required("source", anthropicImageSourceSchema),
 	jsonschema.Optional("cache_control", anthropicCacheControlSchema),
 )
@@ -308,7 +335,7 @@ var anthropicToolResultBlockSchema = jsonschema.Object(
 	jsonschema.Required("tool_use_id", jsonschema.String()),
 	jsonschema.Required("content", jsonschema.Union(
 		jsonschema.String(),
-		jsonschema.Array(jsonschema.Union(anthropicTextBlockSchema, anthropicImageBlockSchema)),
+		jsonschema.Array(jsonschema.Union(anthropicTextBlockSchema, anthropicImageBlockSchema, anthropicDocumentBlockSchema)),
 	)),
 	jsonschema.Optional("is_error", jsonschema.Boolean()),
 	jsonschema.Optional("cache_control", anthropicCacheControlSchema),
@@ -320,6 +347,7 @@ var anthropicMessageSchema = jsonschema.Union(
 		jsonschema.Required("content", jsonschema.Array(jsonschema.Union(
 			anthropicTextBlockSchema,
 			anthropicImageBlockSchema,
+			anthropicDocumentBlockSchema,
 			anthropicToolResultBlockSchema,
 		))),
 	),
@@ -501,6 +529,13 @@ var bedrockDocumentBlockSchema = jsonschema.Object(
 	)),
 )
 
+var bedrockVideoBlockSchema = jsonschema.Object(
+	jsonschema.Required("video", jsonschema.Object(
+		jsonschema.Required("format", jsonschema.Enum([]any{"mp4", "webm", "mov"})),
+		jsonschema.Required("source", bedrockSourceSchema),
+	)),
+)
+
 var bedrockToolUseBlockSchema = jsonschema.Object(
 	jsonschema.Required("toolUse", jsonschema.Object(
 		jsonschema.Required("toolUseId", jsonschema.String()),
@@ -537,6 +572,7 @@ var bedrockMessageSchema = jsonschema.Union(
 			bedrockTextBlockSchema,
 			bedrockImageBlockSchema,
 			bedrockDocumentBlockSchema,
+			bedrockVideoBlockSchema,
 			bedrockToolResultBlockSchema,
 			bedrockCachePointBlockSchema,
 		))),

@@ -18,6 +18,7 @@ func bodySchemaRoutes() []struct {
 	}{
 		{"openai-chat", OpenAIChatHTTPRoute},
 		{"openai-compatible-chat", OpenAICompatibleChatHTTPRoute},
+		{"deepseek-chat", DeepSeekChatHTTPRoute},
 		{"openai-responses", OpenAIResponsesHTTPRoute},
 		{"anthropic", AnthropicMessagesHTTPRoute},
 		{"gemini", GeminiHTTPRoute},

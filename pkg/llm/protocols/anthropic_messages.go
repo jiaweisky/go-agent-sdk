@@ -3,6 +3,7 @@ package protocols
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/internal/llm/protocols/utils"
@@ -30,6 +31,7 @@ type anthropicMessagesImageSource struct {
 	MediaType string `json:"media_type,omitempty"`
 	Data      string `json:"data,omitempty"`
 	URL       string `json:"url,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
 }
 type anthropicMessagesImageBlock struct {
 	Type         string                         `json:"type"`
@@ -264,25 +266,55 @@ func anthropicMessagesLowerServerToolCall(part schema.ToolCallPart) anthropicMes
 	}
 }
 
-func anthropicMessagesLowerImage(part schema.MediaPart) (*anthropicMessagesImageBlock, error) {
+// anthropicMessagesDocumentMIMEs are the media types Anthropic carries in a
+// `document` block rather than an `image` block. Only pdf is lowered: it may be
+// inline bytes, a url, or a provider file reference (by id). Plain text is not
+// lowered.
+var anthropicMessagesDocumentMIMEs = []string{"application/pdf"}
+
+// anthropicMessagesMediaMIMEs is every media type an Anthropic message carries
+// (images + documents).
+func anthropicMessagesMediaMIMEs() []string {
+	return append(append([]string{}, imageMIMEs...), anthropicMessagesDocumentMIMEs...)
+}
+
+// anthropicMessagesMediaMIMESet is the lookup set for the Anthropic descriptor.
+var anthropicMessagesMediaMIMESet = mediaMIMESet(anthropicMessagesMediaMIMEs())
+
+// anthropicMessagesLowerMedia lowers a media part to an Anthropic block: an
+// `image` block for image types, a `document` block for pdf. Both carry base64
+// bytes, a url, or (with the Files API beta) a provider file reference by id.
+func anthropicMessagesLowerMedia(part schema.MediaPart) (*anthropicMessagesImageBlock, error) {
 	source := part.Source
 	if source == "" {
 		source = schema.MediaSourceInline
 	}
-	switch source {
-	case schema.MediaSourceURL:
+	blockType := "image"
+	if slices.Contains(anthropicMessagesDocumentMIMEs, strings.ToLower(part.MediaType)) {
+		blockType = "document"
+	}
+	if source == schema.MediaSourceURL {
 		url, _ := part.Data.(string)
 		if strings.TrimSpace(url) == "" {
-			return nil, InvalidRequest("Anthropic image URL is empty")
+			return nil, InvalidRequest("Anthropic media URL is empty")
 		}
-		return &anthropicMessagesImageBlock{Type: "image", Source: anthropicMessagesImageSource{Type: "url", URL: url}}, nil
+		return &anthropicMessagesImageBlock{Type: blockType, Source: anthropicMessagesImageSource{Type: "url", URL: url}}, nil
 	}
-	media, err := utils.ValidateMedia("Anthropic Messages", part, imageMIMESet)
+	// A provider file reference (Files API file_id; needs the anthropic-beta
+	// header, which is model config) is carried by id, not bytes.
+	if source == schema.MediaSourceFile {
+		id, _ := part.Data.(string)
+		if strings.TrimSpace(id) == "" {
+			return nil, InvalidRequest("Anthropic media file id is empty")
+		}
+		return &anthropicMessagesImageBlock{Type: blockType, Source: anthropicMessagesImageSource{Type: "file", FileID: id}}, nil
+	}
+	media, err := utils.ValidateMedia("Anthropic Messages", part, anthropicMessagesMediaMIMESet)
 	if err != nil {
 		return nil, err
 	}
 	return &anthropicMessagesImageBlock{
-		Type: "image",
+		Type: blockType,
 		Source: anthropicMessagesImageSource{
 			Type:      "base64",
 			MediaType: media.MIME,
@@ -296,25 +328,17 @@ func anthropicMessagesLowerToolResultContentItem(item schema.ToolContent) (any, 
 	case schema.ToolTextContent:
 		return anthropicMessagesTextBlock{Type: "text", Text: v.Text}, nil
 	case schema.ToolFileContent:
-		source := v.Source
-		if source == "" {
-			source = schema.MediaSourceInline
+		payload := v.URI
+		if v.Source == schema.MediaSourceFile && v.FileID != "" {
+			payload = v.FileID
 		}
-		if source == schema.MediaSourceURL {
-			return anthropicMessagesImageBlock{Type: "image", Source: anthropicMessagesImageSource{Type: "url", URL: v.URI}}, nil
-		}
-		media, err := utils.ValidateToolFile("Anthropic Messages", v, imageMIMESet)
+		block, err := anthropicMessagesLowerMedia(schema.MediaPart{
+			Type: "media", MediaType: v.Mime, Source: schema.MediaSource(v.Source), Data: payload, Filename: v.Name,
+		})
 		if err != nil {
 			return nil, err
 		}
-		return anthropicMessagesImageBlock{
-			Type: "image",
-			Source: anthropicMessagesImageSource{
-				Type:      "base64",
-				MediaType: media.MIME,
-				Data:      media.Base64,
-			},
-		}, nil
+		return *block, nil
 	}
 	return anthropicMessagesTextBlock{Type: "text", Text: fmt.Sprint(item)}, nil
 }
@@ -596,7 +620,7 @@ func anthropicMessagesLowerUserContent(msg schema.Message) ([]any, error) {
 		case schema.TextPart:
 			content = append(content, anthropicMessagesTextBlock{Type: "text", Text: part.Text})
 		case schema.MediaPart:
-			img, err := anthropicMessagesLowerImage(part)
+			img, err := anthropicMessagesLowerMedia(part)
 			if err != nil {
 				return nil, err
 			}

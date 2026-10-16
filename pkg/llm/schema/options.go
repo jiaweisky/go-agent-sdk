@@ -64,9 +64,9 @@ const (
 type ModelCapabilities struct {
 	Input  []string `json:"input,omitempty"`
 	Output []string `json:"output,omitempty"`
-	// Sources, when set, are the media sources the model accepts (inline, url,
-	// file); empty means the protocol decides.
-	Sources []MediaSource `json:"sources,omitempty"`
+	// Forms, keyed by modality ("image"|"audio"|"video"|"file"), are the wire
+	// sources the model accepts; empty means the protocol decides.
+	Forms map[string][]MediaSource `json:"forms,omitempty"`
 }
 
 // ModelCompatibility records the schema shapes a model requires.

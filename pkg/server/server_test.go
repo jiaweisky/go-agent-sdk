@@ -1345,7 +1345,7 @@ func TestUnsupportedAttachmentDoesNotWedgeSession(t *testing.T) {
 	ts := newTestServer(t, Options{})
 	id := createSession(t, ts)
 
-	body := `{"prompt":"read this file","files":[{"uri":"data:application/pdf;base64,JVBERi0=","mime":"application/pdf","name":"x.pdf"}]}`
+	body := `{"prompt":"read this file","files":[{"uri":"data:audio/mpeg;base64,SUQz","mime":"audio/mpeg","name":"x.mp3"}]}`
 	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", body, nil)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
@@ -1531,7 +1531,7 @@ func TestOmittedAttachmentEventVisible(t *testing.T) {
 	ts := newTestServer(t, Options{})
 	id := createSession(t, ts)
 
-	body := `{"prompt":"read this file","files":[{"uri":"data:application/pdf;base64,JVBERi0=","mime":"application/pdf","name":"x.pdf"}]}`
+	body := `{"prompt":"read this file","files":[{"uri":"data:audio/mpeg;base64,SUQz","mime":"audio/mpeg","name":"x.mp3"}]}`
 	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", body, nil)
 	resp.Body.Close()
 	waitIdle(t, ts, id)
@@ -1555,7 +1555,7 @@ func TestOmittedAttachmentEventVisible(t *testing.T) {
 	for _, ev := range page.Data {
 		if ev.Type == "session.next.attachment.omitted" {
 			found++
-			if ev.Data.Name != "x.pdf" || ev.Data.MIME != "application/pdf" {
+			if ev.Data.Name != "x.mp3" || ev.Data.MIME != "audio/mpeg" {
 				t.Fatalf("omitted event data = %+v", ev.Data)
 			}
 			if ev.Data.Reason != "unsupported_type" {
@@ -1565,5 +1565,25 @@ func TestOmittedAttachmentEventVisible(t *testing.T) {
 	}
 	if found != 1 {
 		t.Fatalf("session.next.attachment.omitted events = %d, want 1 (deduped per attachment)", found)
+	}
+}
+
+func TestRequestTooLargeExplainsLimit(t *testing.T) {
+	ts := newTestServer(t, Options{MaxBodyBytes: 256})
+	id := createSession(t, ts)
+	big := `{"prompt":"` + strings.Repeat("x", 4000) + `"}`
+	resp := doJSON(t, http.MethodPost, ts.URL+"/api/session/"+id+"/prompt", big, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(body.Message, "256-byte limit") {
+		t.Fatalf("message = %q, want the limit", body.Message)
 	}
 }

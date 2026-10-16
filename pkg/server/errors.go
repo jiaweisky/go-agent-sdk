@@ -72,9 +72,27 @@ func newErrorRef() string {
 
 // decodeJSON reads a request body into v, returning false (and a 400) on error.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+	err := json.NewDecoder(r.Body).Decode(v)
+	if err == nil {
+		return true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "too_large",
+			fmt.Sprintf("request body exceeds the %d-byte limit", tooLarge.Limit))
 		return false
 	}
-	return true
+	writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+	return false
+}
+
+// withMaxBody caps every request body, so an oversized payload is rejected at
+// read time rather than buffered whole.
+func withMaxBody(next http.Handler, limit int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next.ServeHTTP(w, r)
+	})
 }

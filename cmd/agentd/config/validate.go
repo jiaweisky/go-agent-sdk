@@ -148,13 +148,19 @@ func validateServerCommon(s Server, catalog Catalog) error {
 	if _, err := catalog.Subset(s.Models, s.DefaultModel); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
-	if s.SubagentDepth < 0 || s.SubscriberCapacity < 0 {
+	if s.SubagentDepth < 0 || s.SubscriberCapacity < 0 || s.MaxBodyBytes < 0 {
 		return fmt.Errorf("server %q: limits must not be negative", s.Name)
 	}
 	if s.TLS != nil && (s.TLS.CertFile == "" || s.TLS.KeyFile == "") {
 		return fmt.Errorf("server %q: tls requires both certFile and keyFile", s.Name)
 	}
 	if err := ValidateMCP(s.MCP); err != nil {
+		return fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	if err := ValidateInboundMedia(s.Media); err != nil {
+		return fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	if err := ValidateStorage(s.Storage); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
 	if _, err := ReferenceSources(s.References); err != nil {

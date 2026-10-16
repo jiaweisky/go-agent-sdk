@@ -11,8 +11,10 @@ import (
 // the sources (inline/url/file) it accepts. Input is sugar over
 // ModelCapabilities.Input.
 type MediaConfig struct {
-	Input   []string `yaml:"input"`
-	Sources []string `yaml:"sources"`
+	Input []string `yaml:"input"`
+	// Forms lists, per modality (image/audio/video/file), the wire forms the model
+	// accepts (inline/url/file).
+	Forms map[string][]string `yaml:"forms"`
 }
 
 // ModelConfig is one per-model catalog entry.
@@ -35,6 +37,9 @@ type ModelConfig struct {
 	Media *MediaConfig `yaml:"media"`
 	// Credentials is the model's provider credential.
 	Credentials Credentials `yaml:"credentials"`
+	// Headers are extra request headers sent with every model request (e.g. the
+	// `anthropic-beta` header Anthropic Files API references require).
+	Headers map[string]string `yaml:"headers"`
 	// ContextLimit / OutputLimit are the model's token limits.
 	ContextLimit int `yaml:"contextLimit"`
 	OutputLimit  int `yaml:"outputLimit"`
@@ -91,7 +96,7 @@ func (m ModelConfig) Validate() error {
 		return err
 	}
 	if m.Media != nil {
-		if err := ValidateMediaSources(m.Media.Sources); err != nil {
+		if err := ValidateMediaForms(m.Media.Forms); err != nil {
 			return err
 		}
 	}
@@ -170,8 +175,11 @@ func (c Catalog) ModelInfo(id string) (schema.ModelInfo, error) {
 	if inputs := entry.inputs(); len(inputs) > 0 {
 		info.Capabilities.Input = inputs
 	}
-	if entry.Media != nil && len(entry.Media.Sources) > 0 {
-		info.Capabilities.Media = &schema.ModelMediaCapability{Sources: entry.Media.Sources}
+	if entry.Media != nil && len(entry.Media.Forms) > 0 {
+		info.Capabilities.Media = &schema.ModelMediaCapability{Forms: entry.Media.Forms}
+	}
+	for name, value := range entry.Headers {
+		info.Request.Headers[name] = value
 	}
 	return info, nil
 }

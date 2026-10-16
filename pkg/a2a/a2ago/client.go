@@ -4,11 +4,16 @@
 package a2ago
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"iter"
+	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -19,9 +24,16 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
+// ingestClient bounds the out-of-band ingest uploads (which go over plain HTTP,
+// not the a2a transport), so a hung remote cannot block a turn indefinitely.
+var ingestClient = &http.Client{Timeout: 5 * time.Minute}
+
 type goClient struct {
 	inner *a2aclient.Client
 	card  client.Card
+	// headers authenticate every remote request, including the out-of-band
+	// ingest uploads (which go over plain HTTP, not the a2a transport).
+	headers map[string]string
 }
 
 var _ client.Client = (*goClient)(nil)
@@ -48,7 +60,7 @@ func New(ctx context.Context, endpoint string, headers map[string]string) (clien
 	if err != nil {
 		return nil, fmt.Errorf("connect to remote agent: %w", err)
 	}
-	return &goClient{inner: inner, card: cardFromA2A(card)}, nil
+	return &goClient{inner: inner, card: cardFromA2A(card), headers: headers}, nil
 }
 
 // headerInterceptor attaches static headers to every request as service params.
@@ -76,7 +88,7 @@ func (c *goClient) Send(ctx context.Context, req client.Request) iter.Seq2[clien
 	return func(yield func(client.Event, error) bool) {
 		parts := []*a2a.Part{a2a.NewTextPart(req.Prompt)}
 		for _, file := range req.Files {
-			parts = append(parts, filePart(file))
+			parts = append(parts, c.filePart(ctx, file))
 		}
 		if req.Response != nil {
 			parts = append(parts, functionResponsePart(*req.Response))
@@ -124,15 +136,132 @@ func (c *goClient) Cancel(ctx context.Context, taskID string) error {
 	return err
 }
 
-// filePart encodes an attachment as an A2A file part: raw bytes when present,
-// otherwise a file reference URL.
-func filePart(file client.FileAttachment) *a2a.Part {
+// filePart encodes an attachment as an A2A file part. A large payload is uploaded
+// to the remote's advertised ingest target and sent as a reference (best-effort:
+// on failure it falls back to inline bytes); otherwise raw bytes are sent when
+// present, else the URI as a file reference.
+func (c *goClient) filePart(ctx context.Context, file client.FileAttachment) *a2a.Part {
+	ingest := c.card.Ingest
+	if ingest != nil && (ingest.UploadURL != "" || ingest.BrokerURL != "") && len(file.Data) > 0 &&
+		(ingest.MaxInlineBytes <= 0 || int64(len(file.Data)) > ingest.MaxInlineBytes) {
+		if ref, err := uploadToTarget(ctx, ingest, c.headers, file); err == nil {
+			part := a2a.NewFileURLPart(a2a.URL(ref), file.MIME)
+			part.Filename = file.Name
+			return part
+		}
+	}
 	if len(file.Data) > 0 {
 		return &a2a.Part{Content: a2a.Raw(file.Data), MediaType: file.MIME, Filename: file.Name}
 	}
 	part := a2a.NewFileURLPart(a2a.URL(file.URI), file.MIME)
 	part.Filename = file.Name
 	return part
+}
+
+// uploadToTarget writes a file to the remote and returns the reference to send
+// afterwards. It prefers the broker (per-file slot) when advertised, else the
+// static reference target.
+func uploadToTarget(ctx context.Context, ingest *client.Ingest, headers map[string]string, file client.FileAttachment) (string, error) {
+	if ingest.BrokerURL != "" {
+		if ref, err := uploadViaBroker(ctx, ingest, headers, file); err == nil {
+			return ref, nil
+		}
+	}
+	return uploadViaReference(ctx, ingest, headers, file)
+}
+
+// applyHeaders adds the client's auth headers to a request, if any.
+func applyHeaders(req *http.Request, headers map[string]string) {
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+}
+
+// uploadViaBroker requests a per-file slot and writes directly to it.
+func uploadViaBroker(ctx context.Context, ingest *client.Ingest, headers map[string]string, file client.FileAttachment) (string, error) {
+	q := url.Values{}
+	q.Set("name", file.Name)
+	q.Set("mime", file.MIME)
+	q.Set("size", strconv.Itoa(len(file.Data)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ingest.BrokerURL+"?"+q.Encode(), nil)
+	if err != nil {
+		return "", err
+	}
+	applyHeaders(req, headers)
+	resp, err := ingestClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return "", fmt.Errorf("ingest slot: %s", resp.Status)
+	}
+	var slot struct {
+		URL       string            `json:"url"`
+		Method    string            `json:"method"`
+		Headers   map[string]string `json:"headers"`
+		Reference string            `json:"reference"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&slot); err != nil {
+		return "", err
+	}
+	if slot.URL == "" || slot.Reference == "" {
+		return "", fmt.Errorf("ingest slot: incomplete target")
+	}
+	method := slot.Method
+	if method == "" {
+		method = http.MethodPut
+	}
+	put, err := http.NewRequestWithContext(ctx, method, slot.URL, bytes.NewReader(file.Data))
+	if err != nil {
+		return "", err
+	}
+	for name, value := range slot.Headers {
+		put.Header.Set(name, value)
+	}
+	putResp, err := ingestClient.Do(put)
+	if err != nil {
+		return "", err
+	}
+	defer putResp.Body.Close()
+	if putResp.StatusCode/100 != 2 {
+		return "", fmt.Errorf("ingest slot upload: %s", putResp.Status)
+	}
+	return slot.Reference, nil
+}
+
+// uploadViaReference writes to the remote's static reference target.
+func uploadViaReference(ctx context.Context, ingest *client.Ingest, headers map[string]string, file client.FileAttachment) (string, error) {
+	method := ingest.UploadMethod
+	if method == "" {
+		method = http.MethodPut
+	}
+	req, err := http.NewRequestWithContext(ctx, method, ingest.UploadURL, bytes.NewReader(file.Data))
+	if err != nil {
+		return "", err
+	}
+	if file.MIME != "" {
+		req.Header.Set("Content-Type", file.MIME)
+	}
+	applyHeaders(req, headers)
+	resp, err := ingestClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return "", fmt.Errorf("ingest upload: %s", resp.Status)
+	}
+	var out struct {
+		Reference string `json:"reference"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if out.Reference == "" {
+		return "", fmt.Errorf("ingest upload: response has no reference")
+	}
+	return out.Reference, nil
 }
 
 // functionResponsePart encodes a reply to a remote function_call, so an ADK
@@ -160,7 +289,73 @@ func cardFromA2A(card *a2a.AgentCard) client.Card {
 		result.Endpoint = card.SupportedInterfaces[0].URL
 		result.ProtocolVersion = string(card.SupportedInterfaces[0].ProtocolVersion)
 	}
+	result.Ingest = ingestFromA2A(card)
 	return result
+}
+
+// ingestFromA2A reads a card's storage extension into an ingest contract, or nil
+// when the card advertises none.
+func ingestFromA2A(card *a2a.AgentCard) *client.Ingest {
+	for _, ext := range card.Capabilities.Extensions {
+		if ext.URI != client.StorageExtensionURI {
+			continue
+		}
+		params, _ := ext.Params["ingest"].(map[string]any)
+		if params == nil {
+			continue
+		}
+		out := &client.Ingest{
+			Schemes:        stringsFromAny(params["schemes"]),
+			MediaTypes:     stringsFromAny(params["mediaTypes"]),
+			MaxInlineBytes: int64FromAny(params["maxInlineBytes"]),
+			MaxBytes:       int64FromAny(params["maxBytes"]),
+		}
+		if modes, ok := params["modes"].([]any); ok {
+			for _, raw := range modes {
+				mode, _ := raw.(map[string]any)
+				if mode == nil {
+					continue
+				}
+				switch mode["mode"] {
+				case "reference":
+					if upload, ok := mode["upload"].(map[string]any); ok {
+						out.UploadURL, _ = upload["url"].(string)
+						out.UploadMethod, _ = upload["method"].(string)
+					}
+				case "broker":
+					out.BrokerURL, _ = mode["request"].(string)
+				}
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func stringsFromAny(value any) []string {
+	list, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func int64FromAny(value any) int64 {
+	switch n := value.(type) {
+	case float64:
+		return int64(n)
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	}
+	return 0
 }
 
 // eventsFromA2A maps one A2A event — a streaming update or a non-streaming

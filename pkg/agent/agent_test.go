@@ -2790,3 +2790,29 @@ func TestOnPanicReportsHandlerPanic(t *testing.T) {
 		t.Fatal("OnPanic was not called")
 	}
 }
+
+func TestNewClientRejectsInvalidMediaPolicy(t *testing.T) {
+	_, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("test"),
+		Model:       "test-model",
+		Root:        t.TempDir(),
+		MediaPolicy: &core.MediaPolicy{Prefer: []core.MediaPolicySource{"bogus"}},
+	})
+	if err == nil {
+		t.Fatal("an invalid media policy should be rejected at NewClient")
+	}
+}
+
+func TestNewClientAcceptsValidMediaPolicy(t *testing.T) {
+	client, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("test"),
+		Model:       "test-model",
+		Root:        t.TempDir(),
+		MediaPolicy: &core.MediaPolicy{InlineLimitBytes: core.MediaSizeLimits{Default: 1024}, Upload: true, Prefer: []core.MediaPolicySource{core.MediaPolicySourceFile, core.MediaPolicySourceInline}},
+		LLM:         fakeLLM{reply: "ok"},
+	})
+	if err != nil {
+		t.Fatalf("valid media policy rejected: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+}

@@ -4,13 +4,13 @@ import "net/http"
 
 // modelInfoDTO is one model's discoverable metadata for GET /api/model.
 type modelInfoDTO struct {
-	ID           string   `json:"id"`
-	Protocol     string   `json:"protocol"`
-	Input        []string `json:"input,omitempty"`
-	Sources      []string `json:"sources,omitempty"`
-	ContextLimit int      `json:"contextLimit,omitempty"`
-	OutputLimit  int      `json:"outputLimit,omitempty"`
-	Default      bool     `json:"default,omitempty"`
+	ID           string              `json:"id"`
+	Protocol     string              `json:"protocol"`
+	Input        []string            `json:"input,omitempty"`
+	Forms        map[string][]string `json:"forms,omitempty"`
+	ContextLimit int                 `json:"contextLimit,omitempty"`
+	OutputLimit  int                 `json:"outputLimit,omitempty"`
+	Default      bool                `json:"default,omitempty"`
 }
 
 func (s *Server) handleModelList(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +25,7 @@ func (s *Server) handleModelList(w http.ResponseWriter, r *http.Request) {
 			Default:      s.opts.DefaultModel != "" && string(model.ID) == s.opts.DefaultModel,
 		}
 		if model.Capabilities.Media != nil {
-			dto.Sources = model.Capabilities.Media.Sources
+			dto.Forms = model.Capabilities.Media.Forms
 		}
 		out = append(out, dto)
 	}

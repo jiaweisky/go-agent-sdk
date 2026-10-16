@@ -59,6 +59,10 @@ type Options struct {
 	// KeepAlive is the SSE heartbeat interval. Negative disables it; zero uses
 	// the default (15s).
 	KeepAlive time.Duration
+	// MaxBodyBytes, when > 0, caps a request body; a larger one is rejected with
+	// 413 instead of being loaded into memory (protects against an oversized
+	// inline media payload). Zero leaves it unbounded.
+	MaxBodyBytes int64
 	// Public lists route patterns that skip Auth.
 	Public []string
 	// OnError reports internal handler errors that become a redacted 500. Nil
@@ -218,6 +222,9 @@ func (s *Server) Handler() http.Handler {
 
 	var h http.Handler = mux
 	h = s.withJSONErrors(h)
+	if s.opts.MaxBodyBytes > 0 {
+		h = withMaxBody(h, s.opts.MaxBodyBytes)
+	}
 	h = s.withAuth(h)
 	h = s.withCORS(h)
 	h = s.withRecover(h)

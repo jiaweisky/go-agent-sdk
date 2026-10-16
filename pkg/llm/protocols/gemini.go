@@ -16,7 +16,9 @@ const geminiAdapter = "gemini"
 // GeminiDefaultBaseURL is the Google Generative Language API base URL.
 const GeminiDefaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
-var geminiMediaMIMEs = mediaMIMESet(mediaMIMEs)
+// geminiMediaMIMEs are the media types Gemini accepts: images, audio, video, and
+// pdf documents — all lowered by the generic inlineData/fileData block.
+var geminiMediaMIMEs = mediaMIMESet(append(append([]string{}, mediaMIMEs...), "application/pdf"))
 
 type geminiTextPart struct {
 	Text             string  `json:"text"`

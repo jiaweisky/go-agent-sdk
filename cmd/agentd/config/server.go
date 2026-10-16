@@ -36,10 +36,12 @@ type Server struct {
 	Default bool `yaml:"default"`
 
 	// Client-level options shared by both kinds.
-	MediaUpload        *MediaUploadConfig `yaml:"mediaUpload"`
-	MCP                []MCPServer        `yaml:"mcp"`
-	References         []Reference        `yaml:"references"`
-	InboundPermissions []PermissionRule   `yaml:"inboundPermissions"`
+	MediaUpload        *MediaUploadConfig  `yaml:"mediaUpload"`
+	Media              *InboundMediaConfig `yaml:"media"`
+	Storage            *StorageConfig      `yaml:"storage"`
+	MCP                []MCPServer         `yaml:"mcp"`
+	References         []Reference         `yaml:"references"`
+	InboundPermissions []PermissionRule    `yaml:"inboundPermissions"`
 	// Questions selects the question tool's policy: "park" or "decline". The
 	// default depends on the kind: "decline" for a2a (a remote A2A client only
 	// polls task state, so a parked question never gets an answer), "park" for
@@ -68,6 +70,9 @@ type Server struct {
 
 	// KeepAlive is the SSE heartbeat; empty means the 15s default, "0s" disables.
 	KeepAlive string `yaml:"keepAlive"`
+	// MaxBodyBytes caps an HTTP request body (0 = a 128 MiB default; negative is
+	// rejected). Guards against an oversized inline media payload.
+	MaxBodyBytes int64 `yaml:"maxBodyBytes"`
 }
 
 // AuthConfig enables authentication on the served endpoints.

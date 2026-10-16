@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"iter"
 	"os"
 	"path/filepath"
@@ -33,6 +34,12 @@ type a2aFactory struct {
 	// spoolDir is where spooled inbound attachments are written (under the state
 	// root's data directory, never the workspace).
 	spoolDir string
+	// store, when set, is the process's media store: a FileWithUri that names it
+	// is read back locally (spool-equivalent) rather than treated as a url.
+	store schema.MediaStore
+	// mediaSpoolDir is the delivery policy's last-resort spool dir (its reads must
+	// be allowed for the agent's tools to reach a spooled attachment).
+	mediaSpoolDir string
 	// questions is "park" (default) or "decline".
 	questions string
 }
@@ -114,11 +121,13 @@ func NewA2AFactory(client *Client, opts ...A2AFactoryOption) server.Factory {
 		client.HoldQuestions(false)
 	}
 	return &a2aFactory{
-		client:       client,
-		permissions:  config.Permissions,
-		inboundMedia: config.InboundMedia,
-		spoolDir:     core.A2ASpoolDir(client.rt.global.Data),
-		questions:    config.Questions,
+		client:        client,
+		permissions:   config.Permissions,
+		inboundMedia:  config.InboundMedia,
+		spoolDir:      core.A2ASpoolDir(client.rt.global.Data),
+		store:         client.opts.MediaStore,
+		mediaSpoolDir: mediaSpoolDir(client),
+		questions:     config.Questions,
 	}
 }
 
@@ -135,7 +144,7 @@ func (f *a2aFactory) CreateSession(ctx context.Context, req server.SessionReques
 		return nil, err
 	}
 	f.client.rt.markInbound(schema.SessionID(session.ID()))
-	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia, spoolDir: f.spoolDir}, nil
+	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia, spoolDir: f.spoolDir, store: f.store}, nil
 }
 
 // ResumeSession implements server.Factory. The inbound/workspace ruleset is
@@ -161,7 +170,7 @@ func (f *a2aFactory) ResumeSession(
 		return nil, err
 	}
 	f.client.rt.markInbound(schema.SessionID(session.ID()))
-	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia, spoolDir: f.spoolDir}, nil
+	return &a2aSession{session: session, turns: map[string]*a2aTurn{}, inboundMedia: f.inboundMedia, spoolDir: f.spoolDir, store: f.store}, nil
 }
 
 // questionOverride returns the per-session question handler enforcing the
@@ -218,11 +227,26 @@ func (f *a2aFactory) permissionsFor(workspace server.Workspace) schema.Permissio
 	if len(workspace.Permissions) > 0 {
 		rules = workspace.Permissions
 	}
-	return append(append(schema.PermissionRuleset{}, rules...), schema.PermissionRule{
-		Action:   "external_directory",
-		Resource: filepath.Join(f.spoolDir, "*"),
-		Effect:   schema.PermissionEffectAllow,
-	})
+	rules = append(schema.PermissionRuleset{}, rules...)
+	rules = append(rules, spoolAllow(f.spoolDir))
+	if f.mediaSpoolDir != "" {
+		rules = append(rules, spoolAllow(f.mediaSpoolDir))
+	}
+	return rules
+}
+
+// spoolAllow is an external_directory allow for a spool dir, so the agent's
+// read tool can reach a spooled attachment.
+func spoolAllow(dir string) schema.PermissionRule {
+	return schema.PermissionRule{Action: "external_directory", Resource: filepath.Join(dir, "*"), Effect: schema.PermissionEffectAllow}
+}
+
+// mediaSpoolDir returns the delivery policy's spool dir, or "".
+func mediaSpoolDir(client *Client) string {
+	if policy := client.opts.MediaPolicy; policy != nil && policy.Spool != nil {
+		return policy.Spool.Dir
+	}
+	return ""
 }
 
 // a2aSession bridges *Session to server.Session. Each turn forwards its event
@@ -237,6 +261,8 @@ type a2aSession struct {
 	inboundMedia string
 	// spoolDir is where "spool" mode writes inbound attachments.
 	spoolDir string
+	// store, when set, resolves a FileWithUri that names our own store.
+	store schema.MediaStore
 
 	mu    sync.Mutex
 	turns map[string]*a2aTurn
@@ -259,7 +285,7 @@ func (s *a2aSession) OnTurnEnd(turnID string, fn func()) {
 }
 
 func (s *a2aSession) Send(ctx context.Context, turnID string, req server.SendRequest) iter.Seq2[server.Event, error] {
-	prompt, files, err := s.materialize(turnID, req)
+	prompt, files, err := s.materialize(ctx, turnID, req)
 	if err != nil {
 		// No channel was opened; still drop the turn and run its callbacks so
 		// the session is released.
@@ -320,7 +346,7 @@ func (s *a2aSession) endTurn(turnID string, turn *a2aTurn, closeChannel bool) {
 // "inline" mode known media with bytes become native media parts and URL parts
 // become url-source parts, so the target model's planner decides whether they
 // are carried.
-func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string, []schema.PromptFileAttachment, error) {
+func (s *a2aSession) materialize(ctx context.Context, turnID string, req server.SendRequest) (string, []schema.PromptFileAttachment, error) {
 	if len(req.Files) == 0 {
 		return req.Prompt, nil, nil
 	}
@@ -331,7 +357,7 @@ func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string,
 	builder.WriteString(req.Prompt)
 	builder.WriteString("\n\n[attachments]")
 	for _, file := range req.Files {
-		attachment, note, err := materializeA2AFile(dir, inline, file)
+		attachment, note, err := materializeA2AFile(ctx, dir, inline, s.store, file)
 		if err != nil {
 			return "", nil, err
 		}
@@ -350,7 +376,7 @@ func (s *a2aSession) materialize(turnID string, req server.SendRequest) (string,
 // url-source attachment; otherwise raw bytes are written into dir and referenced
 // by path. It returns the native attachment (nil when none applies) and the
 // prompt note describing the file.
-func materializeA2AFile(dir string, inline bool, file server.File) (*schema.PromptFileAttachment, string, error) {
+func materializeA2AFile(ctx context.Context, dir string, inline bool, store schema.MediaStore, file server.File) (*schema.PromptFileAttachment, string, error) {
 	name := file.Name
 	if name == "" {
 		name = file.MIME
@@ -373,12 +399,48 @@ func materializeA2AFile(dir string, inline bool, file server.File) (*schema.Prom
 		}
 		return nil, path, nil
 	case file.URI != "":
+		// A URI that names our own store is read back locally (spool-equivalent),
+		// so the agent's tools see a real path rather than a url that only this
+		// store could resolve.
+		if store != nil {
+			if path, ok := materializeStoredURI(ctx, dir, store, file.URI, name); ok {
+				return nil, path, nil
+			}
+		}
 		if inline && file.MIME != "" {
 			return &schema.PromptFileAttachment{URI: file.URI, Mime: file.MIME, Name: &name}, file.URI, nil
 		}
 		return nil, file.URI, nil
 	}
 	return nil, "", nil
+}
+
+// materializeStoredURI reads a uri back from our own store and streams it to dir.
+// It reports false when the uri is not this store's (the caller falls back).
+func materializeStoredURI(ctx context.Context, dir string, store schema.MediaStore, uri, name string) (string, bool) {
+	rc, err := store.Get(ctx, schema.Reference{Source: "url", Value: uri})
+	if err != nil {
+		return "", false
+	}
+	defer rc.Close()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", false
+	}
+	path := filepath.Join(dir, filepath.Base(name))
+	f, err := os.Create(path)
+	if err != nil {
+		return "", false
+	}
+	if _, err := io.Copy(f, rc); err != nil {
+		f.Close()
+		_ = os.Remove(path)
+		return "", false
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", false
+	}
+	return path, true
 }
 
 func (s *a2aSession) Resume(ctx context.Context, turnID string) iter.Seq2[server.Event, error] {
@@ -488,10 +550,11 @@ func a2aEventFrom(event Event) (server.Event, bool) {
 	case ErrorEvent:
 		return server.Event{Kind: server.EventError, Err: e.Err}, true
 	case AttachmentOmitted:
-		return server.Event{
-			Kind: server.EventNotice,
-			Text: fmt.Sprintf("attachment omitted: %s (%s; %s)", e.Name, e.MIME, e.Reason),
-		}, true
+		text := fmt.Sprintf("attachment omitted: %s (%s; %s)", e.Name, e.MIME, e.Reason)
+		if e.Detail != "" {
+			text += " - " + e.Detail
+		}
+		return server.Event{Kind: server.EventNotice, Text: text}, true
 	case Idle:
 		return server.Event{Kind: server.EventIdle}, true
 	default:

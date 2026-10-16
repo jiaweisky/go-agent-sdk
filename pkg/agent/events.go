@@ -215,6 +215,9 @@ type AttachmentOmitted struct {
 	Name      string
 	MIME      string
 	Reason    string
+	// Detail is a human hint for the reason (e.g. the accepted size limit), so a
+	// client can tell the caller how to fix it.
+	Detail string
 }
 
 func (e AttachmentOmitted) sessionID() string { return e.SessionID }
@@ -598,6 +601,7 @@ func mapRunEvent(eventType string, data map[string]any, sessionID, messageID str
 			Name:      fieldString(data, "name"),
 			MIME:      fieldString(data, "mime"),
 			Reason:    fieldString(data, "reason"),
+			Detail:    fieldString(data, "detail"),
 		}, true
 	}
 	return nil, false

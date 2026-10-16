@@ -10,16 +10,16 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
-type fakeMediaUploader struct{ ref schema.MediaRef }
+type fakeMediaUploader struct{ ref schema.Reference }
 
-func (f fakeMediaUploader) Upload(context.Context, schema.MediaUpload) (schema.MediaRef, error) {
+func (f fakeMediaUploader) Upload(context.Context, schema.MediaUpload) (schema.Reference, error) {
 	return f.ref, nil
 }
 
 func TestSessionFileUpload(t *testing.T) {
 	ts := newTestServer(t, Options{
 		MediaUploader: func(schema.ProviderID) schema.MediaUploader {
-			return fakeMediaUploader{ref: schema.MediaRef{Source: "file", ID: "file-1"}}
+			return fakeMediaUploader{ref: schema.Reference{Source: "file", Value: "file-1"}}
 		},
 	})
 	id := createSession(t, ts)

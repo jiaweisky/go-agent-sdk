@@ -34,7 +34,11 @@ const (
 type ProtocolMediaSupport struct {
 	MIMEs   map[string]struct{}
 	Sources []MediaSource
-	Roles   []string
+	// NoURLSource lists MIME types that reject a url source even though Sources
+	// includes url (e.g. OpenAI Responses documents: input_file takes a file_id or
+	// inline data, not a url).
+	NoURLSource map[string]struct{}
+	Roles       []string
 }
 
 // AllowsMIME reports whether the wire can carry a MIME type.
@@ -46,6 +50,20 @@ func (s ProtocolMediaSupport) AllowsMIME(mime string) bool {
 // AllowsSource reports whether a source is accepted (empty = all).
 func (s ProtocolMediaSupport) AllowsSource(source MediaSource) bool {
 	return len(s.Sources) == 0 || slices.Contains(s.Sources, source)
+}
+
+// AllowsSourceFor reports whether a MIME can be carried from a source: the
+// protocol-level source support, narrowed by NoURLSource.
+func (s ProtocolMediaSupport) AllowsSourceFor(mime string, source MediaSource) bool {
+	if !s.AllowsSource(source) {
+		return false
+	}
+	if source == MediaSourceURL {
+		if _, blocked := s.NoURLSource[strings.ToLower(mime)]; blocked {
+			return false
+		}
+	}
+	return true
 }
 
 // AllowsRole reports whether a message role may carry media (empty = all).
@@ -70,7 +88,12 @@ type ProtocolEntry struct {
 var registry = map[schema.ProtocolID]ProtocolEntry{
 	schema.ProtocolID(OpenAIResponsesHTTPRoute.ID): {
 		Route: OpenAIResponsesHTTPRoute, Scheme: AuthBearer,
-		Media: ProtocolMediaSupport{MIMEs: imageMIMESet, Sources: []MediaSource{MediaSourceInline, MediaSourceURL, MediaSourceFile}},
+		Media: ProtocolMediaSupport{
+			MIMEs: openaiResponsesMediaMIMESet,
+			// Images take a url; documents (pdf) take a file_id or inline data only.
+			Sources:     []MediaSource{MediaSourceInline, MediaSourceURL, MediaSourceFile},
+			NoURLSource: openaiResponsesDocumentMIMESet,
+		},
 	},
 	schema.ProtocolID(OpenAIChatHTTPRoute.ID): {
 		Route: OpenAIChatHTTPRoute, Scheme: AuthBearer,
@@ -80,14 +103,19 @@ var registry = map[schema.ProtocolID]ProtocolEntry{
 		Route: OpenAICompatibleChatHTTPRoute, Scheme: AuthBearer,
 		Media: ProtocolMediaSupport{MIMEs: openAICompatibleProfile.MIMEs(), Sources: []MediaSource{MediaSourceInline, MediaSourceURL}},
 	},
+	schema.ProtocolID(DeepSeekChatHTTPRoute.ID): {
+		Route: DeepSeekChatHTTPRoute, Scheme: AuthBearer,
+		// DeepSeek: images (image_url) + its `file` block (Files API file_id).
+		Media: ProtocolMediaSupport{MIMEs: deepSeekProfile.MIMEs(), Sources: []MediaSource{MediaSourceInline, MediaSourceURL, MediaSourceFile}},
+	},
 	schema.ProtocolID(AnthropicMessagesHTTPRoute.ID): {
 		Route:      AnthropicMessagesHTTPRoute,
 		Scheme:     AuthHeader,
 		HeaderName: "x-api-key",
-		// Anthropic image blocks accept base64 or a URL only; provider file
-		// references belong to the document block (not lowered yet), so a `file`
-		// source is omitted rather than emitting an invalid image block.
-		Media: ProtocolMediaSupport{MIMEs: imageMIMESet, Sources: []MediaSource{MediaSourceInline, MediaSourceURL}},
+		// Images (`image` block) and documents (`document` block: pdf) accept
+		// base64 bytes, a URL, or a provider `file` reference (its Files API;
+		// needs the anthropic-beta header, which is model config).
+		Media: ProtocolMediaSupport{MIMEs: anthropicMessagesMediaMIMESet, Sources: []MediaSource{MediaSourceInline, MediaSourceURL, MediaSourceFile}},
 	},
 	schema.ProtocolID(GeminiHTTPRoute.ID): {
 		Route:      GeminiHTTPRoute,

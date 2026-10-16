@@ -70,6 +70,20 @@ type ClientOptions struct {
 	// cannot carry it inline. Nil disables adaptation; the SDK never
 	// owns credentials or storage, so the host implements the upload.
 	MediaUploader func(providerID schema.ProviderID) schema.MediaUploader
+	// MediaStore, when set, hosts bytes as a url any provider that fetches urls
+	// can consume (the `url` source preference). It is provider-independent. Nil
+	// disables url hosting.
+	MediaStore schema.MediaStore
+	// MediaPolicy, when set, is the operator-owned inbound media delivery policy
+	// that picks each byte-backed attachment's source (inline / provider file /
+	// spooled-on-disk), applied to every inbound media whatever the transport.
+	// Nil keeps the caller-declared behavior (inline-first, with a file
+	// fallback). A caller-declared reference still wins when feasible.
+	MediaPolicy *core.MediaPolicy
+	// MediaTranscode, when set, shrinks audio/video the SDK cannot encode itself
+	// so it fits the policy's inline limit. Nil leaves it undecoded (soft-fail);
+	// images are always shrunk in process.
+	MediaTranscode func(core.MediaTranscodeRequest) (core.MediaTranscodeResult, bool)
 	// LLM overrides the default LLM client (route.LLMClient). When nil, a client
 	// is built from ModelInfo/Protocol over the default HTTP transport.
 	LLM route.LLMClient

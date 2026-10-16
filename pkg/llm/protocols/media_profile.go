@@ -21,6 +21,9 @@ const (
 	VideoURLDataURL BlockKind = "video_url_data_url"
 	// VideoURLHTTP is vLLM video_url with an http(s) URL.
 	VideoURLHTTP BlockKind = "video_url"
+	// OpenAIFileBlock is DeepSeek's `file` block carrying a Files API file_id
+	// (`{"type":"file","file_id":…}`) on the OpenAI-compatible chat wire.
+	OpenAIFileBlock BlockKind = "openai_file"
 )
 
 // MediaEncodingProfile is the ordered set of block kinds a wire may emit. The
@@ -67,6 +70,8 @@ func (k BlockKind) modality() string {
 		return "audio"
 	case VideoURLDataURL, VideoURLHTTP:
 		return "video"
+	case OpenAIFileBlock:
+		return "image"
 	default:
 		return ""
 	}
@@ -77,6 +82,8 @@ func (k BlockKind) source() MediaSource {
 	switch k {
 	case ImageURL, AudioURLHTTP, VideoURLHTTP:
 		return MediaSourceURL
+	case OpenAIFileBlock:
+		return MediaSourceFile
 	default:
 		return MediaSourceInline
 	}
@@ -93,6 +100,8 @@ func (k BlockKind) mimes() []string {
 		return audioMIMEs
 	case VideoURLDataURL, VideoURLHTTP:
 		return videoMIMEs
+	case OpenAIFileBlock:
+		return imageMIMEs
 	default:
 		return nil
 	}
@@ -121,12 +130,18 @@ func (k BlockKind) accepts(mime string) bool {
 var openAIChatProfile = MediaEncodingProfile{ImageInlineDataURL, ImageURL, InputAudioBase64}
 
 // openAICompatibleProfile: vLLM extensions — images (inline + url) + audio
-// (input_audio + audio_url) + video_url.
+// (input_audio + audio_url) + video_url. No `file` block (vLLM has no file_id).
 var openAICompatibleProfile = MediaEncodingProfile{
 	ImageInlineDataURL, ImageURL,
 	InputAudioBase64, AudioURLDataURL, AudioURLHTTP,
 	VideoURLDataURL, VideoURLHTTP,
 }
+
+// deepSeekProfile: DeepSeek's OpenAI-compatible chat — images (image_url data
+// URL / external url) plus its `file` block (a Files API file_id). DeepSeek is
+// image-only, so no audio/video blocks. Kept separate from the vLLM profile so
+// `openai-compatible-chat` does not advertise a `file` block vLLM cannot carry.
+var deepSeekProfile = MediaEncodingProfile{ImageInlineDataURL, ImageURL, OpenAIFileBlock}
 
 // audioFormat maps an audio MIME to OpenAI's input_audio format value.
 func audioFormat(mime string) string {

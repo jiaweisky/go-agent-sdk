@@ -6,13 +6,13 @@ func TestCatalogResolvesPerModel(t *testing.T) {
 	def := ModelConfig{
 		ID: "deepseek-flash", Model: "deepseek-flash", Protocol: "openai-compatible-chat",
 		ModelBaseURL: "https://api.deepseek.com", ProviderID: "deepseek",
-		Media:        &MediaConfig{Input: []string{"text", "image"}, Sources: []string{"inline", "url", "file"}},
+		Media:        &MediaConfig{Input: []string{"text", "image"}, Forms: map[string][]string{"image": {"inline", "url", "file"}}},
 		Credentials:  Credentials{APIKey: "ds"},
 		ContextLimit: 1000, OutputLimit: 100,
 	}
 	models := []ModelConfig{{
 		ID: "gemini-2.5-flash", Model: "gemini-2.5-flash", Protocol: "gemini", ProviderID: "google",
-		Media:       &MediaConfig{Input: []string{"text", "image", "audio", "video"}, Sources: []string{"inline", "file"}},
+		Media:       &MediaConfig{Input: []string{"text", "image", "audio", "video"}, Forms: map[string][]string{"image": {"inline", "file"}, "audio": {"inline", "file"}, "video": {"inline", "file"}}},
 		Credentials: Credentials{APIKey: "goog"},
 	}}
 	catalog, err := NewCatalog(def, models)
@@ -40,7 +40,7 @@ func TestCatalogResolvesPerModel(t *testing.T) {
 	if len(info.Capabilities.Input) != 4 {
 		t.Fatalf("input = %v", info.Capabilities.Input)
 	}
-	if info.Capabilities.Media == nil || len(info.Capabilities.Media.Sources) != 2 {
+	if info.Capabilities.Media == nil || len(info.Capabilities.Media.Forms["image"]) != 2 {
 		t.Fatalf("media = %v", info.Capabilities.Media)
 	}
 
@@ -111,7 +111,7 @@ func TestNewCatalogErrors(t *testing.T) {
 }
 
 func TestModelConfigValidate(t *testing.T) {
-	ok := ModelConfig{ID: "m", Model: "m", Protocol: "gemini", Media: &MediaConfig{Sources: []string{"inline", "url"}}}
+	ok := ModelConfig{ID: "m", Model: "m", Protocol: "gemini", Media: &MediaConfig{Forms: map[string][]string{"image": {"inline", "url"}}}}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("valid: %v", err)
 	}
@@ -119,12 +119,32 @@ func TestModelConfigValidate(t *testing.T) {
 	if err := missingModel.Validate(); err == nil {
 		t.Fatal("expected a missing-model error")
 	}
-	badSource := ModelConfig{ID: "m", Model: "m", Protocol: "gemini", Media: &MediaConfig{Sources: []string{"carrier-pigeon"}}}
+	badSource := ModelConfig{ID: "m", Model: "m", Protocol: "gemini", Media: &MediaConfig{Forms: map[string][]string{"image": {"carrier-pigeon"}}}}
 	if err := badSource.Validate(); err == nil {
 		t.Fatal("expected an unknown-source error")
 	}
 	badModality := ModelConfig{ID: "m", Model: "m", Protocol: "gemini", InputModalities: []string{"hologram"}}
 	if err := badModality.Validate(); err == nil {
 		t.Fatal("expected an unknown-modality error")
+	}
+}
+
+// TestModelInfoCarriesHeaders: a model's extra request headers reach the
+// resolved ModelInfo (e.g. the anthropic-beta header for Files API references).
+func TestModelInfoCarriesHeaders(t *testing.T) {
+	entry := ModelConfig{
+		ID: "claude", Model: "claude-3", Protocol: "anthropic-messages",
+		Headers: map[string]string{"anthropic-beta": "files-api-2025-04-14"},
+	}
+	catalog, err := NewCatalog(entry, nil)
+	if err != nil {
+		t.Fatalf("NewCatalog: %v", err)
+	}
+	info, err := catalog.ModelInfo("claude")
+	if err != nil {
+		t.Fatalf("ModelInfo: %v", err)
+	}
+	if got := info.Request.Headers["anthropic-beta"]; got != "files-api-2025-04-14" {
+		t.Fatalf("headers = %v", info.Request.Headers)
 	}
 }

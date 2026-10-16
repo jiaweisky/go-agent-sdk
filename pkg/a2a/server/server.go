@@ -43,6 +43,15 @@ type Options struct {
 	// Security, when set, requires authentication on the JSON-RPC endpoints
 	// (cards stay public). Nil disables authentication.
 	Security *Security
+	// Ingest, when set, enables the A2A file-exchange edge: each card advertises
+	// a storage extension, and PUT/GET ingest endpoints carry large files out of
+	// band. Nil disables file exchange.
+	Ingest *Ingest
+	// MaxBodyBytes, when > 0, caps a JSON-RPC request body; a larger one is
+	// rejected with 413 instead of being buffered whole (protects against an
+	// oversized inline file part). Out-of-band ingest uploads are bounded
+	// separately by Ingest.MaxBytes. Zero leaves it unbounded.
+	MaxBodyBytes int64
 	// NativeOptions are passed to the underlying A2A server for capabilities the
 	// SDK does not model: authentication interceptors, concurrency limits, push
 	// notifications, and so on. Each value must be an
@@ -100,7 +109,10 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	for _, info := range s.exposed {
 		mux.Handle(s.cardPath(info), s.cardHandler(info))
-		mux.Handle(s.endpointPath(info), s.secure(s.rpcHandler(info)))
+		mux.Handle(s.endpointPath(info), s.secure(s.maxBody(s.rpcHandler(info))))
+		if s.opts.Ingest != nil && s.opts.Ingest.Store != nil {
+			mux.Handle(s.ingestPath(info), s.secure(s.ingestHandler(info)))
+		}
 	}
 	// The default well-known path serves the first exposed agent so a client
 	// that only knows the host can discover it.
@@ -115,6 +127,26 @@ func (s *Server) endpointPath(info schema.AgentInfo) string {
 	return "/agents/" + string(info.ID) + "/"
 }
 
+// maxBody caps a request body to MaxBodyBytes (when set): a declared oversized
+// Content-Length is rejected with 413 up front, and a chunked body is bounded by
+// MaxBytesReader, so a JSON-RPC request cannot buffer an unbounded inline part.
+func (s *Server) maxBody(next http.Handler) http.Handler {
+	limit := s.opts.MaxBodyBytes
+	if limit <= 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > limit {
+			http.Error(w, fmt.Sprintf("request body exceeds the %d-byte limit", limit), http.StatusRequestEntityTooLarge)
+			return
+		}
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) cardPath(info schema.AgentInfo) string {
 	if info.Expose != nil && info.Expose.Path != "" {
 		return info.Expose.Path
@@ -124,7 +156,7 @@ func (s *Server) cardPath(info schema.AgentInfo) string {
 
 func (s *Server) cardHandler(info schema.AgentInfo) http.Handler {
 	producer := a2asrv.AgentCardProducerFn(func(ctx context.Context) (*a2a.AgentCard, error) {
-		return buildCard(info, s.cardEndpoint(ctx, info), s.opts.Security), nil
+		return buildCard(info, s.cardEndpoint(ctx, info), s.opts.Security, s.storageExtension(ctx, info)), nil
 	})
 	inner := a2asrv.NewAgentCardHandler(producer)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +191,7 @@ func (s *Server) Cards(r *http.Request) []*a2a.AgentCard {
 	}
 	cards := make([]*a2a.AgentCard, 0, len(s.exposed))
 	for _, info := range s.exposed {
-		cards = append(cards, buildCard(info, s.cardEndpoint(ctx, info), s.opts.Security))
+		cards = append(cards, buildCard(info, s.cardEndpoint(ctx, info), s.opts.Security, s.storageExtension(ctx, info)))
 	}
 	return cards
 }
@@ -184,6 +216,28 @@ func (s *Server) cardEndpoint(ctx context.Context, info schema.AgentInfo) string
 		return requestBaseURL(r) + s.endpointPath(info)
 	}
 	return s.endpointPath(info)
+}
+
+// storageExtension returns the card's storage extension, or nil when the
+// file-exchange edge is disabled.
+func (s *Server) storageExtension(ctx context.Context, info schema.AgentInfo) *a2a.AgentExtension {
+	if s.opts.Ingest == nil || s.opts.Ingest.Store == nil {
+		return nil
+	}
+	ext := s.opts.Ingest.extension(s.ingestEndpoint(ctx, info))
+	return &ext
+}
+
+// ingestEndpoint resolves the agent's ingest endpoint (where a peer uploads),
+// mirroring cardEndpoint's origin handling.
+func (s *Server) ingestEndpoint(ctx context.Context, info schema.AgentInfo) string {
+	if s.opts.BaseURL != "" {
+		return s.opts.BaseURL + s.ingestPath(info)
+	}
+	if r, ok := requestFromContext(ctx); ok {
+		return requestBaseURL(r) + s.ingestPath(info)
+	}
+	return s.ingestPath(info)
 }
 
 // requestBaseURL reconstructs the scheme and host a request arrived on,

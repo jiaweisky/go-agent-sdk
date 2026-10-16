@@ -341,6 +341,8 @@ func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploader
 		// catalog's ModelInfo, not from the server.
 		Catalog:          catalog,
 		MediaUploader:    uploader,
+		Media:            s.Media.Policy(s.Root),
+		Store:            storageStore(s),
 		MCP:              mcpServers,
 		References:       references,
 		SubagentDepth:    s.SubagentDepth,
@@ -467,10 +469,11 @@ func buildHTTPHandler(ctx context.Context, s config.Server, client *agent.Client
 		DefaultModel:        defaultModel,
 		MediaUploader:       uploader,
 		CORS:                s.CORS,
-		InboundPermissions:  config.PermissionRuleset(s.InboundPermissions),
+		InboundPermissions:  httpInboundPermissions(s),
 		InteractionTimeout:  timeout,
 		InteractionFallback: s.InteractionFallback,
 		Questions:           httpQuestions(s),
+		MaxBodyBytes:        maxBodyBytes(s),
 		SubscriberCapacity:  s.SubscriberCapacity,
 		KeepAlive:           keepAlive,
 		Public:              s.PublicRoutes,
@@ -499,13 +502,51 @@ func buildA2AServer(s config.Server, client *agent.Client, infos []schema.ModelI
 		security = &a2aserver.Security{Bearer: s.Auth.Bearer}
 	}
 	return a2aserver.New(a2aserver.Options{
-		Factory:   agent.NewA2AFactory(client, factoryOpts...),
-		Turns:     client.TurnStore(),
-		Agents:    exposed,
-		BaseURL:   s.BaseURL,
-		KeepAlive: keepAlive,
-		Security:  security,
+		Factory:      agent.NewA2AFactory(client, factoryOpts...),
+		Turns:        client.TurnStore(),
+		Agents:       exposed,
+		BaseURL:      s.BaseURL,
+		KeepAlive:    keepAlive,
+		Security:     security,
+		Ingest:       ingestFor(s),
+		MaxBodyBytes: maxBodyBytes(s),
 	})
+}
+
+// ingestFor builds the A2A file-exchange contract from a server's storage config,
+// or nil when no storage is configured.
+func ingestFor(s config.Server) *a2aserver.Ingest {
+	if s.Storage == nil {
+		return nil
+	}
+	store := s.Storage.Store()
+	if store == nil {
+		return nil
+	}
+	return &a2aserver.Ingest{
+		Store:          store,
+		Schemes:        ingestSchemes(s.Storage),
+		MediaTypes:     s.Storage.MediaTypes,
+		MaxInlineBytes: s.Storage.MaxInlineBytes,
+		MaxBytes:       s.Storage.MaxBytes,
+	}
+}
+
+// ingestSchemes derives the reference schemes a peer may send to a store: an
+// http(s) url for the http/s3/cos backends (and a local store served over http),
+// or file:// for a plain local directory.
+func ingestSchemes(st *config.StorageConfig) []string {
+	if st.Backend == "local" && st.ServeBaseURL == "" {
+		return []string{"file"}
+	}
+	ref := st.URL
+	if st.Backend == "local" {
+		ref = st.ServeBaseURL
+	}
+	if strings.HasPrefix(ref, "http://") {
+		return []string{"http"}
+	}
+	return []string{"https"}
 }
 
 // serveAll runs one serve per listener under one context and signal; a failed
@@ -550,6 +591,47 @@ func mediaUploader(s config.Server) mediaUploaderFunc {
 	}
 	uploader := s.MediaUpload.Uploader()
 	return func(schema.ProviderID) schema.MediaUploader { return uploader }
+}
+
+// httpInboundPermissions extends the operator's inbound ruleset with an
+// external_directory read allow for the delivery policy's spool dir, so the
+// agent's tools can reach a spooled attachment. When the operator set no rules,
+// the restrictive default is kept (the allow is appended to it).
+func httpInboundPermissions(s config.Server) schema.PermissionRuleset {
+	perms := config.PermissionRuleset(s.InboundPermissions)
+	spoolDir := ""
+	if s.Media != nil && s.Media.Spool != nil && s.Media.Spool.Dir != "" {
+		spoolDir = strings.ReplaceAll(s.Media.Spool.Dir, "{Root}", s.Root)
+	}
+	if spoolDir == "" {
+		return perms
+	}
+	if len(perms) == 0 {
+		perms = agent.DefaultInboundPermissions()
+	}
+	return append(perms, schema.PermissionRule{
+		Action: "external_directory", Resource: filepath.Join(spoolDir, "*"), Effect: schema.PermissionEffectAllow,
+	})
+}
+
+// defaultMaxBodyBytes bounds an HTTP request body when the server sets none.
+const defaultMaxBodyBytes = 128 << 20
+
+// maxBodyBytes resolves the server's request-body cap (0 = the default).
+func maxBodyBytes(s config.Server) int64 {
+	if s.MaxBodyBytes > 0 {
+		return s.MaxBodyBytes
+	}
+	return defaultMaxBodyBytes
+}
+
+// storageStore builds the server's provider-independent media store, or nil when
+// no storage is configured.
+func storageStore(s config.Server) schema.MediaStore {
+	if s.Storage == nil {
+		return nil
+	}
+	return s.Storage.Store()
 }
 
 // httpAuth maps a server's auth config to the HTTP server's auth options.

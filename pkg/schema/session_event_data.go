@@ -47,6 +47,12 @@ const (
 	AttachmentOmitUnsupportedSource   SessionAttachmentOmitReason = "unsupported_source"
 	AttachmentOmitUnsupportedRole     SessionAttachmentOmitReason = "unsupported_role"
 	AttachmentOmitInvalidPayload      SessionAttachmentOmitReason = "invalid_payload"
+	// AttachmentOmitTooLarge is a byte-backed attachment over the delivery
+	// policy's inlineLimitBytes/maxBytes that could not be delivered otherwise.
+	AttachmentOmitTooLarge SessionAttachmentOmitReason = "too_large"
+	// AttachmentOmitURLNotAllowed is a caller-supplied url reference the
+	// delivery policy does not allow the provider to fetch (fetchURL is false).
+	AttachmentOmitURLNotAllowed SessionAttachmentOmitReason = "url_not_allowed"
 )
 
 // SessionEventAttachmentOmittedData reports an attachment the selected model
@@ -57,6 +63,8 @@ type SessionEventAttachmentOmittedData struct {
 	Name      string                      `json:"name"`
 	MIME      string                      `json:"mime"`
 	Reason    SessionAttachmentOmitReason `json:"reason"`
+	// Detail is a human hint for the reason (e.g. the accepted size limit).
+	Detail string `json:"detail,omitempty"`
 }
 
 // SessionEventMessageTextData covers context.updated and synthetic.

@@ -9,7 +9,7 @@ import (
 // buildCard builds the AgentCard for one exposed agent. A card describes a
 // single agent (one card = one agent); its URL is where the JSON-RPC endpoint
 // is mounted. When security is set, the card declares the bearer scheme.
-func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.AgentCard {
+func buildCard(info schema.AgentInfo, endpoint string, security *Security, storageExt *a2a.AgentExtension) *a2a.AgentCard {
 	name := string(info.ID)
 	description := ""
 	if info.Description != nil {
@@ -62,6 +62,9 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 		DefaultInputModes:  inputModes,
 		DefaultOutputModes: outputModes,
 		Skills:             skills,
+	}
+	if storageExt != nil {
+		card.Capabilities.Extensions = append(card.Capabilities.Extensions, *storageExt)
 	}
 	if endpoint != "" {
 		card.SupportedInterfaces = []*a2a.AgentInterface{

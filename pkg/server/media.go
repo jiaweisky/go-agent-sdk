@@ -61,7 +61,7 @@ func (s *Server) handleSessionFile(w http.ResponseWriter, r *http.Request) {
 		s.writeSDKError(w, err)
 		return
 	}
-	dto := mediaRefDTO{Source: ref.Source, ID: ref.ID}
+	dto := mediaRefDTO{Source: ref.Source, ID: ref.Value}
 	if ref.ExpiresAt != nil {
 		expires := ref.ExpiresAt.Format(time.RFC3339)
 		dto.ExpiresAt = &expires

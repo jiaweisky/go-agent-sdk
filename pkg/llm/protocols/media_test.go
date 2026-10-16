@@ -17,8 +17,8 @@ func TestMediaAllowedNarrowsByProtocolThenModel(t *testing.T) {
 		{"protocol and model allow an image", OpenAIChatHTTPRoute.Protocol, nil, "image/png", true},
 		{"protocol rejects a document", OpenAIChatHTTPRoute.Protocol, nil, "application/pdf", false},
 		{"bedrock carries a document", BedrockConverseProtocol.ID, nil, "application/pdf", true},
-		{"gemini does not lower a document", GeminiHTTPRoute.Protocol, nil, "application/pdf", false},
-		{"anthropic does not lower a document", AnthropicMessagesHTTPRoute.Protocol, nil, "application/pdf", false},
+		{"gemini carries a document", GeminiHTTPRoute.Protocol, nil, "application/pdf", true},
+		{"anthropic carries a document", AnthropicMessagesHTTPRoute.Protocol, nil, "application/pdf", true},
 		{"text-only model rejects an image", OpenAIChatHTTPRoute.Protocol, []string{"text"}, "image/png", false},
 		{"vision model allows an image", OpenAIChatHTTPRoute.Protocol, []string{"text", "image"}, "image/png", true},
 		{"gemini carries audio", GeminiHTTPRoute.Protocol, nil, "audio/wav", true},
@@ -59,5 +59,97 @@ func TestMediaFeasibleDescriptor(t *testing.T) {
 	unconstrained := ProtocolMediaSupport{MIMEs: imageMIMESet}
 	if !unconstrained.AllowsSource(MediaSourceFile) || !unconstrained.AllowsRole("tool") {
 		t.Fatal("empty sources/roles should be unconstrained")
+	}
+}
+
+func TestAnthropicDocumentLowering(t *testing.T) {
+	doc, err := anthropicMessagesLowerMedia(schema.MediaPart{
+		Type: "media", MediaType: "application/pdf", Source: schema.MediaSourceInline,
+		Data: "data:application/pdf;base64,JVBERi0=",
+	})
+	if err != nil {
+		t.Fatalf("document: %v", err)
+	}
+	if doc.Type != "document" || doc.Source.Type != "base64" || doc.Source.MediaType != "application/pdf" {
+		t.Fatalf("document block = %+v", doc)
+	}
+
+	img, err := anthropicMessagesLowerMedia(schema.MediaPart{
+		Type: "media", MediaType: "image/png", Source: schema.MediaSourceInline,
+		Data: "data:image/png;base64,aGVsbG8=",
+	})
+	if err != nil {
+		t.Fatalf("image: %v", err)
+	}
+	if img.Type != "image" {
+		t.Fatalf("image block type = %q", img.Type)
+	}
+
+	urlDoc, err := anthropicMessagesLowerMedia(schema.MediaPart{
+		Type: "media", MediaType: "application/pdf", Source: schema.MediaSourceURL, Data: "https://x/a.pdf",
+	})
+	if err != nil {
+		t.Fatalf("url document: %v", err)
+	}
+	if urlDoc.Type != "document" || urlDoc.Source.Type != "url" {
+		t.Fatalf("url document block = %+v", urlDoc)
+	}
+}
+
+func TestDeepSeekFileBlockLowering(t *testing.T) {
+	// The `file` block belongs to the DeepSeek profile, not the vLLM one.
+	if compat, _ := LookupProtocol(schema.ProtocolID(OpenAICompatibleChatHTTPRoute.ID)); compat.Media.AllowsSource(schema.MediaSourceFile) {
+		t.Fatal("openai-compatible-chat (vLLM) must not advertise the file source")
+	}
+	entry, ok := LookupProtocol(schema.ProtocolID(DeepSeekChatHTTPRoute.ID))
+	if !ok || !entry.Media.AllowsSource(schema.MediaSourceFile) {
+		t.Fatal("deepseek-chat should allow the file source")
+	}
+	content, err := openaiChatLowerMedia(schema.MediaPart{
+		Type: "media", MediaType: "image/png", Source: schema.MediaSourceFile, Data: "file-api-123",
+	}, deepSeekProfile)
+	if err != nil {
+		t.Fatalf("lower: %v", err)
+	}
+	if content.Type != "file" || content.FileID == nil || *content.FileID != "file-api-123" {
+		t.Fatalf("content = %+v", content)
+	}
+}
+
+func TestAnthropicFileReferenceLowering(t *testing.T) {
+	entry, ok := LookupProtocol(schema.ProtocolID(AnthropicMessagesHTTPRoute.ID))
+	if !ok || !entry.Media.AllowsSource(schema.MediaSourceFile) {
+		t.Fatal("anthropic-messages should allow the file source")
+	}
+	img, err := anthropicMessagesLowerMedia(schema.MediaPart{
+		Type: "media", MediaType: "image/png", Source: schema.MediaSourceFile, Data: "file-api-1",
+	})
+	if err != nil || img.Type != "image" || img.Source.Type != "file" || img.Source.FileID != "file-api-1" {
+		t.Fatalf("image file ref = %+v err=%v", img, err)
+	}
+	doc, err := anthropicMessagesLowerMedia(schema.MediaPart{
+		Type: "media", MediaType: "application/pdf", Source: schema.MediaSourceFile, Data: "file-api-2",
+	})
+	if err != nil || doc.Type != "document" || doc.Source.FileID != "file-api-2" {
+		t.Fatalf("document file ref = %+v err=%v", doc, err)
+	}
+}
+
+// TestResponsesDocumentURLSourceRejected: OpenAI Responses `input_image` takes a
+// url, but `input_file` (documents) takes a file_id or inline data only, so a
+// pdf url source must be rejected while a pdf file source is allowed.
+func TestResponsesDocumentURLSourceRejected(t *testing.T) {
+	entry, ok := LookupProtocol(schema.ProtocolID(OpenAIResponsesHTTPRoute.ID))
+	if !ok {
+		t.Fatal("openai-responses not registered")
+	}
+	if entry.Media.AllowsSourceFor("application/pdf", MediaSourceURL) {
+		t.Fatal("a pdf url source must be rejected for OpenAI Responses")
+	}
+	if !entry.Media.AllowsSourceFor("image/png", MediaSourceURL) {
+		t.Fatal("an image url source is allowed for OpenAI Responses")
+	}
+	if !entry.Media.AllowsSourceFor("application/pdf", MediaSourceFile) {
+		t.Fatal("a pdf file source is allowed for OpenAI Responses")
 	}
 }

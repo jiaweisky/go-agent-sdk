@@ -10,7 +10,7 @@ import (
 
 func TestBuildCardDeclaresMediaModes(t *testing.T) {
 	description := "an agent"
-	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build"), Description: &description}, "http://example.com/", nil)
+	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build"), Description: &description}, "http://example.com/", nil, nil)
 
 	if !containsMode(card.DefaultInputModes, "text/plain") ||
 		!containsMode(card.DefaultInputModes, "image/png") {
@@ -37,7 +37,7 @@ func TestBuildCardDeclaresAudioVideoModes(t *testing.T) {
 	info := schema.AgentInfo{ID: schema.AgentID("build"), Expose: &schema.AgentExpose{
 		InputModes: []string{"text/plain", "image/png", "audio/wav", "video/mp4"},
 	}}
-	card := buildCard(info, "", nil)
+	card := buildCard(info, "", nil, nil)
 	for _, mode := range []string{"audio/wav", "video/mp4"} {
 		if !containsMode(card.DefaultInputModes, mode) {
 			t.Fatalf("defaultInputModes = %v, want %s", card.DefaultInputModes, mode)
@@ -46,14 +46,14 @@ func TestBuildCardDeclaresAudioVideoModes(t *testing.T) {
 }
 
 func TestBuildCardDeclaresSecurityScheme(t *testing.T) {
-	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "http://example.com/", &Security{Bearer: "s3cret"})
+	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "http://example.com/", &Security{Bearer: "s3cret"}, nil)
 	if _, ok := card.SecuritySchemes["bearer"]; !ok {
 		t.Fatalf("securitySchemes = %v, want a bearer scheme", card.SecuritySchemes)
 	}
 	if len(card.SecurityRequirements) != 1 {
 		t.Fatalf("securityRequirements = %v, want one requirement", card.SecurityRequirements)
 	}
-	card = buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "http://example.com/", nil)
+	card = buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "http://example.com/", nil, nil)
 	if len(card.SecuritySchemes) != 0 {
 		t.Fatalf("securitySchemes = %v, want none without security", card.SecuritySchemes)
 	}
@@ -70,7 +70,7 @@ func TestBuildCardRendersExposeMetadata(t *testing.T) {
 			ID: "read", Name: "Read", Description: "Read files", Tags: []string{"files"}, Examples: []string{"read a file"},
 		}},
 	}}
-	card := buildCard(info, "", nil)
+	card := buildCard(info, "", nil, nil)
 	if card.Version != "2.0.0" || card.DocumentationURL != "https://example.com/doc" || card.IconURL != "https://example.com/icon.png" {
 		t.Fatalf("card = %+v", card)
 	}
@@ -86,7 +86,7 @@ func TestBuildCardRendersExposeMetadata(t *testing.T) {
 // skills advertises an empty (non-nil) list, serialized as `"skills": []` and
 // never a synthetic self-skill or `null`.
 func TestBuildCardAdvertisesNoSyntheticSkills(t *testing.T) {
-	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "", nil)
+	card := buildCard(schema.AgentInfo{ID: schema.AgentID("build")}, "", nil, nil)
 	if card.Skills == nil {
 		t.Fatal("skills = nil, want a non-nil empty slice")
 	}
@@ -108,7 +108,7 @@ func TestCardSkillTagsAreNonNull(t *testing.T) {
 	info := schema.AgentInfo{ID: schema.AgentID("build"), Expose: &schema.AgentExpose{
 		Skills: []schema.AgentSkill{{ID: "read", Name: "Read", Description: "Read files"}},
 	}}
-	card := buildCard(info, "", nil)
+	card := buildCard(info, "", nil, nil)
 	if len(card.Skills) != 1 || card.Skills[0].Tags == nil {
 		t.Fatalf("skill = %+v, want non-nil tags", card.Skills)
 	}

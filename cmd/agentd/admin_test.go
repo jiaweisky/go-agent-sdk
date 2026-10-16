@@ -141,19 +141,67 @@ func TestAdminSanitizesCredentialURLs(t *testing.T) {
 		Name: "http", Kind: "http", Agents: []string{"build"},
 		References:  []config.Reference{{Name: "r", Type: "git", Repository: "https://user:git-token-leak@github.com/o/r.git"}},
 		MediaUpload: &config.MediaUploadConfig{URL: "https://user:up-token-leak@up.example/api"},
+		Storage:     &config.StorageConfig{Backend: "s3", S3: &config.S3Config{Endpoint: "https://user:s3-token-leak@cos.example"}},
 	}}}
 	code, body := adminGet(t, adminTestHandler(cfg), "/api/config", "")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, body)
 	}
-	for _, leak := range []string{"git-token-leak", "up-token-leak", "user:"} {
+	for _, leak := range []string{"git-token-leak", "up-token-leak", "s3-token-leak", "user:"} {
 		if strings.Contains(body, leak) {
 			t.Fatalf("response leaked %q:\n%s", leak, body)
 		}
 	}
-	for _, want := range []string{`"repository":"https://github.com/o/r.git"`, `"url":"https://up.example/api"`} {
+	for _, want := range []string{
+		`"repository":"https://github.com/o/r.git"`,
+		`"url":"https://up.example/api"`,
+		`"endpoint":"https://cos.example"`,
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("response missing sanitized URL %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestAdminConfigExposesMediaStorageAndBody checks the new server fields are
+// rendered: the media delivery policy (camelCase size limits), the media upload
+// lifetime, the media store (redacted), and the body cap.
+func TestAdminConfigExposesMediaStorageAndBody(t *testing.T) {
+	cfg := config.Config{
+		Models: []config.ModelConfig{{ID: "m", Model: "m", Protocol: "openai-compatible-chat"}},
+		Servers: []config.Server{{
+			Name: "a", Kind: "http", Agents: []string{"build"},
+			Media: &config.InboundMediaConfig{
+				InlineLimitBytes: config.MediaSizeLimit{Default: 1024, Image: 2048},
+				Upload:           true,
+			},
+			MediaUpload: &config.MediaUploadConfig{URL: "https://user:tok@up.example/api", ExpiresIn: 60, ExpiresAfter: 120},
+			Storage: &config.StorageConfig{
+				Backend: "http", URL: "https://user:tok@store.example/", Auth: "bearer", Token: "s3cret",
+				PresignSecret: "ps",
+			},
+			MaxBodyBytes: 1 << 21,
+		}},
+	}
+	code, body := adminGet(t, adminTestHandler(cfg), "/api/config?section=servers", "")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d: %s", code, body)
+	}
+	for _, want := range []string{
+		`"inlineLimitBytes":{"default":1024,"image":2048}`,
+		`"expiresIn":60`,
+		`"expiresAfter":120`,
+		`"storage":{"backend":"http","url":"https://store.example/"`,
+		`"presignSecret":{"configured":true,"redacted":true}`,
+		`"maxBodyBytes":2097152`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("response missing %q:\n%s", want, body)
+		}
+	}
+	for _, leak := range []string{"s3cret", "user:", "tok@"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("response leaked %q:\n%s", leak, body)
 		}
 	}
 }

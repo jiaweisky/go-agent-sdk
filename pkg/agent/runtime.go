@@ -56,7 +56,10 @@ type runtime struct {
 	models         runner.ModelResolver
 	process        core.AppProcess
 	subagentDepth  int
-	name           string
+	// spoolDir is the media policy's last-resort spool directory (empty when no
+	// policy spool is configured).
+	spoolDir string
+	name     string
 
 	hooksMu sync.RWMutex
 	hooks   map[string]*SessionHooks
@@ -551,6 +554,11 @@ func newRuntime(ctx context.Context, opts *ClientOptions) (*runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	if opts.MediaPolicy != nil {
+		if err := opts.MediaPolicy.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	global := core.NewGlobal(root, home)
 	// The temp directory advertised to the model (and inherited by every spawned
 	// command) lives under the OS temp directory, not under Root, so it stays
@@ -650,6 +658,9 @@ func (r *runtime) buildBuiltins(opts *ClientOptions, global core.Global, locale 
 // buildRunner wires the LLM runner and the coordinator that drains sessions.
 func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Global, locale language.Tag) {
 	r.snapshot = newSnapshot(git, global, &r.location)
+	if opts.MediaPolicy != nil && opts.MediaPolicy.Spool != nil {
+		r.spoolDir = opts.MediaPolicy.Spool.Dir
+	}
 	r.a2aBackendPool = newA2ABackendPool(r.askBackendQuestion)
 	r.a2aBackendPool.persistTask = r.persistRemoteTask
 	r.a2aBackendPool.loadTask = r.loadRemoteTask
@@ -660,6 +671,9 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		LLM:               chooseLLM(opts),
 		Backends:          r.a2aBackendPool.forAgent,
 		MediaUploader:     opts.MediaUploader,
+		MediaStore:        opts.MediaStore,
+		MediaPolicy:       opts.MediaPolicy,
+		MediaTranscode:    opts.MediaTranscode,
 		OnMediaDecision:   opts.OnMediaDecision,
 		Agents:            r.agentSelector,
 		Tools:             hookedRegistry{inner: r.dispatcher, hooksFor: r.hooksFor},
@@ -918,6 +932,7 @@ func (r *runtime) runRetentionCleanup(ctx context.Context) {
 			_ = r.toolOutput.Cleanup()
 		}
 		_ = core.CleanupA2ASpool(r.global.Data)
+		_ = core.CleanupSpoolDir(r.spoolDir)
 	}
 	sweep()
 	ticker := time.NewTicker(retentionCleanupInterval)

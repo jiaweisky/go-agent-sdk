@@ -52,7 +52,7 @@ func TestMediaUploaderPostsMultipartAndReadsRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upload: %v", err)
 	}
-	if ref.Source != "file" || ref.ID != "file-123" {
+	if ref.Source != "file" || ref.Value != "file-123" {
 		t.Fatalf("ref = %+v, want file/file-123", ref)
 	}
 	if ref.ExpiresAt == nil || ref.ExpiresAt.Before(before.Add(59*time.Second)) || ref.ExpiresAt.After(before.Add(61*time.Second)) {
@@ -88,5 +88,32 @@ func TestMediaUploaderErrors(t *testing.T) {
 	defer empty.Close()
 	if _, err := (MediaUploadConfig{URL: empty.URL}).Uploader().Upload(context.Background(), schema.MediaUpload{Data: []byte("x")}); err == nil {
 		t.Fatal("expected an error when the response has no id")
+	}
+}
+
+func TestMediaUploaderSendsExpiresAfter(t *testing.T) {
+	var anchor, seconds string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		anchor = r.FormValue("expires_after[anchor]")
+		seconds = r.FormValue("expires_after[seconds]")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"f1"}`)
+	}))
+	defer srv.Close()
+
+	uploader := MediaUploadConfig{URL: srv.URL, ExpiresAfter: 3600, IDField: "id"}.Uploader()
+	ref, err := uploader.Upload(context.Background(), schema.MediaUpload{Mime: "image/png", Data: []byte("x")})
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if anchor != "created_at" || seconds != "3600" {
+		t.Fatalf("expires_after = %q/%q, want created_at/3600", anchor, seconds)
+	}
+	if ref.ExpiresAt == nil {
+		t.Fatal("expiresAfter should also bound the local reference cache")
 	}
 }

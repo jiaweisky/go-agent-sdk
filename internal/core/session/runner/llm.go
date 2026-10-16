@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -74,7 +76,7 @@ type BackendSelector func(info *schema.AgentInfo) route.LLMClient
 // a long-lived runner does not grow without limit.
 type mediaUploadCache struct {
 	mu    sync.Mutex
-	index map[string]schema.MediaRef
+	index map[string]schema.Reference
 	order []string
 }
 
@@ -89,6 +91,16 @@ type LLMRunner struct {
 	// MediaUploader resolves a provider's media uploader for inline→file
 	// adaptation. Nil disables adaptation.
 	MediaUploader func(providerID schema.ProviderID) schema.MediaUploader
+	// MediaStore hosts bytes as a url any provider that fetches urls can consume,
+	// for the `url` source preference. Nil disables url hosting.
+	MediaStore schema.MediaStore
+	// MediaPolicy, when set, is the operator-owned inbound media delivery policy
+	// that picks each byte-backed attachment's source (inline/file/spool). Nil
+	// keeps the caller-declared behavior (inline-first with a file fallback).
+	MediaPolicy *core.MediaPolicy
+	// MediaTranscode, when set, shrinks media the SDK cannot encode itself
+	// (audio/video) to fit an inline limit. Nil leaves it undecoded (soft-fail).
+	MediaTranscode func(core.MediaTranscodeRequest) (core.MediaTranscodeResult, bool)
 	// OnMediaDecision reports each omit/upload for host metrics. Nil reports
 	// nothing.
 	OnMediaDecision   func(schema.MediaDecision)
@@ -827,7 +839,7 @@ func (r *LLMRunner) prepareTurnAttempt(
 	if r.DropErroredTurns {
 		contextMessages = dropErroredTurns(contextMessages)
 	}
-	contextMessages = r.adaptMedia(ctx, sessionID, model, contextMessages)
+	contextMessages = r.adaptMedia(ctx, sessionID, model, agent, contextMessages)
 	policy := r.turnMediaPolicy(model, agent, sessionID)
 	request := buildTurnRequest(
 		sessionID,
@@ -1069,9 +1081,9 @@ func (r *LLMRunner) turnMediaPolicy(
 	agent core.AgentSelection,
 	sessionID schema.SessionID,
 ) mediaPolicy {
-	policy := mediaPolicyForModel(model, agent)
-	policy.omit = func(messageID schema.MessageID, name, mime, reason string) {
-		r.publishOmittedAttachment(sessionID, messageID, name, mime, reason)
+	policy := mediaPolicyForModel(model, agent, r.MediaPolicy)
+	policy.omit = func(messageID schema.MessageID, name, mime, reason, detail string) {
+		r.publishOmittedAttachment(sessionID, messageID, name, mime, reason, detail)
 	}
 	return policy
 }
@@ -1082,7 +1094,7 @@ func (r *LLMRunner) turnMediaPolicy(
 func (r *LLMRunner) publishOmittedAttachment(
 	sessionID schema.SessionID,
 	messageID schema.MessageID,
-	name, mime, reason string,
+	name, mime, reason, detail string,
 ) {
 	key := string(messageID) + "\x00" + name + "\x00" + mime
 	if !r.omissions.markOnce(key) {
@@ -1091,7 +1103,7 @@ func (r *LLMRunner) publishOmittedAttachment(
 	if r.OnMediaDecision != nil {
 		r.OnMediaDecision(schema.MediaDecision{
 			SessionID: string(sessionID), MessageID: string(messageID),
-			Name: name, MIME: mime, Action: "omit", Reason: reason,
+			Name: name, MIME: mime, Action: "omit", Reason: reason, Detail: detail,
 		})
 	}
 	payload := map[string]any{
@@ -1104,18 +1116,29 @@ func (r *LLMRunner) publishOmittedAttachment(
 	if reason != "" {
 		payload["reason"] = reason
 	}
+	if detail != "" {
+		payload["detail"] = detail
+	}
 	if _, err := r.Events.Publish(schema.SessionEventAttachmentOmitted, payload); err != nil {
 		r.reportError(err)
 	}
 }
 
+// isA2ABackendAgent reports whether a turn's agent delegates to a remote A2A
+// backend. Such media is handled by the remote agent, so the local model's
+// delivery policy does not apply to it.
+func isA2ABackendAgent(agent core.AgentSelection) bool {
+	return agent.Info != nil && agent.Info.Backend != nil && agent.Info.Backend.Type == schema.AgentBackendA2A
+}
+
 // mediaPolicyForModel derives the media filter for a turn: a part is kept only
-// if the protocol can carry its MIME type, the model accepts its modality, and
+// if the operator policy admits it (a fetchable url, an in-limit inline payload)
+// and the protocol can carry its MIME type, the model accepts its modality, and
 // its payload is well-formed. Anything else is omitted from the request
 // (replaced by a text note) instead of failing the turn. A remote A2A backend
 // carries arbitrary file parts, so it is not filtered by the local protocol.
-func mediaPolicyForModel(model route.Model, agent core.AgentSelection) mediaPolicy {
-	if info := agent.Info; info != nil && info.Backend != nil && info.Backend.Type == schema.AgentBackendA2A {
+func mediaPolicyForModel(model route.Model, agent core.AgentSelection, mp *core.MediaPolicy) mediaPolicy {
+	if isA2ABackendAgent(agent) {
 		return mediaPolicy{}
 	}
 	// The registry is keyed by route id; openai-chat and openai-compatible-chat
@@ -1125,15 +1148,18 @@ func mediaPolicyForModel(model route.Model, agent core.AgentSelection) mediaPoli
 		return mediaPolicy{}
 	}
 	var input []string
-	var sources []llmschema.MediaSource
+	var forms map[string][]llmschema.MediaSource
 	if caps := model.GetCapabilities(); caps != nil {
 		input = caps.Input
-		sources = caps.Sources
+		forms = caps.Forms
 	}
 	routeName := model.Route.ID
 	return mediaPolicy{reason: func(role, mime, source, data string) string {
 		src := llmschema.MediaSource(source)
-		if reason := mediaFeasibilityReason(entry.Media, input, sources, role, mime, src); reason != "" {
+		if reason := mediaFeasibilityReason(entry.Media, input, forms, role, mime, src); reason != "" {
+			return reason
+		}
+		if reason := policyGateReason(mp, src, mediaModality(strings.ToLower(mime)), data); reason != "" {
 			return reason
 		}
 		if src == llmschema.MediaSourceInline {
@@ -1142,7 +1168,52 @@ func mediaPolicyForModel(model route.Model, agent core.AgentSelection) mediaPoli
 			}
 		}
 		return ""
+	}, detail: func(role, mime, source, data string) string {
+		// Only the size gates carry a fixable hint: the accepted limit.
+		if mp == nil || source != string(llmschema.MediaSourceInline) {
+			return ""
+		}
+		raw, err := inlineBytes(data)
+		if err != nil {
+			return ""
+		}
+		modality := mediaModality(strings.ToLower(mime))
+		size := int64(len(raw))
+		if limit := mp.MaxBytes.For(modality); limit > 0 && size > limit {
+			return fmt.Sprintf("limit %d bytes", limit)
+		}
+		if limit := mp.InlineLimitBytes.For(modality); limit > 0 && size > limit {
+			return fmt.Sprintf("limit %d bytes", limit)
+		}
+		return ""
 	}}
+}
+
+// policyGateReason applies the operator policy's source gates to an attachment
+// the delivery loop could not place: a url the operator does not allow the
+// provider to fetch, and an inline payload over the size limits.
+func policyGateReason(mp *core.MediaPolicy, src llmschema.MediaSource, modality, data string) string {
+	if mp == nil {
+		return ""
+	}
+	if src == llmschema.MediaSourceURL && !mp.FetchURL {
+		return string(schema.AttachmentOmitURLNotAllowed)
+	}
+	if src != llmschema.MediaSourceInline {
+		return ""
+	}
+	raw, err := inlineBytes(data)
+	if err != nil {
+		return ""
+	}
+	size := int64(len(raw))
+	if limit := mp.MaxBytes.For(modality); limit > 0 && size > limit {
+		return string(schema.AttachmentOmitTooLarge)
+	}
+	if limit := mp.InlineLimitBytes.For(modality); limit > 0 && size > limit {
+		return string(schema.AttachmentOmitTooLarge)
+	}
+	return ""
 }
 
 // mediaFeasibilityReason returns why a protocol descriptor plus a model's
@@ -1151,19 +1222,24 @@ func mediaPolicyForModel(model route.Model, agent core.AgentSelection) mediaPoli
 // constraints, and the protocol's role constraint, but not the payload. It is
 // the single feasibility predicate shared by the turn planner and the
 // inline-to-file adaptation loop.
-func mediaFeasibilityReason(support protocols.ProtocolMediaSupport, modelInput []string, modelSources []llmschema.MediaSource, role, mime string, source llmschema.MediaSource) string {
+func mediaFeasibilityReason(support protocols.ProtocolMediaSupport, modelInput []string, modelForms map[string][]llmschema.MediaSource, role, mime string, source llmschema.MediaSource) string {
 	lower := strings.ToLower(mime)
 	if !support.AllowsMIME(lower) {
 		return string(schema.AttachmentOmitUnsupportedType)
 	}
+	// The model's input modalities use the text|image|audio|video|pdf taxonomy …
 	if len(modelInput) > 0 && !slices.Contains(modelInput, utils.MediaModality(lower)) {
 		return string(schema.AttachmentOmitUnsupportedModality)
 	}
-	if !support.AllowsSource(source) {
+	if !support.AllowsSourceFor(lower, source) {
 		return string(schema.AttachmentOmitUnsupportedSource)
 	}
-	if len(modelSources) > 0 && !slices.Contains(modelSources, source) {
-		return string(schema.AttachmentOmitUnsupportedSource)
+	if len(modelForms) > 0 {
+		// … while media forms are keyed by image|audio|video|file.
+		accepted, ok := modelForms[mediaModality(lower)]
+		if !ok || !slices.Contains(accepted, source) {
+			return string(schema.AttachmentOmitUnsupportedSource)
+		}
 	}
 	if !support.AllowsRole(role) {
 		return string(schema.AttachmentOmitUnsupportedRole)
@@ -1171,30 +1247,24 @@ func mediaFeasibilityReason(support protocols.ProtocolMediaSupport, modelInput [
 	return ""
 }
 
-// adaptMedia rewrites inline attachments to provider file references when the
-// target model/protocol cannot carry them inline but can carry a file reference,
-// using the host MediaUploader. Best-effort: on any error the part is left
-// unchanged and the planner omits it.
-func (r *LLMRunner) adaptMedia(ctx context.Context, sessionID schema.SessionID, model route.Model, messages []schema.SessionMessage) []schema.SessionMessage {
-	if r.MediaUploader == nil {
+// adaptMedia adapts a turn's inbound attachments: the operator delivery policy
+// (when set) picks each byte-backed attachment's source, else the legacy
+// inline-to-file fallback runs. Best-effort: an attachment it cannot place is
+// left for the planner to omit.
+func (r *LLMRunner) adaptMedia(ctx context.Context, sessionID schema.SessionID, model route.Model, agent core.AgentSelection, messages []schema.SessionMessage) []schema.SessionMessage {
+	// A remote A2A backend handles its own media, so the local operator policy
+	// does not reshape it (the legacy inline-to-file fallback still applies).
+	policy := r.MediaPolicy
+	if isA2ABackendAgent(agent) {
+		policy = nil
+	}
+	if r.MediaUploader == nil && r.MediaStore == nil && policy == nil {
 		return messages
 	}
-	entry, ok := protocols.LookupProtocol(llmschema.ProtocolID(model.Route.ID))
+	adapter, ok := r.mediaAdapterFor(model, policy)
 	if !ok {
 		return messages
 	}
-	provider := schema.ProviderID(model.ProviderID())
-	uploader := r.MediaUploader(provider)
-	if uploader == nil {
-		return messages
-	}
-	var input []string
-	var sources []llmschema.MediaSource
-	if caps := model.GetCapabilities(); caps != nil {
-		input = caps.Input
-		sources = caps.Sources
-	}
-	adapter := mediaAdapter{runner: r, entry: entry, provider: provider, input: input, sources: sources, uploader: uploader}
 	for i := range messages {
 		if user, ok := messages[i].(schema.SessionMessageUser); ok && len(user.Files) > 0 {
 			messages[i] = adapter.adaptUserMessage(ctx, sessionID, user)
@@ -1203,125 +1273,384 @@ func (r *LLMRunner) adaptMedia(ctx context.Context, sessionID schema.SessionID, 
 	return messages
 }
 
-// mediaAdapter carries the per-turn invariants the inline-to-file adaptation
-// needs, so each attachment is handled without re-deriving them.
-type mediaAdapter struct {
-	runner   *LLMRunner
-	entry    protocols.ProtocolEntry
-	provider schema.ProviderID
-	input    []string
-	sources  []llmschema.MediaSource
-	uploader schema.MediaUploader
+// mediaAdapterFor builds the per-turn media adapter for a model and policy. It
+// reports false when the route has no protocol descriptor.
+func (r *LLMRunner) mediaAdapterFor(model route.Model, policy *core.MediaPolicy) (mediaAdapter, bool) {
+	entry, ok := protocols.LookupProtocol(llmschema.ProtocolID(model.Route.ID))
+	if !ok {
+		return mediaAdapter{}, false
+	}
+	provider := schema.ProviderID(model.ProviderID())
+	var uploader schema.MediaUploader
+	if r.MediaUploader != nil {
+		uploader = r.MediaUploader(provider)
+	}
+	var input []string
+	var forms map[string][]llmschema.MediaSource
+	if caps := model.GetCapabilities(); caps != nil {
+		input = caps.Input
+		forms = caps.Forms
+	}
+	return mediaAdapter{
+		runner:    r,
+		entry:     entry,
+		provider:  provider,
+		input:     input,
+		forms:     forms,
+		uploader:  uploader,
+		store:     r.MediaStore,
+		policy:    policy,
+		transcode: r.MediaTranscode,
+	}, true
 }
 
-// adaptUserMessage rewrites a user message's inline attachments to file
-// references where needed and persists the result, so a rebuilt turn or a
-// restart reuses it instead of re-uploading.
+// mediaAdapter carries the per-turn invariants the inbound media adaptation
+// needs, so each attachment is handled without re-deriving them.
+type mediaAdapter struct {
+	runner    *LLMRunner
+	entry     protocols.ProtocolEntry
+	provider  schema.ProviderID
+	input     []string
+	forms     map[string][]llmschema.MediaSource
+	uploader  schema.MediaUploader
+	store     schema.MediaStore
+	policy    *core.MediaPolicy
+	transcode func(core.MediaTranscodeRequest) (core.MediaTranscodeResult, bool)
+}
+
+// adaptUserMessage adapts a user message's byte-backed attachments to the
+// delivery policy (or the inline-to-file fallback) and persists the result, so a
+// rebuilt turn or a restart reuses it instead of re-uploading. A spooled
+// attachment is dropped from the files and referenced by path in the text.
 func (a mediaAdapter) adaptUserMessage(ctx context.Context, sessionID schema.SessionID, user schema.SessionMessageUser) schema.SessionMessageUser {
-	files := make([]schema.PromptFileAttachment, len(user.Files))
-	copy(files, user.Files)
+	files := make([]schema.PromptFileAttachment, 0, len(user.Files))
+	text := user.Text
 	changed := false
-	for i := range files {
-		adapted := a.adapt(ctx, sessionID, files[i])
-		if adapted.FileID != files[i].FileID || adapted.MediaSource != files[i].MediaSource || adapted.URI != files[i].URI {
+	for _, file := range user.Files {
+		adapted, note := a.adapt(ctx, sessionID, file)
+		if adapted == nil {
+			changed = true
+		} else {
+			if adapted.FileID != file.FileID || adapted.MediaSource != file.MediaSource || adapted.URI != file.URI || adapted.Mime != file.Mime {
+				changed = true
+			}
+			files = append(files, *adapted)
+		}
+		if note != "" {
+			text += "\n" + note
 			changed = true
 		}
-		files[i] = adapted
 	}
 	if !changed {
 		return user
 	}
 	user.Files = files
+	user.Text = text
 	if err := session.PersistMessage(a.runner.DB, sessionID, user); err != nil {
 		a.runner.reportError(err)
 	}
 	return user
 }
 
-// adapt uploads an infeasible inline attachment and rewrites it as a file
-// reference, or returns it unchanged. Uploads are deduplicated by content hash;
-// a cached ref is reused until it expires.
-func (a mediaAdapter) adapt(ctx context.Context, sessionID schema.SessionID, file schema.PromptFileAttachment) schema.PromptFileAttachment {
+// adapt resolves one attachment. It returns the (possibly rewritten) attachment,
+// or nil when the attachment is spooled; a non-empty note is the path reference
+// to append to the message text. A reference (file_id / url) is honored as-is.
+// A nil policy keeps the inline-to-file fallback; nil is only ever returned
+// under a policy.
+func (a mediaAdapter) adapt(ctx context.Context, sessionID schema.SessionID, file schema.PromptFileAttachment) (*schema.PromptFileAttachment, string) {
 	source := attachmentSource(file.MediaSource, file.URI, file.FileID)
 	if source != llmschema.MediaSourceInline {
-		return file
-	}
-	if mediaFeasibilityReason(a.entry.Media, a.input, a.sources, "user", file.Mime, source) == "" {
-		return file
-	}
-	if mediaFeasibilityReason(a.entry.Media, a.input, a.sources, "user", file.Mime, llmschema.MediaSourceFile) != "" {
-		return file
+		return &file, ""
 	}
 	data, err := inlineBytes(file.URI)
 	if err != nil {
+		return &file, ""
+	}
+	if a.policy == nil {
+		adapted := a.adaptFallback(ctx, sessionID, file, data)
+		return &adapted, ""
+	}
+	return a.adaptPolicy(ctx, sessionID, file, data)
+}
+
+// adaptFallback is the pre-policy behavior: upload an inline attachment only
+// when the model cannot carry it inline but can carry a file reference.
+func (a mediaAdapter) adaptFallback(ctx context.Context, sessionID schema.SessionID, file schema.PromptFileAttachment, data []byte) schema.PromptFileAttachment {
+	if a.modelAllowsSource(file.Mime, llmschema.MediaSourceInline) {
 		return file
+	}
+	if !a.modelAllowsSource(file.Mime, llmschema.MediaSourceFile) {
+		return file
+	}
+	uploaded, _ := a.upload(ctx, sessionID, file, data)
+	return uploaded
+}
+
+// adaptPolicy applies the operator delivery policy to a byte-backed attachment.
+// It first shrinks an over-budget payload (when downsample is enabled), so the
+// size budget holds whatever source is chosen next; then a caller-declared
+// source wins when it fits, else the first feasible prefer entry, else the
+// spool, else the attachment is left for the planner to omit.
+func (a mediaAdapter) adaptPolicy(ctx context.Context, sessionID schema.SessionID, file schema.PromptFileAttachment, data []byte) (*schema.PromptFileAttachment, string) {
+	if limit := a.policy.MaxBytes.For(a.modality(file.Mime)); limit > 0 && int64(len(data)) > limit {
+		return &file, ""
+	}
+	if a.policy.Downsample && !a.withinBudget(data, file.Mime) {
+		if shrunk, mime, ok := a.downsample(file, data); ok {
+			data = shrunk
+			file.Mime = mime
+			file.URI = inlineURI(mime, base64.StdEncoding.EncodeToString(shrunk))
+			a.reportDecision(sessionID, file, "downsample")
+		}
+	}
+	if file.MediaSource != "" && a.inlineFits(data, file.Mime) {
+		return &file, ""
+	}
+	for _, prefer := range a.policy.PreferredSources() {
+		switch prefer {
+		case core.MediaPolicySourceURL:
+			if a.urlHostable(file) {
+				if hosted, ok := a.hostURL(ctx, sessionID, file, data); ok {
+					return hosted, ""
+				}
+			}
+		case core.MediaPolicySourceFile:
+			if a.uploadable(file) {
+				if uploaded, ok := a.upload(ctx, sessionID, file, data); ok {
+					return &uploaded, ""
+				}
+			}
+		case core.MediaPolicySourceInline:
+			if a.inlineFits(data, file.Mime) {
+				return &file, ""
+			}
+		}
+	}
+	if a.policy.Spool != nil {
+		return a.spool(sessionID, file, data)
+	}
+	return &file, ""
+}
+
+// urlHostable reports whether the policy may host the payload as a url: upload
+// enabled, a store present, and the url source feasible for the model.
+func (a mediaAdapter) urlHostable(file schema.PromptFileAttachment) bool {
+	return a.policy.Upload && a.store != nil && a.modelAllowsSource(file.Mime, llmschema.MediaSourceURL)
+}
+
+// hostURL uploads the payload to the provider-independent store and rewrites the
+// attachment as a url reference. Best-effort: on error the attachment is left for
+// the next prefer option.
+func (a mediaAdapter) hostURL(ctx context.Context, sessionID schema.SessionID, file schema.PromptFileAttachment, data []byte) (*schema.PromptFileAttachment, bool) {
+	ref, err := a.store.Put(ctx, schema.MediaUpload{Mime: file.Mime, Name: file.Name, Data: data})
+	if err != nil {
+		a.runner.reportError(err)
+		return nil, false
+	}
+	if ref.Source == "" {
+		ref.Source = string(llmschema.MediaSourceURL)
+	}
+	a.reportDecision(sessionID, file, "upload")
+	hosted := fileWithRef(file, ref)
+	return &hosted, true
+}
+
+// modelAllowsSource reports whether the model and protocol can carry a MIME
+// from a source in the user role.
+func (a mediaAdapter) modelAllowsSource(mime string, source llmschema.MediaSource) bool {
+	return mediaFeasibilityReason(a.entry.Media, a.input, a.forms, "user", mime, source) == ""
+}
+
+// uploadable reports whether the policy may adapt the attachment to a provider
+// file reference: upload enabled, an uploader present, and the file source
+// feasible for the model.
+func (a mediaAdapter) uploadable(file schema.PromptFileAttachment) bool {
+	return a.policy.Upload && a.uploader != nil && a.modelAllowsSource(file.Mime, llmschema.MediaSourceFile)
+}
+
+// modality maps a MIME to the policy's modality key.
+func (a mediaAdapter) modality(mime string) string {
+	return mediaModality(strings.ToLower(mime))
+}
+
+// mediaModality maps a MIME to the delivery policy's modality key
+// (image|audio|video|file) — the taxonomy the per-modality size budgets and the
+// models' media forms share. Unlike the protocol MIME→modality helper, every
+// non-av MIME (text, pdf, octet-stream) is the "file" modality.
+func mediaModality(mime string) string {
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return "image"
+	case strings.HasPrefix(mime, "audio/"):
+		return "audio"
+	case strings.HasPrefix(mime, "video/"):
+		return "video"
+	default:
+		return "file"
+	}
+}
+
+// withinBudget reports whether a payload is within its modality's size budget.
+func (a mediaAdapter) withinBudget(data []byte, mime string) bool {
+	limit := a.policy.InlineLimitBytes.For(a.modality(mime))
+	return limit <= 0 || int64(len(data)) <= limit
+}
+
+// inlineFits reports whether an inline payload for a MIME is both within the
+// size budget and carryable by the model.
+func (a mediaAdapter) inlineFits(data []byte, mime string) bool {
+	return a.withinBudget(data, mime) && a.modelAllowsSource(mime, llmschema.MediaSourceInline)
+}
+
+// upload uploads a byte-backed attachment and rewrites it as a file reference.
+// Uploads are deduplicated by content hash; a cached ref is reused until it
+// expires.
+func (a mediaAdapter) upload(ctx context.Context, sessionID schema.SessionID, file schema.PromptFileAttachment, data []byte) (schema.PromptFileAttachment, bool) {
+	if a.uploader == nil {
+		return file, false
 	}
 	key := mediaCacheKey(a.provider, file.Mime, data)
 	if ref, ok := a.runner.cachedUpload(key); ok {
-		return fileWithRef(file, ref)
+		return fileWithRef(file, ref), true
 	}
 	ref, err := a.uploader.Upload(ctx, schema.MediaUpload{Mime: file.Mime, Name: file.Name, Data: data})
 	if err != nil {
 		a.runner.reportError(err)
-		return file
+		return file, false
 	}
 	a.runner.storeUpload(key, ref)
-	if a.runner.OnMediaDecision != nil {
-		name := ""
-		if file.Name != nil {
-			name = *file.Name
-		}
-		a.runner.OnMediaDecision(schema.MediaDecision{
-			SessionID: string(sessionID), Name: name, MIME: file.Mime, Action: "upload",
-		})
+	a.reportDecision(sessionID, file, "upload")
+	return fileWithRef(file, ref), true
+}
+
+// downsample shrinks an oversized payload to fit the size budget: images in
+// process (pure Go), audio/video through the host transcoder (soft-fail). It
+// returns the shrunk bytes and their MIME.
+func (a mediaAdapter) downsample(file schema.PromptFileAttachment, data []byte) ([]byte, string, bool) {
+	limit := a.policy.InlineLimitBytes.For(a.modality(file.Mime))
+	if limit <= 0 {
+		return nil, "", false
 	}
-	return fileWithRef(file, ref)
+	if strings.HasPrefix(strings.ToLower(file.Mime), "image/") {
+		cfg := core.DefaultImageConfig()
+		cfg.MaxBase64Bytes = base64.StdEncoding.EncodedLen(int(limit))
+		content, err := core.NewImage(cfg).Normalize(mediaName(file), core.FileSystemContent{
+			Content:  base64.StdEncoding.EncodeToString(data),
+			Encoding: "base64",
+			MIME:     file.Mime,
+		})
+		if err != nil {
+			return nil, "", false
+		}
+		decoded, err := base64.StdEncoding.DecodeString(content.Content)
+		if err != nil || int64(len(decoded)) > limit {
+			return nil, "", false
+		}
+		return decoded, content.MIME, true
+	}
+	if a.transcode == nil {
+		return nil, "", false
+	}
+	result, ok := a.transcode(core.MediaTranscodeRequest{MIME: file.Mime, Name: mediaName(file), Data: data, MaxBytes: limit})
+	if !ok || len(result.Data) == 0 || int64(len(result.Data)) > limit {
+		return nil, "", false
+	}
+	mime := result.MIME
+	if mime == "" {
+		mime = file.Mime
+	}
+	return result.Data, mime, true
+}
+
+// inlineURI builds an inline payload reference from base64-encoded content.
+func inlineURI(mime, encoded string) string {
+	return "data:" + mime + ";base64," + encoded
+}
+
+// spool writes an undeliverable attachment to the policy's spool directory and
+// drops it from the files, returning the path note that replaces it.
+func (a mediaAdapter) spool(sessionID schema.SessionID, file schema.PromptFileAttachment, data []byte) (*schema.PromptFileAttachment, string) {
+	dir := a.policy.Spool.Dir
+	if dir == "" {
+		return &file, ""
+	}
+	sum := sha256.Sum256(data)
+	name := hex.EncodeToString(sum[:8]) + "-" + filepath.Base(mediaName(file))
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		a.runner.reportError(err)
+		return &file, ""
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		a.runner.reportError(err)
+		return &file, ""
+	}
+	a.reportDecision(sessionID, file, "spool")
+	return nil, "[spooled attachment: " + path + "]"
+}
+
+// reportDecision publishes one media adaptation decision for host metrics.
+func (a mediaAdapter) reportDecision(sessionID schema.SessionID, file schema.PromptFileAttachment, action string) {
+	if a.runner.OnMediaDecision == nil {
+		return
+	}
+	a.runner.OnMediaDecision(schema.MediaDecision{
+		SessionID: string(sessionID), Name: mediaName(file), MIME: file.Mime, Action: action,
+	})
+}
+
+// mediaName is an attachment's display name, falling back to its MIME.
+func mediaName(file schema.PromptFileAttachment) string {
+	if file.Name != nil && *file.Name != "" {
+		return *file.Name
+	}
+	return file.Mime
 }
 
 // fileWithRef rewrites an inline attachment to reference an uploaded file. The
-// resolved source comes from the returned MediaRef (a provider may return a file
+// resolved source comes from the returned Reference (a provider may return a file
 // id or a URI); an empty source defaults to "file".
-func fileWithRef(file schema.PromptFileAttachment, ref schema.MediaRef) schema.PromptFileAttachment {
+func fileWithRef(file schema.PromptFileAttachment, ref schema.Reference) schema.PromptFileAttachment {
 	source := ref.Source
 	if source == "" {
 		source = string(llmschema.MediaSourceFile)
 	}
 	file.MediaSource = source
 	file.URI = ""
-	file.FileID = ref.ID
+	file.FileID = ref.Value
 	if source == string(llmschema.MediaSourceURL) {
-		file.URI = ref.ID
+		file.URI = ref.Value
 		file.FileID = ""
 	}
 	return file
 }
 
 // cachedUpload returns a cached, unexpired upload for a content key.
-func (r *LLMRunner) cachedUpload(key string) (schema.MediaRef, bool) {
+func (r *LLMRunner) cachedUpload(key string) (schema.Reference, bool) {
 	if r.media == nil {
-		return schema.MediaRef{}, false
+		return schema.Reference{}, false
 	}
 	r.media.mu.Lock()
 	defer r.media.mu.Unlock()
 	ref, ok := r.media.index[key]
 	if !ok {
-		return schema.MediaRef{}, false
+		return schema.Reference{}, false
 	}
 	if ref.ExpiresAt != nil && ref.ExpiresAt.Before(time.Now()) {
 		delete(r.media.index, key)
-		return schema.MediaRef{}, false
+		return schema.Reference{}, false
 	}
 	return ref, true
 }
 
-func (r *LLMRunner) storeUpload(key string, ref schema.MediaRef) {
+func (r *LLMRunner) storeUpload(key string, ref schema.Reference) {
 	if r.media == nil {
 		r.media = &mediaUploadCache{}
 	}
 	r.media.mu.Lock()
 	defer r.media.mu.Unlock()
 	if r.media.index == nil {
-		r.media.index = map[string]schema.MediaRef{}
+		r.media.index = map[string]schema.Reference{}
 	}
 	if _, exists := r.media.index[key]; !exists {
 		r.media.order = append(r.media.order, key)
