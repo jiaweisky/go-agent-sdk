@@ -140,9 +140,10 @@ func executeGlob(deps GlobDeps, input GlobInput, ctx Context) (GlobOutput, error
 	}
 
 	entries, err := deps.Ripgrep.Glob(core.RipgrepGlobInput{
-		Cwd:     cwd,
-		Pattern: input.Pattern,
-		Limit:   limit,
+		Cwd:         cwd,
+		Pattern:     input.Pattern,
+		Limit:       limit,
+		OnViolation: ctx.ReportViolation,
 	})
 	if err != nil {
 		return nil, err

@@ -244,6 +244,18 @@ var SessionEventToolFailed = Define(DefineInput{
 	},
 })
 
+// SessionEventSandboxDenied reports a sandbox denial: an in-process tool guard
+// (Certainty "enforced") or a spawned command whose output matched a platform
+// denial message (Certainty "suspected").
+var SessionEventSandboxDenied = Define(DefineInput{
+	Type:    "session.next.sandbox.denied",
+	Durable: sessionEventDurable,
+	Schema: map[string]any{
+		"timestamp": nil, "sessionID": nil, "assistantMessageID": nil, "callID": nil,
+		"action": nil, "path": nil, "host": nil, "rule": nil, "surface": nil, "certainty": nil,
+	},
+})
+
 // SessionEventRetried is defined for parity, but has no producer: nothing
 // publishes it (V2 core does not emit it either, and its projector is commented
 // out there).
@@ -326,6 +338,7 @@ var SessionEventDurableDefinitions = Inventory(
 	SessionEventToolProgress,
 	SessionEventToolSuccess,
 	SessionEventToolFailed,
+	SessionEventSandboxDenied,
 	SessionEventReasoningStarted,
 	SessionEventReasoningEnded,
 	SessionEventRetried,
@@ -366,6 +379,7 @@ var SessionEventDefinitions = Inventory(
 	SessionEventToolProgress,
 	SessionEventToolSuccess,
 	SessionEventToolFailed,
+	SessionEventSandboxDenied,
 	SessionEventRetried,
 	SessionEventCompactionStarted,
 	SessionEventCompactionDelta,

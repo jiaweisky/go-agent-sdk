@@ -80,6 +80,8 @@ type ReadDeps struct {
 	Reader     ReadFileSystem
 	Image      core.Image
 	Permission core.Permission
+	// Guard, when set, is consulted before the path is read.
+	Guard core.FileReadGuard
 }
 
 func MakeRead(deps ReadDeps) *Def[ReadInput, any, any] {
@@ -114,7 +116,7 @@ func MakeRead(deps ReadDeps) *Def[ReadInput, any, any] {
 			if err := execCtx.Err(); err != nil {
 				return nil, err
 			}
-			result, err := executeRead(deps, input, ctx)
+			result, err := executeRead(execCtx, deps, input, ctx)
 			if err != nil {
 				return nil, failure(readToolErrorMessage(err, input.Path), err)
 			}
@@ -123,7 +125,7 @@ func MakeRead(deps ReadDeps) *Def[ReadInput, any, any] {
 	})
 }
 
-func executeRead(deps ReadDeps, input ReadInput, ctx Context) (any, error) {
+func executeRead(execCtx context.Context, deps ReadDeps, input ReadInput, ctx Context) (any, error) {
 	source := &core.PermissionSource{
 		Type:      core.PermissionSourceTypeTool,
 		MessageID: ctx.AssistantMessageID,
@@ -134,6 +136,12 @@ func executeRead(deps ReadDeps, input ReadInput, ctx Context) (any, error) {
 	target, err := deps.Mutation.Resolve(core.LocationMutationResolveInput{Path: input.Path, Kind: &kind})
 	if err != nil {
 		return nil, err
+	}
+
+	if deps.Guard != nil {
+		if err := deps.Guard.AllowRead(execCtx, target.Canonical); err != nil {
+			return nil, err
+		}
 	}
 
 	if external := target.ExternalDirectory; external != nil {

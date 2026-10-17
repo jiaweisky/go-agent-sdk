@@ -39,18 +39,22 @@ func TestAdkA2AInterop(t *testing.T) {
 	}
 	defer stop()
 
+	// The remote agent is declared in a markdown file (frontmatter backend) and
+	// loaded from ConfigDirs, the same path the chat example demonstrates.
+	configDir := t.TempDir()
+	if err := writeRemoteAgentConfig(configDir, url); err != nil {
+		t.Fatalf("write echo agent config: %v", err)
+	}
 	client, err := agent.NewClient(&agent.ClientOptions{
 		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
 		Model: "test-model", Root: t.TempDir(), Permission: agent.ApproveAll,
-		LLM: adkStubLLM{},
+		ConfigDirs: []string{configDir},
+		LLM:        adkStubLLM{},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
 	defer client.Close()
-	if err := registerRemoteAgent(client, url); err != nil {
-		t.Fatalf("register echo agent: %v", err)
-	}
 
 	session, err := client.CreateSession(context.Background(), &agent.SessionConfig{Agent: echoAgentName})
 	if err != nil {

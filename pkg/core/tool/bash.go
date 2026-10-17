@@ -325,6 +325,11 @@ func executeBash(deps BashDeps, execCtx context.Context, input BashInput, ctx Co
 		// stdin is left nil, which reads from the null device.
 		Detached:       goruntime.GOOS != "windows",
 		ForceKillAfter: 3 * time.Second,
+		OnViolation: func(v core.PolicyViolation) {
+			if ctx.ReportViolation != nil {
+				ctx.ReportViolation(v)
+			}
+		},
 	})
 	if err != nil {
 		if bashIsTimeout(err) {

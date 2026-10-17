@@ -10,15 +10,18 @@ import (
 // absolute host paths; Isolation is optional (default: none). It is the shared
 // contract between the agentd admin API and the supervisor command.
 type ProjectRequest struct {
-	Name             string           `json:"name"`
-	Kind             string           `json:"kind"`
-	Root             string           `json:"root"`
-	WorkingDirectory string           `json:"workingDirectory"`
-	ConfigDirs       []string         `json:"configDirs,omitempty"`
-	Models           []string         `json:"models,omitempty"`
-	DefaultModel     string           `json:"defaultModel,omitempty"`
-	Agents           []string         `json:"agents"`
-	Isolation        *IsolationConfig `json:"isolation,omitempty"`
+	Name             string   `json:"name"`
+	Kind             string   `json:"kind"`
+	Root             string   `json:"root"`
+	WorkingDirectory string   `json:"workingDirectory"`
+	ConfigDirs       []string `json:"configDirs,omitempty"`
+	Models           []string `json:"models,omitempty"`
+	DefaultModel     string   `json:"defaultModel,omitempty"`
+	Agents           []string `json:"agents"`
+	// Peers are remote A2A agents the instance reaches as a client (same shape
+	// as a server's).
+	Peers     []Peer           `json:"peers,omitempty"`
+	Isolation *IsolationConfig `json:"isolation,omitempty"`
 	// InboundPermissions overrides the instance's tool policy (same shape as a
 	// server's). Empty means the SDK default (read-only).
 	InboundPermissions []PermissionRule `json:"inboundPermissions,omitempty"`
@@ -51,7 +54,10 @@ func (r ProjectRequest) Validate() error {
 	if err := validateAuthConfig(r.Kind, r.Auth); err != nil {
 		return err
 	}
-	if err := validateSandboxConfig(r.Sandbox); err != nil {
+	if err := ValidateSandbox(r.Sandbox); err != nil {
+		return fmt.Errorf("project %q: %w", r.Name, err)
+	}
+	if err := ValidatePeers(r.Peers); err != nil {
 		return fmt.Errorf("project %q: %w", r.Name, err)
 	}
 	return ValidateIsolation(r.Name, r.WorkingDirectory, r.Isolation)
@@ -69,6 +75,7 @@ func (r ProjectRequest) ToServer(root string) Server {
 		Models:             r.Models,
 		DefaultModel:       r.DefaultModel,
 		Agents:             r.Agents,
+		Peers:              r.Peers,
 		Isolation:          r.Isolation,
 		InboundPermissions: r.InboundPermissions,
 		Sandbox:            r.Sandbox,

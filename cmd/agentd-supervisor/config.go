@@ -43,6 +43,7 @@ type projectTemplate struct {
 	Models           []string                `yaml:"models"`
 	DefaultModel     string                  `yaml:"defaultModel"`
 	Agents           []string                `yaml:"agents"`
+	Peers            []config.Peer           `yaml:"peers"`
 	Isolation        *config.IsolationConfig `yaml:"isolation"`
 	// Sandbox selects the command-execution seam for the instance's tools (same
 	// shape as a server's); empty means the SDK pass-through.

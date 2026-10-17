@@ -49,9 +49,11 @@ func (b *a2aBackendPool) forAgent(info *schema.AgentInfo) route.LLMClient {
 }
 
 func (b *a2aBackendPool) remote(ctx context.Context, spec schema.AgentA2ABackend) (client.Client, error) {
-	endpoint := spec.Endpoint
+	// CardURL overrides where the card is fetched; otherwise the endpoint (the
+	// discovery root) is used.
+	endpoint := spec.CardURL
 	if endpoint == "" {
-		endpoint = spec.CardURL
+		endpoint = spec.Endpoint
 	}
 	// Hold the lock across dialing so two sessions cannot both miss the cache
 	// and leak a connection.

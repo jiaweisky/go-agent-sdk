@@ -187,6 +187,7 @@ type serverView struct {
 	Models             []string             `json:"models,omitempty"`
 	DefaultModel       string               `json:"defaultModel,omitempty"`
 	Agents             []string             `json:"agents,omitempty"`
+	Peers              []peerView           `json:"peers,omitempty"`
 	Host               string               `json:"host,omitempty"`
 	Mount              string               `json:"mount,omitempty"`
 	Default            bool                 `json:"default,omitempty"`
@@ -233,6 +234,9 @@ type cowView struct {
 type sandboxView struct {
 	Process       string `json:"process"`
 	FailurePolicy string `json:"failurePolicy,omitempty"`
+	// The policy block (profile, filesystem, network, …) is promoted; it carries
+	// no secrets.
+	config.SandboxPolicy
 }
 
 type mediaUploadView struct {
@@ -342,6 +346,15 @@ type mcpView struct {
 	Redacted bool   `json:"redacted,omitempty"` // command/url/environment/headers omitted
 }
 
+type peerView struct {
+	Name        string `json:"name"`
+	Endpoint    string `json:"endpoint,omitempty"`
+	CardURL     string `json:"cardURL,omitempty"`
+	Description string `json:"description,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	Redacted    bool   `json:"redacted,omitempty"` // headers omitted
+}
+
 type referenceView struct {
 	Name        string `json:"name"`
 	Type        string `json:"type,omitempty"`
@@ -374,6 +387,7 @@ type controlView struct {
 type wrapView struct {
 	Process       string `json:"process"`
 	FailurePolicy string `json:"failurePolicy,omitempty"`
+	config.SandboxPolicy
 }
 
 // buildConfigDocument renders the redacted, optionally filtered document.
@@ -391,7 +405,11 @@ func buildConfigDocument(cfg config.Config, section, server string) configDocume
 		}
 	}
 	if cfg.Wrap != nil {
-		doc.Wrap = &wrapView{Process: cfg.Wrap.Process, FailurePolicy: cfg.Wrap.FailurePolicy}
+		doc.Wrap = &wrapView{
+			Process:       cfg.Wrap.Process,
+			FailurePolicy: cfg.Wrap.FailurePolicy,
+			SandboxPolicy: cfg.Wrap.SandboxPolicy,
+		}
 	}
 	switch section {
 	case "models":
@@ -458,6 +476,7 @@ func serverViewOf(s config.Server) serverView {
 		Models:              s.Models,
 		DefaultModel:        s.DefaultModel,
 		Agents:              s.Agents,
+		Peers:               peerViews(s.Peers),
 		Host:                s.Host,
 		Mount:               s.Mount,
 		Default:             s.Default,
@@ -594,7 +613,7 @@ func sandboxViewOf(sb *config.SandboxConfig) *sandboxView {
 	if sb == nil {
 		return nil
 	}
-	return &sandboxView{Process: sb.Process, FailurePolicy: sb.FailurePolicy}
+	return &sandboxView{Process: sb.Process, FailurePolicy: sb.FailurePolicy, SandboxPolicy: sb.SandboxPolicy}
 }
 
 func mediaUploadViewOf(up *config.MediaUploadConfig) *mediaUploadView {
@@ -653,6 +672,17 @@ func mcpViews(servers []config.MCPServer) []mcpView {
 			Name:     m.Name,
 			Type:     m.Type,
 			Redacted: len(m.Command) > 0 || m.URL != "" || len(m.Environment) > 0 || len(m.Headers) > 0,
+		})
+	}
+	return views
+}
+
+func peerViews(peers []config.Peer) []peerView {
+	views := make([]peerView, 0, len(peers))
+	for _, p := range peers {
+		views = append(views, peerView{
+			Name: p.Name, Endpoint: sanitizeURL(p.Endpoint), CardURL: sanitizeURL(p.CardURL),
+			Description: p.Description, Mode: p.ModeOrDefault(), Redacted: len(p.Headers) > 0,
 		})
 	}
 	return views

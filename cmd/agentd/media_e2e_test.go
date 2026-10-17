@@ -100,7 +100,7 @@ func startAgentd(t *testing.T, cfg config.Config) func() {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- run(ctx, cfg) }()
+	go func() { done <- run(ctx, cfg, nil) }()
 	return func() {
 		cancel()
 		if err := <-done; err != nil {
@@ -136,35 +136,42 @@ func TestRunServesMediaHTTP(t *testing.T) {
 			continue
 		}
 		t.Run(tc.name, func(t *testing.T) {
+			prompt := "Describe the attached media briefly; if it is a solid color, name it in one word."
 			assertMediaReply(t, tc.red, func() string {
-				id := postJSON(t, base+"/api/session", `{"agent":"build"}`, http.StatusOK)
-				var created struct {
-					Data struct {
-						ID string `json:"id"`
-					} `json:"data"`
-				}
-				if err := json.Unmarshal([]byte(id), &created); err != nil || created.Data.ID == "" {
-					t.Fatalf("create session: %v (%s)", err, id)
-				}
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-				defer cancel()
-				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/session/"+created.Data.ID+"/event", nil)
-				resp, err := http.DefaultClient.Do(req)
-				if err != nil {
-					t.Fatalf("sse connect: %v", err)
-				}
-				defer resp.Body.Close()
-				body, _ := json.Marshal(map[string]any{
-					"prompt": "Describe the attached media briefly; if it is a solid color, name it in one word.",
-					"files":  []schema.PromptFileAttachment{{URI: tc.httpURI(t), Mime: tc.mime}},
-				})
-				if status := postJSONStatus(t, base+"/api/session/"+created.Data.ID+"/prompt", string(body)); status != http.StatusAccepted {
-					t.Fatalf("prompt status = %d", status)
-				}
-				return readEventText(t, resp)
+				files := []schema.PromptFileAttachment{{URI: tc.httpURI(t), Mime: tc.mime}}
+				return runHTTPSession(t, base, "build", prompt, files)
 			})
 		})
 	}
+}
+
+// runHTTPSession creates a session on the given agent, sends one prompt (with
+// optional attachments) over the session's event stream, and returns the
+// assistant text.
+func runHTTPSession(t *testing.T, base, agent, prompt string, files []schema.PromptFileAttachment) string {
+	t.Helper()
+	id := postJSON(t, base+"/api/session", `{"agent":"`+agent+`"}`, http.StatusOK)
+	var created struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(id), &created); err != nil || created.Data.ID == "" {
+		t.Fatalf("create session: %v (%s)", err, id)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/session/"+created.Data.ID+"/event", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("sse connect: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := json.Marshal(map[string]any{"prompt": prompt, "files": files})
+	if status := postJSONStatus(t, base+"/api/session/"+created.Data.ID+"/prompt", string(body)); status != http.StatusAccepted {
+		t.Fatalf("prompt status = %d", status)
+	}
+	return readEventText(t, resp)
 }
 
 func TestRunServesMediaA2A(t *testing.T) {

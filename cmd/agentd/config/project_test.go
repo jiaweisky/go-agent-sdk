@@ -19,6 +19,26 @@ func TestProjectRequestValidateReadonly(t *testing.T) {
 	}
 }
 
+func TestProjectRequestPeers(t *testing.T) {
+	base := ProjectRequest{
+		Name: "grp-a", Kind: "http", Root: "/state", Agents: []string{"build"},
+		Peers: []Peer{{Name: "echo", Endpoint: "http://127.0.0.1:9099"}},
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("a valid peer must validate: %v", err)
+	}
+	server := base.ToServer("/state")
+	if len(server.Peers) != 1 || server.Peers[0].Name != "echo" {
+		t.Fatalf("ToServer peers = %+v", server.Peers)
+	}
+
+	bad := base
+	bad.Peers = []Peer{{Name: "echo"}}
+	if err := bad.Validate(); err == nil {
+		t.Fatal("expected a peer without endpoint/cardURL to be rejected")
+	}
+}
+
 func TestProjectRequestValidateSandbox(t *testing.T) {
 	base := ProjectRequest{Name: "grp-a", Kind: "http", Root: "/state", Agents: []string{"build"}}
 	if err := base.Validate(); err != nil {

@@ -37,6 +37,13 @@ func newReadDeps(root string) ReadDeps {
 
 func settleRead(t *testing.T, deps ReadDeps, input map[string]any) *Settlement {
 	t.Helper()
+	return settleReadWith(t, deps, input, nil)
+}
+
+func settleReadWith(
+	t *testing.T, deps ReadDeps, input map[string]any, report func(core.PolicyViolation),
+) *Settlement {
+	t.Helper()
 	registry := NewRegistry()
 	if _, err := RegisterRead(registry, deps); err != nil {
 		t.Fatalf("register: %v", err)
@@ -50,6 +57,7 @@ func settleRead(t *testing.T, deps ReadDeps, input map[string]any) *Settlement {
 			Name:  ReadName,
 			Input: input,
 		},
+		ReportViolation: report,
 	})
 	if err != nil {
 		t.Fatalf("settle: %v", err)
@@ -195,6 +203,40 @@ func TestRead_BinaryFile(t *testing.T) {
 	}
 	if result.Result.Value != "Cannot read binary file: blob.bin" {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
+	}
+}
+
+type denyReadGuard struct{}
+
+func (denyReadGuard) AllowRead(context.Context, string) error {
+	return &core.PolicyDeniedError{Violation: core.PolicyViolation{
+		Action: "read", Path: "/secret", Rule: "denyRead",
+		Surface: "tool", Certainty: "enforced",
+	}}
+}
+
+// TestRead_GuardDenies checks the in-process read guard is consulted before the
+// file is read, the model-facing message says it was blocked by the sandbox, and
+// the structured violation is reported to the session event sink.
+func TestRead_GuardDenies(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deps := newReadDeps(root)
+	deps.Guard = denyReadGuard{}
+	var reported core.PolicyViolation
+	result := settleReadWith(t, deps, map[string]any{"path": "hello.txt"},
+		func(v core.PolicyViolation) { reported = v })
+	if result.Result.Type != "error" {
+		t.Fatalf("expected the guard to deny the read, got %q", result.Result.Type)
+	}
+	if reported.Action != "read" || reported.Certainty != "enforced" || reported.Surface != "tool" {
+		t.Fatalf("violation = %+v", reported)
+	}
+	message, _ := result.Result.Value.(string)
+	if !strings.Contains(message, "blocked by sandbox") {
+		t.Fatalf("the failure must explain the sandbox denial: %q", message)
 	}
 }
 

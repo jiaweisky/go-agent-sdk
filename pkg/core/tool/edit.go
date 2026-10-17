@@ -139,6 +139,11 @@ func executeEdit(execCtx context.Context, deps EditDeps, input EditInput, ctx Co
 		return EditOutput{}, err
 	}
 
+	// The sandbox is checked before any permission prompt.
+	if err := guardFileWrite(execCtx, deps.Guard, target.Canonical, core.FileOpEdit); err != nil {
+		return EditOutput{}, err
+	}
+
 	if external := target.ExternalDirectory; external != nil {
 		extPerm := core.LocationMutationExternalDirectoryPermission(*external)
 		if err := deps.Permission.Assert(core.PermissionAssertInput{
@@ -161,10 +166,6 @@ func executeEdit(execCtx context.Context, deps EditDeps, input EditInput, ctx Co
 		Source:    source,
 		Agent:     &ctx.Agent,
 	}); err != nil {
-		return EditOutput{}, err
-	}
-
-	if err := guardFileWrite(execCtx, deps.Guard, target.Canonical, core.FileOpEdit); err != nil {
 		return EditOutput{}, err
 	}
 
@@ -233,9 +234,9 @@ func editUnableToEdit(err error, path string) error {
 	}
 	var stale *core.FileMutationStaleContentError
 	if errors.As(err, &stale) {
-		return &Failure{Message: "File changed after permission approval. Read it again before editing."}
+		return &Failure{Message: "File changed after permission approval. Read it again before editing.", Cause: err}
 	}
-	return &Failure{Message: fmt.Sprintf("Unable to edit %s", path)}
+	return &Failure{Message: sandboxMessage(fmt.Sprintf("Unable to edit %s", path), err), Cause: err}
 }
 
 type editBom struct {

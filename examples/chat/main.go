@@ -77,17 +77,29 @@ func run() error {
 		defer stopAdk()
 	}
 
+	// The remote agent is declared in a markdown agent file loaded from
+	// ConfigDirs: its frontmatter carries an A2A backend, so no code registers
+	// it. The file is generated because the ADK server binds an ephemeral port
+	// each run; a hand-written file with a fixed endpoint works the same way.
+	remoteAgentsDir := filepath.Join(dataDir(), "agents")
+	if err := writeRemoteAgentConfig(remoteAgentsDir, adkURL); err != nil {
+		console.write(fmt.Sprintf("%sremote agent config: %v%s\n", yellow, err, reset))
+	} else if adkURL != "" {
+		console.write(fmt.Sprintf("%sremote agent %q declared in %s%s\n", dim, echoAgentName,
+			filepath.Join(remoteAgentsDir, "agent", echoAgentName+".md"), reset))
+	}
+
 	plugins := examplePlugins(console, yolo)
-	options := append(clientOptions(console, yolo, model, notesURL), util.WithPlugins(plugins))
+	options := append(
+		clientOptions(console, yolo, model, notesURL),
+		util.WithPlugins(plugins),
+		withConfigDir(remoteAgentsDir),
+	)
 	client, err := util.Client(util.ExampleDir(), options...)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
-
-	if err := registerRemoteAgent(client, adkURL); err != nil {
-		console.write(fmt.Sprintf("%sregister echo agent: %v%s\n", yellow, err, reset))
-	}
 
 	// Reuse the persisted agent when it is still selectable.
 	state.Agent = resolveDefaultAgent(client, state.Agent)

@@ -27,6 +27,9 @@ type Server struct {
 	Models       []string `yaml:"models"`
 	DefaultModel string   `yaml:"defaultModel"`
 	Agents       []string `yaml:"agents"`
+	// Peers are remote A2A agents this server reaches as a client; each is
+	// registered as an agent the local model can delegate to.
+	Peers []Peer `yaml:"peers"`
 
 	// Routing: optional; several servers may share one Listen when they differ
 	// by Host or Mount. A server with neither serves the listener root.
@@ -102,7 +105,7 @@ type CowConfig struct {
 	Mode string `yaml:"mode" json:"mode"`
 }
 
-// SandboxConfig selects the command-execution seam.
+// SandboxConfig selects the command-execution seam and its policy.
 type SandboxConfig struct {
 	// Process names the execution seam: none (default) or a registered wrapper.
 	Process string `yaml:"process" json:"process"`
@@ -110,6 +113,63 @@ type SandboxConfig struct {
 	// fail-closed (default) refuses to start; fail-open warns and runs without
 	// the sandbox.
 	FailurePolicy string `yaml:"failurePolicy" json:"failurePolicy"`
+	// The policy block (profile, filesystem, network, …) is inlined.
+	SandboxPolicy `yaml:",inline"`
+}
+
+// SandboxPolicy is the shared sandbox policy block. A "standard" profile applies
+// secure defaults; "custom" applies only the explicit fields; "off" disables the
+// policy (and the sandbox itself).
+type SandboxPolicy struct {
+	Profile           string              `yaml:"profile" json:"profile,omitempty"`
+	Filesystem        *SandboxFilesystem  `yaml:"filesystem" json:"filesystem,omitempty"`
+	Network           *SandboxNetwork     `yaml:"network" json:"network,omitempty"`
+	UnixSockets       *SandboxUnixSockets `yaml:"unixSockets" json:"unixSockets,omitempty"`
+	ProcessInspection string              `yaml:"processInspection" json:"processInspection,omitempty"`
+	Env               *SandboxEnv         `yaml:"env" json:"env,omitempty"`
+	Violations        *SandboxViolations  `yaml:"violations" json:"violations,omitempty"`
+}
+
+// SandboxViolations controls violation reporting. Mode is "heuristic" (the
+// default: best-effort command-side detection), "precise" (Linux syscall
+// tracing) or "off". ReportToModel appends a denial note to a command's output.
+type SandboxViolations struct {
+	Mode          string `yaml:"mode" json:"mode,omitempty"`
+	ReportToModel *bool  `yaml:"reportToModel" json:"reportToModel,omitempty"`
+}
+
+// SandboxFilesystem declares the file policy. Read/Write are "allow" (an
+// allow-list) or "off" (no confinement); empty inherits the profile. Windows
+// cannot express "off" and validation rejects it.
+type SandboxFilesystem struct {
+	Read       string   `yaml:"read" json:"read,omitempty"`
+	Write      string   `yaml:"write" json:"write,omitempty"`
+	DenyRead   []string `yaml:"denyRead" json:"denyRead,omitempty"`
+	AllowRead  []string `yaml:"allowRead" json:"allowRead,omitempty"`
+	DenyWrite  []string `yaml:"denyWrite" json:"denyWrite,omitempty"`
+	AllowWrite []string `yaml:"allowWrite" json:"allowWrite,omitempty"`
+}
+
+// SandboxNetwork declares the network policy. Only off and no-egress are
+// implemented; a domain allow-list needs a proxy.
+type SandboxNetwork struct {
+	Mode           string   `yaml:"mode" json:"mode,omitempty"`
+	AllowedDomains []string `yaml:"allowedDomains" json:"allowedDomains,omitempty"`
+}
+
+// SandboxUnixSockets declares the UNIX-socket policy. Mode is "inherit" (the
+// default: follow the filesystem policy), "allowAll" (no socket-specific policy;
+// the filesystem policy still applies) or "allowlist"; "deny" is accepted as a
+// legacy alias for inherit.
+type SandboxUnixSockets struct {
+	Mode  string   `yaml:"mode" json:"mode,omitempty"`
+	Allow []string `yaml:"allow" json:"allow,omitempty"`
+}
+
+// SandboxEnv declares the child-environment policy.
+type SandboxEnv struct {
+	Mode  string   `yaml:"mode" json:"mode,omitempty"`
+	Scrub []string `yaml:"scrub" json:"scrub,omitempty"`
 }
 
 // KeepAliveDuration parses a keepAlive value; empty means the 15s default

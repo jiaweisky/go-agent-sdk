@@ -85,7 +85,11 @@ func validateWrap(w *WrapConfig) error {
 	default:
 		return fmt.Errorf("wrap.failurePolicy must be fail-closed or fail-open, got %q", w.FailurePolicy)
 	}
-	return nil
+	return ValidateSandbox(&SandboxConfig{
+		Process:       w.Process,
+		FailurePolicy: w.FailurePolicy,
+		SandboxPolicy: w.SandboxPolicy,
+	})
 }
 
 // validateControl checks the optional admin API configuration.
@@ -155,6 +159,12 @@ func validateServerCommon(s Server, catalog Catalog) error {
 		return fmt.Errorf("server %q: tls requires both certFile and keyFile", s.Name)
 	}
 	if err := ValidateMCP(s.MCP); err != nil {
+		return fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	if err := ValidateSandbox(s.Sandbox); err != nil {
+		return fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	if err := ValidatePeers(s.Peers); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
 	if err := ValidateInboundMedia(s.Media); err != nil {

@@ -6,7 +6,7 @@ import "fmt"
 // under the sandbox with write access to roots. It does not return on success.
 // Unlike the per-command launcher, it must not cut the network, because the
 // process serves listeners and calls the model.
-type ProcessLauncher func(roots []string, command string, args []string) error
+type ProcessLauncher func(roots []string, policy Policy, command string, args []string) error
 
 var processRegistry = map[string]ProcessLauncher{}
 

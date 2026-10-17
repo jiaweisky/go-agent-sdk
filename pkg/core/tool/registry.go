@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -17,6 +18,7 @@ type ExecuteInput struct {
 	AssistantMessageID string
 	Call               schema.ToolCallPart
 	Progress           func(structured map[string]any, content []Content) error
+	ReportViolation    func(core.PolicyViolation)
 }
 
 type Settlement struct {
@@ -214,9 +216,17 @@ func (r *Registry) settle(
 		AssistantMessageID: input.AssistantMessageID,
 		ToolCallID:         input.Call.ID,
 		Progress:           input.Progress,
+		ReportViolation:    input.ReportViolation,
 	})
 	if err != nil {
-		if failure, ok := err.(*Failure); ok {
+		var failure *Failure
+		if errors.As(err, &failure) {
+			if input.ReportViolation != nil {
+				var denied *core.PolicyDeniedError
+				if errors.As(failure.Cause, &denied) {
+					input.ReportViolation(denied.Violation)
+				}
+			}
 			return &Settlement{
 				Result: schema.ToolResultValue{Type: "error", Value: failure.Message},
 			}, nil

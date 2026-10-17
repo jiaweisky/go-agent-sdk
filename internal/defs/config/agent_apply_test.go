@@ -78,6 +78,30 @@ func TestApplyDirAgentsV2Markdown(t *testing.T) {
 	}
 }
 
+// TestApplyDirAgentsA2ABackend guards that a markdown agent file can declare a
+// remote A2A backend, so a peer reached over the wire needs no RegisterAgent.
+func TestApplyDirAgentsA2ABackend(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "agent", "echo.md"),
+		"---\ndescription: remote echo\nmode: subagent\nbackend:\n  type: a2a\n  a2a:\n    endpoint: http://127.0.0.1:9099\n---\n")
+
+	agents := core.NewAgent()
+	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}, core.PermissionRuleset{}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	echo := agents.Get(schema.AgentID("echo"))
+	if echo == nil || echo.Backend == nil {
+		t.Fatalf("echo = %+v", echo)
+	}
+	if echo.Backend.Type != schema.AgentBackendA2A {
+		t.Fatalf("backend type = %q", echo.Backend.Type)
+	}
+	if echo.Backend.A2A == nil || echo.Backend.A2A.Endpoint != "http://127.0.0.1:9099" {
+		t.Fatalf("backend a2a = %+v", echo.Backend.A2A)
+	}
+}
+
 func TestApplyDirAgentsExpandsHome(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "agent", "a.md"),

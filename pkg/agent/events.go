@@ -137,6 +137,23 @@ type ToolFailed struct {
 
 func (e ToolFailed) sessionID() string { return e.SessionID }
 
+// SandboxDenied reports a sandbox denial. Certainty is "enforced" for an
+// in-process tool guard and "suspected" for a command that matched a platform
+// denial message.
+type SandboxDenied struct {
+	SessionID string
+	MessageID string
+	CallID    string
+	Action    string
+	Path      string
+	Host      string
+	Rule      string
+	Surface   string
+	Certainty string
+}
+
+func (e SandboxDenied) sessionID() string { return e.SessionID }
+
 // ToolInputStarted reports that a tool call's input started streaming.
 type ToolInputStarted struct {
 	SessionID string
@@ -550,6 +567,13 @@ func mapToolEvent(eventType string, data map[string]any, sessionID, messageID st
 		return ToolProgress{
 			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
 			Structured: data["structured"], Content: data["content"],
+		}, true
+	case schema.SessionEventSandboxDenied.Type:
+		return SandboxDenied{
+			SessionID: sessionID, MessageID: messageID, CallID: fieldString(data, "callID"),
+			Action: fieldString(data, "action"), Path: fieldString(data, "path"),
+			Host: fieldString(data, "host"), Rule: fieldString(data, "rule"),
+			Surface: fieldString(data, "surface"), Certainty: fieldString(data, "certainty"),
 		}, true
 	case schema.SessionEventShellStarted.Type:
 		return ShellStarted{

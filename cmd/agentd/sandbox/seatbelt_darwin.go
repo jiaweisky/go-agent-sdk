@@ -11,86 +11,130 @@ import (
 )
 
 func init() {
-	Register("seatbelt", func() core.AppProcess {
-		return sandboxed{inner: core.NewAppProcess(), launch: seatbeltLaunch}
+	Register("seatbelt", func(policy Policy) core.AppProcess {
+		return newSandboxed(seatbeltLaunch, policy)
 	})
 	RegisterProcess("seatbelt", seatbeltProcess)
 }
 
-// seatbeltLaunch wraps a command in the macOS seatbelt sandbox (`sandbox-exec`):
-// the process may write only under the working directory and the system temporary
-// directories, may not use the network, and may not read the user's sensitive
-// credential directories (see homeReadMasks). It is best-effort — the SDK ships no
-// guarantee for it; `sandbox-exec` is deprecated by Apple.
-func seatbeltLaunch(dir, command string, args []string) (string, []string) {
-	argv := []string{"-p", seatbeltProfile(dir), command}
+// seatbeltLaunch wraps a command in the macOS seatbelt sandbox (`sandbox-exec`)
+// under the resolved policy. Best-effort: the SDK ships no guarantee for it;
+// `sandbox-exec` is deprecated by Apple.
+func seatbeltLaunch(dir string, policy Policy, command string, args []string) (string, []string) {
+	argv := []string{"-p", seatbeltCommandProfile(dir, policy), command}
 	return "sandbox-exec", append(argv, args...)
 }
 
-// seatbeltProcess wraps the whole process in seatbelt: writes are allowed only
-// under roots (and the system temporary directories) and reads of the sensitive
-// home directories are denied; the network stays up, because the process serves
-// listeners and calls the model.
-func seatbeltProcess(roots []string, command string, args []string) error {
-	return execReplace("sandbox-exec", seatbeltProcessArgs(roots, command, args))
+// seatbeltProcess wraps the whole process in seatbelt under the resolved policy.
+// The network stays up (the process serves listeners and calls the model) and
+// process introspection is not denied (agentd manages its own children).
+func seatbeltProcess(roots []string, policy Policy, command string, args []string) error {
+	return execReplace("sandbox-exec", seatbeltProcessArgs(roots, policy, command, args))
 }
 
 // seatbeltProcessArgs is the sandbox-exec argument vector (excluding the program
 // name).
-func seatbeltProcessArgs(roots []string, command string, args []string) []string {
-	return append([]string{"-p", seatbeltProcessProfile(roots), command}, args...)
+func seatbeltProcessArgs(roots []string, policy Policy, command string, args []string) []string {
+	return append([]string{"-p", seatbeltProcessProfile(roots, policy), command}, args...)
 }
 
-// seatbeltProfile renders an SBPL profile: default-allow, then deny the network
-// and all file writes, re-allow writes under the writable roots, then deny reads
-// of the masked credential directories.
-func seatbeltProfile(dir string) string {
-	return seatbeltProfileWith(dir, homeReadMasks())
+// seatbeltCommandProfile is the per-command profile: it adds the network denial
+// (when the policy says no egress) and the process-introspection denial.
+func seatbeltCommandProfile(dir string, policy Policy) string {
+	return writeSeatbeltProfile([]string{dir}, policy, true)
 }
 
-// seatbeltProfileWith is seatbeltProfile with an explicit mask list, for testing.
-func seatbeltProfileWith(dir string, masks []string) string {
-	var roots []string
-	if dir != "" {
-		roots = append(roots, dir)
+// seatbeltProcessProfile is the whole-process profile; it keeps the network and
+// process introspection up.
+func seatbeltProcessProfile(roots []string, policy Policy) string {
+	var clauses []string
+	clauses = append(clauses, roots...)
+	clauses = append(clauses, policy.WorkingDirectory)
+	return writeSeatbeltProfile(clauses, policy, false)
+}
+
+// writeSeatbeltProfile renders the sandbox-exec profile in precedence order
+// (later rules win): default allow, then network, then writes, then reads,
+// then process introspection.
+func writeSeatbeltProfile(dirs []string, policy Policy, perCommand bool) string {
+	var profile strings.Builder
+	profile.WriteString("(version 1)(allow default)")
+	if perCommand && policy.NetworkMode == NetworkNoEgress {
+		profile.WriteString(seatbeltNetworkDeny())
 	}
-	return writeSeatbeltProfile(roots, true, masks)
+	profile.WriteString(seatbeltWriteRules(dirs, policy))
+	profile.WriteString(seatbeltReadRules(dirs, policy))
+	if perCommand && policy.DenyProcessInfo {
+		profile.WriteString(seatbeltProcessInfoDeny())
+	}
+	return profile.String()
 }
 
-// seatbeltProcessProfile is seatbeltProcessProfileWith with the host's masks.
-func seatbeltProcessProfile(roots []string) string {
-	return seatbeltProcessProfileWith(roots, homeReadMasks())
+// seatbeltNetworkDeny denies remote IP traffic (no egress) while leaving
+// AF_UNIX sockets to the filesystem rules. A bare "(deny network*)" would also
+// block AF_UNIX, making the socket allowlist ineffective.
+func seatbeltNetworkDeny() string {
+	return "(deny network* (remote ip))"
 }
 
-// seatbeltProcessProfileWith is seatbeltProcessProfile with an explicit mask
-// list, for testing. Unlike the per-command profile it keeps the network up.
-func seatbeltProcessProfileWith(roots []string, masks []string) string {
-	return writeSeatbeltProfile(roots, false, masks)
+func seatbeltProcessInfoDeny() string {
+	return "(deny process-info*)(deny sysctl-read)"
 }
 
-// writeSeatbeltProfile renders the profile shared by the per-command and
-// whole-process wrappers; denyNetwork adds the network denial.
-func writeSeatbeltProfile(roots []string, denyNetwork bool, masks []string) string {
-	clauses := []string{`(subpath "/private/tmp")`, `(subpath "/private/var/folders")`}
-	for _, root := range roots {
-		// SBPL matches the resolved path; the workdir is under a symlink (e.g.
-		// /var -> /private/var) on some setups.
-		if resolved, err := filepath.EvalSymlinks(root); err == nil {
-			root = resolved
+func seatbeltWriteRules(dirs []string, policy Policy) string {
+	if policy.WriteMode != FSModeAllow {
+		return ""
+	}
+	roots := dedupe(append(append([]string{}, dirs...), policy.WriteRoots()...))
+	roots = append(roots, policy.SocketPaths()...)
+	return "(deny file-write*)(allow file-write* " + seatbeltClauses(roots) + ")" +
+		seatbeltDenies("file-write*", policy.DeniedWrite())
+}
+
+func seatbeltReadRules(dirs []string, policy Policy) string {
+	if policy.ReadMode != FSModeAllow {
+		// read: off means no read confinement; no credential masks either.
+		return ""
+	}
+	// Deny broad regions (home, /etc), then re-allow the project and any
+	// explicitly allowed paths. System run-time paths are never denied.
+	roots := append(append([]string{}, dirs...), policy.ReallowReadRoots()...)
+	roots = append(roots, policy.SocketPaths()...)
+	return seatbeltDenies("file-read*", policy.DenyReadRegions()) +
+		"(allow file-read* " + seatbeltClauses(dedupe(roots)) + ")" +
+		seatbeltDenies("file-read*", policy.DeniedRead())
+}
+
+// seatbeltClauses renders a list of paths as `(subpath "...")` clauses.
+func seatbeltClauses(paths []string) string {
+	var b strings.Builder
+	for _, path := range paths {
+		if path == "" {
+			continue
 		}
-		clauses = append(clauses, fmt.Sprintf("(subpath %q)", root))
+		if resolved, err := filepath.EvalSymlinks(path); err == nil {
+			path = resolved
+		}
+		fmt.Fprintf(&b, "(subpath %q)", path)
 	}
-	network := ""
-	if denyNetwork {
-		network = "(deny network*)"
+	return b.String()
+}
+
+// seatbeltDenies renders deny rules: globs become regexes, literals subpaths.
+func seatbeltDenies(kind string, patterns []string) string {
+	var b strings.Builder
+	for _, pattern := range patterns {
+		if pattern == "" {
+			continue
+		}
+		if strings.ContainsAny(pattern, "*?[") {
+			fmt.Fprintf(&b, "(deny %s (regex %q))", kind, globRegex(pattern))
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(pattern); err == nil {
+			pattern = resolved
+		}
+		fmt.Fprintf(&b, "(deny %s (subpath %q))", kind, pattern)
 	}
-	profile := fmt.Sprintf(
-		"(version 1)(allow default)%s(deny file-write*)(allow file-write* %s)",
-		network,
-		strings.Join(clauses, ""),
-	)
-	for _, mask := range masks {
-		profile += fmt.Sprintf("(deny file-read* (subpath %q))", mask)
-	}
-	return profile
+	return b.String()
 }

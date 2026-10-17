@@ -62,6 +62,10 @@ type RunOptions struct {
 	Timeout        time.Duration
 	Detached       bool
 	ForceKillAfter time.Duration
+	// OnViolation, when set, receives a sandbox violation detected from the
+	// command's output. It is a best-effort signal (a denial the OS surfaced as
+	// an error message), not an authoritative one.
+	OnViolation func(PolicyViolation)
 }
 
 type RunStreamOptions struct {
@@ -74,6 +78,9 @@ type RunStreamOptions struct {
 	Timeout        time.Duration
 	Detached       bool
 	ForceKillAfter time.Duration
+	// OnViolation, when set, receives a sandbox violation detected from the
+	// command's output. See RunOptions.OnViolation.
+	OnViolation func(PolicyViolation)
 }
 
 type RunResult struct {

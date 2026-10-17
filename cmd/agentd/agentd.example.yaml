@@ -58,11 +58,33 @@ servers:
     models: [deepseek-flash, deepseek-flash-responses, deepseek-flash-anthropic]
     defaultModel: deepseek-flash
     agents: [build]
-    # Optional OS sandbox for the commands this server spawns (bash/ripgrep/git):
-    # `bwrap` on Linux, `seatbelt` on macOS (registered wrappers; best-effort).
+    # Optional OS sandbox for this server's commands AND its in-process file
+    # tools: `bwrap` on Linux, `seatbelt` on macOS, `appcontainer` on Windows.
     # sandbox:
-    #   process: seatbelt            # none (default) | bwrap | seatbelt
+    #   process: seatbelt            # none (default) | bwrap | seatbelt | appcontainer
     #   failurePolicy: fail-closed   # fail-closed (default) | fail-open
+    #   profile: standard            # off | standard | custom (default standard)
+    #   filesystem:                  # read/write: allow (allow-list) | off (no confinement)
+    #     read: allow                # Windows rejects off; Linux write:off needs read:off
+    #     write: allow
+    #     denyRead: ["**/.env"]      # a more specific deny beats a broad allow
+    #     allowRead: []              # extra readable paths (e.g. a toolchain)
+    #     denyWrite: []
+    #     allowWrite: []
+    #   network:
+    #     mode: no-egress            # off | no-egress (a domain allow-list needs a proxy)
+    #   unixSockets:
+    #     mode: inherit              # inherit (follow the file policy) | allowAll | allowlist
+    #     allow: []
+    #   processInspection: deny      # deny | allow
+    #   env:
+    #     mode: scrub                # scrub | inherit
+    #     scrub: ["*_KEY", "*_SECRET", "*_TOKEN", "*_PASSWORD"]
+    #   violations:
+    #     mode: heuristic            # heuristic | precise (linux, needs strace) | off
+    #     reportToModel: true        # append "[sandbox] blocked ..." to command output
+    # Each command also gets a private temp under {Root}/data/sandbox-tmp, so it
+    # cannot see files or sockets another process left in the shared host temp.
     # Inbound media delivery policy (operator-owned; see docs/DESIGN-MEDIA.md §4.12).
     # Unset keeps the caller-declared behavior (inline-first, with a file fallback).
     # media:
@@ -106,6 +128,16 @@ servers:
     models: [deepseek-flash]
     defaultModel: deepseek-flash
     agents: [build]
+    # Remote A2A agents this server reaches as a client: each is registered as
+    # an agent the local model delegates to with the task tool (or runs as a
+    # primary agent). Works on http and a2a servers alike.
+    # peers:
+    #   - name: echo
+    #     endpoint: http://127.0.0.1:9099        # remote A2A base URL (card discovery root)
+    #     cardURL: http://127.0.0.1:9099/.well-known/agent-card.json   # optional override
+    #     description: A remote agent that echoes its input.
+    #     mode: subagent                         # primary | subagent | all (default subagent)
+    #     headers: { Authorization: "Bearer ${PEER_TOKEN}" }           # optional
     baseURL: http://127.0.0.1:8788
     inboundMedia: spool               # spool (default) | inline
     # Work autonomously: run every tool; deny the question tool so a confirmation
@@ -138,3 +170,15 @@ servers:
 #   maxLeases: 32                   # cap live project instances (0 = unlimited)
 #   auth:
 #     bearer: ${AGENTD_CONTROL_TOKEN:-replace-me}
+
+# Optional whole-process sandbox (Unix): re-exec agentd under bwrap/seatbelt so
+# every server and tool shares one confinement. Only the filesystem policy
+# applies to the wrapped process: it keeps the network and process introspection
+# up (agentd serves listeners, calls the model and manages children) and
+# inherits its own environment. Its config dirs, state roots and executable are
+# re-allowed (the bootstrap exception).
+# wrap:
+#   process: seatbelt
+#   failurePolicy: fail-closed
+#   profile: standard
+#   filesystem: { read: allow, write: allow }

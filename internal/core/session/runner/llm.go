@@ -1794,6 +1794,23 @@ func (a *turnAttempt) runTool(wait *sync.WaitGroup, call llmschema.LLMEvent, ass
 				return pubErr
 			})
 		},
+		ReportViolation: func(violation core.PolicyViolation) {
+			_ = a.withPublication(func() error {
+				_, pubErr := a.runner.Events.Publish(schema.SessionEventSandboxDenied, map[string]any{
+					"sessionID":          string(a.sessionID),
+					"timestamp":          time.Now().UnixMilli(),
+					"assistantMessageID": string(assistantMessageID),
+					"callID":             call.ID,
+					"action":             violation.Action,
+					"path":               violation.Path,
+					"host":               violation.Host,
+					"rule":               violation.Rule,
+					"surface":            violation.Surface,
+					"certainty":          violation.Certainty,
+				})
+				return pubErr
+			})
+		},
 	})
 	if err != nil {
 		a.recordToolError(err)

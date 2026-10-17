@@ -328,10 +328,11 @@ func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploader
 	if err != nil {
 		return nil, err
 	}
-	process, err := resolveSandbox(s)
+	process, policy, err := resolveSandbox(s)
 	if err != nil {
 		return nil, err
 	}
+	readGuard, writeGuard := sandboxGuards(s, policy)
 	return config.BuildClient(config.ClientParams{
 		Root:             s.Root,
 		WorkingDirectory: s.WorkingDirectory,
@@ -345,12 +346,33 @@ func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploader
 		Store:            storageStore(s),
 		MCP:              mcpServers,
 		References:       references,
+		Peers:            s.Peers,
 		SubagentDepth:    s.SubagentDepth,
 		TitleAuto:        s.TitleAuto,
 		DropErroredTurns: s.DropErroredTurns == nil || *s.DropErroredTurns,
 		Process:          process,
+		FileReadGuard:    readGuard,
+		FileWriteGuard:   writeGuard,
 		SearchExcludes:   excludes,
 	})
+}
+
+// sandboxGuards builds the in-process file guards the policy requires. The same
+// guard enforces reads and writes, so both paths share one policy.
+func sandboxGuards(s config.Server, policy sandbox.Policy) (core.FileReadGuard, core.FileWriteGuard) {
+	if s.Sandbox == nil || !s.Sandbox.Enabled() {
+		return nil, nil
+	}
+	guard := sandbox.NewPathGuard(policy)
+	var readGuard core.FileReadGuard
+	var writeGuard core.FileWriteGuard
+	if policy.ReadMode == sandbox.FSModeAllow {
+		readGuard = guard
+	}
+	if policy.WriteMode == sandbox.FSModeAllow {
+		writeGuard = guard
+	}
+	return readGuard, writeGuard
 }
 
 // isolationBaseDirs collects the configured isolation base directories.
@@ -410,23 +432,37 @@ func insidePath(root, path string) (string, bool) {
 	return rel, true
 }
 
-// resolveSandbox returns the server's command-execution seam. No sandbox (or
-// "none") yields nil, the SDK default. When a named sandbox cannot be built,
-// fail-closed (the default) refuses to start; fail-open warns and runs without
-// it.
-func resolveSandbox(s config.Server) (core.AppProcess, error) {
-	if s.Sandbox == nil {
-		return nil, nil
+// resolveSandbox returns the server's command-execution seam and its resolved
+// policy. No sandbox (or "none") yields a nil process, the SDK default; an
+// explicitly disabled sandbox is reported so it is never a silent opt-out. When
+// a named sandbox cannot be built, fail-closed (the default) refuses to start;
+// fail-open warns and runs without it (the in-process guards still apply).
+func resolveSandbox(s config.Server) (core.AppProcess, sandbox.Policy, error) {
+	policy := s.Sandbox.Policy(s.WorkingDirectory)
+	if s.Root != "" {
+		policy.TempRoot = filepath.Join(s.Root, "data", "sandbox-tmp")
+		// Drop per-run temp left by a crashed previous process. The server owns
+		// this root, so no live instance shares the directory.
+		_ = os.RemoveAll(policy.TempRoot)
 	}
-	process, err := sandbox.Resolve(s.Sandbox.Process)
+	if s.Sandbox == nil {
+		fmt.Fprintf(os.Stderr, "agentd: server %q: sandbox not configured; commands run unsandboxed (permission and workspace policy still apply)\n", s.Name)
+		return nil, policy, nil
+	}
+	if !s.Sandbox.Enabled() {
+		fmt.Fprintf(os.Stderr, "agentd: server %q: sandbox disabled (process %q, profile %q); commands and in-process file tools are not confined\n",
+			s.Name, s.Sandbox.Process, s.Sandbox.Profile)
+		return nil, policy, nil
+	}
+	process, err := sandbox.Resolve(s.Sandbox.Process, policy)
 	if err == nil {
-		return process, nil
+		return process, policy, nil
 	}
 	if s.Sandbox.FailurePolicy == "fail-open" {
-		fmt.Fprintf(os.Stderr, "agentd: server %q: sandbox %q unavailable (%v); running without it\n", s.Name, s.Sandbox.Process, err)
-		return nil, nil
+		fmt.Fprintf(os.Stderr, "agentd: server %q: sandbox %q unavailable (%v); continuing without the process wrapper (in-process file guards still apply)\n", s.Name, s.Sandbox.Process, err)
+		return nil, policy, nil
 	}
-	return nil, err
+	return nil, policy, err
 }
 
 // buildServer mounts one server's transport adapter, dispatching on its kind.

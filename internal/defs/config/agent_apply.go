@@ -111,6 +111,9 @@ func applyAgentInfo(target *schema.AgentInfo, item AgentInfo, home string, base 
 	if item.Permissions != nil {
 		target.Permissions = append(target.Permissions, expandPermissions(*item.Permissions, home)...)
 	}
+	if item.Backend != nil {
+		target.Backend = item.Backend
+	}
 	// The base goes first so the agent's own rules win on conflicts.
 	target.Permissions = core.PermissionMerge(base, target.Permissions)
 }

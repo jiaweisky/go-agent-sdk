@@ -19,11 +19,11 @@ func TestSessionEventDurableVersions(t *testing.T) {
 	if SessionEventAttachmentOmitted.Durable == nil || SessionEventAttachmentOmitted.Durable.Version != 2 {
 		t.Fatalf("attachment omitted durable = %+v", SessionEventAttachmentOmitted.Durable)
 	}
-	if len(SessionEventDurableDefinitions) != 30 {
-		t.Fatalf("durable definitions = %d, want 30", len(SessionEventDurableDefinitions))
+	if len(SessionEventDurableDefinitions) != 31 {
+		t.Fatalf("durable definitions = %d, want 31", len(SessionEventDurableDefinitions))
 	}
-	if len(SessionEventDefinitions) != 34 {
-		t.Fatalf("definitions = %d, want 34", len(SessionEventDefinitions))
+	if len(SessionEventDefinitions) != 35 {
+		t.Fatalf("definitions = %d, want 35", len(SessionEventDefinitions))
 	}
 }
 

@@ -15,4 +15,8 @@ type AgentInfo struct {
 	Steps       *schema.PositiveInt       `json:"steps,omitempty"`
 	Disabled    *bool                     `json:"disabled,omitempty"`
 	Permissions *schema.PermissionRuleset `json:"permissions,omitempty"`
+	// Backend declares how the agent executes: a local LLM loop (unset) or a
+	// remote A2A agent. It lets a markdown agent file describe a peer reached
+	// over the wire, instead of requiring RegisterAgent.
+	Backend *schema.AgentBackend `json:"backend,omitempty"`
 }

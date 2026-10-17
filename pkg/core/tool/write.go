@@ -97,6 +97,12 @@ func executeWrite(execCtx context.Context, deps WriteDeps, input WriteInput, ctx
 		return WriteOutput{}, err
 	}
 
+	// The sandbox is checked before any permission prompt: a path it denies must
+	// not ask the user first.
+	if err := guardFileWrite(execCtx, deps.Guard, target.Canonical, core.FileOpWrite); err != nil {
+		return WriteOutput{}, err
+	}
+
 	if external := target.ExternalDirectory; external != nil {
 		extPerm := core.LocationMutationExternalDirectoryPermission(*external)
 		if err := deps.Permission.Assert(core.PermissionAssertInput{
@@ -119,10 +125,6 @@ func executeWrite(execCtx context.Context, deps WriteDeps, input WriteInput, ctx
 		Source:    source,
 		Agent:     &ctx.Agent,
 	}); err != nil {
-		return WriteOutput{}, err
-	}
-
-	if err := guardFileWrite(execCtx, deps.Guard, target.Canonical, core.FileOpWrite); err != nil {
 		return WriteOutput{}, err
 	}
 

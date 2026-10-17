@@ -22,7 +22,7 @@ func (dummyProcess) RunStream(
 
 func TestResolveNoneAndEmpty(t *testing.T) {
 	for _, name := range []string{"", "none"} {
-		process, err := Resolve(name)
+		process, err := Resolve(name, Policy{})
 		if err != nil {
 			t.Fatalf("resolve %q: %v", name, err)
 		}
@@ -33,14 +33,14 @@ func TestResolveNoneAndEmpty(t *testing.T) {
 }
 
 func TestResolveUnknownErrors(t *testing.T) {
-	if _, err := Resolve("no-such-sandbox"); err == nil {
+	if _, err := Resolve("no-such-sandbox", Policy{}); err == nil {
 		t.Fatal("expected an unknown sandbox name to be rejected")
 	}
 }
 
 func TestResolveRegistered(t *testing.T) {
-	Register("dummy", func() core.AppProcess { return dummyProcess{} })
-	process, err := Resolve("dummy")
+	Register("dummy", func(Policy) core.AppProcess { return dummyProcess{} })
+	process, err := Resolve("dummy", Policy{})
 	if err != nil {
 		t.Fatalf("resolve dummy: %v", err)
 	}

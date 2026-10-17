@@ -30,6 +30,15 @@ type FileWriteGuard interface {
 	Allow(ctx context.Context, path string, op FileOp) error
 }
 
+// FileReadGuard, when supplied to ClientOptions, is consulted before a built-in
+// read (the read tool). A non-nil error aborts the read without touching the
+// file; the tool reports it to the model. Nil disables the guard. It complements
+// the process sandbox, which covers spawned commands (including ripgrep) but not
+// the in-process read tool.
+type FileReadGuard interface {
+	AllowRead(ctx context.Context, path string) error
+}
+
 type FileMutationTarget struct {
 	Canonical string
 	Resource  string

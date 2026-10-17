@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 	"github.com/jiaweisky/go-agent-sdk/pkg/jsonschema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	jsonschema6 "github.com/santhosh-tekuri/jsonschema/v6"
@@ -20,6 +21,10 @@ type Context struct {
 	// session.next.tool.progress event, mirroring the v2 tool invocation
 	// progress context.
 	Progress func(structured map[string]any, content []Content) error
+	// ReportViolation, when set, reports a sandbox denial as a structured
+	// session event. It is the same reporter for in-process guards and for a
+	// spawned command that matched a denial pattern.
+	ReportViolation func(core.PolicyViolation)
 }
 
 type Content interface {

@@ -188,11 +188,12 @@ func executeGrep(deps GrepDeps, input GrepInput, ctx Context) (GrepOutput, error
 	}
 
 	matches, err := deps.Ripgrep.Grep(core.RipgrepGrepInput{
-		Cwd:     cwd,
-		Pattern: input.Pattern,
-		File:    file,
-		Include: input.Include,
-		Limit:   limit,
+		Cwd:         cwd,
+		Pattern:     input.Pattern,
+		File:        file,
+		Include:     input.Include,
+		Limit:       limit,
+		OnViolation: ctx.ReportViolation,
 	})
 	if err != nil {
 		return nil, err

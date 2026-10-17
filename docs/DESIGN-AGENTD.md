@@ -14,6 +14,7 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-16 | Added a per-server `peers` list (`name` + `endpoint`/`cardURL` + optional `headers`/`description`/`mode`): remote A2A agents registered as agents with an A2A backend, so a local agent (e.g. `build`) can delegate to them with the `task` tool (`mode: subagent`, the default) or run one as a primary agent. Applies to both `http` and `a2a` servers; registered in `BuildClient`; validated fail-fast; `/api/config` reports them with `headers` redacted. The control-API `POST /admin/projects` body carries the same `peers` (dynamic project instances can reach peers), and `cmd/agentd-supervisor`'s project template has a matching `peers` field. See `docs/DESIGN-A2A.md` (outbound). |
 | 2026-10-15 | `http` signing can be delegated to an external `presignURL` service (POST `{key, method, expires}` → `{uploadUrl, reference}`), mutually exclusive with the built-in `presignSecret` (nginx secure_link). |
 | 2026-10-15 | Storage credential coverage: `http` gains `auth` (`none`/`basic`/`bearer`, on **both** writes and reads) plus `presignSecret` (nginx secure_link, so a private origin's url carries a ticket); `s3`/`cos` accept **no** credentials for an anonymous/public bucket (urls are plain, no presign); A2A **outbound** ingest uploads now carry the client's auth headers (previously none → 401 against a secured peer). |
 | 2026-10-15 | Added a **native `cos` storage backend**: Tencent COS over its own REST API (`q-sign-algorithm=sha1`), needing no S3/SigV4. `storage.backend` ∈ `http` / `local` / `s3` / `cos`; the S3-compatible `s3` backend still reaches COS via its S3 endpoint. |
@@ -167,6 +168,8 @@ servers:
     models: [deepseek-chat, gpt-4o]     # subset of the global catalog (ids only)
     defaultModel: deepseek-chat         # used when an agent/subagent sets no model
     agents: [ build ]                   # reachable allow-list
+    peers:                              # remote A2A agents this server can delegate to (`task`) or run as primary
+      - { name: echo, endpoint: http://127.0.0.1:9099, description: "Echoes input.", mode: subagent, headers: { Authorization: "Bearer ${PEER_TOKEN}" } }
     mediaUpload: { ... }                # optional
     dropErroredTurns: true              # default true
     auth: { bearer: sk-... }            # or { username, password }; secret in the file
@@ -248,6 +251,7 @@ full `ModelConfig`; a server only selects **ids**:
 | `questions` | both | the `question` tool policy: `park` or `decline`; default **`decline`** for a2a (an A2A client polls task state and cannot answer), **`park`** for http |
 | `auth` | both | http allows `bearer` **or** `username`/`password` (`username` defaults `opencode`); **a2a is bearer-only** |
 | `agents` | both | http = reachable allow-list; a2a = exposed agents |
+| `peers` | both | remote A2A agents registered as agents with an A2A backend (`name` + `endpoint`/`cardURL`, optional `headers`/`description`/`mode`, default `subagent`); the local model delegates to one with the `task` tool, or runs it as a primary agent (`mode: primary`/`all`). See `DESIGN-A2A.md` (outbound) |
 | `interactionTimeout` / `interactionFallback` / `subscriberCapacity` / `cors` / `publicRoutes` | **http only** | hold-mode HITL + SSE/browser tuning |
 | `baseURL` / `cards` / `inboundMedia` / `default` | **a2a only** | card advertising + inbound media (`spool` / `inline`) + origin-root card owner; `cards` is **required per exposed agent** |
 
@@ -565,13 +569,19 @@ compatibility shims are kept.
   `id`/`name`/`description`.
 - **Assembly**: `BuildClient(catalog, server)` produces the expected `ClientOptions` (incl.
   MCP / References / Title / SubagentDepth) for **both** `kind`s — guards against the §1 drift
-  returning.
+  returning. `peers` are validated (name, `endpoint`/`cardURL`, mode, duplicates) and, once
+  built, registered as agents carrying the A2A backend and a delegatable mode (the
+  SDK-level delegation chain is covered by `pkg/agent`'s remote-subagent tests).
 - **Routing**: two servers on one `listen` (host and/or mount) each answer on their own
   selector; the origin-root `/.well-known/agent-card.json` is the `default`, and
   `/.well-known/agents.json` unions all A2A servers.
 - **Integration**: start `agentd` with `http` + `a2a`; assert both listeners answer and that
   each `Client` is isolated (separate session DBs, sessions do not cross). Assert graceful
   shutdown closes all listeners and clients; assert bind-failure aborts startup.
+- **E2E (live model)**: behind the `e2e` build tag, `TestRunPeersReachesRemoteA2A` starts two
+  real `agentd` processes — a remote `a2a` server exposing `build` on the live model, and a
+  local `http` server whose `peers` entry points at it — then runs a session on the peer and
+  asserts the remote model's reply round-trips over A2A (`VLLM_BASE_URL` / `VLLM_MODEL`).
 - **Regression**: a one-entry `agentd` config (`servers` has one entry) behaves like the old
   single command on the wire.
 

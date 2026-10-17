@@ -99,6 +99,11 @@ type ClientOptions struct {
 	// file writes that the process sandbox (Process) does not cover. Nil disables
 	// the guard.
 	FileWriteGuard core.FileWriteGuard
+	// FileReadGuard, when set, is consulted before the built-in read tool reads
+	// a path. It is the seam for a host to extend the sandbox to the in-process
+	// read tool, which the process sandbox (Process) cannot see. Nil disables the
+	// guard.
+	FileReadGuard core.FileReadGuard
 	// SearchExcludes are ripgrep --glob patterns (relative to the working
 	// directory) whose paths the glob/grep tools omit from results, on top of
 	// `.git`. A host uses it to hide a generated directory - for example an

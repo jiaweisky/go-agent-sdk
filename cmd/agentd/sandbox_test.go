@@ -28,32 +28,60 @@ func (resolveNoopProcess) RunStream(
 }
 
 func init() {
-	sandbox.Register("agentd-resolve-test", func() core.AppProcess { return resolveNoopProcess{} })
+	sandbox.Register("agentd-resolve-test", func(sandbox.Policy) core.AppProcess { return resolveNoopProcess{} })
 }
 
 func TestResolveSandbox(t *testing.T) {
 	// No sandbox config selects the SDK default (nil).
-	if p, err := resolveSandbox(config.Server{}); p != nil || err != nil {
+	if p, _, err := resolveSandbox(config.Server{}); p != nil || err != nil {
 		t.Fatalf("no sandbox = %v, %v", p, err)
 	}
 	// "none" also selects the SDK default.
-	if p, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "none"}}); p != nil || err != nil {
+	if p, _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "none"}}); p != nil || err != nil {
 		t.Fatalf("none = %v, %v", p, err)
 	}
 	// A registered wrapper resolves to its process seam.
-	p, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "agentd-resolve-test"}})
+	p, policy, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "agentd-resolve-test"}})
 	if err != nil || p == nil {
 		t.Fatalf("registered = %v, %v", p, err)
 	}
+	if policy.ReadMode != sandbox.FSModeAllow || policy.WriteMode != sandbox.FSModeAllow {
+		t.Fatalf("standard policy = %+v, want allow-list reads and writes", policy)
+	}
 	// An unknown wrapper with the default (fail-closed) refuses to start.
-	if _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "no-such"}}); err == nil {
+	if _, _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "no-such"}}); err == nil {
 		t.Fatal("expected fail-closed to reject an unknown sandbox")
 	}
-	// fail-open warns and runs without the sandbox.
-	if p, err := resolveSandbox(config.Server{
+	// fail-open warns and runs without the sandbox, but keeps the guard policy.
+	if p, policy, err := resolveSandbox(config.Server{
 		Sandbox: &config.SandboxConfig{Process: "no-such", FailurePolicy: "fail-open"},
-	}); p != nil || err != nil {
-		t.Fatalf("fail-open = %v, %v (want nil, nil)", p, err)
+	}); p != nil || err != nil || policy.WriteMode != sandbox.FSModeAllow {
+		t.Fatalf("fail-open = %v, %+v, %v", p, policy, err)
+	}
+	// An explicit profile off disables both the wrapper and the guards.
+	if p, policy, err := resolveSandbox(config.Server{
+		Sandbox: &config.SandboxConfig{Process: "agentd-resolve-test", SandboxPolicy: config.SandboxPolicy{Profile: "off"}},
+	}); p != nil || err != nil || policy.WriteMode == sandbox.FSModeAllow {
+		t.Fatalf("profile off = %v, %+v, %v", p, policy, err)
+	}
+}
+
+func TestSandboxGuards(t *testing.T) {
+	read, write := sandboxGuards(config.Server{Sandbox: &config.SandboxConfig{Process: "none"}}, sandbox.Policy{})
+	if read != nil || write != nil {
+		t.Fatal("a disabled sandbox must not install guards")
+	}
+	policy := sandbox.StandardPolicy(t.TempDir())
+	read, write = sandboxGuards(config.Server{Sandbox: &config.SandboxConfig{Process: "seatbelt"}}, policy)
+	if read == nil || write == nil {
+		t.Fatal("the standard policy must install both guards")
+	}
+
+	custom := policy
+	custom.ReadMode = sandbox.FSModeOff
+	read, write = sandboxGuards(config.Server{Sandbox: &config.SandboxConfig{Process: "seatbelt"}}, custom)
+	if read != nil || write == nil {
+		t.Fatal("read: off must drop the read guard only")
 	}
 }
 
@@ -80,7 +108,8 @@ func TestResolveSandboxBlocksOutsideWrite(t *testing.T) {
 		}
 		return []string{"-c", command}
 	}
-	process, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: wrapper}})
+	dir := t.TempDir()
+	process, _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: wrapper}, WorkingDirectory: dir})
 	if err != nil || process == nil {
 		t.Fatalf("resolveSandbox(%s) = %v, %v", wrapper, process, err)
 	}
@@ -88,7 +117,6 @@ func TestResolveSandboxBlocksOutsideWrite(t *testing.T) {
 	if err != nil {
 		t.Skip("no home directory")
 	}
-	dir := t.TempDir()
 
 	outside := filepath.Join(home, ".agentd-resolve-sandbox-deny-test")
 	blocked, err := process.Run(context.Background(), shell,

@@ -38,31 +38,34 @@ type RipgrepInvalidPatternError struct {
 func (e *RipgrepInvalidPatternError) Error() string { return e.Message }
 
 type RipgrepFindInput struct {
-	Cwd     string
-	Pattern string
-	Limit   int
-	Hidden  bool
-	Follow  bool
-	Context context.Context
-	OnEntry func(FileSystemEntry) error
+	Cwd         string
+	Pattern     string
+	Limit       int
+	Hidden      bool
+	Follow      bool
+	Context     context.Context
+	OnEntry     func(FileSystemEntry) error
+	OnViolation func(PolicyViolation)
 }
 
 type RipgrepGlobInput struct {
-	Cwd     string
-	Pattern string
-	Limit   int
-	Hidden  bool
-	Follow  bool
-	Context context.Context
+	Cwd         string
+	Pattern     string
+	Limit       int
+	Hidden      bool
+	Follow      bool
+	Context     context.Context
+	OnViolation func(PolicyViolation)
 }
 
 type RipgrepGrepInput struct {
-	Cwd     string
-	Pattern string
-	File    *string
-	Include *string
-	Limit   int
-	Context context.Context
+	Cwd         string
+	Pattern     string
+	File        *string
+	Include     *string
+	Limit       int
+	Context     context.Context
+	OnViolation func(PolicyViolation)
 }
 
 type Ripgrep interface {
@@ -105,13 +108,14 @@ type ripgrepRunResult[A any] struct {
 }
 
 type ripgrepRunInput[A any] struct {
-	Cwd     string
-	Args    []string
-	Limit   int
-	Pattern string
-	Context context.Context
-	Parse   func(line string) (*A, error)
-	OnItem  func(A) error
+	Cwd         string
+	Args        []string
+	Limit       int
+	Pattern     string
+	Context     context.Context
+	OnViolation func(PolicyViolation)
+	Parse       func(line string) (*A, error)
+	OnItem      func(A) error
 }
 
 // ripgrepRun runs ripgrep and parses its rows, stopping after limit+1 rows as the
@@ -135,6 +139,7 @@ func ripgrepRun[A any](
 		Dir:           input.Cwd,
 		ExtendEnv:     true,
 		MaxErrorBytes: &maxError,
+		OnViolation:   input.OnViolation,
 	})
 	if err != nil {
 		return nil, err
@@ -226,10 +231,11 @@ func (s *ripgrepService) Glob(input RipgrepGlobInput) ([]FileSystemEntry, error)
 	args := s.filesArgs(input.Pattern, input.Hidden, input.Follow)
 
 	result, err := ripgrepRun(s.process, s.binary, ripgrepRunInput[string]{
-		Cwd:     input.Cwd,
-		Args:    args,
-		Limit:   input.Limit,
-		Context: input.Context,
+		Cwd:         input.Cwd,
+		Args:        args,
+		Limit:       input.Limit,
+		Context:     input.Context,
+		OnViolation: input.OnViolation,
 		Parse: func(line string) (*string, error) {
 			value := ripgrepNormalizeRelative(line)
 			return &value, nil
@@ -254,10 +260,11 @@ func (s *ripgrepService) Find(input RipgrepFindInput) ([]FileSystemEntry, error)
 	args := s.filesArgs(pattern, input.Hidden, input.Follow)
 
 	result, err := ripgrepRun(s.process, s.binary, ripgrepRunInput[FileSystemEntry]{
-		Cwd:     input.Cwd,
-		Args:    args,
-		Limit:   input.Limit,
-		Context: input.Context,
+		Cwd:         input.Cwd,
+		Args:        args,
+		Limit:       input.Limit,
+		Context:     input.Context,
+		OnViolation: input.OnViolation,
 		Parse: func(line string) (*FileSystemEntry, error) {
 			entry := FileSystemEntry{Path: ripgrepNormalizeRelative(line), Type: FileKindFile}
 			return &entry, nil
@@ -292,7 +299,7 @@ type ripgrepRawMatch struct {
 }
 
 func (s *ripgrepService) Grep(input RipgrepGrepInput) ([]FileSystemMatch, error) {
-	args := []string{"--no-config", "--json", "--hidden", "--no-messages"}
+	args := []string{"--no-config", "--json", "--hidden"}
 	if input.Include != nil && *input.Include != "" {
 		args = append(args, "--glob="+*input.Include)
 	}
@@ -305,12 +312,13 @@ func (s *ripgrepService) Grep(input RipgrepGrepInput) ([]FileSystemMatch, error)
 	}
 
 	result, err := ripgrepRun(s.process, s.binary, ripgrepRunInput[FileSystemMatch]{
-		Cwd:     input.Cwd,
-		Args:    args,
-		Limit:   input.Limit,
-		Pattern: input.Pattern,
-		Context: input.Context,
-		Parse:   parseRipgrepMatch,
+		Cwd:         input.Cwd,
+		Args:        args,
+		Limit:       input.Limit,
+		Pattern:     input.Pattern,
+		Context:     input.Context,
+		OnViolation: input.OnViolation,
+		Parse:       parseRipgrepMatch,
 	})
 	if err != nil {
 		return nil, err

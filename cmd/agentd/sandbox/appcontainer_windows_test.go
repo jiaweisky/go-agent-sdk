@@ -14,7 +14,7 @@ import (
 )
 
 func TestAppContainerRegistered(t *testing.T) {
-	if p, err := Resolve("appcontainer"); err != nil || p == nil {
+	if p, err := Resolve("appcontainer", StandardPolicy("")); err != nil || p == nil {
 		t.Fatalf("Resolve(appcontainer) = %v, %v", p, err)
 	}
 }
@@ -23,7 +23,7 @@ func TestAppContainerRegistered(t *testing.T) {
 // write under the run directory succeeds, and a write outside it (the user's
 // home) is denied because the AppContainer has no access there.
 func TestAppContainerEnforcesWrites(t *testing.T) {
-	process, err := Resolve("appcontainer")
+	process, err := Resolve("appcontainer", StandardPolicy(""))
 	if err != nil || process == nil {
 		t.Fatalf("Resolve(appcontainer) = %v, %v", process, err)
 	}

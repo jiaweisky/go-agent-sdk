@@ -11,6 +11,7 @@ import (
 	"iter"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -25,16 +26,20 @@ import (
 )
 
 func init() {
-	Register("appcontainer", func() core.AppProcess { return &appContainerProcess{} })
+	Register("appcontainer", func(policy Policy) core.AppProcess {
+		return &appContainerProcess{policy: policy}
+	})
 	RegisterProcess("appcontainer", execInAppContainer)
 }
 
 // appContainerProcess runs every command inside a Windows AppContainer: a
-// low-integrity sandbox with no network and no filesystem access except the run
-// directory the command is granted. It is best-effort — the SDK ships no
-// guarantee for it; Windows whole-process isolation is a container/Job Object
-// deployment concern.
-type appContainerProcess struct{}
+// low-integrity sandbox with no network and no filesystem access except the
+// paths the policy grants. It is best-effort — the SDK ships no guarantee for
+// it; Windows whole-process isolation is a container/Job Object deployment
+// concern.
+type appContainerProcess struct {
+	policy Policy
+}
 
 const (
 	// containerName is the AppContainer profile, created on first use.
@@ -102,6 +107,58 @@ func appContainerSID(name string) (*windows.SID, error) {
 // (comparatively slow) icacls call runs once per directory, not per command.
 var grantedDirs sync.Map
 
+// grantedReads remembers directories already granted read-only access.
+var grantedReads sync.Map
+
+// grantedTraverse remembers directories already granted traverse-only access.
+var grantedTraverse sync.Map
+
+// grantTraverse lets the profile walk to a child directory without listing or
+// reading its siblings.
+func grantTraverse(path string, sid *windows.SID) error {
+	if path == "" {
+		return nil
+	}
+	if _, ok := grantedTraverse.Load(path); ok {
+		return nil
+	}
+	if err := icacls(path, sid, "(X)"); err != nil {
+		return err
+	}
+	grantedTraverse.Store(path, struct{}{})
+	return nil
+}
+
+// grantTempTraversal grants traverse access to the per-run temp's base and its
+// parent, so the profile can reach the run directory under the state root.
+func grantTempTraversal(policy Policy, sid *windows.SID) error {
+	if policy.TempRoot == "" {
+		return nil
+	}
+	for _, dir := range []string{policy.TempRoot, filepath.Dir(policy.TempRoot)} {
+		if err := grantTraverse(dir, sid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// grantRead gives the sandbox profile read and execute access to dir, for paths
+// the policy allows beyond the run directory.
+func grantRead(dir string, sid *windows.SID) error {
+	if dir == "" {
+		return nil
+	}
+	if _, ok := grantedReads.Load(dir); ok {
+		return nil
+	}
+	if err := icacls(dir, sid, "(OI)(CI)RX"); err != nil {
+		return err
+	}
+	grantedReads.Store(dir, struct{}{})
+	return nil
+}
+
 // grantAccess gives the sandbox profile modify access to dir, so the wrapped
 // command can read and write its run directory (and, by inheritance, children).
 func grantAccess(dir string, sid *windows.SID) error {
@@ -133,15 +190,28 @@ func icacls(path string, sid *windows.SID, rights string) error {
 // then waits and exits with the child's status. Best-effort: an AppContainer
 // blocks loopback by default, so it also attempts a loopback exemption for the
 // profile (the host may need to configure one itself).
-func execInAppContainer(roots []string, command string, args []string) error {
+func execInAppContainer(roots []string, policy Policy, command string, args []string) error {
 	sid, err := appContainerSID(containerName)
 	if err != nil {
 		return err
 	}
-	for _, root := range roots {
+	for _, root := range append(roots, policy.WriteRoots()...) {
 		if err := grantAccess(root, sid); err != nil {
 			return err
 		}
+	}
+	for _, root := range policy.AllowRead {
+		if err := grantRead(root, sid); err != nil {
+			return err
+		}
+	}
+	for _, socket := range policy.SocketPaths() {
+		if err := grantAccess(socket, sid); err != nil {
+			return err
+		}
+	}
+	if err := grantTempTraversal(policy, sid); err != nil {
+		return err
 	}
 	// The binary itself must be readable and executable by the profile.
 	if err := icacls(command, sid, "(RX)"); err != nil {
@@ -149,15 +219,9 @@ func execInAppContainer(roots []string, command string, args []string) error {
 	}
 	exemptLoopback(sid)
 
-	capability, err := windows.CreateWellKnownSid(windows.WinCapabilityInternetClientServerSid)
+	security, err := networkSecurity(sid, true)
 	if err != nil {
 		return err
-	}
-	capabilities := []windows.SIDAndAttributes{{Sid: capability, Attributes: windows.SE_GROUP_ENABLED}}
-	security := securityCapabilities{
-		appContainerSid: sid,
-		capabilities:    &capabilities[0],
-		capabilityCount: uint32(len(capabilities)),
 	}
 
 	// The re-executed process keeps this process's std handles. A handle the
@@ -331,6 +395,24 @@ func (p *stdioPipes) closeAll() {
 	}
 }
 
+// networkSecurity builds the AppContainer security capabilities. allowNetwork
+// adds internetClientServer; without it the per-command container has no network
+// capability.
+func networkSecurity(sid *windows.SID, allowNetwork bool) (securityCapabilities, error) {
+	security := securityCapabilities{appContainerSid: sid}
+	if !allowNetwork {
+		return security, nil
+	}
+	capability, err := windows.CreateWellKnownSid(windows.WinCapabilityInternetClientServerSid)
+	if err != nil {
+		return security, err
+	}
+	capabilities := []windows.SIDAndAttributes{{Sid: capability, Attributes: windows.SE_GROUP_ENABLED}}
+	security.capabilities = &capabilities[0]
+	security.capabilityCount = uint32(len(capabilities))
+	return security, nil
+}
+
 // newChildAttributeList builds the process attribute list a spawned child is
 // started with: the AppContainer security capabilities plus, when handles are
 // given, an explicit handle list. The caller must Delete the returned list.
@@ -371,7 +453,7 @@ func newChildAttributeList(
 // handle and the readable ends of its stdout (and stderr, unless merged into
 // stdout). On error nothing survives: every pipe end is closed and the returned
 // handles and files are invalid.
-func spawn(dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr bool) (process windows.Handle, stdout, stderr *os.File, err error) {
+func spawn(policy Policy, dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr bool) (process windows.Handle, stdout, stderr *os.File, err error) {
 	sid, err := appContainerSID(containerName)
 	if err != nil {
 		return 0, nil, nil, err
@@ -382,6 +464,24 @@ func spawn(dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr
 		}
 	}
 	if err := grantAccess(dir, sid); err != nil {
+		return 0, nil, nil, err
+	}
+	for _, root := range policy.WriteRoots() {
+		if err := grantAccess(root, sid); err != nil {
+			return 0, nil, nil, err
+		}
+	}
+	for _, root := range policy.AllowRead {
+		if err := grantRead(root, sid); err != nil {
+			return 0, nil, nil, err
+		}
+	}
+	for _, socket := range policy.SocketPaths() {
+		if err := grantAccess(socket, sid); err != nil {
+			return 0, nil, nil, err
+		}
+	}
+	if err := grantTempTraversal(policy, sid); err != nil {
 		return 0, nil, nil, err
 	}
 
@@ -397,7 +497,15 @@ func spawn(dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr
 		}
 	}()
 
-	attributeList, err := newChildAttributeList(securityCapabilities{appContainerSid: sid}, pipes.childHandles())
+	allowNetwork := policy.NetworkMode == NetworkOff
+	security, err := networkSecurity(sid, allowNetwork)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	if allowNetwork {
+		exemptLoopback(sid)
+	}
+	attributeList, err := newChildAttributeList(security, pipes.childHandles())
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -511,6 +619,12 @@ func (p *appContainerProcess) Run(
 	args []string,
 	options ...core.RunOptions,
 ) (*core.RunResult, error) {
+	policy, cleanup, err := withPrivateTemp(p.policy)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	options = withTempEnv(options, policy.PrivateTemp)
 	var opts core.RunOptions
 	if len(options) > 0 {
 		opts = options[0]
@@ -522,7 +636,7 @@ func (p *appContainerProcess) Run(
 		defer cancel()
 	}
 	commandLine := windows.ComposeCommandLine(append([]string{command}, args...))
-	process, stdout, stderr, err := spawn(opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), opts.Stdin, opts.CombineOutput)
+	process, stdout, stderr, err := spawn(policy, opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), opts.Stdin, opts.CombineOutput)
 	if err != nil {
 		return nil, &core.AppProcessError{Command: description, Cause: err}
 	}
@@ -578,19 +692,26 @@ func (p *appContainerProcess) RunStream(
 	args []string,
 	options ...core.RunStreamOptions,
 ) iter.Seq2[string, error] {
-	var opts core.RunStreamOptions
-	if len(options) > 0 {
-		opts = options[0]
-	}
 	description := util.DescribeCommand(command, args)
 	return func(yield func(string, error) bool) {
+		policy, cleanup, err := withPrivateTemp(p.policy)
+		if err != nil {
+			yield("", &core.AppProcessError{Command: description, Cause: err})
+			return
+		}
+		defer cleanup()
+		options = withStreamTempEnv(options, policy.PrivateTemp)
+		var opts core.RunStreamOptions
+		if len(options) > 0 {
+			opts = options[0]
+		}
 		if opts.Timeout > 0 {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 			defer cancel()
 		}
 		commandLine := windows.ComposeCommandLine(append([]string{command}, args...))
-		process, stdout, stderr, err := spawn(opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), nil, opts.IncludeStderr)
+		process, stdout, stderr, err := spawn(policy, opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), nil, opts.IncludeStderr)
 		if err != nil {
 			yield("", &core.AppProcessError{Command: description, Cause: err})
 			return

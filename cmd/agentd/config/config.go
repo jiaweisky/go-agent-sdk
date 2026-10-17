@@ -27,6 +27,9 @@ type WrapConfig struct {
 	// FailurePolicy is what to do when the named sandbox cannot be built:
 	// fail-closed (default) refuses to start; fail-open warns and runs unwrapped.
 	FailurePolicy string `yaml:"failurePolicy"`
+	// The policy block (profile, filesystem, …) is inlined. The whole-process
+	// wrapper also allows the configured roots and config dirs.
+	SandboxPolicy `yaml:",inline"`
 }
 
 // ControlConfig configures the optional project admin API.

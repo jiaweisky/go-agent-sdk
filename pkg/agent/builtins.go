@@ -29,6 +29,7 @@ type builtinDeps struct {
 	name           string
 	process        core.AppProcess
 	fileGuard      core.FileWriteGuard
+	readGuard      core.FileReadGuard
 	searchExcludes []string
 }
 
@@ -50,7 +51,8 @@ func registerBuiltins(tools tool.Tools, deps builtinDeps, agentPermissions schem
 	registrations := []func() error{
 		func() error {
 			_, err := tool.RegisterRead(tools, tool.ReadDeps{
-				Mutation: mutation, Reader: tool.NewReadFileSystem(deps.locale), Image: image, Permission: deps.permission,
+				Mutation: mutation, Reader: tool.NewReadFileSystem(deps.locale), Image: image,
+				Permission: deps.permission, Guard: deps.readGuard,
 			})
 			return err
 		},

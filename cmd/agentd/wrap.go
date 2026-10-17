@@ -38,10 +38,28 @@ func wrapProcess(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+	roots := wrapRoots(cfg)
+	policy := w.Policy()
+	// The wrapped process must still read its own executable, config dirs and
+	// state roots (the bootstrap exception), and write the shared roots.
+	policy.AllowRead = append(policy.AllowRead, executable)
+	policy.AllowRead = append(policy.AllowRead, roots...)
+	policy.AllowRead = append(policy.AllowRead, configDirs(cfg)...)
+	policy.AllowWrite = append(policy.AllowWrite, roots...)
 	// The sentinel marks the child as already wrapped so it does not recurse.
 	os.Setenv(wrappedEnv, w.Process)
 	fmt.Fprintf(os.Stderr, "agentd: entering whole-process sandbox %q\n", w.Process)
-	return launcher(wrapRoots(cfg), executable, os.Args[1:])
+	return launcher(roots, policy, executable, os.Args[1:])
+}
+
+// configDirs collects the configured agent/skill directories, which the wrapped
+// process must read to start.
+func configDirs(cfg config.Config) []string {
+	var dirs []string
+	for _, s := range cfg.Servers {
+		dirs = append(dirs, s.ConfigDirs...)
+	}
+	return dirs
 }
 
 // wrapRoots is the set of directories the wrapped process may write: every

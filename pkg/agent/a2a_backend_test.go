@@ -645,3 +645,31 @@ func TestMergePermissionRules(t *testing.T) {
 		t.Fatalf("nil overlay = %v, want [allow]", got)
 	}
 }
+
+// TestA2ABackendCardURLOverridesEndpoint guards that CardURL, when set, is the
+// URL the card is resolved from; otherwise the endpoint (discovery root) is.
+func TestA2ABackendCardURLOverridesEndpoint(t *testing.T) {
+	cases := []struct {
+		name string
+		spec schema.AgentA2ABackend
+		want string
+	}{
+		{"cardURL overrides endpoint", schema.AgentA2ABackend{Endpoint: "http://base", CardURL: "http://base/card.json"}, "http://base/card.json"},
+		{"endpoint when no cardURL", schema.AgentA2ABackend{Endpoint: "http://base"}, "http://base"},
+		{"cardURL alone", schema.AgentA2ABackend{CardURL: "http://base/card.json"}, "http://base/card.json"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pool := newA2ABackendPool(nil)
+			var got string
+			pool.newClient = func(_ context.Context, endpoint string, _ map[string]string) (client.Client, error) {
+				got = endpoint
+				return nil, nil
+			}
+			_, _ = pool.remote(context.Background(), c.spec)
+			if got != c.want {
+				t.Fatalf("resolved from %q, want %q", got, c.want)
+			}
+		})
+	}
+}

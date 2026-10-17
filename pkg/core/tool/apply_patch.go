@@ -118,7 +118,7 @@ func executeApplyPatch(execCtx context.Context, deps ApplyPatchDeps, input Apply
 		if errors.As(err, &failure) {
 			return ApplyPatchOutput{}, err
 		}
-		return ApplyPatchOutput{}, run.fail("patch")
+		return ApplyPatchOutput{}, run.failWithCause("patch", err)
 	}
 	return output, nil
 }
@@ -135,6 +135,10 @@ func (r *applyPatchRun) assertFileWriteGuard(targets []applyPatchTarget) error {
 }
 
 func (r *applyPatchRun) fail(path string) error {
+	return r.failWithCause(path, nil)
+}
+
+func (r *applyPatchRun) failWithCause(path string, cause error) error {
 	prefix := fmt.Sprintf("Unable to apply patch at %s", path)
 	if len(r.applied) > 0 {
 		resources := make([]string, len(r.applied))
@@ -147,7 +151,7 @@ func (r *applyPatchRun) fail(path string) error {
 			strings.Join(resources, ", "),
 		)
 	}
-	return &Failure{Message: prefix}
+	return &Failure{Message: sandboxMessage(prefix, cause), Cause: cause}
 }
 
 // applyPatchTarget pairs a parsed hunk with its resolved mutation target.
@@ -171,13 +175,14 @@ func (r *applyPatchRun) run(input ApplyPatchInput) (ApplyPatchOutput, error) {
 	if err != nil {
 		return ApplyPatchOutput{}, err
 	}
+	// The sandbox is checked before any permission prompt.
+	if err := r.assertFileWriteGuard(targets); err != nil {
+		return ApplyPatchOutput{}, err
+	}
 	if err := r.assertExternalPermissions(targets, source); err != nil {
 		return ApplyPatchOutput{}, err
 	}
 	if err := r.assertEditPermission(targets, source); err != nil {
-		return ApplyPatchOutput{}, err
-	}
-	if err := r.assertFileWriteGuard(targets); err != nil {
 		return ApplyPatchOutput{}, err
 	}
 	prepared, err := r.prepareChanges(targets)

@@ -173,6 +173,12 @@ is consulted by the `write` / `edit` / `apply_patch` tools before any mutation �
 `Allow(ctx, path, op)` where `op` is the tool (`write`/`edit`/`apply_patch`); a non-nil error aborts
 the mutation (model-facing `Failure`). Nil disables the guard.
 
+**Also implemented (S5)**: `ClientOptions.FileReadGuard` is consulted by the `read` tool
+(`AllowRead(ctx, path)`), so the in-process read path shares the sandbox policy. `grep`/`glob`
+run ripgrep through `AppProcess`, so the process sandbox covers them already. `agentd` builds one
+`PathGuard` from the server's sandbox policy and installs both interfaces, so reads and writes
+cannot drift apart.
+
 ### 8. Reference implementations (optional, build-tagged)
 
 Ship **optional, best-effort** wrappers of `core.AppProcess` that `exec` through a sandbox,
@@ -192,18 +198,29 @@ platform-specific package directly. **Shipped (best-effort, S4)**: `bwrap` (Linu
 registered on import — so `sandbox.process: bwrap` / `seatbelt` / `appcontainer` works out of
 the box on those platforms.
 
-> `bwrap` and `seatbelt` block **writes** outside the project, **network egress**, and **reads of a
-> denylist** of sensitive `$HOME` directories (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.docker`,
-> `~/.kube`, `~/.config/gcloud`, `~/.config/gh`). It is a denylist, not the Part 4 "filesystem
-> view" allowlist: reads elsewhere are still allowed — use a container or whole-process wrapping
-> for a strict view. `sandbox.failurePolicy` governs *resolution* at startup only; a wrapper that
-> resolves but fails at exec (e.g. `bwrap` without user namespaces) surfaces as a per-command tool
-> error, not a startup failure.
+> **S5 policy** (see the `sandbox` block in §13): the wrappers enforce more than writes.
+> **Reads** deny broad regions — the user's home (and its parent), `/etc` — and re-allow the
+> project plus explicit paths, so A1/A2 and sibling projects are unreadable while the system
+> run-time paths keep working (the Part 4 "deny-region + re-allow" model). **Writes** stay
+> allow-only. **Network** egress is denied per command (hard no-egress). **Process introspection**
+> is denied per command (`(deny process-info*)`/`(deny sysctl-read)` on seatbelt, `--unshare-pid`
+> on bwrap, the low-integrity AppContainer on Windows). The child **environment** is scrubbed of
+> `*_KEY` / `*_SECRET` / `*_TOKEN` / `*_PASSWORD`. The whole-process profile keeps the network
+> and process introspection (it serves listeners, calls the model and manages children) and
+> re-allows its own config dirs (FR12). `sandbox.failurePolicy` governs *resolution* at startup
+> only; a wrapper that resolves but fails at exec surfaces as a per-command tool error.
+> Each command runs with a private temp under `{Root}/data/sandbox-tmp`, so the shared host
+> temp (and any socket another process left there) is not exposed; the child's `TMPDIR`/`TEMP`
+> point at it.
+> Denials are reported as `session.next.sandbox.denied` events: `enforced` from the in-process
+> guard (authoritative) and from Linux precise mode (strace), and `suspected` from a command whose
+> stderr matched a platform denial message (best-effort). `violations.reportToModel` appends a
+> short denial note to the command output.
 
-> The Windows `appcontainer` wrapper creates an AppContainer profile, grants it the run
-> directory (`icacls`), and launches the command with
-> `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` (no network, no filesystem access outside the
-> granted directory). It is **best-effort and unverified on a real Windows host**; whole-process
+> The Windows `appcontainer` wrapper creates an AppContainer profile, grants it the run directory
+> and the policy's allowed paths (`icacls`), and launches the command with
+> `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` (no network capability, no filesystem access
+> outside the granted directories). It has been **verified on a real Windows host**. Whole-process
 > isolation there remains a Job Object / container deployment concern (Part 4).
 
 #### 8.1 Whole-process wrapping
@@ -367,9 +384,34 @@ servers:
       cow:
         mode: auto            # auto | reflink | clonefile
     sandbox:
-      process: none           # none | <registered wrapper> (bwrap/seatbelt/…)
-      failurePolicy: fail-closed   # fail-closed (default) | fail-open
+      process: seatbelt          # none | seatbelt | bwrap | appcontainer
+      failurePolicy: fail-closed # fail-closed (default) | fail-open
+      profile: standard          # off | standard | custom (default: standard when enabled)
+      filesystem:
+        read: allow              # allow | off (no read confinement; Windows rejects off)
+        write: allow             # allow | off (no write confinement; Linux needs read off too)
+        denyRead: []             # more specific than an allow
+        allowRead: []
+        denyWrite: []
+        allowWrite: []
+      network:
+        mode: no-egress          # off | no-egress (a domain allow-list needs a proxy, not implemented)
+      unixSockets:
+        mode: inherit            # inherit (file policy) | allowAll | allowlist
+        allow: []
+      processInspection: deny    # deny | allow (explicit opt-out)
+      env:
+        mode: scrub              # scrub | inherit
+        scrub: ["*_KEY", "*_SECRET", "*_TOKEN", "*_PASSWORD"]
+      violations:
+        mode: heuristic          # heuristic | precise (linux) | off
+        reportToModel: true      # append a denial note to command output
 ```
+
+`profile` is the easy path: `off` disables the sandbox (and its guards); `standard` applies the
+secure defaults above; `custom` starts from "no confinement" and applies only the explicit fields.
+An explicit `read: off` / `write: off` / `network: mode: off` / `processInspection: allow` is a
+deliberate opt-out, never a silent downgrade. `agentd` logs when a sandbox block disables itself.
 
 `container`/`remote` are **not** config fields: such an instance runs its own agentd (in a
 container/VM/remote host) and is provisioned by the host supervisor (§15), so agentd only
@@ -381,6 +423,14 @@ Validation (fail-fast, like the rest of `config.Validate`):
 - `sandbox.process` is required when `sandbox` is set; `sandbox.failurePolicy` is
   `fail-closed` (default) or `fail-open`. A name that matches no registered wrapper fails
   startup (fail-closed) or logs and runs without the sandbox (fail-open).
+- `sandbox.profile` is `off | standard | custom`; `filesystem.read`/`write` are `allow | off`;
+  `network.mode` is `off | no-egress` (a domain allow-list is rejected until a proxy exists);
+  `unixSockets.mode` is `inherit | allowAll | allowlist` (allowlist requires a path; the
+  pre-rename `deny` is accepted as an alias for inherit);
+  `processInspection` is `deny | allow`; `env.mode` is `scrub | inherit`. Unsupported rules fail
+  startup — notably a **write glob on Linux** (bwrap cannot express it), Windows `read/write: off`
+  and `processInspection: allow` (the AppContainer cannot express them), and Linux `write: off`
+  together with `read: allow` (contradictory) — never a silent allow-all.
 
 Whole-process wrapping is a **top-level** `wrap` block (§8.1), not a per-server
 field, because it applies to the whole process:
@@ -389,10 +439,18 @@ field, because it applies to the whole process:
 wrap:
   process: seatbelt
   failurePolicy: fail-closed
+  profile: standard            # off | standard | custom
+  filesystem: { read: allow, write: allow }
+  # Only the filesystem policy applies to the wrapped process: it keeps the
+  # network and process introspection up (it serves listeners, calls the model
+  # and manages children) and inherits its own environment. Its config dirs,
+  # state roots and executable are re-allowed (FR12).
 ```
 
 `wrap.process` is required when `wrap` is set; `wrap.failurePolicy` is
-`fail-closed` (default) or `fail-open`.
+`fail-closed` (default) or `fail-open`. The whole-process wrapper re-allows every server's
+state root, working directory, config dirs and the executable, so the process can start and
+serve; the policy still confines the commands and tools it spawns.
 
 ### 14. Integration into `run.go`
 
@@ -431,7 +489,7 @@ provisioning **at runtime**. Two options:
 
    | Method + path | Body / effect |
    |---|---|
-   | `POST /admin/projects` | `{name,kind,root,workingDirectory,configDirs,models,defaultModel,agents,isolation,readonly,auth}` → `201 {project_id,kind,server_base,transport,working_directory,readonly}` |
+   | `POST /admin/projects` | `{name,kind,root,workingDirectory,configDirs,models,defaultModel,agents,peers,isolation,readonly,auth}` → `201 {project_id,kind,server_base,transport,working_directory,readonly}` (`peers`: remote A2A agents the instance reaches as a client, same shape as a server's) |
    | `GET /admin/projects` | list running instances |
    | `DELETE /admin/projects/{id}` | stop the instance and release its view |
 

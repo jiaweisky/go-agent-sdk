@@ -9,12 +9,14 @@ package sandbox
 
 import (
 	"fmt"
+	"os/exec"
+	"runtime"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 
-// Factory builds a process seam for one sandbox.
-type Factory func() core.AppProcess
+// Factory builds a process seam for one sandbox and policy.
+type Factory func(Policy) core.AppProcess
 
 var registry = map[string]Factory{}
 
@@ -31,10 +33,12 @@ func Register(name string, factory Factory) {
 	registry[name] = factory
 }
 
-// Resolve returns the process seam for a name. An empty name or "none" returns
-// nil, meaning the SDK's default pass-through. Unknown names are an error so
-// startup fails fast rather than silently running unsandboxed.
-func Resolve(name string) (core.AppProcess, error) {
+// Resolve returns the process seam for a name and policy. An empty name or
+// "none" returns nil, meaning the SDK's default pass-through. Unknown names are
+// an error so startup fails fast rather than silently running unsandboxed. When
+// the policy scrubs environment variables, the returned process scrubs them from
+// every command, whichever wrapper produced it.
+func Resolve(name string, policy Policy) (core.AppProcess, error) {
 	switch name {
 	case "", "none":
 		return nil, nil
@@ -43,5 +47,23 @@ func Resolve(name string) (core.AppProcess, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown sandbox.process %q", name)
 	}
-	return factory(), nil
+	if policy.ViolationMode == ViolationPrecise {
+		if runtime.GOOS != "linux" {
+			return nil, fmt.Errorf("sandbox.violations.mode precise is only supported on linux")
+		}
+		if _, err := exec.LookPath("strace"); err != nil {
+			return nil, fmt.Errorf("sandbox.violations.mode precise requires strace: %w", err)
+		}
+	}
+	process := factory(policy)
+	if len(policy.ScrubEnv) > 0 {
+		process = scrubbedProcess{inner: process, patterns: policy.ScrubEnv}
+	}
+	if policy.ViolationMode != "" && policy.ViolationMode != ViolationOff {
+		process = reportingProcess{
+			inner: process, precise: policy.ViolationMode == ViolationPrecise,
+			reportToModel: policy.ReportToModel,
+		}
+	}
+	return process, nil
 }
