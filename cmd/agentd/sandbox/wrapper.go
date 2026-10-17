@@ -12,6 +12,9 @@ import (
 // working directory (the writable project root), or "" when unset.
 type launcher func(dir string, policy Policy, command string, args []string) (string, []string)
 
+// sandboxTempDirMode keeps a per-run temp private to the server user.
+const sandboxTempDirMode os.FileMode = 0o700
+
 // sandboxed adapts a launcher to the SDK process seam. Each run gets a private
 // temp directory under the policy's TempRoot, so a command cannot reach sockets
 // or files another process left in the shared host temp.
@@ -65,7 +68,7 @@ func withPrivateTemp(policy Policy) (Policy, func(), error) {
 	if base == "" {
 		base = os.TempDir()
 	}
-	if err := os.MkdirAll(base, 0o700); err != nil {
+	if err := os.MkdirAll(base, sandboxTempDirMode); err != nil {
 		return Policy{}, nil, err
 	}
 	temp, err := os.MkdirTemp(base, "run-")

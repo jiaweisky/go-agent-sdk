@@ -99,6 +99,9 @@ func TestSeatbeltPrivateTempUnderHome(t *testing.T) {
 	}
 }
 
+// socketAcceptTimeout bounds the local UNIX-socket test server.
+const socketAcceptTimeout = 5 * time.Second
+
 // TestSeatbeltUnixSocketAllowlist checks an allow-listed UNIX socket outside the
 // workdir is reachable, while AF_UNIX stays allowed by the file policy (the
 // network rule must deny IP only).
@@ -125,7 +128,7 @@ func TestSeatbeltUnixSocketAllowlist(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 	if unix, ok := listener.(*net.UnixListener); ok {
-		_ = unix.SetDeadline(time.Now().Add(5 * time.Second))
+		_ = unix.SetDeadline(time.Now().Add(socketAcceptTimeout))
 	}
 	go func() {
 		conn, err := listener.Accept()

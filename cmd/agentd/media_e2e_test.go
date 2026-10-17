@@ -27,6 +27,13 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
+const (
+	// httpSessionTimeout bounds one HTTP/SSE turn in the e2e tests.
+	httpSessionTimeout = 3 * time.Minute
+	// a2aTurnTimeout bounds one A2A streaming turn in the e2e tests.
+	a2aTurnTimeout = 2 * time.Minute
+)
+
 // These end-to-end tests start the real agentd command against a live model and
 // exercise the media surface of each transport:
 //
@@ -159,7 +166,7 @@ func runHTTPSession(t *testing.T, base, agent, prompt string, files []schema.Pro
 	if err := json.Unmarshal([]byte(id), &created); err != nil || created.Data.ID == "" {
 		t.Fatalf("create session: %v (%s)", err, id)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), httpSessionTimeout)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api/session/"+created.Data.ID+"/event", nil)
 	resp, err := http.DefaultClient.Do(req)
@@ -339,7 +346,7 @@ func sendTurn(t *testing.T, client *a2aclient.Client, mime string, data []byte) 
 		&a2a.Part{Content: a2a.Raw(data), MediaType: mime})
 	message.ContextID = a2a.NewContextID()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), a2aTurnTimeout)
 	defer cancel()
 	var (
 		artifact strings.Builder

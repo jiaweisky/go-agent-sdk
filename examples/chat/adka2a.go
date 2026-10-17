@@ -18,6 +18,15 @@ import (
 // detail the backend in the definition records, not part of its identity.
 const echoAgentName = "echo"
 
+const (
+	// adkStartupTimeout allows the first adka2a run to compile adk-go.
+	adkStartupTimeout = 180 * time.Second
+	// remoteAgentDirMode / remoteAgentFileMode are the generated config's modes:
+	// a traversable directory and a world-readable (non-secret) markdown file.
+	remoteAgentDirMode  os.FileMode = 0o755
+	remoteAgentFileMode os.FileMode = 0o644
+)
+
 // startAdkA2A launches the examples/adka2a submodule (a Google ADK agent served
 // over A2A) and returns its base URL plus a stop function. The submodule is a
 // separate Go module — it depends on adk-go, which the SDK itself never does —
@@ -40,8 +49,7 @@ func startAdkA2A() (string, func(), error) {
 	}
 	stop := func() { killProcessGroup(cmd) }
 
-	// The first run compiles adk-go, which is heavy; allow generous startup.
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), adkStartupTimeout)
 	defer cancel()
 	if err := waitForTCP(ctx, addr); err != nil {
 		stop()
@@ -79,10 +87,10 @@ func writeRemoteAgentConfig(dir, url string) error {
 		}
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), remoteAgentDirMode); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(echoAgentMarkdown(url)), 0o644)
+	return os.WriteFile(path, []byte(echoAgentMarkdown(url)), remoteAgentFileMode)
 }
 
 // withConfigDir appends a directory to the client's ConfigDirs, so agents
