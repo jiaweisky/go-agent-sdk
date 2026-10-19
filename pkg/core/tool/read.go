@@ -212,6 +212,9 @@ func readToolErrorMessage(err error, path string) string {
 	switch err.(type) {
 	case *ReadBinaryFileError,
 		*ReadMediaIngestLimitError,
+		*ReadMalformedUtf8Error,
+		*ReadOffsetOutOfRangeError,
+		*ReadPathKindError,
 		*core.ImageDecodeError,
 		*core.ImageSizeError:
 		return err.Error()

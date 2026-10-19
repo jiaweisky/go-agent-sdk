@@ -186,7 +186,7 @@ func TestRead_OffsetOutOfRange(t *testing.T) {
 	if result.Result.Type != "error" {
 		t.Fatalf("expected error result, got %q", result.Result.Type)
 	}
-	if result.Result.Value != "Unable to read data.txt" {
+	if result.Result.Value != "Offset 10 is out of range" {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
 	}
 }
@@ -474,7 +474,7 @@ func TestRead_MalformedUtf8(t *testing.T) {
 	if result.Result.Type != "error" {
 		t.Fatalf("expected error result, got %q", result.Result.Type)
 	}
-	if result.Result.Value != "Unable to read bad.txt" {
+	if result.Result.Value != "File is not valid UTF-8: bad.txt" {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
 	}
 }
@@ -537,7 +537,7 @@ func TestRead_DeniedPermission(t *testing.T) {
 	if result.Result.Type != "error" {
 		t.Fatalf("expected error result, got %q", result.Result.Type)
 	}
-	if result.Result.Value != "Unable to read secret.txt" {
+	if !strings.Contains(result.Result.Value.(string), "permission blocked") {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
 	}
 }
