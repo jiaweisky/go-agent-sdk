@@ -2,6 +2,7 @@ package tool
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
@@ -32,9 +33,15 @@ func TestFailurePropagatesUserDecline(t *testing.T) {
 
 	// A config-denied tool (PermissionBlockedError) is model-facing, not a
 	// decline: the model sees the failure and the turn continues.
-	blocked := failure("Permission denied: question", &core.PermissionBlockedError{})
+	blocked := failure("Permission denied: question", &core.PermissionBlockedError{
+		Rules: core.PermissionRuleset{
+			{Action: "question", Resource: "*", Effect: core.PermissionEffectDeny},
+		},
+	})
 	var denied *Failure
-	if !errors.As(blocked, &denied) || denied.Message != "Permission denied: question" {
-		t.Fatalf("failure() = %v, want a model-facing Failure", blocked)
+	if !errors.As(blocked, &denied) ||
+		!strings.Contains(denied.Message, "question") ||
+		!strings.Contains(denied.Message, "denied by the current policy") {
+		t.Fatalf("failure() = %v, want a model-facing Failure with the policy reason", blocked)
 	}
 }

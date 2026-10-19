@@ -107,7 +107,8 @@ func TestSkillToolMissingAndDenied(t *testing.T) {
 		Skills:     stubSkillLister{skills: []core.SkillInfo{info}},
 		Permission: &bashTestPermission{denyAction: SkillName},
 	}, map[string]any{"name": "effect"})
-	if denied.Result.Type != "error" || denied.Result.Value != "Unable to load skill effect" {
+	got, _ := denied.Result.Value.(string)
+	if denied.Result.Type != "error" || !strings.HasPrefix(got, "Unable to load skill effect: permission blocked") {
 		t.Fatalf("denied = %+v", denied.Result)
 	}
 }

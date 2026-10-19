@@ -77,7 +77,12 @@ type PermissionBlockedError struct {
 }
 
 func (e *PermissionBlockedError) Error() string {
-	return "permission blocked"
+	for _, rule := range e.Rules {
+		if rule.Effect == PermissionEffectDeny {
+			return fmt.Sprintf("permission blocked: %s %q is denied by the current policy", rule.Action, rule.Resource)
+		}
+	}
+	return "permission blocked: the current policy denies this action"
 }
 
 type PermissionNotFoundError struct {

@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
@@ -88,7 +89,8 @@ func TestTodoWriteMapsErrors(t *testing.T) {
 		Todos:      &stubTodoUpdater{},
 		Permission: &bashTestPermission{denyAction: TodoWriteName},
 	}, map[string]any{"todos": []any{}})
-	if denied.Result.Type != "error" || denied.Result.Value != "Unable to update todos" {
+	got, _ := denied.Result.Value.(string)
+	if denied.Result.Type != "error" || !strings.HasPrefix(got, "Unable to update todos: permission blocked") {
 		t.Fatalf("denied = %+v", denied.Result)
 	}
 }

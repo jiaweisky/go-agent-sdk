@@ -208,7 +208,8 @@ func TestGlob_DeniedPermission(t *testing.T) {
 	if result.Result.Type != "error" {
 		t.Fatalf("expected error result, got %q", result.Result.Type)
 	}
-	if result.Result.Value != "Unable to find files matching *.go" {
+	got, _ := result.Result.Value.(string)
+	if !strings.HasPrefix(got, "Unable to find files matching *.go: permission blocked") {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
 	}
 	if len(rg.calls) != 0 {
@@ -224,7 +225,8 @@ func TestGlob_RipgrepError(t *testing.T) {
 	if result.Result.Type != "error" {
 		t.Fatalf("expected error result, got %q", result.Result.Type)
 	}
-	if result.Result.Value != "Unable to find files matching *.go" {
+	got, _ := result.Result.Value.(string)
+	if got != "Unable to find files matching *.go" {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
 	}
 }

@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
@@ -154,7 +155,8 @@ func TestQuestion_DeniedPermission(t *testing.T) {
 	if result.Result.Type != "error" {
 		t.Fatalf("expected error result, got %q", result.Result.Type)
 	}
-	if result.Result.Value != "Permission denied: question" {
+	got, _ := result.Result.Value.(string)
+	if !strings.HasPrefix(got, "Permission denied: question: permission blocked") {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
@@ -282,7 +283,8 @@ func TestWrite_DeniedPermission(t *testing.T) {
 	if result.Result.Type != "error" {
 		t.Fatalf("expected error result, got %q", result.Result.Type)
 	}
-	if result.Result.Value != "Unable to write nope.txt" {
+	got, _ := result.Result.Value.(string)
+	if !strings.HasPrefix(got, "Unable to write nope.txt: permission blocked") {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
 	}
 	if _, err := os.Stat(filepath.Join(root, "nope.txt")); !os.IsNotExist(err) {

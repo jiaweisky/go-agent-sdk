@@ -14,6 +14,10 @@ func failure(message string, err error) error {
 	if decline := userDecline(err); decline != nil {
 		return decline
 	}
+	var blocked *core.PermissionBlockedError
+	if errors.As(err, &blocked) {
+		return &Failure{Message: message + ": " + blocked.Error(), Cause: err}
+	}
 	return &Failure{Message: sandboxMessage(message, err), Cause: err}
 }
 

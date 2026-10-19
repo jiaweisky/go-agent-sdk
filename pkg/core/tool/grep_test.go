@@ -296,7 +296,8 @@ func TestGrep_DeniedPermission(t *testing.T) {
 	if result.Result.Type != "error" {
 		t.Fatalf("expected error result, got %q", result.Result.Type)
 	}
-	if result.Result.Value != "Unable to grep for world" {
+	got, _ := result.Result.Value.(string)
+	if !strings.HasPrefix(got, "Unable to grep for world: permission blocked") {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
 	}
 	if len(rg.calls) != 0 {
@@ -312,7 +313,8 @@ func TestGrep_RipgrepError(t *testing.T) {
 	if result.Result.Type != "error" {
 		t.Fatalf("expected error result, got %q", result.Result.Type)
 	}
-	if result.Result.Value != "Unable to grep for world" {
+	got, _ := result.Result.Value.(string)
+	if got != "Unable to grep for world" {
 		t.Fatalf("unexpected error: %v", result.Result.Value)
 	}
 }
