@@ -35,9 +35,10 @@
 |---|---|
 | **ACM / App Control Model** | Versioned model of one app × platform × build/UI hash: interactions, identity, capabilities, coverage, fixtures, provenance. |
 | **Bundle** | The machine-readable ACM handoff (`apps/<app>/<platform>/<build>/<variant>/`). |
-| **Capability ID** | Stable semantic operation ID (`chat.find`); used by manifest, policy and presets. |
-| **Tool name** | Agent-facing projection of a capability (`chat_find`). |
-| **Pack** | Optional capability family (`core`, `workspace`, `channel`, `thread`, `message`, `attachment`, `file`, `unread`, `send`). |
+| **Conversation** | Domain-neutral conversation-level entity/operation model (chat/channel/thread/DM/mail thread). |
+| **Capability ID** | Stable semantic operation ID (`conversation.find`); used by manifest, policy and presets. |
+| **Tool name** | Agent-facing projection of a capability (`conversation_find`, or an app alias such as `chat_find`). |
+| **Pack** | Optional capability family (`conversation`, `workspace`, `channel`, `thread`, `message`, `attachment`, `file`, `unread`, `send`). |
 | **Adapter** | Per app × platform code implementing capabilities on the platform framework. |
 | **Controller** | Narrow platform driver surface (`observe/act/screenshot/OCR/close`). |
 | **Profile** | UI data for an adapter (roles/labels/bounds/clips/variants); not behavior. |
@@ -51,6 +52,7 @@
 | **Drift** | Design/map/runtime or registry/runtime mismatch requiring reconciliation. |
 | **Postcondition** | Checkable success condition for a capability (identity, content, boundary, send state). |
 | **Effect-verified** | A write outcome whose effect contract was confirmed at evidence tier 1/2; distinct from a registry/model `verified` state. |
+| **Geometry** | Per-observation mapping between display, window, content and captured-image coordinate spaces, including scale, rotation and window identity. |
 
 ## 0. Change log
 
@@ -86,6 +88,8 @@
 | 2026-10-18 | Add research-driven mechanisms: effect/read-back outcomes; window-scoped/background automation; bounded observation/find; human-demo inputs; runtime repair/admission; effect fault injection; hybrid GUI+API; secret substitution/idle TTL; optional planner/reflector; decisions C41–C45 and open items O23–O27. |
 | 2026-10-19 | OSS deep-dive (OpenAdapt, Peekaboo, Playwright MCP, Stagehand, UFO): add verification tiers + three-valued effect verdicts, exact evidence coverage/no-effect proof, observation truncation semantics, tool kind/group metadata, secret redaction vs substitution, the repair/admission lifecycle, and Appendix E. |
 | 2026-10-19 | Review pass: package-safe effect/outcome type names; observed/absence state; oracle/verifier isolation and idempotent replay; clarified verdict, count and collateral-loss semantics; added `delivery_indeterminate`; fixed metric denominators and tool metadata; aligned O27 with the post-MVP write phase; clarified canary, read-only vs write admission and signer/revocation wording. |
+| 2026-10-19 | Add the cross-platform coordinate model: per-display logical points, window/content/image spaces, per-capture geometry, AX/OCR cross-checks, occlusion/z-order and input safety, plus C47–C48 and O28. |
+| 2026-10-19 | Make the ACM acquisition/correction loop the first milestone (M0); clarify conversation-level core vs `chat.*` app alias; change unknown gating to per-capability; add C49. |
 
 ## 1. Thesis and scope
 
@@ -292,6 +296,9 @@ type ObserveWithOptions interface {
 - A window-scoped observation binds `WindowRef` plus the owner PID, window ID, bounds and layer it
   was captured against (and process generation when the platform exposes it). If any of these
   changes, return `ErrStaleObservation`; never retarget the same action to a different window.
+- The observation carries a `Geometry` mapping for display/window/content/image spaces and the
+  occluded regions it detected. Raw native or screen coordinates never reach the model; adapters
+  use them only at the execution edge.
 - `Act` executes exactly one primitive. A `Session` binds one app/account/window (`WindowRef`);
   AX semantic actions may run in the background, while global input (`CGEvent`) requires foreground
   activation and policy/consent. If activation fails, return an error instead of sending input to
@@ -301,8 +308,8 @@ type ObserveWithOptions interface {
   indeterminate-delivery result and do not blind-retry; observe and reconcile first.
 - A `Session` serializes `Act`; a `Controller` does not need to be safe for concurrent `Act`.
 - `Screenshot` returns PNG bytes by default. `clip` is normalized `(0..1)` relative to the captured
-  window, top-left origin; the controller converts to device pixels and handles Retina/multi-monitor.
-  If capture is unavailable, return `ErrUnsupported`.
+  content area, top-left origin; the observation `Geometry` maps it to window/screen/native pixels
+  and handles Retina/multi-monitor. If capture is unavailable, return `ErrUnsupported`.
 - `OCRController.OCR` uses the same clip coordinate space; `OCRResult` bounds are normalized to the
   captured image. Implementing `OCRController` implies `Capabilities().OCR == true`; if OCR is not
   available, `Session.OCR` returns `ErrUnsupported`.
@@ -310,7 +317,8 @@ type ObserveWithOptions interface {
   After `Close`, other methods return `ErrControllerUnavailable`.
 - Methods return typed errors where applicable: `ErrTCCDenied`, `ErrSecureInput`,
   `ErrAppNotRunning`, `ErrWindowNotFound`, `ErrStaleObservation`, `ErrDeliveryIndeterminate`,
-  `ErrUnsupported`, `ErrTimeout`, `ErrControllerUnavailable`.
+  `ErrCoordinateMismatch`, `ErrOccluded`, `ErrWindowNotFrontmost`,
+  `ErrUnsupportedCoordinateSpace`, `ErrUnsupported`, `ErrTimeout`, `ErrControllerUnavailable`.
 - The controller does not choose the app model, capability set or policy; identity/model selection
   happens in the host/session via `IdentityProvider` and the registry.
 - Redaction, permission/audit and postcondition verification live in `Session`/`Guard`/the adapter,
@@ -963,6 +971,39 @@ re-observes, verifies `Current == ref`, and returns a structured result. A misma
 
 This is the concrete link from observation to an executable capability: **observed locators +
 probed transition + synthesized steps + checked postcondition + versioned bundle**.
+
+### 3.0.1 ACM acquisition, validation and correction loop
+
+The first deliverable is not a capability adapter; it is the loop that produces, checks and
+corrects an App Control Model. Automation produces a **draft with evidence**, not semantic truth.
+A bundle becomes authoritative only after probe/fixture validation and developer review.
+
+```text
+appmodel snapshot  # capture window/AX/screenshot/OCR/geometry/build/UI hash
+appmodel draft     # write draft/ from evidence; never overwrite a reviewed bundle
+appmodel validate  # schema + referential integrity + fixture replay + live probes
+appmodel diff      # live vs bundle; show drift and proposed changes
+appmodel freeze    # developer-reviewed hash/provenance; mark the bundle authoritative
+```
+
+**Automatically extracted:** window identity/geometry, surfaces and bounds, control roles/labels/
+actions, selected/focused state, chat-list rows, identity candidates, OCR text regions and
+confidence, build/UI hash, and capability candidates backed by observed transitions. Every
+generated field carries `source`, `evidence_ref` and `confidence`.
+
+**Developer-owned:** meaning, identity precedence/ambiguity, capability scope, pre/postconditions,
+error semantics, which capabilities are `unsupported`, and acceptance. A developer edits the
+Stage 1 YAML directly; `draft` outputs to a separate `draft/` tree so generation cannot silently
+overwrite reviewed work.
+
+**Validation is evidence-based:** schema and referential integrity, every capability has
+pre/post/errors, every identity rule cites evidence, fixtures replay, live probes confirm the
+transition, and `unknown`/`unsupported` are explicit. A mismatch becomes `drift`, not a silent
+model edit. `freeze` records the reviewed bundle hash, generator version, reviewer and provenance.
+
+**First implementation slice (M0):** capture/draft/validate/diff/freeze for one WeCom window. Do not
+build capability tools or adapters until M0 can reproduce `current` identity from a frozen bundle
+and report drift when the live UI changes.
 
 ### 3.1 Artifacts and bundle
 
@@ -1857,9 +1898,9 @@ type CoreAdapter interface {
 }
 
 type CapabilityDescriptor struct {
-    Name        string // chat.open, channel.open, thread.read, ...
+    Name        string // conversation.open; chat.open is a WeCom alias
     Class       ActionClass
-    Pack        string // core | workspace | channel | thread | message | attachment | file | unread | send
+    Pack        string // conversation | workspace | channel | thread | message | attachment | file | unread | send
     Input, Output jsonschema.Schema
     Pre, Post   []Condition
     Errors      []ErrorCode
@@ -1886,6 +1927,27 @@ Rules:
 - The capability runtime binds `Descriptor.Name`/`Pack` to a core method or pack handler; unsupported
   packs are not advertised.
 - Shared wait/retry/OCR/scroll helpers are allowed; interaction semantics are not shared.
+
+#### 4.2.1 Conversation core vs app packs
+
+The core contract is **conversation-level**, not “chat”: a conversation may be a WeCom chat, a
+Slack channel, a Discord thread, a DM or a mail thread.
+
+| Layer | Naming | Example |
+|---|---|---|
+| Core entity/operation | `Conversation`, `ConversationRef`, `Find/Current/Open/Read/Scroll/Search/Leave` | `conversation.current` |
+| App-family pack | `chat`, `channel`, `thread`, `message`, ... | `chat.*` for WeCom/WeChat; `channel.*` for Slack |
+| Tool projection | preset-defined tool name | `chat_current` for WeCom; `channel_open` for Slack |
+
+Rules:
+
+- `conversation.*` is the canonical capability family for conversation-level operations.
+- `chat.*` is a **WeCom/WeChat preset/pack alias**, not a universal chat adapter and not the SDK
+  core. Slack/Discord/Feishu use their own packs; they do not inherit WeCom semantics.
+- Policy/manifest and the ACM use canonical capability IDs; presets may project app-friendly aliases
+  such as `chat_*`. The alias is a tool-layer concern, never an adapter behavior.
+- When in doubt, use `conversation.*` in new code and mark app-family aliases in the capability
+  descriptor.
 
 `FindQuery`, `SearchHit`, `Entity`, `EntityRef`, `Location`, `ReadOptions`, `Page`,
 `ScrollOptions`, `SearchOptions` and `LeaveOptions` are summarized in Appendix D.
@@ -2269,9 +2331,11 @@ Every platform must define the same areas, even if some are unsupported:
 
 | Area | Requirement |
 |---|---|
-| Observe | accessibility/DOM tree, normalized elements, window/identity, UI hash |
-| Act/input | semantic actions first; input events fallback; activation before global input |
-| Capture/OCR | window/region capture, format/coordinate space, OCR engine and confidence |
+| Observe | accessibility/DOM tree, normalized elements, window/identity/geometry, UI hash |
+| Act/input | semantic actions first; input events fallback; activation before global input; z-order/hit-test before coordinate input |
+| Capture/OCR | window/region capture, content/frame geometry, image scale/rotation, OCR engine and confidence |
+| Geometry | display/window/content/image spaces, multi-monitor/DPI/rotation, coordinate-mismatch detection |
+| Occlusion | window-scoped capture, occluded-region detection, topmost-window/hit-test checks |
 | Focus/window/launch | activate, foreground, multi-window/multi-account, launch/attach |
 | Permissions | preflight, denial, secure input/lock screen, refresh |
 | Placement/security | in-process/helper/sidecar/operator APK; signing; local IPC token; no remote exposure |
@@ -2282,6 +2346,105 @@ Every platform must define the same areas, even if some are unsupported:
 
 An unsupported area must return `ErrUnsupported`, not silently degrade.
 
+### 5.0.1 Coordinate spaces and geometry
+
+Coordinate systems differ by platform: macOS uses screen points (Cocoa's bottom-left must be
+converted to Quartz/AX top-left), Windows uses physical pixels with per-monitor DPI, X11 uses root
+pixels, Android uses display pixels with rotation/density/insets, and Wayland does not expose a
+reliable global screen coordinate at all. The SDK therefore normalizes the **model**, not the
+platform API.
+
+**Canonical space.** `DisplayID` + logical points, top-left origin, y-down. Each display carries
+its own `Bounds`, `Scale` (native pixels per logical point) and `Rotation`. There is no single
+global scale; multi-monitor coordinates may be negative. A platform that cannot provide a global
+space sets `GlobalCoordinates=false` and uses window-relative coordinates only.
+
+| Space | Meaning | Who uses it |
+|---|---|---|
+| `native` | Platform API units and origin | Controller only |
+| `screen` | Canonical display logical points | Controller/adapter |
+| `window` | Relative to the window frame origin | Adapter |
+| `content` | Normalized `(0..1)` inside content bounds | Model/capability |
+| `image` | Pixels in a captured image | OCR/vision |
+
+```go
+type CoordinateSpace string
+
+const (
+    SpaceNative  CoordinateSpace = "native"
+    SpaceScreen  CoordinateSpace = "screen"
+    SpaceWindow  CoordinateSpace = "window"
+    SpaceContent CoordinateSpace = "content"
+    SpaceImage   CoordinateSpace = "image"
+)
+
+type Geometry struct {
+    DisplayID    string
+    WindowFrame  Rect // screen logical points
+    ContentFrame Rect // excludes titlebar/shadow/insets
+    Scale        float64
+    Rotation     int
+    Transform    [6]float64 // image -> content -> window -> screen
+}
+```
+
+**OCR mapping.** OCR never yields screen coordinates. Vision returns normalized boxes with a
+bottom-left origin; convert to image pixels, then divide by the capture scale, add the content
+origin, and finally add the window origin:
+
+```text
+imagePx = (minX*W, (1-maxY)*H, width*W, height*H)
+contentPoint = (imagePx - frameOffsetPx) / scale // offset is 0 for content-only capture
+screenPoint = contentOrigin + contentPoint
+windowPoint = screenPoint - windowOrigin
+```
+
+**Controls.** Prefer AX/UIA/AT-SPI frames for control bounds. OCR yields text regions, not controls;
+if there is no structured control, cluster text into a visual region and mark it `ocr` with a
+confidence. Store screen, window and normalized bounds together:
+
+```go
+type ElementBounds struct {
+    Screen     Rect
+    Window     Rect
+    Normalized Rect // 0..1 within content
+    Source     string // ax | ocr | vision
+    Confidence float64
+}
+```
+
+Rules:
+
+- Recompute `Scale` and `ContentFrame` for every capture; never assume `2x` or a fixed titlebar.
+- Convert to native units only at the input edge and round once; keep float logical coordinates
+  internally.
+- Cross-check AX/UIA and capture geometry; a mismatch beyond tolerance returns
+  `ErrCoordinateMismatch` instead of guessing.
+- Android must include display, rotation and window insets; Windows must run per-monitor DPI aware;
+  X11 must use RandR monitor geometry; Wayland must not fake global coordinates.
+
+### 5.0.2 Occlusion and coordinate input safety
+
+Observation and action use different guarantees:
+
+- **Observation:** capture the exact window (`CGWindowListCreateImage` with the window ID or
+  ScreenCaptureKit window capture) rather than the full screen. Window-scoped capture normally
+  yields the target's own content even when covered, but may fail or return blank for minimized,
+  protected or secure windows; fail closed.
+- **Full-screen fallback:** use the front-to-back window list to compute `OccludedRects`; do not
+  OCR covered pixels as if they belonged to the target app.
+- **Action:** global coordinate input lands on the topmost window at that point, even if the target
+  was captured successfully. Before a coordinate click, verify the point hits the target window
+  (window list + AX hit-test). Prefer a background AX action. Otherwise raise the target under
+  policy/consent, re-observe, then input; or return `ErrOccluded`/HITL.
+- **Transparent overlays** may intercept input; z-order/alpha alone is not sufficient, so hit-test
+  before delivery.
+- Revalidate window identity and z-order immediately before input; any change is
+  `ErrStaleObservation`.
+
+Typed errors: `ErrCoordinateMismatch`, `ErrOccluded`, `ErrWindowNotFrontmost`,
+`ErrUnsupportedCoordinateSpace`.
+
 ### 5.1 macOS (MVP)
 
 - **Observe.** AX (`AXUIElement`) tree/attributes/actions; targeted traversal with depth/element
@@ -2290,10 +2453,14 @@ An unsupported area must return `ErrUnsupported`, not silently degrade.
   cannot perform the action. Global input requires foreground activation and explicit
   policy/consent. Serialize per app/account; IME/Unicode text needs care.
 - **Capture/OCR.** ScreenCaptureKit is the target; the current helper uses
-  `CGWindowListCreateImage`. Capture is window-targeted; clip is normalized `(0..1)`; PNG; Retina
-  handled by the controller. Vision OCR returns normalized block bounds/confidence.
-- **Focus/window/launch.** `NSWorkspace`/`open -b`; activate and raise the selected window; support
-  multiple windows/app instances and bind the session to one.
+  `CGWindowListCreateImage`. Capture is window-targeted by CGWindowID; record the frame/content
+  origin and per-capture scale; PNG. Vision returns bottom-left normalized boxes; convert them to
+  content/window points with the recorded `Geometry` (never assume 2x). Retina/multi-monitor is
+  handled by the controller.
+- **Focus/window/launch.** `NSWorkspace`/`open -b`; select the exact CGWindowID (never use the title
+  as the ID), record bounds/layer/display, and bind the session to that window. Support multiple
+  windows/app instances without retargeting. Reads prefer background AX; only coordinate input
+  requires foreground activation and policy/consent.
 - **Permissions.** Accessibility + Screen Recording. Input Monitoring only for event taps/listening
   (verify per macOS version/feature). Secure input, lock screen and TCC denial are hard stops.
   TCC is tied to signed identity/path; preflight first and only request permission when missing.
@@ -2307,13 +2474,13 @@ An unsupported area must return `ErrUnsupported`, not silently degrade.
 
 | Method | Request | Response |
 |---|---|---|
-| `launch/activate` | bundle ID | pid, window ID/title |
-| `list_windows` | pid | windows + titles |
-| `identity` | pid | build, executable hash, window |
-| `observe` | pid, options (depth, image) | AX snapshot + normalized tree + UI hash |
-| `act` | pid, action + resolved target | ok/error |
-| `ocr` | pid, optional normalized clip | text + blocks + confidence |
-| `screenshot` | pid, optional clip | PNG |
+| `launch/activate` | bundle ID | pid, CGWindowID/title, bounds/layer/display |
+| `list_windows` | pid | windows + CGWindowID/bounds/layer/display |
+| `identity` | pid | build, executable hash, window identity |
+| `observe` | pid, CGWindowID, options (depth, image) | AX snapshot + normalized tree + geometry/occlusion + UI hash |
+| `act` | pid, CGWindowID, action + resolved target | ok/error (`ErrOccluded`/indeterminate) |
+| `ocr` | pid, CGWindowID, optional normalized clip | text + blocks/confidence + geometry |
+| `screenshot` | pid, CGWindowID, optional clip | PNG + capture geometry |
 | `focus` | pid, window? | ok |
 | `wait/events` | pid, condition/timeout | stable/event result (optional) |
 | `health` | none | TCC/screen/secure-input/capabilities/version |
@@ -2323,7 +2490,7 @@ An unsupported area must return `ErrUnsupported`, not silently degrade.
 - **Fallback/limits.** AX gaps and custom panes use OCR/vision; TCC and secure input are hard stops;
   helper rebuilds may require re-consent.
 - **Tests.** AX fixtures, TCC denial, secure input, helper restart, activation, virtualized list,
-  OCR, multi-window.
+  OCR, multi-window, Retina/multi-monitor, window title-vs-ID, occlusion/hit-test.
 
 **WeCom reference findings.** Live discovery: sidebar `AXTextField` search; an `AXButton` beside it;
 a virtualized chat `AXTable`; `AXScrollArea` page actions in the sidebar; a selected row that
@@ -2342,6 +2509,9 @@ implementation with a different profile.
   target window; per-monitor DPI awareness; serialize actions.
 - **Capture/OCR.** Windows.Graphics.Capture or BitBlt; OCR via Windows.Media.Ocr or a configured
   engine; PNG; normalized clip; DPI handled by the controller.
+- **Coordinates.** Native screen pixels with per-monitor DPI awareness; use DWM extended frame
+  bounds where relevant and record the content/frame insets. A non-DPI-aware process gets virtualized
+  coordinates and will not match the capture.
 - **Focus/window/launch.** Foreground activation, multi-monitor/DPI, ShellExecute/process launch;
   bind one window/account per session.
 - **Permissions/hard stops.** UAC/secure desktop, elevated windows/integrity mismatch, input
@@ -2361,6 +2531,9 @@ implementation with a different profile.
   root/uinput default. IME/Unicode and focus handling are controller concerns.
 - **Capture/OCR.** X11 capture; Wayland via PipeWire/xdg-desktop-portal with consent; OCR via
   Tesseract/on-device engine or vision model; normalized clip.
+- **Coordinates.** X11 uses root-window pixels and RandR monitor geometry; record per-monitor
+  scale/rotation. Wayland generally has no trusted global coordinates: set
+  `GlobalCoordinates=false` and use window-relative/portal coordinates only.
 - **Focus/window/launch.** EWMH/compositor-specific window management; desktop entries/exec;
   activate before input.
 - **Permissions/hard stops.** Accessibility bus availability, portal consent, sandbox
@@ -2377,6 +2550,9 @@ implementation with a different profile.
 - **Act/input.** Accessibility actions; ADB input fallback; gestures/multi-touch; IME.
 - **Capture/OCR.** MediaProjection consent or `screencap`; on-device OCR (ML Kit) or vision model;
   normalized clip.
+- **Coordinates.** Display pixels with display ID, rotation and window insets; distinguish
+  `getBoundsInScreen` from window/content bounds and convert through `Geometry`. Multi-display and
+  rotation changes invalidate the observation.
 - **Focus/window/launch.** `am start`, foreground service, multi-window/work profiles; bind one
   device/account per session.
 - **Permissions/hard stops.** Accessibility service enablement, runtime permissions, foreground
@@ -2451,17 +2627,19 @@ Three tool families (normative reference: §6.5):
 - `app_*` routing tools — `app_list`, `app_delegate`, `app_status`, `app_cancel`; multi-app
   orchestration without exposing every app's tools.
 - App semantic tools — generated from the capability manifest. They are organized as a **common
-  core + optional capability packs**: `chat_*` is the core for chat-like apps; packs add
-  `workspace_*`, `channel_*`, `thread_*`, `message_*`, `search_messages`, `mail_*`, `doc_*`,
-  `file_*`, etc. Each app model declares supported packs. Tools are capability-filtered, map to
-  guarded primitives, and return typed postconditions.
+  conversation-level core + optional capability packs**: `conversation_*` is the canonical core;
+  `chat_*` is a WeCom/WeChat preset alias, not a universal adapter. Packs add `workspace_*`,
+  `channel_*`, `thread_*`, `message_*`, `search_messages`, `mail_*`, `doc_*`, `file_*`, etc. Each
+  app model declares supported packs. Tools are capability-filtered, map to guarded primitives, and
+  return typed postconditions.
 - `app_*` primitives — `app_observe`, `app_act`, `app_screenshot`, `app_launch`; no app semantics.
   Available only under explicit policy for opaque/exploratory flows.
 
 The capability runtime is domain-neutral; “chat” is one app family, not a universal interface.
 
-**Naming.** Capability IDs (`chat.find`) are used by the manifest, policy and presets; tool names
-(`chat_find`) are used by the agent. The compiler maps IDs to tool names and adds
+**Naming.** Canonical capability IDs (`conversation.find`) are used by the manifest and policy;
+presets may expose app-family aliases such as `chat.*`, and tool names (`conversation_find` or
+`chat_find`) are used by the agent. The compiler maps IDs to tool names and adds
 `x-capability-id` to the schema. Details and pack names are in §6.5.0.
 
 **Capability cards.** Every tool is projected from a card: name, summary, `when_to_use`,
@@ -2555,13 +2733,15 @@ Three tool families:
 
 | Concept | Example | Used by |
 |---|---|---|
-| Capability ID | `chat.find` | manifest, policy, preset |
-| Tool name | `chat_find` | agent/tool call |
-| Pack | `core`, `workspace`, `channel`, `thread`, `message`, `attachment`, `file`, `unread`, `send` | model/pack filtering |
+| Canonical capability ID | `conversation.find` | manifest, policy |
+| App-family alias | `chat.find` | WeCom/WeChat preset |
+| Tool name | `conversation_find` or `chat_find` | agent/tool call |
+| Pack | `conversation`, `workspace`, `channel`, `thread`, `message`, `attachment`, `file`, `unread`, `send` | model/pack filtering |
 | Error code | `not_found` | tool result |
 
 The compiler maps capability IDs to tool names and adds `x-capability-id` to the tool schema. Policy
-and presets use capability IDs; the agent sees tool names.
+and manifest use canonical IDs; presets may expose app-family aliases. The examples in §6.5 use the
+WeCom `chat.*` alias for readability, not as a universal interface.
 
 Tool schemas also carry metadata used by policy and projection:
 
@@ -2589,7 +2769,7 @@ This is SDK-native metadata, not an MCP-specific feature; MCP projection may mir
 ```go
 type CapabilityCard struct {
     Name         string
-    CapabilityID string // chat.find
+    CapabilityID string // conversation.find; WeCom alias chat.find
     Summary      string
     WhenToUse    []string
     WhenNotToUse []string
@@ -2608,13 +2788,14 @@ type Example struct {
 Cards must be discriminable; missing/ambiguous cards are a tool-selection bug. Tool selection is
 measured with first-tool accuracy, wrong-tool rate, unnecessary calls and task success (§9.3).
 
-**`chat_*` is a minimal common core, not the complete IM surface.** Apps differ in containers,
-threads, search syntax, message actions and hierarchy; Slack/Discord/Feishu need additional packs.
-Each app model declares which packs it supports; unsupported packs are not registered.
+**`conversation_*` is the minimal conversation-level core, not the complete IM surface; WeCom
+projects the `chat_*` alias.** Apps differ in containers, threads, search syntax, message actions
+and hierarchy; Slack/Discord/Feishu need additional packs. Each app model declares which packs it
+supports; unsupported packs are not registered.
 
 | Pack | Tools (examples) | Typical apps |
 |---|---|---|
-| Core chat | `chat_find/current/open/read/scroll/search/leave` | WeCom, WeChat, Feishu, Slack, Discord |
+| Conversation core | `conversation_find/current/open/read/scroll/search/leave` (`chat_*` alias for WeCom) | WeCom, WeChat, Feishu, Slack, Discord |
 | workspace/guild | `workspace_list/switch`, `guild_list` | Slack, Discord |
 | channel | `channel_list/open/join/leave/search` | Slack, Discord, Feishu |
 | thread | `thread_list/open/read/reply` | Slack, Discord, Feishu |
@@ -2625,13 +2806,14 @@ Each app model declares which packs it supports; unsupported packs are not regis
 | presence/unread | `unread_list`, `mark_read` | Slack, Discord, Feishu |
 | docs/bot | `doc_open`, `bot_command` | Feishu and similar |
 
-A flat `chat_search {query, scope, limit}` is not sufficient for apps with search operators
+A flat `conversation_search {query, scope, limit}` is not sufficient for apps with search operators
 (`in:`, `from:`, `before:`, etc.); those apps expose `search_messages` with a `filters` object or an
 app-specific search verb.
 
 #### 6.5.1 Common types
 
-`ChatRef` is `EntityRef{Kind: "chat"}`. The full field set is in Appendix D.
+`ChatRef` is the WeCom alias for `ConversationRef` (`EntityRef{Kind: "chat"}`). The full field set is
+in Appendix D.
 
 ```go
 type AppInfo struct {
@@ -2725,6 +2907,8 @@ Error codes:
 | `at_boundary` | strict/beyond-boundary request | no | use `at_top`/`at_bottom` flags |
 | `stale_observation` | state changed since observe | yes | re-observe/retry |
 | `delivery_indeterminate` | input may have been posted; final state unknown | no | observe/reconcile first; HITL if unresolved |
+| `occluded` | target window is covered or not topmost | no | use background AX, raise with consent, or HITL |
+| `coordinate_mismatch` | AX/UIA and capture geometry disagree | no | re-observe or mark unsupported |
 | `no_permission` | policy denies the capability/target | no | HITL/host policy |
 | `hitl_required` | approval required | yes | complete HITL |
 | `model_mismatch` | app build/UI hash has no verified model | no | fallback/HITL |
@@ -2823,7 +3007,7 @@ app_cancel {task_id:"..."}  // if the parent no longer needs it
 
 The parent agent never receives WeCom and Slack semantic tools at the same time.
 
-#### 6.5.4 Core chat tools
+#### 6.5.4 Conversation core tools (WeCom `chat_*` alias)
 
 This is the common core for chat-like apps; capability packs extend it. An app model may omit a
 core tool if the app genuinely does not support it (for example, no in-chat search).
@@ -3053,8 +3237,8 @@ apps:
 
 The inventory selects **which app/account/model/policy**; it does not list every tool. Capabilities
 come from the model, permissions from policy, and exposure from the preset. Multiple
-accounts/workspaces are separate inventory entries. Policy/preset entries use capability IDs
-(`chat.find`); the compiler maps them to tool names (`chat_find`).
+accounts/workspaces are separate inventory entries. Policy/preset entries use canonical capability
+IDs (`conversation.find`); the WeCom preset may alias them to `chat.find` and project `chat_find`.
 
 **Policy (example).**
 
@@ -3154,8 +3338,8 @@ defer session.Close()
 - Target environment: enterprise account/tenant, `zh-CN`, light theme, recorded default window size
   plus one resized variant.
 - Mode: **read-only**.
-- In scope: `chat.find`, `chat.current`, `chat.open`, `chat.read`, `chat.scroll`, optional
-  `chat.search`/`chat.leave`, screenshot/OCR fallback, policy/audit.
+- In scope: `conversation.find/current/open/read/scroll`, optional `conversation.search/leave`
+  (WeCom projects the `chat.*` alias), screenshot/OCR fallback, policy/audit.
 - No WeCom API dependency for desktop control; official APIs are an optional post-MVP data/action
   source.
 - WeChat (`com.tencent.xinWeChat`) is a **post-MVP** separate vision/OCR adapter, not a WeCom
@@ -3183,7 +3367,8 @@ defer session.Close()
 
 ### 7.3 Stage 1 plan (WeCom model)
 
-**Commands and artifacts.**
+**Commands and artifacts.** M0 starts with `snapshot → draft → validate → diff → freeze`
+(§3.0.1); `discover/probe/coverage` below are the full P0.5 path after the loop works.
 
 ```bash
 appmodel discover --app wecom --platform macos --build <build> \
@@ -3215,24 +3400,40 @@ appmodel validate --bundle apps/wecom/macos/<build>/<variant>
    window resize; record confidence.
 9. **Leave semantics.** Decide: close search/modals, clear selection/focus chat list, or
    `unsupported`. Do not assume a native back button.
-10. **Capability manifest.** Core: `chat.find/current/open/read/scroll`, optional
-    `chat.search`/`chat.leave`; pre/post/errors/policy class; no attachment/file tools in MVP.
+10. **Capability manifest.** Core: `conversation.find/current/open/read/scroll` (WeCom projects the
+    `chat.*` alias), optional `conversation.search`/`conversation.leave`; pre/post/errors/policy
+    class; no attachment/file tools in MVP.
 11. **Coverage/fixtures.** Golden goals × paths; duplicate names, empty chat, long history,
     at-top/bottom, modal/login, stale search.
 12. **Exit (G1/G2).** Every in-scope goal has a path; unknown/unsupported declared; bundle
     validated; developer approves identity/leave/search semantics.
 
-**Unknown gating.** P2 cannot start until:
+**Per-capability gating.** Do not block the first slice on every unknown:
 
-- the scroll container is found and verified; otherwise `chat.scroll` is `unsupported`;
-- leave semantics are decided; otherwise `chat.leave` is not registered;
-- in-chat search availability is decided; otherwise `chat.search` is not registered;
-- the identity fallback/ambiguity policy is approved.
+| Slice | Capability | Gating |
+|---|---|---|
+| M1 | `conversation.current` | build/UI hash, identity/ambiguity policy, modal detection, window binding |
+| M2 | `conversation.find` + `conversation.open` | search availability, result taxonomy, debounce/stale, ambiguity, row selection |
+| M3 | `conversation.read` | message-pane bounds + OCR confidence |
+| M4 | `conversation.scroll` | scroll container + boundary detection |
+| M5 | `conversation.search` / `conversation.leave` | in-chat search / leave semantics; otherwise `unsupported` |
+
+`chat.*` is the WeCom preset alias for these capabilities. Scroll/leave/search unknowns must not
+block `conversation.current`.
+
+**First implementation sequence.**
+
+- **M0 — ACM loop:** `snapshot → draft → validate → diff → freeze` for one WeCom window (§3.0.1).
+- **M1 — first capability:** `conversation.current` (`chat_current` alias), AX-only, read-only,
+  no OCR/search/scroll/leave/input.
+- Then M2 `find/open`, M3 `read`, M4 `scroll`, optional M5 `search/leave`, and only then the full
+  P2 adapter surface.
 
 ### 7.4 Stage 2 plan (WeCom adapter)
 
 - **State machine:** Attached → ChatList → SearchResults/Chat → optional ScopedSearch; Modal on top.
-- **Core adapter:** `chat.find/current/open/read/scroll` plus optional `chat.search`/`chat.leave`.
+- **Core adapter:** `conversation.find/current/open/read/scroll` plus optional
+  `conversation.search`/`conversation.leave` (WeCom `chat.*` alias).
 - **Find:** native sidebar search; classify hits; debounce/stale handling; ranking/ambiguity; local
   AX list only as fallback.
 - **Current:** selected row + header cross-check; return entity/container/confidence.
@@ -3245,8 +3446,8 @@ appmodel validate --bundle apps/wecom/macos/<build>/<variant>
 - **Search:** optional; if the app/build has no in-chat search, do not register `chat_search`.
 - **Leave:** close search/modals; clear selection/focus chat list; verify parent state; if no
   reliable path, do not register `chat_leave`.
-- **Tools:** capability IDs → `chat_*`; read-only projection; no raw element ids/coordinates/OCR
-  clips.
+- **Tools:** canonical `conversation.*` → WeCom `chat_*` alias; read-only projection; no raw element
+  ids/coordinates/OCR clips.
 - **Errors:** no matches = `ok:true`, `warnings:["no_matches"]`; boundary = flags; real failures use
   typed errors; low confidence is a warning.
 - **Tool selection:** `chat_find` (locate chat/content) vs `chat_search` (inside current context) vs
@@ -3271,8 +3472,8 @@ appmodel validate --bundle apps/wecom/macos/<build>/<variant>
 11. App restart/PID change/multi-window: re-resolve identity/model; no stale session.
 12. Modal/login/update/stale-search recovery: detect, re-observe, bounded retry or HITL.
 13. Privacy: screenshots/OCR/fixtures redacted; no credentials/QR/message bodies in logs.
-14. The agent completes the flow with a generic prompt and `chat_*` tools; no WeCom-specific
-    click/OCR/AX instructions.
+14. The agent completes the flow with a generic prompt and `conversation_*` (WeCom `chat_*` alias)
+    tools; no WeCom-specific click/OCR/AX instructions.
 15. Model registry entry, fixtures, coverage and unknown/unsupported lists exist.
 16. Latency/cost budgets: initial targets for observe/open/read/scroll p95 and token/latency are
     recorded and tracked.
@@ -3281,6 +3482,9 @@ appmodel validate --bundle apps/wecom/macos/<build>/<variant>
     scroll duplicate <1%.
 19. Window/background: reads and opens are bound to the target window; background AX is used where
     supported; foreground/global input only under policy and without focus theft during reads.
+20. Coordinates/occlusion: display/window/content/image transforms are validated on Retina,
+    multi-monitor, per-monitor DPI, rotation and inset variants; AX/OCR geometry mismatch fails;
+    a covered target is never clicked blindly.
 
 **Demo commands.**
 
@@ -3293,13 +3497,19 @@ go run ./examples/computer-use-wecom-agent --prompt "找到关于 X 的聊天并
 
 | Phase | Content | Exit |
 |---|---|---|
-| **P0** | Signed operator, TCC/AX/screenshot/OCR, default-deny + audit | health/TCC/AX/OCR smoke; audited denial |
-| **P0.5** | Discovery harness: snapshot/probe/diff/fixtures/coverage/drift | produces a validated bundle for WeCom |
+| **P0** | P0a window/TCC/AX/geometry; P0b screenshot/OCR/input/default-deny/audit | P0a smoke for M0; P0b health/OCR/audit before input |
+| **M0 (P0.5a)** | ACM capture/draft/validate/diff/freeze for one WeCom window | frozen bundle; developer can correct it; live drift is reported |
+| **P0.5** | Full discovery harness: discover/probe/diff/fixtures/coverage/drift | produces a validated bundle for WeCom |
 | **P1** | Stage 1 WeCom model: dossier/map/identity/manifest/coverage/fixtures | G1/G2 approved; unknowns resolved or marked optional |
+| **M1 (P1a)** | `conversation.current` walking skeleton (`chat_current` alias) | AX-only current identity; policy/tool projection; fixture replay |
 | **P2** | Stage 2 WeCom core adapter: find/current/open/read/scroll + optional search/leave; fixture replay/contract tests | G3/G4; local smoke; no wrong-chat |
 | **P2.5** | Registry/drift baseline: model registry, build/UI-hash detection, drift automation | registry/drift checks pass |
 | **P4** | Advanced policy templates/DevBypass, live canary E2E, metrics thresholds, rollout/rollback | G5/G6; read-only MVP accepted |
 | **P3 (post-MVP, after P4)** | Composer + send with permission/HITL; deny/verify; no duplicate send | write enablement only |
+
+Delivery note: split P0 for implementation. **P0a** is window/TCC/AX/geometry only and is sufficient
+for M0. OCR, input and the full audit path can follow M1 as **P0b**; do not block the ACM loop on
+the complete P0 surface.
 
 P2 uses contract/fixture replay and local smoke; P4 is the first live canary/metrics gate. Policy
 and audit are implemented in P0/P1; P4 adds advanced templates and rollout. Post-MVP phases P5–P8
@@ -3448,7 +3658,7 @@ type ApprovalRequest struct {
 |---|---|---|
 | Stage 1 | schema, evidence, coverage, drift | bundle schema/referential integrity, probe repeatability, provenance, drift/report format, fixture redaction |
 | Stage 2 | tool projection, core/packs, policy | capability ID→tool name, `x-capability-id`, cards, contract/postconditions, pack availability, policy/HITL, error mapping |
-| Integration | platform/build/account/locale/window | model mismatch, restart/PID change, multi-window, multi-account, locale/theme/layout |
+| Integration | platform/build/account/locale/window/display | model mismatch, restart/PID change, multi-window, multi-account, multi-monitor/DPI/rotation, locale/theme/layout |
 | Adversarial | bypass/injection/leakage | app/MCP/design/tool-description injection, cross-session, raw handles, wrong entity/account, resource exhaustion, IPC token, OCR misread |
 | E2E | golden goals | live app, canary, rollback |
 | Performance | latency/cost | observe/open/read/scroll p50/p95, OCR/vision/token cost |
@@ -3476,6 +3686,9 @@ type ApprovalRequest struct {
   verdict, exact coverage, idempotent replay (same key does not re-actuate) and outcome
   (`reconciliation_required`); missing evidence is never treated as absence; never retry blindly.
 - Multi-window/account/restart; generated artifact version; privacy/redaction.
+- Geometry/occlusion: AX↔OCR coordinate cross-check, negative multi-monitor origins, per-display
+  scale/rotation, titlebar/shadow/insets, transparent overlay, occluded target refusal, and stale
+  z-order/window identity.
 - Performance: latency/token/cost budgets; concurrency/serialization.
 - MCP edge: external tools allowlisted/proxied; server projection/filtering.
 
@@ -3496,13 +3709,17 @@ type ApprovalRequest struct {
 - **Wrong-tool rate:** incorrect tool calls ÷ total tool calls.
 - **Latency/cost:** p50/p95 and token/OCR/vision cost per capability.
 - **Observation budget:** elements/text tokens, snapshot depth/boxes, full-dump avoidance.
+- **Coordinate mismatch rate:** AX/UIA vs OCR/capture geometry mismatches ÷ observations.
+- **Occluded-action rate:** coordinate actions refused or rerouted because the target was not
+  topmost ÷ coordinate actions attempted; must be 0 for delivered clicks.
 - **Unsupported/ambiguous rate:** per capability and pack.
 - **Model:** supported builds/platforms, drift age, time-to-update, verified-model traffic,
   fallback/HITL rate, deprecated-model usage.
-- Thresholds: wrong-entity 0 and silent-incorrect-success 0 on the golden set; postcondition ≥99%;
-  read ≥95%; scroll duplicate <1%; first-tool target calibrated per app (initially ≥95%); over-halt
-  calibrated per app after the first live canary; latency/cost budgets from §7. Thresholds are
-  calibrated on the app's golden set and approved at G5.
+- Thresholds: wrong-entity 0, silent-incorrect-success 0, coordinate-mismatch 0 and occluded
+  delivered clicks 0 on the golden set; postcondition ≥99%; read ≥95%; scroll duplicate <1%;
+  first-tool target calibrated per app (initially ≥95%); over-halt calibrated per app after the
+  first live canary; latency/cost budgets from §7. Thresholds are calibrated on the app's golden
+  set and approved at G5.
 - Metrics never contain message text, contact data, QR content or secrets.
 
 ### 9.5 E2E, CI and data governance
@@ -3515,7 +3732,8 @@ type ApprovalRequest struct {
 - Effect fault injection (post-MVP writes): no-land/partial/duplicate/wrong-record/other-record;
   assert read-back and outcome.
 
-**Traceability (MVP).**
+**Traceability (MVP).** The table uses the WeCom `chat.*` alias; the canonical IDs are
+`conversation.*`.
 
 | Goal | Capability | Test | Metric | Gate |
 |---|---|---|---|---|
@@ -3629,10 +3847,12 @@ The roadmap aligns with §7. Each phase has an exit; dependencies are explicit.
 
 | Phase | Content | Exit | Depends on |
 |---|---|---|---|
-| **P0** | macOS operator/TCC/AX/OCR; default-deny + audit | health/TCC/AX/OCR smoke; audited denial | — |
-| **P0.5** | Discovery harness: snapshot/probe/diff/fixtures/coverage/drift | validated draft bundle for WeCom | P0 |
+| **P0** | macOS operator: P0a window/TCC/AX/geometry; P0b OCR/input/audit | P0a smoke for M0; P0b health/OCR/audit before input | — |
+| **M0 (P0.5a)** | ACM capture/draft/validate/diff/freeze for one window | frozen bundle; correction + drift test | P0 |
+| **P0.5** | Full discovery harness: discover/probe/diff/fixtures/coverage/drift | validated draft bundle for WeCom | M0 |
 | **P1** | WeCom Stage 1 model: dossier/map/identity/manifest/coverage/fixtures | G1/G2; unknowns resolved/optional | P0.5 |
-| **P2** | WeCom core adapter: find/current/open/read/scroll + optional search/leave; contract/fixture/local smoke | G3/G4; no wrong-chat | P1 |
+| **M1 (P1a)** | `conversation.current` walking skeleton (`chat_current` alias) | AX-only current identity; policy/tool projection; fixture replay | M0 |
+| **P2** | WeCom core adapter: find/current/open/read/scroll + optional search/leave; contract/fixture/local smoke | G3/G4; no wrong-chat | P1/M1 |
 | **P2.5** | Registry/drift baseline (pulled from P8) | model registry, build detection, drift automation | P2 |
 | **P4** | Live canary, metrics thresholds, rollout/rollback | G5/G6; read-only MVP accepted | P2.5 |
 | **P3 (post-MVP)** | Composer/send with permission/HITL; deny/verify | write enablement only | P4 |
@@ -3644,6 +3864,7 @@ The roadmap aligns with §7. Each phase has an exit; dependencies are explicit.
 Rules:
 
 - Do not scale apps/platforms before the registry/drift baseline (P2.5).
+- M0 and M1 are the first delivery slices; do not wait for the full P1/P2 surface.
 - Read-only MVP is P0–P2 + P4; write is post-MVP (P3).
 - High-value apps get dedicated adapters; long-tail apps use primitives/vision + HITL.
 - Policy/audit are P0/P1; P4 adds advanced templates and rollout.
@@ -3712,8 +3933,8 @@ biometric challenges remain hard stops; other risks use policy/HITL/fail-closed 
 | **C31** | Stage 2 is split into **2a compilation** (schemas/policy/skeleton/fixture wiring), **2b handwritten adapter semantics** (state machine, identity, search/read/scroll/verification/recovery) and **2c runtime**. The compiler never generates semantic algorithms from YAML. | Stage 2 |
 | **C32** | A Stage 1 bundle must pass schema validation and referential-integrity checks before Stage 2; invalid bundles are rejected. | Model/registry |
 | **C33** | Design sources (Figma/Penpot/files/screenshots/MCP) are optional hypotheses; runtime probes + developer review are authoritative. | Design sources |
-| **C34** | Capability IDs (`chat.find`) are the configuration unit; tool names (`chat_find`) are projections. Policy/presets use IDs; schemas carry `x-capability-id`. | Tools/config |
-| **C35** | Semantic tools are a common core + optional capability packs; packs are declared per app model and capability-filtered. | Tools/packs |
+| **C34** | Canonical capability IDs (`conversation.find`) are the configuration unit; app-family aliases (`chat.find`) and tool names (`chat_find`) are projections. Policy/manifest use canonical IDs; schemas carry `x-capability-id`. | Tools/config |
+| **C35** | Semantic tools are a conversation-level core + optional capability packs; packs are declared per app model and capability-filtered. | Tools/packs |
 | **C36** | Multi-app agents use routing tools (`app_list`/`app_delegate`/`app_status`/`app_cancel`) and app-bound subagents; the parent does not receive all semantic tools. | Multi-app |
 | **C37** | No matches return empty results + `warnings`; boundaries return `at_top`/`at_bottom` flags; low confidence is a warning, not an error. | Tool semantics |
 | **C38** | External MCP tools are opaque sources: allowlist, schema validation, redaction, no implicit postconditions, policy proxy. | MCP |
@@ -3725,6 +3946,9 @@ biometric challenges remain hard stops; other risks use policy/HITL/fail-closed 
 | **C44** | Human demonstrations/recordings and agent exploration traces are optional Stage 1 inputs and hypotheses, never verified authority. | Stage 1 |
 | **C45** | Repair follows `candidate → reviewed → replay_passed → fault_passed → approved → staged → canary → active`; models cannot promote, approval binds hashes, canary auto-reverts, and admission is signed, bounded and revocable. | Operations/repair |
 | **C46** | Secrets are substituted at the execution edge; response redaction is defense-in-depth, never a security boundary, and resolved secrets never enter model context, logs or tool results. | Security/secrets |
+| **C47** | Coordinates are normalized through per-display `Geometry` (display/window/content/image spaces); model-facing bounds are window/content-relative, native/screen coordinates stay at the execution edge, and AX/OCR geometry mismatch fails closed. | Platform/geometry |
+| **C48** | Observation uses window-scoped capture; coordinate input requires a topmost/hit-test check or a background AX action, and occluded targets are refused or escalated, never clicked blindly. | Platform/occlusion |
+| **C49** | The core contract is conversation-level (`conversation.*`), not a universal chat model; `chat.*` is a WeCom/WeChat preset alias and Slack/Discord/Feishu use their own packs. | Tools/app model |
 
 All decisions are accepted unless a later revision marks them draft/deprecated; the scope column is
 informational.
@@ -3769,6 +3993,7 @@ its gate with its blockers open.
 | **O22** | Test data/fixture governance | implementation | MVP | QA/security | P4 | isolated test accounts; encrypted/redacted fixtures; CI matrix |
 | **O23** | Window-scoped session/background policy | implementation | MVP | platform owner | P2 | WindowRef + PID/window/bounds/layer validation; stale error; background AX; foreground consent for CGEvent; indeterminate delivery |
 | **O24** | Bounded observation/find | implementation | MVP | platform owner | P2 | depth/boxes/budget; truncation/deadline warnings; find within snapshot; no completeness/focus inference from truncation; no full-tree dump |
+| **O28** | Geometry/occlusion model | implementation | MVP | platform owner | P2 | display/window/content/image transforms; multi-monitor/DPI/rotation/insets; AX/OCR cross-check; z-order/hit-test; occluded target refusal |
 
 ### 14.3 Post-MVP items
 
@@ -3795,7 +4020,7 @@ its gate with its blockers open.
 - **P0:** O3a, O3b.
 - **P0.5:** O14.
 - **P1:** O1a–O1g, O2a planning.
-- **P2:** O4, O5, O13 (contract), O15, O19, O23, O24.
+- **P2:** O4, O5, O13 (contract), O15, O19, O23, O24, O28.
 - **P2.5:** O16.
 - **P4:** O7, O8, O9, O10, O11, O13 (live metrics), O17 baseline, O22.
 - **Post-MVP:** O2b, O6, O12, O18, O20, O21, O25, O27; O26 baseline at P4, full at P8; O17 full.
@@ -3851,8 +4076,9 @@ capabilities:
   - {name: chat.send, class: input, hitl: true}
 ```
 
-The YAML is illustrative; §8.2 is the normative permission/grant model. Capability IDs (`chat.find`)
-map to tool names (`chat_find`); presets/policies use IDs.
+The YAML is illustrative and uses the WeCom `chat.*` alias; §8.2 is the normative permission/grant
+model. Canonical capability IDs are `conversation.*`, projected to `conversation_*` or the WeCom
+`chat_*` alias.
 
 ## Appendix B: Usage scenarios
 
@@ -3878,9 +4104,9 @@ permissions/HITL.
 
 ## Appendix D: Normalized and app-semantic types (illustrative)
 
-Platform types (`Capabilities`, `Observation`, `Element`, `Action`, `Rect`, `OCRResult`,
-`ActionClass`, `Controller`) are defined in `pkg/apps`; the snippets in this document are
-summaries. App-semantic types are not all implemented yet; they belong to the model/adapter layer
+Platform types (`Capabilities`, `Observation`, `Element`, `ElementBounds`, `Geometry`,
+`CoordinateSpace`, `Action`, `Rect`, `OCRResult`, `ActionClass`, `Controller`) are defined in
+`pkg/apps`; the snippets in this document are summaries. App-semantic types are not all implemented yet; they belong to the model/adapter layer
 and should be defined in `internal/apps/model` (or `pkg/apps/model` when externally named).
 
 ```go
