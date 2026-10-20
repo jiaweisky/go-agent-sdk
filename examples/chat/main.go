@@ -14,7 +14,6 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/examples/internal/util"
 	"github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
-	"github.com/jiaweisky/go-agent-sdk/pkg/mcp"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
@@ -408,24 +407,6 @@ func parseAnswer(input string, options []schema.QuestionOption) []string {
 		selected = append(selected, options[index-1].Label)
 	}
 	return selected
-}
-
-// weatherMCP configures an optional local weather MCP server (stdio). It is
-// enabled only when WEATHER_MCP points at the server entry script; AMAP_API_KEY
-// is passed through to the server. No path or key is hardcoded.
-func weatherMCP() []agent.MCPConfig {
-	server := expandPath(os.Getenv("WEATHER_MCP"))
-	if server == "" {
-		return nil
-	}
-	return []agent.MCPConfig{{
-		Name: "weather",
-		Server: mcp.ServerConfig{
-			Type:        "local",
-			Command:     []string{"node", server},
-			Environment: map[string]string{"AMAP_API_KEY": os.Getenv("AMAP_API_KEY")},
-		},
-	}}
 }
 
 // expandPath expands $VAR references and a leading ~ in a configured path, so

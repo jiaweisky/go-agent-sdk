@@ -14,7 +14,7 @@ else
 EXE :=
 endif
 
-EXAMPLES := chat tool notesmcp a2a-embedded agentd-client
+EXAMPLES := chat tool notesmcp weathermcp a2a-embedded agentd-client
 BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(EXAMPLES)))
 CMDS := agentd agentd-supervisor
 CMD_BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(CMDS)))

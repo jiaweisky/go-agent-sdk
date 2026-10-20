@@ -14,8 +14,7 @@ models and their provider, protocol and endpoint.
 | `OPENAI_API_KEY` | OpenAI API key | — |
 | `ANTHROPIC_API_KEY` | Anthropic API key | — |
 | `DEEPSEEK_API_KEY` | DeepSeek API key | — |
-| `WEATHER_MCP` | chat: path to the weather MCP server entry script | — |
-| `AMAP_API_KEY` | chat: AMap key used by the weather MCP server | — |
+| `AMAP_API_KEY` | chat: AMap key used by the built-in weather MCP server (`examples/weathermcp`). Register at <https://lbs.amap.com/>, then create an application in the console (Application Management → Create Application) and add a Key of the **Web Service** type to it. | — |
 
 Example:
 
@@ -44,6 +43,12 @@ prompts. Model token limits and pricing come from the shared model catalog
 The chat starts a small notes MCP server (`examples/notesmcp`) over streamable
 HTTP (spawned with `go run` and killed on exit); `/mcp` lists and fetches its
 prompts and resources, and `/mcps` shows each server's instructions.
+
+It also registers the built-in weather MCP server (`examples/weathermcp`) as a
+**local stdio** server: the SDK spawns `go run ./examples/weathermcp` and owns
+the process, complementing the notes server, which chat launches itself. It
+queries live or forecast weather for Chinese cities through the AMap REST API
+(`AMAP_API_KEY`).
 
 It also starts a Google ADK (adk-go) agent served over A2A (`examples/adka2a`,
 a **separate Go module** so the SDK never depends on adk-go) and registers it as
