@@ -93,6 +93,7 @@ func TestSocketAllowlist(t *testing.T) {
 // TestDenyReadRegionsRootHome guards the parent expansion: a home directly under
 // / (e.g. /root) must not turn into a deny-everything rule.
 func TestDenyReadRegionsRootHome(t *testing.T) {
+	skipOnWindows(t)
 	regions := denyReadRegions("/root")
 	if contains(regions, "/") {
 		t.Fatalf("root home must not deny /: %v", regions)

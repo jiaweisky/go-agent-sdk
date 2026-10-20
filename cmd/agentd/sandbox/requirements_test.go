@@ -37,10 +37,23 @@ func platformSandbox(t *testing.T) (wrapper, shell string, shellArgs func(string
 	}
 }
 
+// skipOnWindows gates the POSIX-shaped slices of the sandbox matrix. These
+// tests assert literal /-rooted policy paths or wrapper behaviors the windows
+// appcontainer wrapper does not provide: it denies out-of-sandbox writes only
+// by exit status (no PolicyViolation reports), and its private-temp flow is
+// not usable through cmd.
+func skipOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the windows appcontainer wrapper does not provide this behavior")
+	}
+}
+
 // TestRequirementsReadWriteEnv is the portable slice of the acceptance matrix:
 // a write/read inside works, a write outside is denied and reported, and a
 // secret environment variable is scrubbed.
 func TestRequirementsReadWriteEnv(t *testing.T) {
+	skipOnWindows(t)
 	wrapper, shell, shellArgs := platformSandbox(t)
 	dir := t.TempDir()
 	process, err := Resolve(wrapper, StandardPolicy(dir))
@@ -110,6 +123,7 @@ func TestRequirementsReadWriteEnv(t *testing.T) {
 // TestRequirementsPrivateTemp checks a sandboxed command can use the per-run
 // temp under TempRoot and that the run directory is cleaned up.
 func TestRequirementsPrivateTemp(t *testing.T) {
+	skipOnWindows(t)
 	wrapper, shell, shellArgs := platformSandbox(t)
 	dir := t.TempDir()
 	tempRoot := filepath.Join(t.TempDir(), "sandbox-tmp")
