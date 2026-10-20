@@ -20,6 +20,24 @@ type Factory func(Policy) core.AppProcess
 
 var registry = map[string]Factory{}
 
+// probes decide whether a registered sandbox can actually launch (the wrapper
+// binary exists on the host). A name without a probe is always available.
+var probes = map[string]func() error{}
+
+// RegisterAvailable sets the availability probe for a named sandbox; both
+// Resolve and ResolveProcess run it so a missing wrapper binary fails at
+// startup (fail-closed refuses, fail-open warns) instead of failing per
+// command. It is intended for the wrapper's own init function.
+func RegisterAvailable(name string, probe func() error) {
+	if name == "" || name == "none" {
+		panic("sandbox: " + name + " is a reserved name")
+	}
+	if _, dup := probes[name]; dup {
+		panic("sandbox: duplicate availability registration: " + name)
+	}
+	probes[name] = probe
+}
+
 // Register adds a named sandbox. It is intended to be called from init
 // functions of build-tagged wrapper packages. It panics on a duplicate name or a
 // reserved name ("", "none"), which are programming errors surfaced at startup.
@@ -46,6 +64,9 @@ func Resolve(name string, policy Policy) (core.AppProcess, error) {
 	factory, ok := registry[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown sandbox.process %q", name)
+	}
+	if err := checkAvailable(name); err != nil {
+		return nil, err
 	}
 	if policy.ViolationMode == ViolationPrecise {
 		if runtime.GOOS != "linux" {

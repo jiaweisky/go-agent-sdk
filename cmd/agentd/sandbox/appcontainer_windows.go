@@ -624,7 +624,7 @@ func (p *appContainerProcess) Run(
 		return nil, err
 	}
 	defer cleanup()
-	options = withTempEnv(options, policy.PrivateTemp)
+	options = withTempEnv(options, policy)
 	var opts core.RunOptions
 	if len(options) > 0 {
 		opts = options[0]
@@ -700,7 +700,7 @@ func (p *appContainerProcess) RunStream(
 			return
 		}
 		defer cleanup()
-		options = withStreamTempEnv(options, policy.PrivateTemp)
+		options = withStreamTempEnv(options, policy)
 		var opts core.RunStreamOptions
 		if len(options) > 0 {
 			opts = options[0]

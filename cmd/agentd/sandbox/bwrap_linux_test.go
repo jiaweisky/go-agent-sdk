@@ -3,8 +3,11 @@
 package sandbox
 
 import (
+	"os/exec"
 	"reflect"
 	"testing"
+
+	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 
 func TestBwrapLaunch(t *testing.T) {
@@ -83,6 +86,9 @@ func TestBwrapPreciseTrace(t *testing.T) {
 }
 
 func TestBwrapRegistered(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap is not available")
+	}
 	if p, err := Resolve("bwrap", StandardPolicy("")); err != nil || p == nil {
 		t.Fatalf("Resolve(bwrap) = %v, %v", p, err)
 	}
@@ -102,8 +108,27 @@ func TestBwrapProcessArgs(t *testing.T) {
 }
 
 func TestBwrapProcessRegistered(t *testing.T) {
+	if _, err := exec.LookPath("bwrap"); err != nil {
+		t.Skip("bwrap is not available")
+	}
 	if l, err := ResolveProcess("bwrap"); err != nil || l == nil {
 		t.Fatalf("ResolveProcess(bwrap) = %v, %v", l, err)
+	}
+}
+
+// TestResolveMissingBinary exercises the availability probe: a registered
+// sandbox whose wrapper binary is missing must fail Resolve (and
+// ResolveProcess) with an "unavailable" error, so fail-closed refuses to start
+// and fail-open warns.
+func TestResolveMissingBinary(t *testing.T) {
+	Register("probe-test", func(Policy) core.AppProcess { return nil })
+	RegisterProcess("probe-test", func([]string, Policy, string, []string) error { return nil })
+	RegisterAvailable("probe-test", func() error { return exec.ErrNotFound })
+	if _, err := Resolve("probe-test", StandardPolicy("")); err == nil {
+		t.Fatal("Resolve(probe-test) succeeded despite the missing binary")
+	}
+	if _, err := ResolveProcess("probe-test"); err == nil {
+		t.Fatal("ResolveProcess(probe-test) succeeded despite the missing binary")
 	}
 }
 

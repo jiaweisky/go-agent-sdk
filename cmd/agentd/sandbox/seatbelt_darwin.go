@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -15,6 +16,10 @@ func init() {
 		return newSandboxed(seatbeltLaunch, policy)
 	})
 	RegisterProcess("seatbelt", seatbeltProcess)
+	RegisterAvailable("seatbelt", func() error {
+		_, err := exec.LookPath("sandbox-exec")
+		return err
+	})
 }
 
 // seatbeltLaunch wraps a command in the macOS seatbelt sandbox (`sandbox-exec`)

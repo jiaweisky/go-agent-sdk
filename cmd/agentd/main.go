@@ -47,7 +47,7 @@ func runMain(args []string) error {
 	}
 	// Wrap, when configured, re-executes agentd inside a whole-process sandbox
 	// (does not return on success).
-	if err := wrapProcess(cfg); err != nil {
+	if err := wrapProcess(cfg, fl.config); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

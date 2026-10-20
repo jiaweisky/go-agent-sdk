@@ -35,5 +35,19 @@ func ResolveProcess(name string) (ProcessLauncher, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown wrap.process %q", name)
 	}
+	if err := checkAvailable(name); err != nil {
+		return nil, err
+	}
 	return launcher, nil
+}
+
+// checkAvailable runs the name's availability probe, so a missing wrapper
+// binary surfaces at startup.
+func checkAvailable(name string) error {
+	if probe := probes[name]; probe != nil {
+		if err := probe(); err != nil {
+			return fmt.Errorf("sandbox %q is unavailable: %w", name, err)
+		}
+	}
+	return nil
 }

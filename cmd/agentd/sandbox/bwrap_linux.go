@@ -4,6 +4,8 @@ package sandbox
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
@@ -14,6 +16,10 @@ func init() {
 		return newSandboxed(bwrapLaunch, policy)
 	})
 	RegisterProcess("bwrap", bwrapProcess)
+	RegisterAvailable("bwrap", func() error {
+		_, err := exec.LookPath("bwrap")
+		return err
+	})
 }
 
 // bwrapProcess wraps the whole process in bubblewrap under the policy. Unlike the
@@ -57,7 +63,7 @@ func bwrapReadArgs(dirs []string, policy Policy) []string {
 	}
 	// A fresh root: only the allow-listed paths exist beyond /dev /proc /tmp.
 	argv := []string{"--tmpfs", "/"}
-	for _, root := range dedupe(append(append([]string{}, dirs...), policy.ReadRoots()...)) {
+	for _, root := range bwrapBinds(bwrapReadRoots(dirs, policy)) {
 		argv = append(argv, "--ro-bind", root, root)
 	}
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
@@ -72,6 +78,26 @@ func bwrapReadArgs(dirs []string, policy Policy) []string {
 	return argv
 }
 
+// bwrapReadRoots are the read bind candidates: the dirs, the policy's working
+// directory and temp, the explicitly allowed read paths, the legacy temp
+// compatibility root when there is no per-run temp, and the platform's run-time
+// paths. Entries keep their literal spelling — bwrapBinds adds the resolved
+// forms.
+func bwrapReadRoots(dirs []string, policy Policy) []string {
+	paths := append(bwrapRootPaths(dirs, policy), policy.AllowRead...)
+	if policy.PrivateTemp == "" {
+		// The shared temp keeps the legacy /tmp compatibility root. With a
+		// per-run temp only that directory is exposed.
+		paths = append(paths, legacyTempReadRoots()...)
+	}
+	return append(paths, platformReadRoots()...)
+}
+
+// bwrapRootPaths merges the dirs with the policy's working directory and temp.
+func bwrapRootPaths(dirs []string, policy Policy) []string {
+	return append(append([]string{}, dirs...), policy.WorkingDirectory, policy.tempPath())
+}
+
 func bwrapWriteArgs(dirs []string, policy Policy) []string {
 	if policy.WriteMode != FSModeAllow {
 		// write: off is only meaningful together with read: off; the config
@@ -82,12 +108,49 @@ func bwrapWriteArgs(dirs []string, policy Policy) []string {
 		}
 		return nil
 	}
+	paths := append(bwrapRootPaths(dirs, policy), policy.AllowWrite...)
+	// The sockets are bound in their canonical form and as configured: the
+	// fresh root lacks the compatibility symlinks (/var/run → /run), so a
+	// command only reaches the socket through a spelling that is bound.
+	sockets := policy.SocketPaths()
+	if policy.SocketMode == SocketAllowlist {
+		sockets = append(sockets, policy.SocketAllow...)
+	}
 	var argv []string
-	for _, root := range dedupe(append(append([]string{}, dirs...), policy.WriteRoots()...)) {
+	for _, root := range bwrapBinds(paths, sockets) {
 		argv = append(argv, "--bind", root, root)
 	}
-	for _, socket := range policy.SocketPaths() {
-		argv = append(argv, "--bind", socket, socket)
-	}
 	return argv
+}
+
+// bwrapBinds expands the bind list: each path is bound at its canonical
+// (symlink-resolved) spelling and at its literal one. The canonical form alone
+// loses the usrmerge aliases (/bin → usr/bin, /var/run → /run): the fresh
+// tmpfs root contains only what is bound and commands reference the literal
+// paths, so every spelling must be bound in turn. A configured path that does
+// not exist is kept, so bwrap itself refuses to launch — the same fail-closed
+// outcome as any other missing root.
+func bwrapBinds(pathGroups ...[]string) []string {
+	var out []string
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		path = filepath.Clean(path)
+		if !contains(out, path) {
+			out = append(out, path)
+		}
+	}
+	for _, group := range pathGroups {
+		for _, path := range group {
+			if path == "" {
+				continue // an empty path would Clean/EvalSymlinks to "."
+			}
+			if resolved, err := filepath.EvalSymlinks(path); err == nil {
+				add(resolved)
+			}
+			add(path)
+		}
+	}
+	return out
 }

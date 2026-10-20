@@ -36,7 +36,7 @@ func (s sandboxed) Run(
 		return nil, err
 	}
 	defer cleanup()
-	options = withTempEnv(options, policy.PrivateTemp)
+	options = withTempEnv(options, policy)
 	name, argv := s.launch(runDir(options), policy, command, args)
 	return s.inner.Run(ctx, name, argv, options...)
 }
@@ -51,7 +51,7 @@ func (s sandboxed) RunStream(
 			return
 		}
 		defer cleanup()
-		options = withStreamTempEnv(options, policy.PrivateTemp)
+		options = withStreamTempEnv(options, policy)
 		name, argv := s.launch(streamDir(options), policy, command, args)
 		for line, err := range s.inner.RunStream(ctx, name, argv, options...) {
 			if !yield(line, err) {
@@ -95,39 +95,44 @@ func streamDir(options []core.RunStreamOptions) string {
 
 // withTempEnv points the child's temp variables at the private directory while
 // preserving the caller's environment semantics.
-func withTempEnv(options []core.RunOptions, temp string) []core.RunOptions {
+func withTempEnv(options []core.RunOptions, policy Policy) []core.RunOptions {
 	out := append([]core.RunOptions{}, options...)
 	if len(out) == 0 {
 		out = []core.RunOptions{{}}
 	}
 	opts := out[0]
-	opts.Env, opts.ExtendEnv = tempEnv(opts.Env, opts.ExtendEnv, temp)
+	opts.Env, opts.ExtendEnv = tempEnv(opts.Env, opts.ExtendEnv, policy)
 	out[0] = opts
 	return out
 }
 
-func withStreamTempEnv(options []core.RunStreamOptions, temp string) []core.RunStreamOptions {
+func withStreamTempEnv(options []core.RunStreamOptions, policy Policy) []core.RunStreamOptions {
 	out := append([]core.RunStreamOptions{}, options...)
 	if len(out) == 0 {
 		out = []core.RunStreamOptions{{}}
 	}
 	opts := out[0]
-	opts.Env, opts.ExtendEnv = tempEnv(opts.Env, opts.ExtendEnv, temp)
+	opts.Env, opts.ExtendEnv = tempEnv(opts.Env, opts.ExtendEnv, policy)
 	out[0] = opts
 	return out
 }
 
 // tempEnv merges the private temp variables into the child environment. An
 // empty, non-extending environment means "inherit", so it is preserved by
-// switching to extend mode before adding the variables.
-func tempEnv(env map[string]string, extend bool, temp string) (map[string]string, bool) {
-	merged := make(map[string]string, len(env)+3)
+// switching to extend mode before adding the variables. In heuristic violation
+// mode the child locale is pinned to C: the denial scan matches English OS
+// messages, which a localized locale would replace with unmatchable text.
+func tempEnv(env map[string]string, extend bool, policy Policy) (map[string]string, bool) {
+	merged := make(map[string]string, len(env)+4)
 	for key, value := range env {
 		merged[key] = value
 	}
 	if env == nil && !extend {
 		extend = true
 	}
-	merged["TMPDIR"], merged["TMP"], merged["TEMP"] = temp, temp, temp
+	merged["TMPDIR"], merged["TMP"], merged["TEMP"] = policy.PrivateTemp, policy.PrivateTemp, policy.PrivateTemp
+	if policy.ViolationMode == ViolationHeuristic {
+		merged["LC_ALL"] = "C"
+	}
 	return merged, extend
 }

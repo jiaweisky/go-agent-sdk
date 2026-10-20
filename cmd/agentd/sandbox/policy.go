@@ -111,19 +111,6 @@ func DefaultScrubEnv() []string {
 	return []string{"*_KEY", "*_SECRET", "*_TOKEN", "*_PASSWORD"}
 }
 
-// ReadRoots is the set of paths readable when ReadMode is allow. It always
-// includes the working directory, the explicitly allowed paths and the
-// platform's run-time paths.
-func (p Policy) ReadRoots() []string {
-	roots := append([]string{p.WorkingDirectory, p.tempPath()}, p.AllowRead...)
-	if p.PrivateTemp == "" {
-		// The shared temp keeps the legacy /tmp compatibility root. With a
-		// per-run temp only that directory is exposed.
-		roots = append(roots, legacyTempReadRoots()...)
-	}
-	return dedupe(append(roots, platformReadRoots()...))
-}
-
 // WriteRoots is the set of paths writable when WriteMode is allow.
 func (p Policy) WriteRoots() []string {
 	roots := append([]string{p.WorkingDirectory, p.tempPath()}, p.AllowWrite...)
