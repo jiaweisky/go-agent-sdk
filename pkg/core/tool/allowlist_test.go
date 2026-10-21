@@ -47,7 +47,7 @@ func TestRestrict(t *testing.T) {
 	}
 }
 
-func TestRestrictListShape(t *testing.T) {
+func TestRestrictNilVersusEmptyList(t *testing.T) {
 	mat := &tool.Materialization{
 		Definitions: []llmschema.ToolDefinition{{Name: "bash"}},
 		Settle: func(context.Context, tool.ExecuteInput) (*tool.Settlement, error) {
