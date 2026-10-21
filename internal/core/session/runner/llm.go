@@ -982,7 +982,14 @@ func (r *LLMRunner) materializeTools(
 	if stored.Permission != nil {
 		permissions = core.PermissionMerge(permissions, *stored.Permission)
 	}
-	return r.Tools.MaterializeFor(string(sessionID), permissions)
+	mat, err := r.Tools.MaterializeFor(string(sessionID), permissions)
+	if err != nil {
+		return nil, err
+	}
+	if agent.Info != nil {
+		mat = tool.Restrict(mat, agent.Info.Tools)
+	}
+	return mat, nil
 }
 
 func contextMessagesOf(entries []session.HistoryEntry) []schema.SessionMessage {

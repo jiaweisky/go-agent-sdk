@@ -52,6 +52,21 @@ const (
 	PermissionEffectAsk   PermissionEffect = "ask"
 )
 
+// PermissionRule is one permission rule. Evaluation takes the LAST matching
+// rule across the merged rulesets, so rule order matters: a later rule wins on
+// conflict.
+//
+// The deny effect carries two distinct behaviors depending on the resource
+// shape:
+//
+//   - deny with resource "*" removes the matching tool from the model-facing
+//     toolset entirely at materialization time (Registry.Materialize's
+//     wholly-disabled check): the model never sees it, and a call to it fails
+//     as an unknown tool. To delete a tool from an agent, prefer the explicit
+//     AgentInfo.Tools allowlist over this form; this rule shape remains for
+//     dynamic cases (session-level narrowing, config-driven rulesets).
+//   - deny with a narrower resource keeps the tool listed and only rejects the
+//     matching calls at execution time.
 type PermissionRule struct {
 	Action   string           `json:"action"`
 	Resource string           `json:"resource"`

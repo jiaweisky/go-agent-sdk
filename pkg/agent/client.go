@@ -237,6 +237,10 @@ type AgentConfig struct {
 	Steps       int
 	Model       string
 	Permissions schema.PermissionRuleset
+	// Tools is the agent's tool-name allowlist (schema.AgentInfo.Tools). Nil
+	// keeps the current value (every tool for a new agent); a non-nil slice —
+	// including an explicit empty one — replaces it (empty means no tools).
+	Tools []string
 	// Backend selects how the agent executes. Nil keeps the current backend
 	// (a local LLM loop for a newly created agent).
 	Backend *schema.AgentBackend
@@ -308,6 +312,11 @@ func applyAgentConfig(info *schema.AgentInfo, cfg AgentConfig) {
 	}
 	if cfg.Permissions != nil {
 		info.Permissions = core.PermissionMerge(info.Permissions, cfg.Permissions)
+	}
+	// Tools: nil keeps the current value (every tool for a new agent); a
+	// non-nil slice — including an explicit empty one — replaces the allowlist.
+	if cfg.Tools != nil {
+		info.Tools = cfg.Tools
 	}
 	if cfg.Backend != nil {
 		info.Backend = cfg.Backend
@@ -496,7 +505,11 @@ func (c *Client) AgentTools(agentID string, permissions schema.PermissionRuleset
 	if err != nil {
 		return nil, err
 	}
-	definitions := registry.Materialize(core.PermissionMerge(info.Permissions, permissions)).Definitions
+	mat := registry.Materialize(core.PermissionMerge(info.Permissions, permissions))
+	// The allowlist scopes the capability surface the same way the turn loop
+	// does, so what is advertised here matches what sessions can actually use.
+	mat = tool.Restrict(mat, info.Tools)
+	definitions := mat.Definitions
 	tools := make([]AgentTool, 0, len(definitions))
 	for _, definition := range definitions {
 		tools = append(tools, AgentTool{Name: definition.Name, Description: definition.Description})

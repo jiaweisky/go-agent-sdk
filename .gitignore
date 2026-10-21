@@ -2,6 +2,7 @@
 
 # Build and test artifacts
 /bin/
+/dist/
 *.test
 *.out
 

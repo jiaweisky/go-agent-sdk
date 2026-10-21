@@ -253,6 +253,38 @@ func (r *Registry) settle(
 	return s, nil
 }
 
+// Restrict filters a materialization to a tool-name allowlist (the explicit
+// counterpart of the deny-with-resource-"*" removal; see whollyDisabled): the
+// model-facing definitions are reduced to the listed names, and the settle
+// path rejects anything else, so a hallucinated call cannot reach a
+// filtered-out tool. A nil list keeps every tool (the unset default); a
+// non-nil empty list rejects every tool. Matching is by exact tool name.
+func Restrict(mat *Materialization, names []string) *Materialization {
+	if mat == nil || names == nil {
+		return mat
+	}
+	allowed := make(map[string]bool, len(names))
+	for _, name := range names {
+		allowed[name] = true
+	}
+	defs := make([]schema.ToolDefinition, 0, len(mat.Definitions))
+	for _, def := range mat.Definitions {
+		if allowed[def.Name] {
+			defs = append(defs, def)
+		}
+	}
+	inner := mat.Settle
+	return &Materialization{
+		Definitions: defs,
+		Settle: func(execCtx context.Context, input ExecuteInput) (*Settlement, error) {
+			if !allowed[input.Call.Name] {
+				return &Settlement{Result: schema.ToolResultValue{Type: "error", Value: "Unknown tool: " + input.Call.Name}}, nil
+			}
+			return inner(execCtx, input)
+		},
+	}
+}
+
 func (r *Registry) lookup(name string) (registrationEntry, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -268,6 +300,12 @@ func (r *Registry) lookup(name string) (registrationEntry, bool) {
 	return registrationEntry{}, false
 }
 
+// whollyDisabled reports whether a tool's action is denied for all resources:
+// the last matching rule being deny-with-resource-"*" means the tool is
+// dropped from the materialization (not listed to the model, and its settle
+// lookup reports an unknown tool) rather than merely rejected at call time.
+// This is how a permissions deny rule doubles as tool removal; the explicit
+// way to scope an agent's toolset is AgentInfo.Tools (an allowlist).
 func whollyDisabled(action string, rules []PermissionRule) bool {
 	var lastMatch *PermissionRule
 	for i := range rules {

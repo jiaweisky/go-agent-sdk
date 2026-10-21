@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -22,6 +24,57 @@ func TestConfigEntryNameFromPath(t *testing.T) {
 	}
 	if got := ConfigEntryNameFromPath("other/x.md", []string{"agent/", "agents/"}); got != "x" {
 		t.Fatalf("fallback name = %q", got)
+	}
+}
+
+func TestApplyAgentInfoTools(t *testing.T) {
+	// The allowlist replaces any target list; a later agent file wins as a whole.
+	target := &schema.AgentInfo{Tools: []string{"bash"}}
+	applyAgentInfo(target, AgentInfo{Tools: []string{"read", "grep"}}, "/home", nil)
+	if len(target.Tools) != 2 || target.Tools[0] != "read" || target.Tools[1] != "grep" {
+		t.Fatalf("tools = %+v", target.Tools)
+	}
+
+	// An explicit empty list means no tools.
+	applyAgentInfo(target, AgentInfo{Tools: []string{}}, "/home", nil)
+	if target.Tools == nil || len(target.Tools) != 0 {
+		t.Fatalf("tools = %+v", target.Tools)
+	}
+
+	// A file without tools leaves the target's list untouched.
+	applyAgentInfo(target, AgentInfo{}, "/home", nil)
+	if target.Tools == nil || len(target.Tools) != 0 {
+		t.Fatalf("tools = %+v", target.Tools)
+	}
+}
+
+func TestDecodeAgentDocumentTools(t *testing.T) {
+	info, ok := decodeAgentDocument(AgentEntry{
+		Name: "ops",
+		Data: map[string]any{
+			"description": "ops",
+			"tools":       []any{"bash", "read"},
+		},
+		Content: "You operate.",
+	})
+	if !ok {
+		t.Fatal("decode failed")
+	}
+	if len(info.Tools) != 2 || info.Tools[0] != "bash" || info.Tools[1] != "read" {
+		t.Fatalf("tools = %+v", info.Tools)
+	}
+
+	// An explicit empty list decodes as non-nil empty, so `tools: []` means no
+	// tools (distinct from the field being absent).
+	empty, ok := decodeAgentDocument(AgentEntry{
+		Name: "none",
+		Data: map[string]any{"tools": []any{}},
+	})
+	if !ok {
+		t.Fatal("decode failed")
+	}
+	if empty.Tools == nil || len(empty.Tools) != 0 {
+		t.Fatalf("tools = %+v", empty.Tools)
 	}
 }
 

@@ -111,6 +111,12 @@ func applyAgentInfo(target *schema.AgentInfo, item AgentInfo, home string, base 
 	if item.Permissions != nil {
 		target.Permissions = append(target.Permissions, expandPermissions(*item.Permissions, home)...)
 	}
+	// The allowlist replaces (does not merge) so a later agent file wins as a
+	// whole; nil (field absent) leaves the target's list untouched, while an
+	// explicit empty list means no tools.
+	if item.Tools != nil {
+		target.Tools = item.Tools
+	}
 	if item.Backend != nil {
 		target.Backend = item.Backend
 	}

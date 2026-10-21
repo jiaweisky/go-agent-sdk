@@ -673,3 +673,68 @@ func TestA2ABackendCardURLOverridesEndpoint(t *testing.T) {
 		})
 	}
 }
+
+// TestRemoteA2AAgentWithEmptyToolAllowlist runs an agent whose backend is a
+// remote A2A peer and whose tool allowlist is explicitly empty (tools: []).
+// The empty allowlist must not break delegation: the turn runs through the
+// backend, the remote output flows back, and the locally advertised capability
+// surface is empty (AgentTools agrees with what sessions can use).
+func TestRemoteA2AAgentWithEmptyToolAllowlist(t *testing.T) {
+	// Remote host: a normal client with a stub model, exposed over A2A.
+	remoteHost := newTestClient(t)
+	endpoint := startA2AServer(t, remoteHost)
+
+	// Caller: a client whose "remote" agent delegates to the A2A endpoint and
+	// carries no local tools at all.
+	caller, err := NewClient(&ClientOptions{
+		Protocol: "openai-responses", Credentials: APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: ApproveAll,
+		LLM: backendStubLLM{},
+	})
+	if err != nil {
+		t.Fatalf("new caller: %v", err)
+	}
+	t.Cleanup(func() { _ = caller.Close() })
+
+	err = caller.RegisterAgent("remote", AgentConfig{
+		Backend: &schema.AgentBackend{
+			Type: schema.AgentBackendA2A,
+			A2A:  &schema.AgentA2ABackend{Endpoint: endpoint},
+		},
+		Tools: []string{},
+	})
+	if err != nil {
+		t.Fatalf("register remote agent: %v", err)
+	}
+
+	// The advertised capability surface is empty, not "every tool".
+	tools, err := caller.AgentTools("remote", nil)
+	if err != nil {
+		t.Fatalf("agent tools: %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("advertised tools = %+v", tools)
+	}
+
+	session, err := caller.CreateSession(context.Background(), &SessionConfig{Agent: "remote"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer session.Close()
+
+	var text strings.Builder
+	for event, err := range session.Send(context.Background(), MessageOptions{Prompt: "hi"}) {
+		if err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		switch e := event.(type) {
+		case TextDelta:
+			text.WriteString(e.Delta)
+		case TextEnded:
+			text.WriteString(e.Text)
+		}
+	}
+	if !strings.Contains(text.String(), "hello world") {
+		t.Fatalf("remote output = %q", text.String())
+	}
+}

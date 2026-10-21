@@ -39,16 +39,26 @@ func (c AgentColor) Valid() bool {
 }
 
 type AgentInfo struct {
-	ID          AgentID           `json:"id"`
-	Model       *ModelRef         `json:"model,omitempty"`
-	Request     ProviderRequest   `json:"request"`
-	System      *string           `json:"system,omitempty"`
-	Description *string           `json:"description,omitempty"`
-	Mode        string            `json:"mode"`
-	Hidden      bool              `json:"hidden"`
-	Color       *AgentColor       `json:"color,omitempty"`
-	Steps       *PositiveInt      `json:"steps,omitempty"`
+	ID          AgentID         `json:"id"`
+	Model       *ModelRef       `json:"model,omitempty"`
+	Request     ProviderRequest `json:"request"`
+	System      *string         `json:"system,omitempty"`
+	Description *string         `json:"description,omitempty"`
+	Mode        string          `json:"mode"`
+	Hidden      bool            `json:"hidden"`
+	Color       *AgentColor     `json:"color,omitempty"`
+	Steps       *PositiveInt    `json:"steps,omitempty"`
+	// Permissions gate tool execution at call time (and a deny rule with
+	// resource "*" even removes the tool from the list — see PermissionRule).
+	// For an explicit toolset, prefer Tools below.
 	Permissions PermissionRuleset `json:"permissions"`
+	// Tools is a Go-side extension (not in opencode v2 core): a tool-name
+	// allowlist for the agent. When set, only these tools are materialized for
+	// the agent's sessions — both the model-facing definitions and execution —
+	// and calls to anything else are rejected as unknown. Nil (the field
+	// absent) means every registered tool; an explicitly empty list means no
+	// tools at all.
+	Tools []string `json:"tools,omitempty"`
 	// Backend selects how the agent executes: a local LLM loop (nil) or a
 	// remote A2A agent.
 	Backend *AgentBackend `json:"backend,omitempty"`

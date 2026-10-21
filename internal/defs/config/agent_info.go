@@ -15,6 +15,10 @@ type AgentInfo struct {
 	Steps       *schema.PositiveInt       `json:"steps,omitempty"`
 	Disabled    *bool                     `json:"disabled,omitempty"`
 	Permissions *schema.PermissionRuleset `json:"permissions,omitempty"`
+	// Tools is the tool-name allowlist (Go-side extension; see
+	// schema.AgentInfo): nil means every tool, an explicit empty list means
+	// none.
+	Tools []string `json:"tools,omitempty"`
 	// Backend declares how the agent executes: a local LLM loop (unset) or a
 	// remote A2A agent. It lets a markdown agent file describe a peer reached
 	// over the wire, instead of requiring RegisterAgent.
