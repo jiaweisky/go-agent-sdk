@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
@@ -11,7 +13,9 @@ import (
 // ApplyDirAgents merges agents from each directory's {agent,agents}/**/*.md and
 // {mode,modes}/*.md into the agent service. Later directories and files win.
 // base is merged under each agent's own rules (see core.DefaultAgentPermissions),
-// so a configured agent inherits the defaults like a built-in one.
+// so a configured agent inherits the defaults like a built-in one. A file whose
+// frontmatter cannot be decoded is skipped with a warning on stderr — one bad
+// file must not take down the other agents, but the problem must be visible.
 func ApplyDirAgents(agents *core.Agent, dirs []string, global core.Global, base core.PermissionRuleset) error {
 	_, err := agents.Transform(func(draft core.AgentDraft) error {
 		for _, dir := range dirs {
@@ -20,8 +24,9 @@ func ApplyDirAgents(agents *core.Agent, dirs []string, global core.Global, base 
 				return err
 			}
 			for _, entry := range entries {
-				info, ok := decodeAgentDocument(entry)
-				if !ok {
+				info, err := decodeAgentDocument(entry)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "defs: skipping agent file %q: %v\n", entry.Name, err)
 					continue
 				}
 				id := schema.AgentID(entry.Name)
@@ -40,8 +45,9 @@ func ApplyDirAgents(agents *core.Agent, dirs []string, global core.Global, base 
 }
 
 // decodeAgentDocument decodes an agent file as a v2 agent: the frontmatter keys
-// plus the body as the system prompt.
-func decodeAgentDocument(entry AgentEntry) (AgentInfo, bool) {
+// plus the body as the system prompt. It fails when a frontmatter value has the
+// wrong shape for its target field (the decode is a JSON round-trip).
+func decodeAgentDocument(entry AgentEntry) (AgentInfo, error) {
 	merged := make(map[string]any, len(entry.Data)+1)
 	for key, value := range entry.Data {
 		merged[key] = value
@@ -49,17 +55,17 @@ func decodeAgentDocument(entry AgentEntry) (AgentInfo, bool) {
 	merged["system"] = entry.Content
 	encoded, err := json.Marshal(merged)
 	if err != nil {
-		return AgentInfo{}, false
+		return AgentInfo{}, fmt.Errorf("encode frontmatter: %w", err)
 	}
 	var info AgentInfo
 	if err := json.Unmarshal(encoded, &info); err != nil {
-		return AgentInfo{}, false
+		return AgentInfo{}, fmt.Errorf("decode frontmatter: %w", err)
 	}
 	if entry.Primary {
 		mode := "primary"
 		info.Mode = &mode
 	}
-	return info, true
+	return info, nil
 }
 
 func applyAgentInfo(target *schema.AgentInfo, item AgentInfo, home string, base core.PermissionRuleset) {

@@ -49,7 +49,7 @@ func TestApplyAgentInfoTools(t *testing.T) {
 }
 
 func TestDecodeAgentDocumentTools(t *testing.T) {
-	info, ok := decodeAgentDocument(AgentEntry{
+	info, err := decodeAgentDocument(AgentEntry{
 		Name: "ops",
 		Data: map[string]any{
 			"description": "ops",
@@ -57,8 +57,8 @@ func TestDecodeAgentDocumentTools(t *testing.T) {
 		},
 		Content: "You operate.",
 	})
-	if !ok {
-		t.Fatal("decode failed")
+	if err != nil {
+		t.Fatalf("decode: %v", err)
 	}
 	if len(info.Tools) != 2 || info.Tools[0] != "bash" || info.Tools[1] != "read" {
 		t.Fatalf("tools = %+v", info.Tools)
@@ -66,15 +66,21 @@ func TestDecodeAgentDocumentTools(t *testing.T) {
 
 	// An explicit empty list decodes as non-nil empty, so `tools: []` means no
 	// tools (distinct from the field being absent).
-	empty, ok := decodeAgentDocument(AgentEntry{
+	empty, err := decodeAgentDocument(AgentEntry{
 		Name: "none",
 		Data: map[string]any{"tools": []any{}},
 	})
-	if !ok {
-		t.Fatal("decode failed")
+	if err != nil {
+		t.Fatalf("decode: %v", err)
 	}
 	if empty.Tools == nil || len(empty.Tools) != 0 {
 		t.Fatalf("tools = %+v", empty.Tools)
+	}
+
+	// A wrong-shaped frontmatter value fails the decode (the caller warns and
+	// skips the file instead of registering a half-decoded agent).
+	if _, err := decodeAgentDocument(AgentEntry{Name: "bad", Data: map[string]any{"tools": "bash"}}); err == nil {
+		t.Fatal("expected a decode error for a string tools value")
 	}
 }
 
