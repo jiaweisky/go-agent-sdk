@@ -2,12 +2,12 @@
 #
 # A reusable host supervisor for agentd. Point a host's `supervisor_command` at
 # this binary; it satisfies the acquire/release JSON protocol by calling a
-# running agentd's admin (control) API, so the host spawns no Go processes
+# running agentd's control API, so the host spawns no Go processes
 # itself. String values support ${VAR} / ${VAR:-default} (the agentd loader).
 
 agentd:
   baseURL: http://127.0.0.1:9090          # a running agentd with `control.listen` set
-  token: ${AGENTD_CONTROL_TOKEN:-}        # control.auth.bearer, if configured
+  token: ${AGENTD_CONTROL_TOKEN:-}        # control.auth.token, if configured
 
 project:                                  # template cloned for each acquired project
   kind: http                              # http | a2a
@@ -25,4 +25,5 @@ project:                                  # template cloned for each acquired pr
   #   process: seatbelt                   # none (default) | bwrap | seatbelt | appcontainer
   #   failurePolicy: fail-closed          # fail-closed (default) | fail-open
   auth:
-    bearer: ${AGENTD_INSTANCE_TOKEN:-}    # optional per-instance transport auth
+    type: bearer
+    token: ${AGENTD_INSTANCE_TOKEN:-}     # optional per-instance transport auth

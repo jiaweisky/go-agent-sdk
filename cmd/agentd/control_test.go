@@ -254,7 +254,7 @@ func TestManagerEnforcesLeaseCap(t *testing.T) {
 func TestControlHandlerCRUDAndAuth(t *testing.T) {
 	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
 	t.Cleanup(manager.Close)
-	server := httptest.NewServer(newControlHandler(manager, &config.AuthConfig{Bearer: "s3cret"}))
+	server := httptest.NewServer(newControlHandler(manager, &config.AuthConfig{Type: "bearer", Token: "s3cret"}))
 	defer server.Close()
 
 	body, err := json.Marshal(testControlRequest(t))
@@ -277,6 +277,12 @@ func TestControlHandlerCRUDAndAuth(t *testing.T) {
 	}
 	if code := doControl(t, http.MethodDelete, server.URL+"/admin/projects/grp-a", "", "s3cret"); code != http.StatusNotFound {
 		t.Fatalf("second delete = %d, want 404", code)
+	}
+
+	empty := httptest.NewServer(newControlHandler(manager, &config.AuthConfig{Type: "bearer"}))
+	defer empty.Close()
+	if code := doControl(t, http.MethodGet, empty.URL+"/admin/projects", "", ""); code != http.StatusUnauthorized {
+		t.Fatalf("empty token must fail closed, got %d", code)
 	}
 }
 

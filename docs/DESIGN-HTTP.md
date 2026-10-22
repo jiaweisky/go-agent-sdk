@@ -31,6 +31,7 @@
 | 2026-10-06 | Servers self-heal by default: `dropErroredTurns: true` in both commands (the SDK default stays `false`); only provider rejections (`error.type: "provider"`) are dropped — interrupts/declines are kept. Fixed `GET /wait` to wait for the prompt worker, so an accepted prompt is not reported idle before its turn starts |
 | 2026-10-06 | An omitted attachment is now perceivable: the runner publishes the durable `session.next.attachment.omitted` event, so a client is not left believing an unsupported attachment was delivered |
 | 2026-10-06 | Model media capabilities: `ModelInfo.Capabilities.Input` now flows into the request, the context builder omits media the protocol/model cannot carry (text note, never a failed turn), and `inputModalities` is configurable in both commands |
+| 2026-10-22 | **Breaking:** authentication is bearer-only and explicit — `auth: {type: bearer, token: ...}`; Basic (username/password) and the `opencode` default username are removed from both `server.Auth` and the agentd/control config |
 
 ---
 
@@ -104,7 +105,7 @@ the authoritative endpoint list and §5.5 names the dropped groups.
 | `GET /api/session/:id/event` (durable SSE) | same, but **durable replay merged with live** (§5.4), because deltas/HITL are live-only in this SDK |
 | SSE envelope (`server.connected`, heartbeat, `event: message`) | same (§6.3) |
 | permission / question request + reply routes | same, over `Client.Permission()` / `Client.Question()` |
-| auth: Basic user/password from `OPENCODE_*` env | **Bearer by default** (Basic optional); **no env**, secrets from config (§8.1) |
+| auth: Basic user/password from `OPENCODE_*` env | **Bearer only** (`auth.type` + `auth.token`); **no env**, secrets from config (§8.1) |
 | location-scoped routes (`location` query) | **dropped**: one `Client` = one project/root |
 | provider / model catalog (models.dev) + credential / integration (OAuth) routes | **dropped**: the host supplies `Protocol` + credentials; `catalog`/`credential`/`integration` are not ported (`AGENTS.md`) |
 | `pty` / `project-copy` / `reference` / `fs` / `command` routes | **dropped** (§5.5) |
@@ -166,7 +167,7 @@ server/                         HTTP API (Go-specific; no direct TS counterpart,
 ├── permission.go               permission list/get/reply
 ├── question.go                 question list/get/reply/reject
 ├── interactions.go             hold mode + timeout policy glue
-├── auth.go                     bearer / basic middleware
+├── auth.go                     bearer middleware
 ├── cors.go                     CORS middleware
 ├── errors.go                   error envelope + SDK error → status mapping
 ├── sse.go                      SSE writer, heartbeat, wire event envelope
@@ -202,9 +203,9 @@ package server
 // Options configures a Server. It covers the HTTP surface only: every model/SDK
 // setting lives on the injected *agent.Client (see the mapping table below).
 type Options struct {
-    // Auth, when set, requires a credential on every /api route except the ones
-    // listed in Public. Nil disables authentication (loopback use). Type and
-    // scheme (bearer/basic) are defined in §8.1.
+    // Auth, when set, requires a bearer token on every /api route except the
+    // ones listed in Public. Nil disables authentication (loopback use). The
+    // credential shape is defined in §8.1.
     Auth *Auth
 
     // Agents is the allow-list of agent names the API may create/use (§12.4).
@@ -264,7 +265,7 @@ across three destinations; only the middle column is `server.Options`:
 | Config key(s) | Destination |
 |---|---|
 | `listen`, `tls`, `allowInsecure` | `cmd/agentserve` process (socket / HTTPS / bind policy), not `Options` |
-| `auth.bearer` / `auth.username`+`auth.password` | `Options.Auth` (§8.1) |
+| `auth.type` + `auth.token` | `Options.Auth` (§8.1) |
 | `cors` | `Options.CORS` |
 | `inboundPermissions` | `Options.InboundPermissions` |
 | `interactionTimeout` / `interactionFallback` | `Options.InteractionTimeout` / `Options.InteractionFallback` |
@@ -791,18 +792,13 @@ transports behave identically.
 
 ```go
 type Auth struct {
-    Scheme   string // "bearer" (default) | "basic"
-    Token    string // bearer
-    Username string // basic
-    Password string // basic
+    Token string // bearer token
 }
 ```
 
-- Bearer is the default — the natural fit for service-to-service foreign SDKs
-  and consistent with `a2a/server.Security`.
-- Basic is offered for opencode-client compatibility.
-- `New` rejects an `Auth` with an unknown `Scheme` or a missing credential
-  (bearer token / basic password), mirroring `a2a/server.Security`.
+- Bearer is the only scheme — the natural fit for service-to-service foreign
+  SDKs and consistent with `a2a/server.Security`.
+- `New` rejects an `Auth` with an empty token, mirroring `a2a/server.Security`.
 - These are **inbound API credentials**. Do not confuse them with the model
   provider `credentials` in `cmd/agentserve` (§12), which authenticate the SDK's
   outbound LLM calls.
@@ -810,7 +806,7 @@ type Auth struct {
   opencode's `OPENCODE_SERVER_PASSWORD`). Config files are the only secret
   source (see `cmd/agentserve`).
 - Constant-time comparison; missing/invalid → `401` with `WWW-Authenticate:
-  Bearer` (or `Basic realm="..."`).
+  Bearer`.
 - `Options.Public` lists unauthenticated routes (typically only `/api/health`);
   entries match the request path **exactly** (no prefix matching), so a public
   route cannot accidentally expose a subtree.
@@ -1088,9 +1084,8 @@ to `agentserve.yaml`, which is git-ignored). The complete field set:
 | `titleAuto` | bool | `false` | no | Auto-generate session titles via the `title` agent |
 | `dropErroredTurns` | bool | `true` | no | Exclude a provider-rejected turn (`error.type: "provider"`) from later contexts, so a persistently rejected message cannot wedge the session; interrupts/declines are kept (§5.2). The server defaults to `true` (a remote client cannot run the revert dance); `false` restores opencode-CLI behavior |
 | `agents` | []string | `[build]` | no | **Allow-list** of agent names the API may create/use (see 12.4) |
-| `auth.bearer` | string | — | no\*\* | Bearer token required on all routes except `publicRoutes` (secret) |
-| `auth.username` | string | `opencode` | no | Basic-auth username (alternative to bearer; secret with password) |
-| `auth.password` | string | — | no\*\* | Basic-auth password (secret) |
+| `auth.type` | string | — | no\*\* | Authentication scheme; `bearer` is the only value |
+| `auth.token` | string | — | no\*\* | Bearer token required on all routes except `publicRoutes` (secret) |
 | `inboundPermissions` | []rule | SDK deny-by-default | no | Ruleset merged over the agent for API-created sessions |
 | `interactionTimeout` | duration | `0` (disabled) | no | Auto-resolve a held permission/question after this long |
 | `interactionFallback` | string | `reject` | no | Fallback effect on timeout: `reject` \| `allow` |
@@ -1104,8 +1099,8 @@ to `agentserve.yaml`, which is git-ignored). The complete field set:
 
 \* exactly one credential source: `credentials.apiKey` **or** `credentials.aws`.
 \*\* `auth` is optional, but a non-loopback bind **requires** it unless
-`allowInsecure`. Within `auth`, `bearer` takes precedence; otherwise a complete
-`username` + `password` selects Basic.
+`allowInsecure`. When set, `auth.type` must be `bearer` and `auth.token` must be
+non-empty.
 \*\*\* `tls` requires both files; when set the server serves HTTPS.
 
 > **`inboundPermissions` replaces, it does not extend.** When the key is present
@@ -1132,7 +1127,8 @@ subagentDepth: 1
 titleAuto: false
 agents: [build]                   # allow-list of usable agents
 auth:
-  bearer: <token>                 # optional; required for non-loopback binds
+  type: bearer
+  token: <token>                  # optional; required for non-loopback binds
 inboundPermissions:               # REPLACES the SDK deny-by-default (not additive)
   - { action: bash, resource: "*", effect: deny }
 interactionTimeout: 5m            # optional HITL fallback
@@ -1194,7 +1190,7 @@ Startup fails, before binding, on any of:
 - `agents` empty;
 - neither `credentials.apiKey` nor `credentials.aws` set;
 - `credentials.aws` set but missing `region` / `accessKeyId` / `secretAccessKey`;
-- `auth` set with neither `bearer` nor a complete `username` + `password`;
+- `auth` set with a `type` other than `bearer` or an empty `token`;
 - `interactionFallback` not one of `reject` / `allow`;
 - an `inboundPermissions` rule with an unknown `effect` (not `allow` / `deny` /
   `ask`);
@@ -1328,7 +1324,7 @@ routes must land together with it).
 | D2 | `server/` imports root `agent`; no root-side adapter (unlike A2A) | HTTP is inherently coupled to the public API; wire DTOs are added only where an SDK type leaks secrets (§5.1), not as a parallel interface layer |
 | D3 | `prompt` = enqueue + per-session worker + return `202`; **no unbounded request-holding** (only `/wait`, bounded by `timeout`) | Survives bot webhook timeouts and disconnects |
 | D4 | Wire events = raw `schema.EventPayload` DTO + `server.connected` | Full fidelity, stable discriminator, matches opencode's `/api/event` |
-| D5 | Bearer auth by default (Basic optional); no env | Service-to-service foreign SDKs; SDK philosophy; consistent with `a2a/server.Security` |
+| D5 | Bearer-only auth (`auth.type: bearer` + token); no env | Service-to-service foreign SDKs; SDK philosophy; consistent with `a2a/server.Security` |
 | D6 | Server holds interactions (`HoldInteractions(true)`) with a timeout fallback | Required to surface prompts; timeout prevents a wedged turn |
 | D7 | No `location` scoping; one `Client` per handler | The SDK `Client` is already bound to one project/root |
 | D8 | Document the wire contract here; **no OpenAPI document and no generated SDK** | SSE isn't OpenAPI-expressible, a hand-maintained spec would drift, and the consumer's client belongs in its own repo (§11) |

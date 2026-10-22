@@ -6,18 +6,9 @@ import (
 	"strings"
 )
 
-const (
-	schemeBearer = "bearer"
-	schemeBasic  = "basic"
-)
-
-// Auth requires a credential on every /api route except Options.Public.
+// Auth requires a bearer token on every /api route except Options.Public.
 type Auth struct {
-	// Scheme is "bearer" (default) or "basic".
-	Scheme   string
-	Token    string // bearer
-	Username string // basic
-	Password string // basic
+	Token string
 }
 
 func (s *Server) withAuth(next http.Handler) http.Handler {
@@ -39,21 +30,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 }
 
 func (s *Server) authChallenge() string {
-	if s.opts.Auth.Scheme == schemeBasic {
-		return `Basic realm="go-agent-sdk"`
-	}
 	return "Bearer"
 }
 
 func (s *Server) authorized(r *http.Request) bool {
-	a := s.opts.Auth
-	if a.Scheme == schemeBasic {
-		user, pass, ok := r.BasicAuth()
-		if !ok {
-			return false
-		}
-		return constEq(user, a.Username) && constEq(pass, a.Password)
-	}
 	token := ""
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		token = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
@@ -61,7 +41,7 @@ func (s *Server) authorized(r *http.Request) bool {
 	if token == "" {
 		token = r.URL.Query().Get("auth_token")
 	}
-	return constEq(token, a.Token)
+	return constEq(token, s.opts.Auth.Token)
 }
 
 func constEq(a, b string) bool {

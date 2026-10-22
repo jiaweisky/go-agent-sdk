@@ -1,19 +1,17 @@
 package main
 
 import (
-	"crypto/subtle"
 	"net/http"
 	"net/url"
 	"sort"
-	"strings"
 
 	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
 
-// adminDoc carries the loaded configuration and its provenance for the admin
-// read-only endpoints (/api/config, /api/info). It is shared by every listener;
-// each listener reports its own address in /api/info.
-type adminDoc struct {
+// introspectDoc carries the loaded configuration and its provenance for the
+// read-only config/info endpoints (/api/config, /api/info). It is shared by
+// every listener; each listener reports its own address in /api/info.
+type introspectDoc struct {
 	config  config.Config
 	path    string
 	env     []string
@@ -37,43 +35,26 @@ func validSection(section string) bool {
 	return false
 }
 
-// writeAdminError writes the uniform error envelope, matching the /api/* shape.
-func writeAdminError(w http.ResponseWriter, status int, code, message string) {
+// writeIntrospectError writes the uniform error envelope, matching the /api/* shape.
+func writeIntrospectError(w http.ResponseWriter, status int, code, message string) {
 	writeJSONStatus(w, status, map[string]string{"error": code, "message": message})
 }
 
 // authorized reports whether the request carries the server's configured
-// credential. A nil auth (loopback server) authorizes every request.
+// bearer token. A nil auth (loopback server) authorizes every request; an auth
+// whose token is empty denies (validation rejects that config first).
 func authorized(req *http.Request, auth *config.AuthConfig) bool {
 	if auth == nil {
 		return true
 	}
-	if auth.Bearer != "" {
-		token := ""
-		if h := req.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-			token = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
-		}
-		if token == "" {
-			token = req.URL.Query().Get("auth_token")
-		}
-		return constEq(token, auth.Bearer)
+	if auth.Token == "" {
+		return false
 	}
-	if auth.Password != "" {
-		user, pass, ok := req.BasicAuth()
-		if !ok {
-			return false
-		}
-		username := auth.Username
-		if username == "" {
-			username = "opencode"
-		}
-		return constEq(user, username) && constEq(pass, auth.Password)
+	token := bearerToken(req)
+	if token == "" {
+		token = req.URL.Query().Get("auth_token")
 	}
-	return true
-}
-
-func constEq(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+	return constEq(token, auth.Token)
 }
 
 // publicPath reports whether path is an explicitly-configured public route.
@@ -86,8 +67,8 @@ func publicPath(patterns []string, path string) bool {
 	return false
 }
 
-// adminSchemaVersion versions the /api/config document; bump on a breaking change.
-const adminSchemaVersion = 1
+// configSchemaVersion versions the /api/config document; bump on a breaking change.
+const configSchemaVersion = 1
 
 // secret reports whether a sensitive value is configured without revealing it.
 type secret struct {
@@ -367,9 +348,8 @@ type permissionRuleView struct {
 }
 
 type authView struct {
-	Bearer   secret `json:"bearer"`
-	Username string `json:"username,omitempty"`
-	Password secret `json:"password"`
+	Type  string `json:"type"`
+	Token secret `json:"token"`
 }
 
 type controlView struct {
@@ -712,5 +692,5 @@ func authViewOf(a *config.AuthConfig) *authView {
 	if a == nil {
 		return nil
 	}
-	return &authView{Bearer: redact(a.Bearer), Username: a.Username, Password: redact(a.Password)}
+	return &authView{Type: a.Type, Token: redact(a.Token)}
 }

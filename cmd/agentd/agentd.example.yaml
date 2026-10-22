@@ -6,7 +6,7 @@
 #
 # Any string value may reference environment variables explicitly: `${VAR}`
 # (required), `${VAR:-default}`, and `$$` for a literal `$`. No environment is
-# read implicitly — only where the file asks for it (shown on apiKey, bearer,
+# read implicitly — only where the file asks for it (shown on apiKey, token,
 # workingDirectory below; it works for modelBaseURL, cards.name/description too).
 #
 # `modelBaseURL` is the *base* only: the protocol appends its own path
@@ -110,7 +110,8 @@ servers:
     #   cos: { region: ap-guangzhou, bucket: my-bucket-1250000000,
     #          secretID: ${COS_SECRET_ID}, secretKey: ${COS_SECRET_KEY} }
     auth:
-      bearer: ${AGENTD_TOKEN:-replace-me}
+      type: bearer
+      token: ${AGENTD_TOKEN:-replace-me}
     keepAlive: 15s
 
   # A2A server: the same client assembly, exposed over the A2A protocol on its
@@ -153,20 +154,22 @@ servers:
         provider: { organization: jiaweisky, url: https://github.com/jiaweisky }
         # skills:                     # operator-authored labels; omitted → the card advertises []
     auth:
-      bearer: ${AGENTD_TOKEN:-replace-me}              # A2A auth is bearer-only
+      type: bearer
+      token: ${AGENTD_TOKEN:-replace-me}              # A2A is bearer-only like HTTP
     keepAlive: 15s
 
-# Optional admin API: create and destroy isolated project instances at runtime.
+# Optional control API: create and destroy isolated project instances at runtime.
 # The host (e.g. an IM bridge) uses it to lease one instance per project/group.
 # Local isolation modes (none/copy/worktree/overlay) are served in-process, each
 # on its own listener under `projectListen`; container/remote instances run in a
 # separate process and are provisioned by the host instead.
 # control:
-#   listen: 127.0.0.1:9090          # admin API bind address
+#   listen: 127.0.0.1:9090          # control API bind address
 #   projectListen: 127.0.0.1:0      # where dynamic instances bind (default loopback:0)
 #   maxLeases: 32                   # cap live project instances (0 = unlimited)
 #   auth:
-#     bearer: ${AGENTD_CONTROL_TOKEN:-replace-me}
+#     type: bearer
+#     token: ${AGENTD_CONTROL_TOKEN:-replace-me}
 
 # Optional whole-process sandbox (Unix): re-exec agentd under bwrap/seatbelt so
 # every server and tool shares one confinement. Only the filesystem policy

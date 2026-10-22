@@ -134,6 +134,37 @@ func TestValidateRejectsNonLoopbackWithoutAuth(t *testing.T) {
 	}
 }
 
+func TestValidateAuthRequiresExplicitBearerToken(t *testing.T) {
+	base := func(auth *AuthConfig) Config {
+		return Config{
+			Models: []ModelConfig{testModel()},
+			Servers: []Server{
+				{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}, Auth: auth},
+			},
+		}
+	}
+	cases := []struct {
+		name string
+		auth *AuthConfig
+		ok   bool
+	}{
+		{"nil", nil, true},
+		{"bearer", &AuthConfig{Type: "bearer", Token: "t"}, true},
+		{"missing type", &AuthConfig{Token: "t"}, false},
+		{"unknown type", &AuthConfig{Type: "basic", Token: "t"}, false},
+		{"empty token", &AuthConfig{Type: "bearer"}, false},
+	}
+	for _, tc := range cases {
+		err := base(tc.auth).Validate()
+		if tc.ok && err != nil {
+			t.Errorf("%s: unexpected error: %v", tc.name, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("%s: expected an error", tc.name)
+		}
+	}
+}
+
 func TestValidateRejectsUnknownDefaultModelWholeCatalog(t *testing.T) {
 	cfg := Config{
 		Models: []ModelConfig{testModel()},

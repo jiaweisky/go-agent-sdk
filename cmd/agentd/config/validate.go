@@ -92,7 +92,7 @@ func validateWrap(w *WrapConfig) error {
 	})
 }
 
-// validateControl checks the optional admin API configuration.
+// validateControl checks the optional control API configuration.
 func validateControl(c *ControlConfig) error {
 	if c == nil {
 		return nil
@@ -103,10 +103,13 @@ func validateControl(c *ControlConfig) error {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		return fmt.Errorf("control.listen: %w", err)
 	}
-	// The admin API can copy arbitrary directories and spawn agents, so a
+	// The control API can copy arbitrary directories and spawn agents, so a
 	// non-loopback bind must be authenticated (same guard as a served endpoint).
-	if !IsLoopback(c.Listen) && (c.Auth == nil || c.Auth.Bearer == "") {
-		return errors.New("control.listen on a non-loopback address requires control.auth.bearer")
+	if err := validateAuthConfig(c.Auth); err != nil {
+		return fmt.Errorf("control: %w", err)
+	}
+	if !IsLoopback(c.Listen) && c.Auth == nil {
+		return errors.New("control.listen on a non-loopback address requires control.auth")
 	}
 	if c.MaxLeases < 0 {
 		return errors.New("control.maxLeases must not be negative")
@@ -314,7 +317,7 @@ func validateAgentCards(s Server) error {
 }
 
 func validateAuth(s Server) error {
-	if err := validateAuthConfig(s.Kind, s.Auth); err != nil {
+	if err := validateAuthConfig(s.Auth); err != nil {
 		return err
 	}
 	if !IsLoopback(s.Listen) && !s.AllowInsecure && s.Auth == nil {
@@ -323,17 +326,17 @@ func validateAuth(s Server) error {
 	return nil
 }
 
-// validateAuthConfig checks an auth block's shape for a transport kind: a
-// bearer token or a username/password, bearer-only for a2a. Nil is valid.
-func validateAuthConfig(kind string, auth *AuthConfig) error {
+// validateAuthConfig checks an auth block: the type must be bearer and its
+// token must be set. Nil is valid.
+func validateAuthConfig(auth *AuthConfig) error {
 	if auth == nil {
 		return nil
 	}
-	if auth.Bearer == "" && auth.Password == "" {
-		return errors.New("auth requires bearer or a password (username defaults to opencode)")
+	if auth.Type != "bearer" {
+		return fmt.Errorf("auth.type must be %q, got %q", "bearer", auth.Type)
 	}
-	if kind == "a2a" && auth.Bearer == "" {
-		return errors.New("a2a auth is bearer-only")
+	if auth.Token == "" {
+		return errors.New("auth.token is required for bearer")
 	}
 	return nil
 }

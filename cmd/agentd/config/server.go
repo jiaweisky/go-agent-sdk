@@ -78,13 +78,6 @@ type Server struct {
 	MaxBodyBytes int64 `yaml:"maxBodyBytes"`
 }
 
-// AuthConfig enables authentication on the served endpoints.
-type AuthConfig struct {
-	Bearer   string `yaml:"bearer"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-}
-
 // IsolationConfig derives a per-server view of the working directory.
 type IsolationConfig struct {
 	// Mode is none | copy | worktree | overlay.

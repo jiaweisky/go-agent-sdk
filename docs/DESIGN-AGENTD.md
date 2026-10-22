@@ -14,6 +14,7 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-22 | **Breaking:** server and control auth are bearer-only and explicit — `auth: {type: bearer, token: ...}`; the `username`/`password` (Basic) form and the `opencode` default username are removed. |
 | 2026-10-22 | **A2A file exchange removed from the SDK.** `storage` now serves only the model edge (provider url hosting); the AgentCard storage extension, signed-slot endpoint, inbound `FileWithUri` materialization, and A2A-only `mediaTypes`/`maxInlineBytes`/`maxBytes` are gone. |
 | 2026-10-16 | Added a per-server `peers` list (`name` + `endpoint`/`cardURL` + optional `headers`/`description`/`mode`): remote A2A agents registered as agents with an A2A backend, so a local agent (e.g. `build`) can delegate to them with the `task` tool (`mode: subagent`, the default) or run one as a primary agent. Applies to both `http` and `a2a` servers; registered in `BuildClient`; validated fail-fast; `/api/config` reports them with `headers` redacted. The control-API `POST /admin/projects` body carries the same `peers` (dynamic project instances can reach peers), and `cmd/agentd-supervisor`'s project template has a matching `peers` field. See `docs/DESIGN-A2A.md` (outbound). |
 | 2026-10-15 | `http` signing can be delegated to an external `presignURL` service (POST `{key, method, expires}` → `{uploadUrl, reference}`), mutually exclusive with the built-in `presignSecret` (nginx secure_link). |
@@ -23,7 +24,7 @@
 | 2026-10-15 | DeepSeek's OpenAI-compatible chat is its **own protocol** (`deepseek-chat`, catalog `protocol:` value) so `openai-compatible-chat` (vLLM) does not carry the `file` block; `mediaUpload` gains `expiresAfter` (provider-side `expires_after`; deletion stays the host's). |
 | 2026-10-15 | Added an optional per-server `storage` block for `DESIGN-MEDIA` **{M17}/{M18}**: a provider-independent media store. Backends `http` (a PUT base → url), `local` (a shared directory), `s3` (**S3-compatible**: AWS S3 / MinIO / COS, SigV4-signed), and `cos` (**native** Tencent COS, `q-sign-algorithm=sha1`) serve the model edge **and** the A2A file exchange. The AgentCard storage extension advertises a self-describing `upload`: `auth: none` (the peer writes directly to an open store prefix) or `auth: signed` (the peer `POST`s for a presigned slot; agentd exposes that signed-slot endpoint). There is no relay endpoint. Inbound `FileWithUri` resolution stays. |
 | 2026-10-15 | `media` block updated for `DESIGN-MEDIA` **{M17} reference hosting**: `prefer` ∈ `inline` / `url` / `file`, where `url` is produced by the provider-independent `storage` store (object storage) and `file` by the provider-bound `mediaUpload` (Files API); `url` is no longer caller-only. |
-| 2026-10-15 | Added **§5.3 admin read-only endpoints**: `GET /api/config` (whitelist-redacted, structured, with provenance) and `GET /api/info` (version/pid/listen/servers). Served by agentd's router on each listener's origin-root server with that server's credential (not public by default); global scope; `?section=`/`&server=` filters; `schemaVersion`; read-only, no hot reload. Loader gains `LoadWithEnv` (records expanded `${VAR}` names). |
+| 2026-10-15 | Added **§5.3 read-only config/info endpoints**: `GET /api/config` (whitelist-redacted, structured, with provenance) and `GET /api/info` (version/pid/listen/servers). Served by agentd's router on each listener's origin-root server with that server's credential (not public by default); global scope; `?section=`/`&server=` filters; `schemaVersion`; read-only, no hot reload. Loader gains `LoadWithEnv` (records expanded `${VAR}` names). |
 | 2026-10-11 | First draft: motivation, current state, target architecture, config, lifecycle, constraints, migration, testing, decisions (D1–D4). |
 | 2026-10-11 | Added §5.1 (streamlined config-driven CLI, D5) and §5.2 (routing / in-process multiplexing, D6/D7); clarified the `ClientOptions` drift is **config-only** — agents/subagents/skills still load from `configDirs` in both commands. |
 | 2026-10-11 | Configuration settled: a `servers[]` list (renamed from `transports`; per-entry `kind`) with per-server settings, and a **single global `models` catalog** selected per server by id subset + `defaultModel`; camelCase keys, inline secrets (D8); A2A `baseURL` optional. |
@@ -173,7 +174,7 @@ servers:
       - { name: echo, endpoint: http://127.0.0.1:9099, description: "Echoes input.", mode: subagent, headers: { Authorization: "Bearer ${PEER_TOKEN}" } }
     mediaUpload: { ... }                # optional
     dropErroredTurns: true              # default true
-    auth: { bearer: sk-... }            # or { username, password }; secret in the file
+    auth: { type: bearer, token: sk-... }   # secret in the file
     allowInsecure: false                # opt out of the non-loopback-without-auth guard
     inboundPermissions: [ ... ]
     interactionTimeout: 5m
@@ -207,7 +208,7 @@ servers:
     #              # omit the s3/cos credentials (or set http auth none) for an anonymous/public origin or bucket
     # mediaUpload: { url: https://api.deepseek.com/files, fields: {purpose: user_data}, idField: id, expiresAfter: 86400 }  # provider Files API → file_id; expiresAfter → provider expires_after
     cards: { build: { name: ..., description: ... } }   # REQUIRED per exposed agent (name + description)
-    auth: { bearer: sk-... }            # A2A auth is bearer-only
+    auth: { type: bearer, token: sk-... }   # A2A is bearer-only, like HTTP
     dropErroredTurns: true
     allowInsecure: false
     # tls: { certFile: ..., keyFile: ... }   # listener-level (shared by entries on the same `listen`)
@@ -249,7 +250,7 @@ full `ModelConfig`; a server only selects **ids**:
 | `mediaUpload` / `inboundPermissions` / `keepAlive` / `dropErroredTurns` / `tls` / `allowInsecure` | both | `dropErroredTurns` defaults **true** |
 | `media` + `storage` + `mediaUpload` + `maxBodyBytes` | both | inbound media delivery + model-edge hosting (`DESIGN-MEDIA` {M16}/{M17}); `prefer` ∈ `inline`/`url`/`file`, where `url` is produced by the **provider-independent `storage`** store (`http` PUT base / `local` shared dir / `s3` / native `cos` object store → url) and `file` by the **provider-bound `mediaUpload`** (Files API → file_id). `media` keys: `inlineLimitBytes` / `prefer` / `upload` / `downsample` / `spool` / `maxBytes` (the two size keys are per-modality: a number or `{default, image, audio, video, file}`); `maxBodyBytes` caps an HTTP request body; `storage` keys: `backend` (`http`/`local`/`s3`/`cos`), `auth` (`none`/`basic`/`bearer`) / `username` / `password` / `token` / `header`+`value` (custom), `presignSecret` (nginx secure_link) + `presignTTL`, or `s3`/`cos` credentials (omit → anonymous/public bucket). A2A file exchange is not part of the SDK. Unset = inline-first (unchanged) |
 | `questions` | both | the `question` tool policy: `park` or `decline`; default **`decline`** for a2a (an A2A client polls task state and cannot answer), **`park`** for http |
-| `auth` | both | http allows `bearer` **or** `username`/`password` (`username` defaults `opencode`); **a2a is bearer-only** |
+| `auth` | both | bearer only: `auth: {type: bearer, token: ...}` (required for non-loopback binds) |
 | `agents` | both | http = reachable allow-list; a2a = exposed agents |
 | `peers` | both | remote A2A agents registered as agents with an A2A backend (`name` + `endpoint`/`cardURL`, optional `headers`/`description`/`mode`, default `subagent`); the local model delegates to one with the `task` tool, or runs it as a primary agent (`mode: primary`/`all`). See `DESIGN-A2A.md` (outbound) |
 | `interactionTimeout` / `interactionFallback` / `subscriberCapacity` / `cors` / `publicRoutes` | **http only** | hold-mode HITL + SSE/browser tuning |
@@ -307,8 +308,8 @@ Validation (fail-fast, reusing today's `validate()` rules per server):
   exist in the catalog; its `defaultModel` (if set) is within that server's subset; every
   `models[]` entry passes `ModelConfig` validation.
 - **auth / bind** (per server): a non-loopback `listen` requires `auth` unless
-  `allowInsecure: true`; `auth` must set `bearer` (both kinds) or `password` (**http only**,
-  `username` defaults `opencode`) — an A2A entry must use `bearer`.
+  `allowInsecure: true`; `auth` must set `type: bearer` and a non-empty `token`
+  (both kinds).
 - **tls**: when set, both `certFile` and `keyFile` are required; entries sharing a `listen`
   must use the same `tls`.
 - **numbers / enums**: `contextLimit` / `outputLimit` / `subagentDepth` / `subscriberCapacity`
@@ -444,7 +445,7 @@ still has its **own `Client`** (own `Root`/isolation), its own auth, and its own
 (Caddy/nginx/Traefik) doing host/path routing in front of per-entry listeners — A2A already
 emits proxy-correct card URLs — is a deployment choice, not an `agentd` feature.
 
-### 5.3 Admin read-only endpoints (`/api/config`, `/api/info`)
+### 5.3 Read-only config/info endpoints (`/api/config`, `/api/info`)
 
 An operator (e.g. an IM bridge's admin) can read agentd's **effective** configuration and
 runtime info without the config file — useful across machines.
@@ -457,7 +458,7 @@ runtime info without the config file — useful across machines.
 - **Served by agentd's router** (not `pkg/server`), on each listener's **origin-root** server,
   using that server's credential. It is **not** public by default — only an explicit
   `publicRoutes` entry makes it anonymous. A dynamic control-API instance's router carries no
-  admin doc, so it never serves these.
+  introspection doc, so it never serves these.
 - **Scope: global** (the whole process config), **not** per-server. In a multi-tenant
   deployment (servers with distinct credentials) any authenticated client can read the whole
   config; the operator should keep agentd single-tenant or expose it on a dedicated server.
@@ -466,7 +467,7 @@ runtime info without the config file — useful across machines.
   `&server=<name>` (filter `servers[]`). An unknown `section` → `400`.
 - **Redaction (fail-closed whitelist)**: the response is a dedicated DTO; unlisted fields are
   omitted. Secrets are **never** returned — `models[].credentials.apiKey`/`aws.*`,
-  `servers[].auth.bearer|password`, `servers[].tls`, `servers[].mcp[]` internals,
+  `servers[].auth.token`, `servers[].tls`, `servers[].mcp[]` internals,
   `servers[].mediaUpload.header|value|fields`,
   `servers[].storage.password|token|value|presignSecret`, `servers[].storage.s3.accessKey|secretKey`,
   `servers[].storage.cos.secretID|secretKey|sessionToken`, `control.auth.*` become

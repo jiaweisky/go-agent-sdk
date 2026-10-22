@@ -28,7 +28,7 @@ servers:
     workingDirectory: .
     configDirs: [./agents]
     agents: [build]
-    auth: { bearer: replace-me }
+    auth: { type: bearer, token: replace-me }
 ```
 
 Servers with the same `listen` share one listener and are routed by `host` (a

@@ -484,17 +484,17 @@ provisioning **at runtime**. Two options:
    `agentd --config <generated>` (or the same binary with `--project/--isolation` flags), then
    registers the resulting `base_url` with the bridge. No new network surface; lifecycle is the
    host's. Tether drives this via its `ProjectProvider`/`supervisor_command`.
-2. **Control API (implemented, opt-in).** A long-running agentd exposes an admin API when
+2. **Control API (implemented, opt-in).** A long-running agentd exposes a control API when
    `control.listen` is set:
 
    | Method + path | Body / effect |
    |---|---|
-   | `POST /admin/projects` | `{name,kind,root,workingDirectory,configDirs,models,defaultModel,agents,peers,isolation,readonly,auth}` → `201 {project_id,kind,server_base,transport,working_directory,readonly}` (`peers`: remote A2A agents the instance reaches as a client, same shape as a server's) |
+   | `POST /admin/projects` | `{name,kind,root,workingDirectory,configDirs,models,defaultModel,agents,peers,isolation,readonly,auth}` → `201 {project_id,kind,server_base,transport,working_directory,readonly}` (`peers`: remote A2A agents the instance reaches as a client, same shape as a server's; `auth`: `{type: bearer, token}` like a server's) |
    | `GET /admin/projects` | list running instances |
    | `DELETE /admin/projects/{id}` | stop the instance and release its view |
 
    It prepares the view (Part 1 `Runner`), builds a `Client`, binds a listener under
-   `control.projectListen` (default `127.0.0.1:0`), and serves it. `control.auth.bearer`, when
+   `control.projectListen` (default `127.0.0.1:0`), and serves it. `control.auth.token`, when
    set, guards the API; a non-loopback `control.listen` **requires** it, and `control.projectListen`
    must be loopback (dynamic instances are served unauthenticated). `control.maxLeases` caps the
    live instance count (0 = unlimited). **Local modes only**
@@ -528,7 +528,7 @@ exclusive with `isolation` — a read-only lease shares the source directory.
 >
 > **Constraint — the control API cannot hide behind a container.** Dynamic instances bind
 > `control.projectListen`, which must be loopback (above); a control-API agentd inside a
-> container publishes only its own admin port, so the per-project `server_base` it returns
+> container publishes only its own control port, so the per-project `server_base` it returns
 > (`127.0.0.1:<port>`) lives *inside* the container and is unreachable from the host.
 > Containerizing the orchestrator therefore only works when the container shares the host network
 > namespace (`--network host` on Linux) or a per-project container publishes its own port. The

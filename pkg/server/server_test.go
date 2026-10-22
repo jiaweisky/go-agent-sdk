@@ -131,7 +131,7 @@ func TestHealth(t *testing.T) {
 
 func TestAuth(t *testing.T) {
 	ts := newTestServer(t, Options{
-		Auth:   &Auth{Scheme: schemeBearer, Token: "t0ken"},
+		Auth:   &Auth{Token: "t0ken"},
 		Public: []string{"/api/health"},
 	})
 	// public route needs no auth
@@ -151,6 +151,12 @@ func TestAuth(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("auth status = %d", resp.StatusCode)
+	}
+	// browser SSE fallback: the token may arrive as a query parameter
+	resp = doJSON(t, http.MethodGet, ts.URL+"/api/agent?auth_token=t0ken", "", nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("query-token status = %d", resp.StatusCode)
 	}
 }
 
@@ -582,7 +588,7 @@ func TestCORSConfiguredOrigin(t *testing.T) {
 }
 
 func TestPublicRouteOverridesAuth(t *testing.T) {
-	ts := newTestServer(t, Options{Auth: &Auth{Scheme: schemeBearer, Token: "t"}, Public: []string{"/api/agent"}})
+	ts := newTestServer(t, Options{Auth: &Auth{Token: "t"}, Public: []string{"/api/agent"}})
 
 	resp := doJSON(t, http.MethodGet, ts.URL+"/api/agent", "", nil)
 	resp.Body.Close()
@@ -647,8 +653,8 @@ func TestSessionMessagePagination(t *testing.T) {
 	}
 }
 
-func TestBasicAuth(t *testing.T) {
-	ts := newTestServer(t, Options{Auth: &Auth{Scheme: schemeBasic, Username: "u", Password: "p"}})
+func TestBearerAuth(t *testing.T) {
+	ts := newTestServer(t, Options{Auth: &Auth{Token: "t0ken"}})
 
 	resp := doJSON(t, http.MethodGet, ts.URL+"/api/agent", "", nil)
 	resp.Body.Close()
@@ -657,7 +663,7 @@ func TestBasicAuth(t *testing.T) {
 	}
 
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/agent", nil)
-	req.SetBasicAuth("u", "p")
+	req.Header.Set("Authorization", "Bearer t0ken")
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request: %v", err)

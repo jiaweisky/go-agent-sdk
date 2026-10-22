@@ -96,7 +96,7 @@ func testConfig(baseURL, token string) supervisorConfig {
 			DefaultModel:     "deepseek-flash",
 			Agents:           []string{"build"},
 			Isolation:        &config.IsolationConfig{Mode: "worktree", BaseDir: "/var/lib/agentd/views"},
-			Auth:             &config.AuthConfig{Bearer: "instance-token"},
+			Auth:             &config.AuthConfig{Type: "bearer", Token: "instance-token"},
 		},
 	}
 }
@@ -130,7 +130,7 @@ func TestAcquireCreatesProjectAndReturnsLease(t *testing.T) {
 	if created.Isolation == nil || created.Isolation.Mode != "worktree" {
 		t.Fatalf("writable project must request the isolated view: %+v", created.Isolation)
 	}
-	if created.Auth == nil || created.Auth.Bearer != "instance-token" {
+	if created.Auth == nil || created.Auth.Token != "instance-token" {
 		t.Fatalf("auth = %+v", created.Auth)
 	}
 }

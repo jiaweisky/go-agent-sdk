@@ -173,9 +173,9 @@ and is validated before the handler runs.
   remote agent; the same path is used by the `task` tool.
 - **Server command** — `cmd/agentd` serves one agent client per configured
   server over HTTP/SSE and/or A2A, from a single YAML config (string values may
-  reference `${VAR}`; no implicit environment reads), with an optional admin API
+  reference `${VAR}`; no implicit environment reads), with an optional control API
   that creates isolated project instances at runtime and per-server command
-  sandboxing / isolation. `cmd/agentd-supervisor` wraps that admin API for a
+  sandboxing / isolation. `cmd/agentd-supervisor` wraps that control API for a
   host's `supervisor_command`. See [`docs/DESIGN-AGENTD.md`](docs/DESIGN-AGENTD.md)
   and [`docs/DESIGN-ISOLATION.md`](docs/DESIGN-ISOLATION.md).
 
@@ -200,7 +200,7 @@ go-agent-sdk/
 ├── internal/     engine internals (not importable outside this module)
 │   ├── core/       session, session/runner, database, tool, skill, ...
 │   └── defs/       agent and skill definitions loaded from markdown
-└── cmd/          commands (cmd/agentd: HTTP/SSE + A2A + admin API;
+└── cmd/          commands (cmd/agentd: HTTP/SSE + A2A + control API;
                   cmd/agentd-supervisor: host supervisor_command)
 ```
 

@@ -89,7 +89,7 @@ type serveTarget struct {
 // run builds one client per configured server, groups the servers by listener,
 // and serves until ctx is canceled. Every client created is closed on return, so
 // a mid-build failure leaks nothing.
-func run(ctx context.Context, cfg config.Config, admin *adminDoc) error {
+func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) error {
 	global, err := cfg.Catalog()
 	if err != nil {
 		return err
@@ -164,7 +164,7 @@ func run(ctx context.Context, cfg config.Config, admin *adminDoc) error {
 			}
 		}
 		targets = append(targets, serveTarget{
-			srv:          &http.Server{Handler: newRouter(entries, admin, ln.Addr()), ReadHeaderTimeout: 10 * time.Second},
+			srv:          &http.Server{Handler: newRouter(entries, introspect, ln.Addr()), ReadHeaderTimeout: 10 * time.Second},
 			ln:           ln,
 			tls:          entries[0].cfg.TLS,
 			closeStreams: combineClose(entries),
@@ -535,7 +535,7 @@ func buildA2AServer(s config.Server, client *agent.Client, infos []schema.ModelI
 	factoryOpts = append(factoryOpts, agent.WithInboundQuestions(a2aQuestions(s)))
 	var security *a2aserver.Security
 	if s.Auth != nil {
-		security = &a2aserver.Security{Bearer: s.Auth.Bearer}
+		security = &a2aserver.Security{Bearer: s.Auth.Token}
 	}
 	return a2aserver.New(a2aserver.Options{
 		Factory:      agent.NewA2AFactory(client, factoryOpts...),
@@ -638,12 +638,5 @@ func httpAuth(s config.Server) *server.Auth {
 	if s.Auth == nil {
 		return nil
 	}
-	if s.Auth.Bearer != "" {
-		return &server.Auth{Scheme: "bearer", Token: s.Auth.Bearer}
-	}
-	username := s.Auth.Username
-	if username == "" {
-		username = "opencode"
-	}
-	return &server.Auth{Scheme: "basic", Username: username, Password: s.Auth.Password}
+	return &server.Auth{Token: s.Auth.Token}
 }

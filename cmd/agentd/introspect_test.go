@@ -9,12 +9,12 @@ import (
 	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
 
-func adminTestHandler(cfg config.Config) http.Handler {
+func introspectTestHandler(cfg config.Config) http.Handler {
 	entries := make([]*builtServer, 0, len(cfg.Servers))
 	for _, s := range cfg.Servers {
 		entries = append(entries, &builtServer{cfg: s})
 	}
-	return newRouter(entries, &adminDoc{
+	return newRouter(entries, &introspectDoc{
 		config:  cfg,
 		path:    "/etc/agentd.yaml",
 		env:     []string{"DEEPSEEK_API_KEY", "AGENTD_PLATFORM"},
@@ -22,7 +22,7 @@ func adminTestHandler(cfg config.Config) http.Handler {
 	}, nil)
 }
 
-func adminGet(t *testing.T, h http.Handler, path, bearer string) (int, string) {
+func introspectGet(t *testing.T, h http.Handler, path, bearer string) (int, string) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	if bearer != "" {
@@ -33,7 +33,7 @@ func adminGet(t *testing.T, h http.Handler, path, bearer string) (int, string) {
 	return rec.Code, rec.Body.String()
 }
 
-func TestAdminConfigRedactsSecrets(t *testing.T) {
+func TestConfigRedactsSecrets(t *testing.T) {
 	cfg := config.Config{
 		Models: []config.ModelConfig{{
 			ID: "m", Model: "m", Protocol: "openai-compatible-chat", ModelBaseURL: "https://api.example.com",
@@ -49,7 +49,7 @@ func TestAdminConfigRedactsSecrets(t *testing.T) {
 			{
 				Name: "sec", Kind: "http", Listen: "127.0.0.1:8788", Root: "/tmp/s", Agents: []string{"build"},
 				Host:        "sec.example.com",
-				Auth:        &config.AuthConfig{Bearer: "bearer-leak", Username: "admin", Password: "pw-leak"},
+				Auth:        &config.AuthConfig{Type: "bearer", Token: "bearer-leak"},
 				TLS:         &config.TLS{CertFile: "/etc/cert.pem", KeyFile: "/etc/key.pem"},
 				MCP:         []config.MCPServer{{Name: "mcp1", URL: "https://mcp.example", Headers: map[string]string{"Authorization": "token-leak"}}},
 				MediaUpload: &config.MediaUploadConfig{URL: "https://up.example", Header: "X-Auth", Value: "upload-leak", Fields: map[string]string{"k": "v"}},
@@ -58,16 +58,16 @@ func TestAdminConfigRedactsSecrets(t *testing.T) {
 				},
 			},
 		},
-		Control: &config.ControlConfig{Listen: "127.0.0.1:9090", Auth: &config.AuthConfig{Bearer: "ctl-leak"}},
+		Control: &config.ControlConfig{Listen: "127.0.0.1:9090", Auth: &config.AuthConfig{Type: "bearer", Token: "ctl-leak"}},
 		Wrap:    &config.WrapConfig{Process: "seatbelt", FailurePolicy: "fail-closed"},
 	}
-	code, body := adminGet(t, adminTestHandler(cfg), "/api/config", "")
+	code, body := introspectGet(t, introspectTestHandler(cfg), "/api/config", "")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, body)
 	}
 	for _, leak := range []string{
 		"sk-super-secret", "AKIA-LEAK", "aws-secret-leak", "aws-token-leak",
-		"bearer-leak", "pw-leak", "token-leak", "upload-leak", "ctl-leak",
+		"bearer-leak", "token-leak", "upload-leak", "ctl-leak",
 		"/etc/cert.pem", "/etc/key.pem",
 	} {
 		if strings.Contains(body, leak) {
@@ -77,10 +77,9 @@ func TestAdminConfigRedactsSecrets(t *testing.T) {
 	for _, want := range []string{
 		`"schemaVersion":1`,
 		`"apiKey":{"configured":true,"redacted":true}`,
-		`"bearer":{"configured":true,"redacted":true}`,
-		`"password":{"configured":true,"redacted":true}`,
+		`"type":"bearer"`,
+		`"token":{"configured":true,"redacted":true}`,
 		`"tls":{"configured":true,"redacted":true}`,
-		`"username":"admin"`,
 		`/etc/agentd.yaml`,
 		`"DEEPSEEK_API_KEY"`,
 		`"process":"seatbelt"`,
@@ -95,25 +94,34 @@ func TestAdminConfigRedactsSecrets(t *testing.T) {
 	}
 }
 
-func TestAdminConfigAuth(t *testing.T) {
+func TestConfigAuth(t *testing.T) {
 	cfg := config.Config{Servers: []config.Server{{
-		Name: "http", Kind: "http", Agents: []string{"build"}, Auth: &config.AuthConfig{Bearer: "s3cret"},
+		Name: "http", Kind: "http", Agents: []string{"build"}, Auth: &config.AuthConfig{Type: "bearer", Token: "s3cret"},
 	}}}
-	h := adminTestHandler(cfg)
-	if code, _ := adminGet(t, h, "/api/config", ""); code != http.StatusUnauthorized {
+	h := introspectTestHandler(cfg)
+	if code, _ := introspectGet(t, h, "/api/config", ""); code != http.StatusUnauthorized {
 		t.Fatalf("no credential = %d, want 401", code)
 	}
-	if code, _ := adminGet(t, h, "/api/config", "s3cret"); code != http.StatusOK {
+	if code, _ := introspectGet(t, h, "/api/config", "s3cret"); code != http.StatusOK {
 		t.Fatalf("with credential = %d, want 200", code)
+	}
+	if code, _ := introspectGet(t, h, "/api/config?auth_token=s3cret", ""); code != http.StatusOK {
+		t.Fatalf("with query credential = %d, want 200", code)
 	}
 
 	cfg.Servers[0].PublicRoutes = []string{"/api/config"}
-	if code, _ := adminGet(t, adminTestHandler(cfg), "/api/config", ""); code != http.StatusOK {
+	if code, _ := introspectGet(t, introspectTestHandler(cfg), "/api/config", ""); code != http.StatusOK {
 		t.Fatalf("publicRoutes must skip auth, got %d", code)
+	}
+
+	cfg.Servers[0].PublicRoutes = nil
+	cfg.Servers[0].Auth = &config.AuthConfig{Type: "bearer"}
+	if code, _ := introspectGet(t, introspectTestHandler(cfg), "/api/config", ""); code != http.StatusUnauthorized {
+		t.Fatalf("empty token must fail closed, got %d", code)
 	}
 }
 
-func TestAdminConfigSectionAndServerFilters(t *testing.T) {
+func TestConfigSectionAndServerFilters(t *testing.T) {
 	cfg := config.Config{
 		Models: []config.ModelConfig{{ID: "m", Model: "m", Protocol: "openai-compatible-chat"}},
 		Servers: []config.Server{
@@ -121,29 +129,29 @@ func TestAdminConfigSectionAndServerFilters(t *testing.T) {
 			{Name: "b", Kind: "a2a", Agents: []string{"build"}},
 		},
 	}
-	h := adminTestHandler(cfg)
+	h := introspectTestHandler(cfg)
 
-	if code, _ := adminGet(t, h, "/api/config?section=nope", ""); code != http.StatusBadRequest {
+	if code, _ := introspectGet(t, h, "/api/config?section=nope", ""); code != http.StatusBadRequest {
 		t.Fatalf("unknown section = %d, want 400", code)
 	}
-	_, body := adminGet(t, h, "/api/config?section=models", "")
+	_, body := introspectGet(t, h, "/api/config?section=models", "")
 	if !strings.Contains(body, `"models"`) || strings.Contains(body, `"name":"a"`) {
 		t.Fatalf("section=models should return only models:\n%s", body)
 	}
-	_, body = adminGet(t, h, "/api/config?section=servers&server=b", "")
+	_, body = introspectGet(t, h, "/api/config?section=servers&server=b", "")
 	if strings.Contains(body, `"name":"a"`) || !strings.Contains(body, `"name":"b"`) {
 		t.Fatalf("server filter wrong:\n%s", body)
 	}
 }
 
-func TestAdminSanitizesCredentialURLs(t *testing.T) {
+func TestConfigSanitizesCredentialURLs(t *testing.T) {
 	cfg := config.Config{Servers: []config.Server{{
 		Name: "http", Kind: "http", Agents: []string{"build"},
 		References:  []config.Reference{{Name: "r", Type: "git", Repository: "https://user:git-token-leak@github.com/o/r.git"}},
 		MediaUpload: &config.MediaUploadConfig{URL: "https://user:up-token-leak@up.example/api"},
 		Storage:     &config.StorageConfig{Backend: "s3", S3: &config.S3Config{Endpoint: "https://user:s3-token-leak@cos.example"}},
 	}}}
-	code, body := adminGet(t, adminTestHandler(cfg), "/api/config", "")
+	code, body := introspectGet(t, introspectTestHandler(cfg), "/api/config", "")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, body)
 	}
@@ -163,10 +171,10 @@ func TestAdminSanitizesCredentialURLs(t *testing.T) {
 	}
 }
 
-// TestAdminConfigExposesMediaStorageAndBody checks the new server fields are
+// TestConfigExposesMediaStorageAndBody checks the new server fields are
 // rendered: the media delivery policy (camelCase size limits), the media upload
 // lifetime, the media store (redacted), and the body cap.
-func TestAdminConfigExposesMediaStorageAndBody(t *testing.T) {
+func TestConfigExposesMediaStorageAndBody(t *testing.T) {
 	cfg := config.Config{
 		Models: []config.ModelConfig{{ID: "m", Model: "m", Protocol: "openai-compatible-chat"}},
 		Servers: []config.Server{{
@@ -183,7 +191,7 @@ func TestAdminConfigExposesMediaStorageAndBody(t *testing.T) {
 			MaxBodyBytes: 1 << 21,
 		}},
 	}
-	code, body := adminGet(t, adminTestHandler(cfg), "/api/config?section=servers", "")
+	code, body := introspectGet(t, introspectTestHandler(cfg), "/api/config?section=servers", "")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, body)
 	}
@@ -206,9 +214,9 @@ func TestAdminConfigExposesMediaStorageAndBody(t *testing.T) {
 	}
 }
 
-func TestAdminInfo(t *testing.T) {
+func TestInfo(t *testing.T) {
 	cfg := config.Config{Servers: []config.Server{{Name: "http", Kind: "http", Agents: []string{"build"}}}}
-	code, body := adminGet(t, adminTestHandler(cfg), "/api/info", "")
+	code, body := introspectGet(t, introspectTestHandler(cfg), "/api/info", "")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, body)
 	}
@@ -219,13 +227,13 @@ func TestAdminInfo(t *testing.T) {
 	}
 }
 
-// TestAdminAbsentWithoutDoc guards that a dynamic-instance router (no admin
-// doc) never serves the endpoints.
-func TestAdminAbsentWithoutDoc(t *testing.T) {
+// TestIntrospectAbsentWithoutDoc guards that a dynamic-instance router (no
+// introspection doc) never serves the endpoints.
+func TestIntrospectAbsentWithoutDoc(t *testing.T) {
 	entries := []*builtServer{{cfg: config.Server{Name: "d", Kind: "http"},
 		handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })}}
 	h := newRouter(entries, nil, nil)
-	if code, _ := adminGet(t, h, "/api/config", ""); code != http.StatusNotFound {
+	if code, _ := introspectGet(t, h, "/api/config", ""); code != http.StatusNotFound {
 		t.Fatalf("dynamic router /api/config = %d, want 404", code)
 	}
 }

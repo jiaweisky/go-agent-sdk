@@ -1,7 +1,7 @@
 // Command agentd-supervisor is a reusable host supervisor for cmd/agentd. It
 // speaks the supervisor_command protocol — one JSON request on stdin, one JSON
-// response on stdout — and satisfies it through a running agentd's admin
-// (control) API, so a host can point its supervisor_command at it without
+// response on stdout — and satisfies it through a running agentd's control
+// API, so a host can point its supervisor_command at it without
 // spawning Go processes itself.
 package main
 

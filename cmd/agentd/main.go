@@ -52,5 +52,5 @@ func runMain(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return run(ctx, cfg, &adminDoc{config: cfg, path: fl.config, env: env, version: version})
+	return run(ctx, cfg, &introspectDoc{config: cfg, path: fl.config, env: env, version: version})
 }

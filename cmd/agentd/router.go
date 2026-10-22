@@ -14,7 +14,7 @@ import (
 
 // router dispatches one listener's requests to its servers: by Host first, then
 // the longest matching Mount, then the root server. It also serves the
-// origin-root discovery endpoints and the read-only admin endpoints.
+// origin-root discovery endpoints and the read-only config/info endpoints.
 type router struct {
 	hosts   []*builtServer // entries with Host set
 	mounts  []*builtServer // entries with Mount set
@@ -23,12 +23,12 @@ type router struct {
 	defA2A  *builtServer   // the A2A entry that owns the origin-root card
 	entries []*builtServer // every entry on this listener
 
-	admin *adminDoc // nil on a dynamic instance router
-	addr  net.Addr  // this listener's bound address
+	introspect *introspectDoc // nil on a dynamic instance router
+	addr       net.Addr       // this listener's bound address
 }
 
-func newRouter(entries []*builtServer, admin *adminDoc, addr net.Addr) http.Handler {
-	r := &router{entries: entries, admin: admin, addr: addr}
+func newRouter(entries []*builtServer, introspect *introspectDoc, addr net.Addr) http.Handler {
+	r := &router{entries: entries, introspect: introspect, addr: addr}
 	for _, e := range entries {
 		if e.cfg.Host != "" {
 			r.hosts = append(r.hosts, e)
@@ -56,7 +56,7 @@ func (r *router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.serveDiscovery(w, req) {
 		return
 	}
-	if r.serveAdmin(w, req) {
+	if r.serveIntrospection(w, req) {
 		return
 	}
 	if e := r.matchHost(req); e != nil {
@@ -137,13 +137,13 @@ func (r *router) serveDiscovery(w http.ResponseWriter, req *http.Request) bool {
 	return false
 }
 
-// serveAdmin handles the read-only admin endpoints (/api/config, /api/info),
-// reporting whether it served the request. It is served on the listener's
-// origin-root server and uses that server's credential; a publicRoutes entry is
-// the only way to make it anonymous. Dynamic-instance routers have no admin doc,
-// so they never serve it.
-func (r *router) serveAdmin(w http.ResponseWriter, req *http.Request) bool {
-	if r.admin == nil {
+// serveIntrospection handles the read-only config/info endpoints
+// (/api/config, /api/info), reporting whether it served the request. It is
+// served on the listener's origin-root server and uses that server's
+// credential; a publicRoutes entry is the only way to make it anonymous.
+// Dynamic-instance routers have no introspection doc, so they never serve it.
+func (r *router) serveIntrospection(w http.ResponseWriter, req *http.Request) bool {
+	if r.introspect == nil {
 		return false
 	}
 	path := req.URL.Path
@@ -152,10 +152,10 @@ func (r *router) serveAdmin(w http.ResponseWriter, req *http.Request) bool {
 	}
 	if req.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeAdminError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only GET is supported")
+		writeIntrospectError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only GET is supported")
 		return true
 	}
-	if !r.authorizeAdmin(w, req) {
+	if !r.authorizeIntrospection(w, req) {
 		return true
 	}
 	if path == "/api/config" {
@@ -166,19 +166,20 @@ func (r *router) serveAdmin(w http.ResponseWriter, req *http.Request) bool {
 	return true
 }
 
-// authorizeAdmin enforces the origin-root server's credential (an explicit
-// publicRoutes entry is the only way to skip it), writing 404/401 on failure.
-func (r *router) authorizeAdmin(w http.ResponseWriter, req *http.Request) bool {
+// authorizeIntrospection enforces the origin-root server's credential (an
+// explicit publicRoutes entry is the only way to skip it), writing 404/401 on
+// failure.
+func (r *router) authorizeIntrospection(w http.ResponseWriter, req *http.Request) bool {
 	entry := r.root
 	if entry == nil {
-		writeAdminError(w, http.StatusNotFound, "not_found", "no server serves this listener")
+		writeIntrospectError(w, http.StatusNotFound, "not_found", "no server serves this listener")
 		return false
 	}
 	if entry.cfg.Auth == nil || publicPath(entry.cfg.PublicRoutes, req.URL.Path) || authorized(req, entry.cfg.Auth) {
 		return true
 	}
 	w.Header().Set("WWW-Authenticate", "Bearer")
-	writeAdminError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+	writeIntrospectError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 	return false
 }
 
@@ -186,22 +187,22 @@ func (r *router) serveConfig(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
 	section := query.Get("section")
 	if !validSection(section) {
-		writeAdminError(w, http.StatusBadRequest, "bad_request", "section must be models, servers, control or wrap")
+		writeIntrospectError(w, http.StatusBadRequest, "bad_request", "section must be models, servers, control or wrap")
 		return
 	}
-	sources := []sourceView{{Kind: "file", Path: r.admin.path}}
-	if len(r.admin.env) > 0 {
-		sources = append(sources, sourceView{Kind: "env", Expanded: r.admin.env})
+	sources := []sourceView{{Kind: "file", Path: r.introspect.path}}
+	if len(r.introspect.env) > 0 {
+		sources = append(sources, sourceView{Kind: "env", Expanded: r.introspect.env})
 	}
 	writeJSONStatus(w, http.StatusOK, configResponse{
-		SchemaVersion: adminSchemaVersion,
+		SchemaVersion: configSchemaVersion,
 		Sources:       sources,
-		Config:        buildConfigDocument(r.admin.config, section, query.Get("server")),
+		Config:        buildConfigDocument(r.introspect.config, section, query.Get("server")),
 	})
 }
 
 func (r *router) serveInfo(w http.ResponseWriter) {
-	info := infoResponse{Version: r.admin.version, PID: os.Getpid()}
+	info := infoResponse{Version: r.introspect.version, PID: os.Getpid()}
 	if r.addr != nil {
 		info.Listen = r.addr.String()
 	}

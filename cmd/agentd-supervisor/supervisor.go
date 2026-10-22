@@ -40,7 +40,7 @@ type lease struct {
 }
 
 // supervisor translates the supervisor_command protocol into calls on a running
-// agentd admin (control) API.
+// agentd control API.
 type supervisor struct {
 	cfg    supervisorConfig
 	client *http.Client

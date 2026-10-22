@@ -101,19 +101,8 @@ func New(ctx context.Context, client *agent.Client, opts Options) (*Server, erro
 	if client == nil {
 		return nil, errors.New("server: client is required")
 	}
-	if opts.Auth != nil {
-		switch opts.Auth.Scheme {
-		case "", schemeBearer:
-			if opts.Auth.Token == "" {
-				return nil, errors.New("server: Auth.Token is required for bearer")
-			}
-		case schemeBasic:
-			if opts.Auth.Password == "" {
-				return nil, errors.New("server: Auth.Password is required for basic")
-			}
-		default:
-			return nil, fmt.Errorf("server: unknown Auth.Scheme %q", opts.Auth.Scheme)
-		}
+	if opts.Auth != nil && opts.Auth.Token == "" {
+		return nil, errors.New("server: Auth.Token is required")
 	}
 	if opts.InteractionFallback == "" {
 		opts.InteractionFallback = "reject"

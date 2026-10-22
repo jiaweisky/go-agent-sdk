@@ -28,8 +28,14 @@ func TestValidateControl(t *testing.T) {
 	if err := base(&ControlConfig{Listen: "0.0.0.0:9090"}).Validate(); err == nil {
 		t.Fatal("expected a non-loopback control.listen without auth to be rejected")
 	}
-	if err := base(&ControlConfig{Listen: "0.0.0.0:9090", Auth: &AuthConfig{Bearer: "t"}}).Validate(); err != nil {
+	if err := base(&ControlConfig{Listen: "0.0.0.0:9090", Auth: &AuthConfig{Type: "bearer", Token: "t"}}).Validate(); err != nil {
 		t.Fatalf("non-loopback control with bearer should validate: %v", err)
+	}
+	if err := base(&ControlConfig{Listen: "0.0.0.0:9090", Auth: &AuthConfig{Type: "basic", Token: "t"}}).Validate(); err == nil {
+		t.Fatal("expected an unsupported control auth type to be rejected")
+	}
+	if err := base(&ControlConfig{Listen: "0.0.0.0:9090", Auth: &AuthConfig{Type: "bearer"}}).Validate(); err == nil {
+		t.Fatal("expected an empty control token to be rejected")
 	}
 	if err := base(&ControlConfig{Listen: "127.0.0.1:9090", ProjectListen: "0.0.0.0:0"}).Validate(); err == nil {
 		t.Fatal("expected a non-loopback projectListen to be rejected")

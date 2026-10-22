@@ -8,7 +8,7 @@ import (
 // ProjectRequest is the body of the control API's POST /admin/projects: one
 // isolated project instance to create. Root and WorkingDirectory must be
 // absolute host paths; Isolation is optional (default: none). It is the shared
-// contract between the agentd admin API and the supervisor command.
+// contract between the control API and the supervisor command.
 type ProjectRequest struct {
 	Name             string   `json:"name"`
 	Kind             string   `json:"kind"`
@@ -51,7 +51,7 @@ func (r ProjectRequest) Validate() error {
 	if r.Readonly && r.Isolation != nil {
 		return errors.New("readonly shares the source directory; isolation is not allowed")
 	}
-	if err := validateAuthConfig(r.Kind, r.Auth); err != nil {
+	if err := validateAuthConfig(r.Auth); err != nil {
 		return err
 	}
 	if err := ValidateSandbox(r.Sandbox); err != nil {

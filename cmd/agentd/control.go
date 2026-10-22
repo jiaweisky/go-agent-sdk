@@ -2,13 +2,11 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -278,7 +276,7 @@ func (m *projectManager) teardown(project isolation.IsolatedProject) {
 	_ = project.Teardown(ctx)
 }
 
-// controlHandler serves the admin API.
+// controlHandler serves the control API: project-instance lifecycle endpoints.
 type controlHandler struct {
 	manager *projectManager
 	auth    *config.AuthConfig
@@ -294,11 +292,13 @@ func newControlHandler(manager *projectManager, auth *config.AuthConfig) http.Ha
 }
 
 func (h *controlHandler) authorized(r *http.Request) bool {
-	if h.auth == nil || h.auth.Bearer == "" {
+	if h.auth == nil {
 		return true
 	}
-	provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(h.auth.Bearer)) == 1
+	if h.auth.Token == "" {
+		return false
+	}
+	return constEq(bearerToken(r), h.auth.Token)
 }
 
 func (h *controlHandler) list(w http.ResponseWriter, r *http.Request) {

@@ -16,7 +16,7 @@ import (
 )
 
 // TestAgentdSupervisor runs both binaries end to end: a real agentd with its
-// admin (control) API enabled, and agentd-supervisor satisfying the
+// control API enabled, and agentd-supervisor satisfying the
 // supervisor_command protocol against it. It acquires a writable lease (the
 // instance must actually serve sessions), acquires a read-only lease (it must
 // share the source directory), rejects an agent the template does not expose,
@@ -71,7 +71,8 @@ servers:
 control:
   listen: 127.0.0.1:%d
   auth:
-    bearer: %s
+    type: bearer
+    token: %s
 `, staticPort, filepath.Join(work, "static-root"), source, controlPort, token))
 	agentdProc := startAgentd(t, agentd, agentdCfg)
 	defer func() {
@@ -208,7 +209,7 @@ func startAgentd(t *testing.T, bin, configPath string) *exec.Cmd {
 	return cmd
 }
 
-// waitForControl polls the admin API until agentd is listening.
+// waitForControl polls the control API until agentd is listening.
 func waitForControl(t *testing.T, port int, token string) {
 	t.Helper()
 	url := fmt.Sprintf("http://127.0.0.1:%d/admin/projects", port)

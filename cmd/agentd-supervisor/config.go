@@ -7,7 +7,7 @@ import (
 )
 
 // supervisorConfig configures the reuse-oriented project supervisor: a running
-// agentd admin (control) API plus the template every acquired project is cloned
+// agentd control API plus the template every acquired project is cloned
 // from. It is loaded with the agentd config loader, so `${VAR}` references and
 // strict, unknown-key-rejecting parsing apply too.
 type supervisorConfig struct {
@@ -26,14 +26,14 @@ func (c supervisorConfig) Validate() error {
 	return nil
 }
 
-// endpoint is a running agentd's control (admin) API.
+// endpoint is a running agentd's control API.
 type endpoint struct {
 	BaseURL string `yaml:"baseURL"`
 	Token   string `yaml:"token"`
 }
 
 // projectTemplate describes the isolated instance created per project. rootBase
-// plus the project id forms the SDK state root; the agentd admin API applies the
+// plus the project id forms the SDK state root; the agentd control API applies the
 // isolation (worktree/overlay/copy) and prepares the view.
 type projectTemplate struct {
 	Kind             string                  `yaml:"kind"` // http | a2a
