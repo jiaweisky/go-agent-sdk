@@ -255,7 +255,6 @@ type inboundMediaView struct {
 	Upload           bool                `json:"upload,omitempty"`
 	Downsample       bool                `json:"downsample,omitempty"`
 	SpoolDir         string              `json:"spoolDir,omitempty"`
-	FetchURL         bool                `json:"fetchURL,omitempty"`
 	MaxBytes         *mediaSizeLimitView `json:"maxBytes,omitempty"`
 }
 
@@ -273,24 +272,20 @@ type mediaSizeLimitView struct {
 // storageView is the redacted media-store config. Credential-bearing URLs have
 // their userinfo stripped; every secret becomes a configured/redacted marker.
 type storageView struct {
-	Backend        string          `json:"backend,omitempty"`
-	URL            string          `json:"url,omitempty"`
-	Auth           string          `json:"auth,omitempty"`
-	Username       string          `json:"username,omitempty"`
-	Password       secret          `json:"password"`
-	Token          secret          `json:"token"`
-	Header         string          `json:"header,omitempty"`
-	Value          secret          `json:"value"`
-	PresignSecret  secret          `json:"presignSecret"`
-	PresignURL     string          `json:"presignURL,omitempty"`
-	PresignTTL     string          `json:"presignTTL,omitempty"`
-	Root           string          `json:"root,omitempty"`
-	ServeBaseURL   string          `json:"serveBaseURL,omitempty"`
-	S3             *s3StorageView  `json:"s3,omitempty"`
-	COS            *cosStorageView `json:"cos,omitempty"`
-	MediaTypes     []string        `json:"mediaTypes,omitempty"`
-	MaxInlineBytes int64           `json:"maxInlineBytes,omitempty"`
-	MaxBytes       int64           `json:"maxBytes,omitempty"`
+	Backend       string          `json:"backend,omitempty"`
+	URL           string          `json:"url,omitempty"`
+	Auth          string          `json:"auth,omitempty"`
+	Username      string          `json:"username,omitempty"`
+	Password      secret          `json:"password"`
+	Token         secret          `json:"token"`
+	Header        string          `json:"header,omitempty"`
+	Value         secret          `json:"value"`
+	PresignSecret secret          `json:"presignSecret"`
+	PresignTTL    string          `json:"presignTTL,omitempty"`
+	Root          string          `json:"root,omitempty"`
+	ServeBaseURL  string          `json:"serveBaseURL,omitempty"`
+	S3            *s3StorageView  `json:"s3,omitempty"`
+	COS           *cosStorageView `json:"cos,omitempty"`
 }
 
 type s3StorageView struct {
@@ -513,24 +508,20 @@ func storageViewOf(s *config.StorageConfig) *storageView {
 		return nil
 	}
 	return &storageView{
-		Backend:        s.Backend,
-		URL:            sanitizeURL(s.URL),
-		Auth:           s.Auth,
-		Username:       s.Username,
-		Password:       redact(s.Password),
-		Token:          redact(s.Token),
-		Header:         s.Header,
-		Value:          redact(s.Value),
-		PresignSecret:  redact(s.PresignSecret),
-		PresignURL:     sanitizeURL(s.PresignURL),
-		PresignTTL:     s.PresignTTL,
-		Root:           s.Root,
-		ServeBaseURL:   sanitizeURL(s.ServeBaseURL),
-		S3:             s3StorageViewOf(s.S3),
-		COS:            cosStorageViewOf(s.COS),
-		MediaTypes:     s.MediaTypes,
-		MaxInlineBytes: s.MaxInlineBytes,
-		MaxBytes:       s.MaxBytes,
+		Backend:       s.Backend,
+		URL:           sanitizeURL(s.URL),
+		Auth:          s.Auth,
+		Username:      s.Username,
+		Password:      redact(s.Password),
+		Token:         redact(s.Token),
+		Header:        s.Header,
+		Value:         redact(s.Value),
+		PresignSecret: redact(s.PresignSecret),
+		PresignTTL:    s.PresignTTL,
+		Root:          s.Root,
+		ServeBaseURL:  sanitizeURL(s.ServeBaseURL),
+		S3:            s3StorageViewOf(s.S3),
+		COS:           cosStorageViewOf(s.COS),
 	}
 }
 
@@ -640,7 +631,6 @@ func inboundMediaViewOf(m *config.InboundMediaConfig) *inboundMediaView {
 		Prefer:           m.Prefer,
 		Upload:           m.Upload,
 		Downsample:       m.Downsample,
-		FetchURL:         m.FetchURL,
 		MaxBytes:         mediaSizeLimitViewOf(m.MaxBytes),
 	}
 	if m.Spool != nil {

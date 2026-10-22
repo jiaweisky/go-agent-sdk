@@ -91,10 +91,6 @@ type MediaPolicy struct {
 	// Spool, when set, is the last-resort disk location for byte-backed media the
 	// model cannot take inline or as a file.
 	Spool *MediaSpoolPolicy
-	// FetchURL allows honoring a caller-supplied url source (the provider fetches
-	// it). When false, a url reference is omitted rather than handed to the
-	// provider.
-	FetchURL bool
 	// MaxBytes is the per-modality hard ceiling: byte-backed media larger than
 	// its modality's ceiling is skipped (with a note) instead of delivered. Zero
 	// lifts it.

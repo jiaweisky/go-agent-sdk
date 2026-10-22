@@ -89,25 +89,22 @@ servers:
     # Unset keeps the caller-declared behavior (inline-first, with a file fallback).
     # media:
     #   inlineLimitBytes: 262144              # size budget: over this cannot be inlined
-    #   prefer: [file, inline]                # first feasible source (url is caller-only)
+    #   prefer: [file, inline]                # first feasible source (url = hosted or caller URL)
     #   upload: true                          # large media -> provider Files API (needs mediaUpload + model sources incl. file)
     #   downsample: true                      # over budget -> shrink first, whatever source is picked next
     #   spool: { dir: "{Root}/data/spool" }   # last resort: on disk, under the state root
-    #   fetchURL: true                        # allow a caller-supplied url source
     #   maxBytes: 52428800                    # hard skip above this
-    # Provider-independent media store ({M17}/{M18}); serves the model edge (url)
-    # and the A2A file exchange (ingest). Backends: http | local | s3 | cos.
-    # Credentials validate BOTH writes (upload) and reads (download); omit them
-    # for an anonymous/public origin or bucket. `s3` is S3-compatible (AWS S3 /
-    # MinIO, and COS via its S3 endpoint); the native `cos` backend drives Tencent
-    # COS over its own REST API (SHA1-signed):
+    # Provider-independent media store ({M17}); serves the model edge (url).
+    # Backends: http | local | s3 | cos. Credentials authenticate the upload;
+    # omit them for an anonymous/public origin or bucket. `s3` is S3-compatible
+    # (AWS S3 / MinIO, and COS via its S3 endpoint); the native `cos` backend
+    # drives Tencent COS over its own REST API (SHA1-signed):
     # storage:
     #   backend: http                         # http | local | s3 | cos
     #   url: https://store.example/x/
-    #   auth: bearer                          # none | basic | bearer (write AND read)
+    #   auth: bearer                          # none | basic | bearer (upload)
     #   token: ${STORE_TOKEN}                 # basic → username/password; or a custom header/value
-    #   presignSecret: ${NGINX_SECURE_LINK}   # optional: sign urls (nginx secure_link md5+expires)
-    #   presignURL: https://signer.example/sign   # OR an external signer (POST {key,method,expires})
+    #   presignSecret: ${NGINX_SECURE_LINK}   # optional: sign returned urls (nginx secure_link)
     # storage:
     #   backend: cos                          # http | local | s3 | cos
     #   cos: { region: ap-guangzhou, bucket: my-bucket-1250000000,

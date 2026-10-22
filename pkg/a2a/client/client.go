@@ -10,11 +10,6 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
-// StorageExtensionURI identifies the file-exchange extension an agent may
-// advertise on its AgentCard (see pkg/a2a/server). It is the discovery contract
-// for handing an agent a large file out of band.
-const StorageExtensionURI = "https://github.com/jiaweisky/go-agent-sdk/extensions/storage/v1"
-
 // Card is the subset of a remote agent's AgentCard the SDK consumes.
 type Card struct {
 	// Name is the agent's human-readable name.
@@ -27,32 +22,6 @@ type Card struct {
 	Streaming bool
 	// ProtocolVersion is the remote's A2A protocol version.
 	ProtocolVersion string
-	// Ingest, when set, is the remote's file-exchange contract: where to upload
-	// a large file out of band before referencing it. Nil when the remote
-	// advertises none (send small files inline; the sender assumes nothing else).
-	Ingest *Ingest
-}
-
-// Ingest is a remote agent's file-exchange contract, read from its AgentCard.
-type Ingest struct {
-	// Schemes a peer may reference (informational).
-	Schemes []string
-	// MediaTypes the remote accepts (informational).
-	MediaTypes []string
-	// MaxInlineBytes is the largest inline part the remote accepts; larger media
-	// should be uploaded and referenced.
-	MaxInlineBytes int64
-	// MaxBytes is the largest referenced file the remote accepts.
-	MaxBytes int64
-	// UploadURL is where a sender writes a file (reference mode); empty when the
-	// remote advertises no static target.
-	UploadURL string
-	// UploadMethod is the HTTP method for UploadURL (default PUT).
-	UploadMethod string
-	// BrokerURL, when set, issues a per-file upload target on request (broker
-	// mode): a sender POSTs size/name/mime there and writes to the target it
-	// returns. Preferred over UploadURL when present.
-	BrokerURL string
 }
 
 // EventKind classifies an event received from a remote A2A agent. The zero

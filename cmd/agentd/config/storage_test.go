@@ -11,7 +11,7 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
-// TestHTTPAuthKinds checks basic/bearer credentials reach both writes and reads.
+// TestHTTPAuthKinds checks basic/bearer credentials reach writes.
 func TestHTTPAuthKinds(t *testing.T) {
 	cases := []struct {
 		name string
@@ -24,17 +24,13 @@ func TestHTTPAuthKinds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var putAuth, getAuth string
+			var putAuth string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				key := "Authorization"
 				if tc.cfg.Header != "" {
 					key = tc.cfg.Header
 				}
-				if r.Method == http.MethodPut {
-					putAuth = r.Header.Get(key)
-				} else {
-					getAuth = r.Header.Get(key)
-				}
+				putAuth = r.Header.Get(key)
 				w.WriteHeader(http.StatusOK)
 			}))
 			defer srv.Close()
@@ -43,20 +39,12 @@ func TestHTTPAuthKinds(t *testing.T) {
 			cfg.Backend, cfg.URL = "http", srv.URL+"/"
 			store := cfg.Store()
 			name := "a.png"
-			ref, err := store.Put(context.Background(), schema.MediaUpload{Name: &name, Data: []byte("x")})
+			_, err := store.Put(context.Background(), schema.MediaUpload{Name: &name, Data: []byte("x")})
 			if err != nil {
 				t.Fatalf("put: %v", err)
 			}
 			if putAuth != tc.want {
 				t.Fatalf("put auth = %q, want %q", putAuth, tc.want)
-			}
-			rc, err := store.Get(context.Background(), ref)
-			if err != nil {
-				t.Fatalf("get: %v", err)
-			}
-			rc.Close()
-			if getAuth != tc.want {
-				t.Fatalf("get auth = %q, want %q", getAuth, tc.want)
 			}
 		})
 	}
@@ -71,8 +59,7 @@ func TestSecureLinkMD5Vector(t *testing.T) {
 	}
 }
 
-// TestHTTPPresign checks a PresignSecret makes Put return a signed url and
-// Reserve issue a signed PUT slot.
+// TestHTTPPresign checks a PresignSecret makes Put return a signed url.
 func TestHTTPPresign(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -89,38 +76,6 @@ func TestHTTPPresign(t *testing.T) {
 	if !strings.Contains(ref.Value, "md5=") || !strings.Contains(ref.Value, "expires=") || ref.ExpiresAt == nil {
 		t.Fatalf("presigned ref = %+v", ref)
 	}
-
-	target, err := store.Reserve(context.Background(), "a.png", "image/png", 3)
-	if err != nil {
-		t.Fatalf("reserve: %v", err)
-	}
-	if !strings.Contains(target.URL, "md5=") || target.Method != http.MethodPut || target.Reference == "" {
-		t.Fatalf("reserve = %+v", target)
-	}
-}
-
-// TestHTTPPresignService checks an external signer issues the broker slot.
-func TestHTTPPresignService(t *testing.T) {
-	var gotBody string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		gotBody = string(b)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"uploadUrl":"https://store/put/x","reference":"https://store/get/x"}`)
-	}))
-	defer srv.Close()
-
-	store := StorageConfig{Backend: "http", URL: "https://origin/base/", PresignURL: srv.URL, PresignTTL: "5m"}.Store()
-	target, err := store.Reserve(context.Background(), "a.png", "image/png", 123)
-	if err != nil {
-		t.Fatalf("reserve: %v", err)
-	}
-	if target.URL != "https://store/put/x" || target.Reference != "https://store/get/x" || target.Method != http.MethodPut {
-		t.Fatalf("target = %+v", target)
-	}
-	if !strings.Contains(gotBody, `"key"`) || !strings.Contains(gotBody, "PUT") {
-		t.Fatalf("presign request body = %q", gotBody)
-	}
 }
 
 func TestValidateHTTPAuth(t *testing.T) {
@@ -129,7 +84,6 @@ func TestValidateHTTPAuth(t *testing.T) {
 		{URL: "https://x/", Auth: "bearer"},
 		{URL: "https://x/", Auth: "digest"},
 		{URL: "https://x/", Header: "X-K"},
-		{URL: "https://x/", PresignSecret: "s", PresignURL: "https://sign"},
 	} {
 		if err := ValidateStorage(&c); err == nil {
 			t.Fatalf("expected rejection: %+v", c)
@@ -199,7 +153,7 @@ func TestStoragePut(t *testing.T) {
 	}
 }
 
-func TestLocalStorePutGet(t *testing.T) {
+func TestLocalStorePut(t *testing.T) {
 	dir := t.TempDir()
 	store := StorageConfig{Backend: "local", Root: dir, ServeBaseURL: "https://media.example/pub"}.Store()
 	name := "a.png"
@@ -209,22 +163,5 @@ func TestLocalStorePutGet(t *testing.T) {
 	}
 	if ref.Value[:len("https://media.example/pub/")] != "https://media.example/pub/" {
 		t.Fatalf("value = %q", ref.Value)
-	}
-	rc, err := store.Get(context.Background(), ref)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer rc.Close()
-	b, _ := io.ReadAll(rc)
-	if string(b) != "bytes" {
-		t.Fatalf("roundtrip = %q", b)
-	}
-	// A foreign reference is rejected.
-	if _, err := store.Get(context.Background(), schema.Reference{Source: "url", Value: "https://other/x"}); err == nil {
-		t.Fatal("a foreign reference must be rejected")
-	}
-	// A traversal reference is rejected.
-	if _, err := store.Get(context.Background(), schema.Reference{Source: "url", Value: "https://media.example/pub/../etc/passwd"}); err == nil {
-		t.Fatal("a traversal reference must be rejected")
 	}
 }

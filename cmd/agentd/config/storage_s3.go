@@ -34,7 +34,7 @@ type S3Config struct {
 	// PathStyle addresses objects as endpoint/bucket/key (MinIO/older COS) rather
 	// than bucket.endpoint/key.
 	PathStyle bool `yaml:"pathStyle"`
-	// PresignTTL bounds a returned url's lifetime (and a Reserve write target).
+	// PresignTTL bounds a returned presigned GET url's lifetime.
 	// Empty defaults to 15m.
 	PresignTTL string `yaml:"presignTTL"`
 }
@@ -147,95 +147,6 @@ func (c s3Store) Put(ctx context.Context, media schema.MediaUpload) (schema.Refe
 	}
 	expires := time.Now().Add(c.ttl())
 	return schema.Reference{Source: "url", Value: signed, ExpiresAt: &expires}, nil
-}
-
-// Get reads an object back (a signed GET; a presigned url is also accepted).
-func (c s3Store) Get(ctx context.Context, ref schema.Reference) (io.ReadCloser, error) {
-	u, err := url.Parse(ref.Value)
-	if err != nil {
-		return nil, err
-	}
-	if !c.owns(u) {
-		return nil, fmt.Errorf("%w: %q", schema.ErrUnsupportedReference, ref.Value)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	// A presigned url already carries its signature; only sign a bare object url.
-	if !c.anonymous() && u.Query().Get("X-Amz-Signature") == "" {
-		c.signer().signHeader(req, nil)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		return nil, fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	return resp.Body, nil
-}
-
-// Target is empty: a presigned target is per-object, so s3 advertises none
-// statically (a peer uses Reserve, or the server's ingest endpoint).
-func (c s3Store) Target() schema.UploadTarget { return schema.UploadTarget{} }
-
-// Reserve issues a presigned PUT target for one file (broker mode): a sender
-// writes directly to the store and then references Reference.
-func (c s3Store) Reserve(ctx context.Context, name, mime string, size int64) (schema.UploadTarget, error) {
-	if c.anonymous() {
-		return schema.UploadTarget{}, nil
-	}
-	key := sanitizeKey(name)
-	if key == "" {
-		key = hex.EncodeToString([]byte(name + ":" + mime))
-	}
-	u, err := c.objectURL(key)
-	if err != nil {
-		return schema.UploadTarget{}, err
-	}
-	put, err := c.signer().presign(http.MethodPut, u, c.ttl())
-	if err != nil {
-		return schema.UploadTarget{}, err
-	}
-	return schema.UploadTarget{
-		URL: put, Method: http.MethodPut, Reference: u.String(), Expires: time.Now().Add(c.ttl()),
-	}, nil
-}
-
-func objectHost(c *S3Config, base *url.URL) string {
-	if c.PathStyle {
-		return base.Host
-	}
-	return c.Bucket + "." + base.Host
-}
-
-// owns reports whether u addresses this store: the host must match the endpoint
-// (with the bucket, for virtual-host addressing) and, for path-style addressing,
-// the path must sit under the store's bucket.
-func (c s3Store) owns(u *url.URL) bool {
-	base, err := url.Parse(c.s3().Endpoint)
-	if err != nil || u.Host != objectHost(c.s3(), base) {
-		return false
-	}
-	if !c.s3().PathStyle {
-		return true
-	}
-	prefix := path.Clean("/"+path.Join(base.Path, c.s3().Bucket)) + "/"
-	return strings.HasPrefix(u.Path, prefix)
-}
-
-func sanitizeKey(name string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			return r
-		default:
-			return '-'
-		}
-	}, path.Base(name))
 }
 
 // sigV4 signs an HTTP request with AWS Signature Version 4 (header auth, and a

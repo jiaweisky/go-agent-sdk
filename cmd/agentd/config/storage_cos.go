@@ -33,7 +33,7 @@ type COSConfig struct {
 	SessionToken string `yaml:"sessionToken"`
 	// Endpoint overrides the default host (<bucket>.cos.<region>.myqcloud.com).
 	Endpoint string `yaml:"endpoint"`
-	// PresignTTL bounds a returned url's lifetime (and a Reserve write target).
+	// PresignTTL bounds a returned presigned GET url's lifetime.
 	// Empty defaults to 15m.
 	PresignTTL string `yaml:"presignTTL"`
 }
@@ -61,9 +61,7 @@ func ValidateCOS(c *COSConfig) error {
 }
 
 // cosStore is a Tencent COS store over its native REST API (q-sign-algorithm=sha1),
-// needing no S3 SDK. It mirrors the S3 backend's behavior — a Put returns a
-// presigned GET url, Reserve issues a presigned PUT slot — so the A2A edge is
-// identical whichever object store is configured.
+// needing no S3 SDK. A Put returns a presigned GET url for the provider.
 type cosStore struct {
 	config StorageConfig
 	// now is injectable for tests; nil uses time.Now.
@@ -157,60 +155,6 @@ func (c cosStore) Put(ctx context.Context, media schema.MediaUpload) (schema.Ref
 	}
 	expires := c.clock().Add(c.ttl())
 	return schema.Reference{Source: "url", Value: c.presign("get", key, expires), ExpiresAt: &expires}, nil
-}
-
-// Get reads an object back (a signed GET; a presigned url is also accepted).
-func (c cosStore) Get(ctx context.Context, ref schema.Reference) (io.ReadCloser, error) {
-	u, err := url.Parse(ref.Value)
-	if err != nil {
-		return nil, err
-	}
-	if u.Host != c.host() {
-		return nil, fmt.Errorf("%w: %q", schema.ErrUnsupportedReference, ref.Value)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	// A presigned url already carries its signature; only sign a bare object url.
-	if !c.anonymous() && u.Query().Get("q-signature") == "" {
-		c.authorize(req, strings.TrimPrefix(u.Path, "/"), "get")
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		return nil, fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	return resp.Body, nil
-}
-
-// Target is empty: a presigned target is per-object, so cos advertises none
-// statically (a peer uses Reserve, or the server's ingest endpoint).
-func (c cosStore) Target() schema.UploadTarget { return schema.UploadTarget{} }
-
-// Reserve issues a presigned PUT target for one file (broker mode): a sender
-// writes directly to COS and then references Reference.
-func (c cosStore) Reserve(ctx context.Context, name, mime string, size int64) (schema.UploadTarget, error) {
-	if c.anonymous() {
-		return schema.UploadTarget{}, nil
-	}
-	key := sanitizeKey(name)
-	if key == "" {
-		key = hex.EncodeToString([]byte(name + ":" + mime))
-	}
-	expires := c.clock().Add(c.ttl())
-	t := schema.UploadTarget{
-		URL: c.presign("put", key, expires), Method: http.MethodPut,
-		Reference: c.objectURL(key), Expires: expires,
-	}
-	if mime != "" {
-		t.Headers = map[string]string{"Content-Type": mime}
-	}
-	return t, nil
 }
 
 // authorize adds the native COS Authorization header, signing host and any

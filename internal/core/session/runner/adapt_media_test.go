@@ -7,7 +7,6 @@ import (
 	"errors"
 	"image"
 	"image/png"
-	"io"
 	"math/rand"
 	"os"
 	"strconv"
@@ -301,7 +300,8 @@ func TestPolicyMaxBytesLeavesForOmission(t *testing.T) {
 }
 
 // TestPolicyGatesInThePlanner covers the omissions the delivery loop cannot make
-// itself: a disallowed url and an over-limit inline payload.
+// itself: an over-limit inline payload. URL sources are governed by provider
+// capability, not by the operator policy.
 func TestPolicyGatesInThePlanner(t *testing.T) {
 	info := runnerModelInfo(schema.ModelAPI{Protocol: "openai-chat", URL: runnerStrPtr("https://openai.example/v1")}, nil)
 	info.Capabilities.Input = []string{"text", "image"}
@@ -310,9 +310,9 @@ func TestPolicyGatesInThePlanner(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 
-	policy := mediaPolicyForModel(model, core.AgentSelection{}, &core.MediaPolicy{InlineLimitBytes: core.MediaSizeLimits{Default: 4}, FetchURL: false})
-	if got := policy.reason("user", "image/jpeg", "url", "https://example.com/a.jpg"); got != string(schema.AttachmentOmitURLNotAllowed) {
-		t.Fatalf("disallowed url reason = %q, want url_not_allowed", got)
+	policy := mediaPolicyForModel(model, core.AgentSelection{}, &core.MediaPolicy{InlineLimitBytes: core.MediaSizeLimits{Default: 4}})
+	if got := policy.reason("user", "image/jpeg", "url", "https://example.com/a.jpg"); got != "" {
+		t.Fatalf("url reason = %q, want empty when the model supports it", got)
 	}
 	if got := policy.reason("user", "image/png", "inline", dataURL("image/png", []byte{1, 2, 3, 4, 5})); got != string(schema.AttachmentOmitTooLarge) {
 		t.Fatalf("oversized inline reason = %q, want too_large", got)
@@ -321,15 +321,16 @@ func TestPolicyGatesInThePlanner(t *testing.T) {
 		t.Fatalf("small inline reason = %q, want empty", got)
 	}
 
-	allowed := mediaPolicyForModel(model, core.AgentSelection{}, &core.MediaPolicy{FetchURL: true})
-	if got := allowed.reason("user", "image/jpeg", "url", "https://example.com/a.jpg"); got != "" {
-		t.Fatalf("allowed url reason = %q, want empty", got)
+	// A model that cannot carry the url form reports unsupported_source; the
+	// delivery note keeps the URL so tools can fetch it.
+	info.Capabilities.Input = []string{"text"}
+	textOnly, err := FromCatalogModel(info, schema.Credential{})
+	if err != nil {
+		t.Fatalf("resolve text-only: %v", err)
 	}
-
-	// With no policy the caller-declared behavior is unchanged.
-	legacy := mediaPolicyForModel(model, core.AgentSelection{}, nil)
-	if got := legacy.reason("user", "image/jpeg", "url", "https://example.com/a.jpg"); got != "" {
-		t.Fatalf("no-policy url reason = %q, want empty", got)
+	textPolicy := mediaPolicyForModel(textOnly, core.AgentSelection{}, nil)
+	if got := textPolicy.reason("user", "image/jpeg", "url", "https://example.com/a.jpg"); got != string(schema.AttachmentOmitUnsupportedModality) {
+		t.Fatalf("text-only url reason = %q, want unsupported_modality", got)
 	}
 }
 
@@ -341,12 +342,6 @@ type fakeStore struct {
 func (f *fakeStore) Put(context.Context, schema.MediaUpload) (schema.Reference, error) {
 	f.called++
 	return f.ref, nil
-}
-
-func (f *fakeStore) Get(context.Context, schema.Reference) (io.ReadCloser, error) { return nil, nil }
-func (f *fakeStore) Target() schema.UploadTarget                                  { return schema.UploadTarget{} }
-func (f *fakeStore) Reserve(context.Context, string, string, int64) (schema.UploadTarget, error) {
-	return schema.UploadTarget{}, nil
 }
 
 // TestPolicyHostsURL: with `url` preferred and a store configured, a byte-backed

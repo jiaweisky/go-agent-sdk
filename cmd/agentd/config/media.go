@@ -48,8 +48,8 @@ type MediaUploadConfig struct {
 type InboundMediaConfig struct {
 	// InlineLimitBytes is the per-modality size budget (raw bytes).
 	InlineLimitBytes MediaSizeLimit `yaml:"inlineLimitBytes"`
-	// Prefer is the source order the policy attempts (file, inline); empty means
-	// [file, inline].
+	// Prefer is the source order the policy attempts (file, url, inline); empty
+	// means [file, inline].
 	Prefer []string `yaml:"prefer"`
 	// Upload allows adapting byte-backed media to a provider file reference via
 	// mediaUpload.
@@ -59,9 +59,6 @@ type InboundMediaConfig struct {
 	Downsample bool `yaml:"downsample"`
 	// Spool is the last-resort disk location for undeliverable byte-backed media.
 	Spool *MediaSpoolConfig `yaml:"spool"`
-	// FetchURL allows honoring a caller-supplied url source (the provider
-	// fetches it).
-	FetchURL bool `yaml:"fetchURL"`
 	// MaxBytes is the per-modality hard ceiling; larger byte-backed media is
 	// skipped (noted).
 	MaxBytes MediaSizeLimit `yaml:"maxBytes"`
@@ -138,7 +135,6 @@ func (c *InboundMediaConfig) Policy(root string) *core.MediaPolicy {
 		Upload:           c.Upload,
 		Downsample:       c.Downsample,
 		Spool:            spool,
-		FetchURL:         c.FetchURL,
 		MaxBytes:         c.MaxBytes.limits(),
 	}
 }

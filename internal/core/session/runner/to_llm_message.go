@@ -41,6 +41,12 @@ func (p mediaPolicy) omitNote(messageID schema.MessageID, name *string, role, mi
 	if p.detail != nil {
 		detail = p.detail(role, mime, source, data)
 	}
+	if llmschema.MediaSource(source) == llmschema.MediaSourceURL && data != "" {
+		if detail != "" {
+			detail += "; "
+		}
+		detail += "URL: " + data
+	}
 	if p.omit != nil {
 		p.omit(messageID, value, mime, reason, detail)
 	}

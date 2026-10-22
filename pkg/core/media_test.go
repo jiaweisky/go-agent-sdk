@@ -12,7 +12,7 @@ func TestMediaPolicyValidate(t *testing.T) {
 		{},
 		{Prefer: []MediaPolicySource{MediaPolicySourceFile, MediaPolicySourceInline}, InlineLimitBytes: MediaSizeLimits{Default: 1024}, MaxBytes: MediaSizeLimits{Default: 2048}},
 		{Prefer: []MediaPolicySource{MediaPolicySourceURL, MediaPolicySourceFile, MediaPolicySourceInline}},
-		{Spool: &MediaSpoolPolicy{Dir: "/tmp/spool"}, FetchURL: true, Upload: true, Downsample: true},
+		{Spool: &MediaSpoolPolicy{Dir: "/tmp/spool"}, Upload: true, Downsample: true},
 	}
 	for _, policy := range valid {
 		if err := policy.Validate(); err != nil {

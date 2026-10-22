@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,34 +65,6 @@ func TestCOSStoreRoundTrip(t *testing.T) {
 	if ref.ExpiresAt == nil {
 		t.Fatal("presigned reference should carry an expiry")
 	}
-	rc, err := store.Get(context.Background(), schema.Reference{Source: "url", Value: srv.URL + "/b/key"})
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer rc.Close()
-	if b, _ := io.ReadAll(rc); string(b) != "stored" {
-		t.Fatalf("get body = %q", b)
-	}
-}
-
-func TestCOSReserveSignsPutSlot(t *testing.T) {
-	store := StorageConfig{Backend: "cos", COS: &COSConfig{
-		Region: "ap-guangzhou", Bucket: "b", SecretID: "id", SecretKey: "key", PresignTTL: "5m",
-	}}.Store()
-
-	target, err := store.Reserve(context.Background(), "a.png", "image/png", 10)
-	if err != nil {
-		t.Fatalf("reserve: %v", err)
-	}
-	if !strings.Contains(target.URL, "q-signature=") || target.Method != http.MethodPut {
-		t.Fatalf("reserve target = %+v", target)
-	}
-	if target.Reference == "" || target.Expires.IsZero() {
-		t.Fatalf("reserve reference/expiry = %+v", target)
-	}
-	if target.Headers["Content-Type"] != "image/png" {
-		t.Fatalf("reserve headers = %+v", target.Headers)
-	}
 }
 
 // TestCOSAnonymous checks an uncredentialed bucket signs nothing and returns a
@@ -121,17 +92,6 @@ func TestCOSAnonymous(t *testing.T) {
 	}
 	if strings.Contains(ref.Value, "q-signature") || ref.ExpiresAt != nil {
 		t.Fatalf("anonymous ref should be a plain url: %+v", ref)
-	}
-	if target, _ := store.Reserve(context.Background(), "a.png", "image/png", 3); target.URL != "" {
-		t.Fatalf("anonymous reserve should be empty: %+v", target)
-	}
-	rc, err := store.Get(context.Background(), ref)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer rc.Close()
-	if auth != "" {
-		t.Fatalf("anonymous get must not sign: %q", auth)
 	}
 }
 

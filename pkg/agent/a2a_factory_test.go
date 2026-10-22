@@ -37,7 +37,7 @@ func newA2ATestSession(t *testing.T, mode string) *a2aSession {
 
 func TestMaterializeInlineDeliversMedia(t *testing.T) {
 	session := newA2ATestSession(t, "inline")
-	_, files, err := session.materialize(context.Background(), "t1", server.SendRequest{
+	_, files, err := session.materialize("t1", server.SendRequest{
 		Prompt: "look",
 		Files:  []server.File{{Name: "a.png", MIME: "image/png", Data: []byte{1, 2, 3}}},
 	})
@@ -77,7 +77,7 @@ func TestA2AFactoryAllowsReadingSpool(t *testing.T) {
 
 func TestMaterializeSpoolWritesPaths(t *testing.T) {
 	session := newA2ATestSession(t, "spool")
-	prompt, files, err := session.materialize(context.Background(), "t2", server.SendRequest{
+	prompt, files, err := session.materialize("t2", server.SendRequest{
 		Prompt: "look",
 		Files:  []server.File{{Name: "a.png", MIME: "image/png", Data: []byte{1, 2, 3}}},
 	})
@@ -94,7 +94,7 @@ func TestMaterializeSpoolWritesPaths(t *testing.T) {
 
 func TestMaterializeInlineKeepsURLParts(t *testing.T) {
 	session := newA2ATestSession(t, "inline")
-	_, files, err := session.materialize(context.Background(), "t3", server.SendRequest{
+	_, files, err := session.materialize("t3", server.SendRequest{
 		Prompt: "look",
 		Files:  []server.File{{Name: "remote.png", MIME: "image/png", URI: "https://example.com/a.png"}},
 	})
@@ -103,6 +103,23 @@ func TestMaterializeInlineKeepsURLParts(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].URI != "https://example.com/a.png" {
 		t.Fatalf("files = %v, want the URL part carried", files)
+	}
+}
+
+func TestMaterializeInlineKeepsNonHTTPURIAsNote(t *testing.T) {
+	session := newA2ATestSession(t, "inline")
+	prompt, files, err := session.materialize("t4", server.SendRequest{
+		Prompt: "look",
+		Files:  []server.File{{Name: "stored.pdf", MIME: "application/pdf", URI: "s3://bucket/key"}},
+	})
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("files = %v, want no attachment for a non-http URI", files)
+	}
+	if !strings.Contains(prompt, "s3://bucket/key") {
+		t.Fatalf("prompt = %q, want the URI note", prompt)
 	}
 }
 

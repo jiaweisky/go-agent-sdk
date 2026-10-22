@@ -22,7 +22,6 @@ func TestInboundMediaPolicyExpandsRoot(t *testing.T) {
 		Upload:           true,
 		Downsample:       true,
 		Spool:            &MediaSpoolConfig{Dir: "{Root}/data/spool"},
-		FetchURL:         true,
 		MaxBytes:         MediaSizeLimit{Default: 52428800},
 	}
 	policy := m.Policy("/state/srv")
@@ -35,7 +34,7 @@ func TestInboundMediaPolicyExpandsRoot(t *testing.T) {
 	if len(policy.Prefer) != 2 || policy.Prefer[0] != core.MediaPolicySourceFile || policy.Prefer[1] != core.MediaPolicySourceInline {
 		t.Fatalf("prefer = %v", policy.Prefer)
 	}
-	if policy.InlineLimitBytes.For("image") != 262144 || policy.MaxBytes.For("video") != 52428800 || !policy.Upload || !policy.Downsample || !policy.FetchURL {
+	if policy.InlineLimitBytes.For("image") != 262144 || policy.MaxBytes.For("video") != 52428800 || !policy.Upload || !policy.Downsample {
 		t.Fatalf("policy = %+v", policy)
 	}
 	if err := policy.Validate(); err != nil {

@@ -1203,9 +1203,6 @@ func policyGateReason(mp *core.MediaPolicy, src llmschema.MediaSource, modality,
 	if mp == nil {
 		return ""
 	}
-	if src == llmschema.MediaSourceURL && !mp.FetchURL {
-		return string(schema.AttachmentOmitURLNotAllowed)
-	}
 	if src != llmschema.MediaSourceInline {
 		return ""
 	}

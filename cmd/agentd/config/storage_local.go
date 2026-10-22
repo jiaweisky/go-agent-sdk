@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,32 +48,4 @@ func (c localStore) Put(ctx context.Context, media schema.MediaUpload) (schema.R
 		return schema.Reference{}, err
 	}
 	return schema.Reference{Source: "url", Value: c.base() + name}, nil
-}
-
-// pathFor maps a reference back to a file under Root, rejecting anything that
-// escapes it (a foreign uri, traversal, or a nested path).
-func (c localStore) pathFor(value string) (string, bool) {
-	name := strings.TrimPrefix(value, c.base())
-	if name == value || name == "" || strings.Contains(name, "/") || strings.Contains(name, "..") {
-		return "", false
-	}
-	return filepath.Join(c.config.Root, name), true
-}
-
-// Get reads a Put object back. It rejects a reference that is not this store's.
-func (c localStore) Get(ctx context.Context, ref schema.Reference) (io.ReadCloser, error) {
-	path, ok := c.pathFor(ref.Value)
-	if !ok {
-		return nil, fmt.Errorf("%w: %q", schema.ErrUnsupportedReference, ref.Value)
-	}
-	return os.Open(path)
-}
-
-// Target is empty: a local directory has no network upload target (peers use the
-// server's ingest endpoint or the shared filesystem directly).
-func (c localStore) Target() schema.UploadTarget { return schema.UploadTarget{} }
-
-// Reserve is empty for the same reason as Target.
-func (c localStore) Reserve(ctx context.Context, name, mime string, size int64) (schema.UploadTarget, error) {
-	return schema.UploadTarget{}, nil
 }

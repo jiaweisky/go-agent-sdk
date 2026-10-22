@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,8 +21,8 @@ import (
 )
 
 // StorageConfig configures the process's provider-independent media store: it
-// hosts bytes and returns an http(s) url a provider can fetch (and, with a
-// storage extension, a peer can write to). One store serves every provider.
+// hosts bytes and returns an http(s) url a provider can fetch. One store serves
+// every provider.
 type StorageConfig struct {
 	// Backend names the storage mechanism: "http" (a PUT to URL), "local" (a
 	// shared directory), "s3" (S3-compatible) or "cos" (native Tencent COS).
@@ -32,7 +31,7 @@ type StorageConfig struct {
 	// written under it.
 	URL string `yaml:"url"`
 	// Auth is the http backend's credential scheme: "" / "none", "basic" or
-	// "bearer". It is sent on both writes (PUT) and reads (GET).
+	// "bearer". It is sent on the Put write.
 	Auth string `yaml:"auth"`
 	// Username / Password authenticate "basic".
 	Username string `yaml:"username"`
@@ -44,13 +43,9 @@ type StorageConfig struct {
 	Header string `yaml:"header"`
 	Value  string `yaml:"value"`
 	// PresignSecret, when set, signs http urls with nginx's secure_link scheme
-	// (md5 + expires), so a private origin can accept a provider's fetches (and
-	// a broker PUT slot) without a shared header credential.
+	// (md5 + expires), so a private origin can accept a provider's fetches
+	// without a shared header credential.
 	PresignSecret string `yaml:"presignSecret"`
-	// PresignURL, when set, delegates signing to an external service instead: a
-	// POST {key, method, expires} returns {uploadUrl, reference}. It is mutually
-	// exclusive with PresignSecret, and covers upload slots only.
-	PresignURL string `yaml:"presignURL"`
 	// PresignTTL bounds a presigned url's lifetime. Empty defaults to 15m.
 	PresignTTL string `yaml:"presignTTL"`
 	// Root is the local backend's shared directory.
@@ -62,11 +57,6 @@ type StorageConfig struct {
 	S3 *S3Config `yaml:"s3"`
 	// COS configures a Tencent COS bucket over its native REST API (backend "cos").
 	COS *COSConfig `yaml:"cos"`
-	// MediaTypes allowed on A2A ingest (patterns such as "image/*").
-	MediaTypes []string `yaml:"mediaTypes"`
-	// MaxInlineBytes / MaxBytes bound A2A ingest (referenced files).
-	MaxInlineBytes int64 `yaml:"maxInlineBytes"`
-	MaxBytes       int64 `yaml:"maxBytes"`
 }
 
 // Store builds the SDK MediaStore from the config.
@@ -133,9 +123,6 @@ func validateHTTPAuth(s *StorageConfig) error {
 	}
 	if (s.Header == "") != (s.Value == "") {
 		return errors.New("storage.header and storage.value must be set together")
-	}
-	if s.PresignSecret != "" && s.PresignURL != "" {
-		return errors.New("storage.presignSecret and storage.presignURL are mutually exclusive")
 	}
 	return nil
 }
@@ -231,115 +218,6 @@ func (c mediaStoreClient) Put(ctx context.Context, media schema.MediaUpload) (sc
 		return schema.Reference{}, err
 	}
 	return schema.Reference{Source: "url", Value: signed, ExpiresAt: &expires}, nil
-}
-
-// Get reads a Put object back. It rejects a reference that is not this store's.
-func (c mediaStoreClient) Get(ctx context.Context, ref schema.Reference) (io.ReadCloser, error) {
-	if ref.Source != "url" || !strings.HasPrefix(ref.Value, c.base()) {
-		return nil, fmt.Errorf("%w: %q", schema.ErrUnsupportedReference, ref.Value)
-	}
-	u, err := url.Parse(ref.Value)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ref.Value, nil)
-	if err != nil {
-		return nil, err
-	}
-	// A secure_link url carries its own ticket (md5+expires); only add the
-	// shared credential to a bare object url.
-	if u.Query().Get("expires") == "" {
-		for key, value := range c.authHeaders() {
-			req.Header.Set(key, value)
-		}
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		return nil, fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	return resp.Body, nil
-}
-
-// Target is the static upload target a peer writes objects to (reference mode).
-func (c mediaStoreClient) Target() schema.UploadTarget {
-	return schema.UploadTarget{URL: c.base(), Method: http.MethodPut, Headers: c.authHeaders()}
-}
-
-// Reserve issues a presigned PUT slot (broker mode) when a PresignSecret is
-// configured; without one an http store advertises no per-file slot (its static
-// target, or the server's ingest endpoint, is the write path).
-func (c mediaStoreClient) Reserve(ctx context.Context, name, mime string, size int64) (schema.UploadTarget, error) {
-	if c.config.PresignURL != "" {
-		return c.reserveViaService(ctx, name, mime, size)
-	}
-	if c.config.PresignSecret == "" {
-		return schema.UploadTarget{}, nil
-	}
-	key := sanitizeKey(name)
-	if key == "" {
-		key = hex.EncodeToString([]byte(name + ":" + mime))
-	}
-	object := c.base() + key
-	expires := time.Now().Add(c.ttl())
-	signed, err := c.presignURL(object, expires)
-	if err != nil {
-		return schema.UploadTarget{}, err
-	}
-	return schema.UploadTarget{URL: signed, Method: http.MethodPut, Reference: object, Expires: expires}, nil
-}
-
-// reserveViaService asks an external signer for a PUT slot (broker mode): it
-// POSTs {key, method, expires} and reads back {uploadUrl, reference}.
-func (c mediaStoreClient) reserveViaService(ctx context.Context, name, mime string, size int64) (schema.UploadTarget, error) {
-	key := sanitizeKey(name)
-	if key == "" {
-		key = hex.EncodeToString([]byte(name + ":" + mime))
-	}
-	body, err := json.Marshal(map[string]any{
-		"key": key, "method": http.MethodPut, "expires": int64(c.ttl().Seconds()),
-	})
-	if err != nil {
-		return schema.UploadTarget{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.PresignURL, bytes.NewReader(body))
-	if err != nil {
-		return schema.UploadTarget{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for name, value := range c.authHeaders() {
-		req.Header.Set(name, value)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return schema.UploadTarget{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return schema.UploadTarget{}, fmt.Errorf("storage: presign: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	var out struct {
-		UploadURL string `json:"uploadUrl"`
-		Reference string `json:"reference"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return schema.UploadTarget{}, err
-	}
-	if out.UploadURL == "" {
-		return schema.UploadTarget{}, errors.New("storage: presign response has no uploadUrl")
-	}
-	if out.Reference == "" {
-		out.Reference = out.UploadURL
-	}
-	return schema.UploadTarget{
-		URL: out.UploadURL, Method: http.MethodPut, Reference: out.Reference,
-		Expires: time.Now().Add(c.ttl()),
-	}, nil
 }
 
 // secureLinkMD5 computes nginx secure_link's base64url(md5("<expires><uri> <secret>")).

@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -70,14 +69,6 @@ func TestS3StoreRoundTrip(t *testing.T) {
 	if ref.ExpiresAt == nil {
 		t.Fatal("presigned reference should carry an expiry")
 	}
-	rc, err := store.Get(context.Background(), schema.Reference{Source: "url", Value: srv.URL + "/b/key"})
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer rc.Close()
-	if b, _ := io.ReadAll(rc); string(b) != "stored" {
-		t.Fatalf("get body = %q", b)
-	}
 }
 
 // TestS3Anonymous checks an uncredentialed bucket signs nothing and returns a
@@ -106,17 +97,6 @@ func TestS3Anonymous(t *testing.T) {
 	if strings.Contains(ref.Value, "X-Amz-Signature") || ref.ExpiresAt != nil {
 		t.Fatalf("anonymous ref should be a plain url: %+v", ref)
 	}
-	if target, _ := store.Reserve(context.Background(), "a.png", "image/png", 3); target.URL != "" {
-		t.Fatalf("anonymous reserve should be empty: %+v", target)
-	}
-	rc, err := store.Get(context.Background(), ref)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer rc.Close()
-	if auth != "" {
-		t.Fatalf("anonymous get must not sign: %q", auth)
-	}
 }
 
 func TestValidateS3(t *testing.T) {
@@ -144,41 +124,5 @@ func TestCanonicalURISingleEncodes(t *testing.T) {
 	}
 	if got := canonicalURI(u); got != "/caf%C3%A9%20file.png" {
 		t.Fatalf("canonical uri = %q, want a single encoding", got)
-	}
-}
-
-// TestS3OwnsRejectsForeignBucket: under path-style addressing a reference to
-// another bucket on the same endpoint is not this store's.
-func TestS3OwnsRejectsForeignBucket(t *testing.T) {
-	store := StorageConfig{Backend: "s3", S3: &S3Config{
-		Endpoint: "https://s3.example", Region: "us-east-1", Bucket: "b",
-		AccessKey: "AK", SecretKey: "SK", PathStyle: true,
-	}}.Store().(s3Store)
-
-	own := func(raw string) bool {
-		u, err := url.Parse(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return store.owns(u)
-	}
-	if own("https://s3.example/other/key") {
-		t.Fatal("another bucket must not be owned")
-	}
-	if !own("https://s3.example/b/key") {
-		t.Fatal("this bucket's object must be owned")
-	}
-}
-
-// TestS3GetForeignBucketWrapsUnsupportedReference: Get of a foreign reference
-// fails with an error that errors.Is detects as ErrUnsupportedReference.
-func TestS3GetForeignBucketWrapsUnsupportedReference(t *testing.T) {
-	store := StorageConfig{Backend: "s3", S3: &S3Config{
-		Endpoint: "https://s3.example", Region: "us-east-1", Bucket: "b",
-		AccessKey: "AK", SecretKey: "SK", PathStyle: true,
-	}}.Store()
-	_, err := store.Get(context.Background(), schema.Reference{Source: "url", Value: "https://s3.example/other/key"})
-	if !errors.Is(err, schema.ErrUnsupportedReference) {
-		t.Fatalf("Get foreign ref err = %v, want ErrUnsupportedReference", err)
 	}
 }

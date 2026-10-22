@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
@@ -439,6 +440,25 @@ func TestToLLMMessagesDegradesUnsupportedMedia(t *testing.T) {
 	}
 	if !reflect.DeepEqual(omitted, want) {
 		t.Fatalf("omitted = %+v, want %+v", omitted, want)
+	}
+}
+
+func TestOmittedURLKeepsURLInNote(t *testing.T) {
+	model := runnerTestModel()
+	name := "a.pdf"
+	file := schema.PromptFileAttachment{
+		URI: "https://peer.example/a.pdf", Mime: "application/pdf", Name: &name,
+	}
+	policy := mediaPolicy{reason: func(string, string, string, string) string {
+		return string(schema.AttachmentOmitUnsupportedSource)
+	}}
+	user := schema.SessionMessageUser{
+		ID: "msg_user", Type: "user", Text: "look",
+		Files: []schema.PromptFileAttachment{file},
+	}
+	got, _ := json.Marshal(ToLLMMessages([]schema.SessionMessage{user}, model, policy))
+	if !strings.Contains(string(got), "https://peer.example/a.pdf") {
+		t.Fatalf("omitted URL note lost the URL: %s", got)
 	}
 }
 

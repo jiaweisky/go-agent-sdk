@@ -544,45 +544,8 @@ func buildA2AServer(s config.Server, client *agent.Client, infos []schema.ModelI
 		BaseURL:      s.BaseURL,
 		KeepAlive:    keepAlive,
 		Security:     security,
-		Ingest:       ingestFor(s),
 		MaxBodyBytes: maxBodyBytes(s),
 	})
-}
-
-// ingestFor builds the A2A file-exchange contract from a server's storage config,
-// or nil when no storage is configured.
-func ingestFor(s config.Server) *a2aserver.Ingest {
-	if s.Storage == nil {
-		return nil
-	}
-	store := s.Storage.Store()
-	if store == nil {
-		return nil
-	}
-	return &a2aserver.Ingest{
-		Store:          store,
-		Schemes:        ingestSchemes(s.Storage),
-		MediaTypes:     s.Storage.MediaTypes,
-		MaxInlineBytes: s.Storage.MaxInlineBytes,
-		MaxBytes:       s.Storage.MaxBytes,
-	}
-}
-
-// ingestSchemes derives the reference schemes a peer may send to a store: an
-// http(s) url for the http/s3/cos backends (and a local store served over http),
-// or file:// for a plain local directory.
-func ingestSchemes(st *config.StorageConfig) []string {
-	if st.Backend == "local" && st.ServeBaseURL == "" {
-		return []string{"file"}
-	}
-	ref := st.URL
-	if st.Backend == "local" {
-		ref = st.ServeBaseURL
-	}
-	if strings.HasPrefix(ref, "http://") {
-		return []string{"http"}
-	}
-	return []string{"https"}
 }
 
 // serveAll runs one serve per listener under one context and signal; a failed

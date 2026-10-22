@@ -50,9 +50,6 @@ const (
 	// AttachmentOmitTooLarge is a byte-backed attachment over the delivery
 	// policy's inlineLimitBytes/maxBytes that could not be delivered otherwise.
 	AttachmentOmitTooLarge SessionAttachmentOmitReason = "too_large"
-	// AttachmentOmitURLNotAllowed is a caller-supplied url reference the
-	// delivery policy does not allow the provider to fetch (fetchURL is false).
-	AttachmentOmitURLNotAllowed SessionAttachmentOmitReason = "url_not_allowed"
 )
 
 // SessionEventAttachmentOmittedData reports an attachment the selected model
