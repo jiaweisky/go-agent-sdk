@@ -11,6 +11,8 @@ DIST ?= dist
 # Build metadata. An exact git tag (HEAD tagged) is a release version; anything
 # else is a dev build carrying the short commit and a -dirty marker. Outside git
 # everything degrades to "dev".
+# Makefile.nmake cannot expand $(shell) and mirrors this block with
+# scripts/versionstamp.ps1; keep the two in sync.
 # Tag version: take the exact tag on HEAD only when it is made of
 # [0-9A-Za-z._+-] (an optional leading "v" before a digit is stripped:
 # v1.2.3 -> 1.2.3, vendor-drop stays). The filter runs inside the shell
