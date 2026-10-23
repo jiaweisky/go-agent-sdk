@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -174,20 +175,33 @@ func TestManagerWiresSandbox(t *testing.T) {
 	t.Cleanup(manager.Close)
 	defer manager.Close() // release agent.db before t.TempDir cleanup (see TestManagerRefusesReaderWhileWriter)
 
-	// An unknown sandbox fails closed while building the instance, proving the
-	// request's sandbox reaches the client assembly (resolveSandbox runs in
-	// prepare, not in Validate).
+	// A wrapper that is valid config but unavailable on this host fails closed
+	// while building the instance, proving the request's sandbox reaches the
+	// client assembly (resolveSandbox runs in prepare, not in Validate).
 	bad := testControlRequest(t)
-	bad.Sandbox = &config.SandboxConfig{Process: "no-such-wrapper"}
+	bad.Sandbox = &config.SandboxConfig{Wrapper: unavailableWrapper()}
 	if _, err := manager.Start(bad); err == nil {
 		t.Fatal("expected the instance sandbox to be resolved and fail closed")
 	}
 
 	// fail-open runs without the sandbox.
 	open := testControlRequest(t)
-	open.Sandbox = &config.SandboxConfig{Process: "no-such-wrapper", FailurePolicy: "fail-open"}
+	open.Sandbox = &config.SandboxConfig{Wrapper: unavailableWrapper(), FailurePolicy: "fail-open"}
 	if _, err := manager.Start(open); err != nil {
 		t.Fatalf("fail-open sandbox must not fail: %v", err)
+	}
+}
+
+// unavailableWrapper is a built-in wrapper that is not registered on this host,
+// so startup resolution fails while config validation still accepts the name.
+func unavailableWrapper() config.Wrapper {
+	switch runtime.GOOS {
+	case "linux":
+		return config.WrapperAppContainer
+	case "darwin":
+		return config.WrapperBwrap
+	default:
+		return config.WrapperSeatbelt
 	}
 }
 

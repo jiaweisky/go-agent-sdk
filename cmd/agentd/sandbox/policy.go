@@ -24,7 +24,9 @@ const (
 // Network modes. A domain allow-list needs a proxy and is not implemented by
 // the native sandbox; other values are rejected by configuration validation.
 const (
-	NetworkOff      = "off"
+	// NetworkOff disables network access for sandboxed commands.
+	NetworkOff = "off"
+	// NetworkNoEgress allows local traffic but blocks outbound connections.
 	NetworkNoEgress = "no-egress"
 )
 
@@ -45,7 +47,10 @@ const (
 
 // Environment modes.
 const (
-	EnvScrub   = "scrub"
+	// EnvScrub removes the configured environment-name globs before a command
+	// starts.
+	EnvScrub = "scrub"
+	// EnvInherit passes the environment through unchanged.
 	EnvInherit = "inherit"
 )
 

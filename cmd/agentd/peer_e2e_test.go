@@ -15,7 +15,7 @@ import (
 // registered agent with an A2A backend -> A2A client -> remote execution ->
 // mirrored local session -> the HTTP API.
 //
-// The peer runs as the session's primary agent, so the local model is never
+// The A2A peer runs as the session's primary agent, so the local model is never
 // asked to pick the task tool (vLLM may have tool-calling disabled); the test is
 // deterministic and only requires the live model on the remote side.
 //
@@ -53,7 +53,7 @@ func startRemoteAgentd(t *testing.T, baseURL, model string, modalities []string)
 	return base
 }
 
-// startPeeredAgentd serves an HTTP API whose `remote` peer is the remote agent,
+// startPeeredAgentd serves an HTTP API whose `remote` A2A peer is the remote agent,
 // and returns its base URL.
 func startPeeredAgentd(t *testing.T, remoteBase, baseURL, model string, modalities []string) string {
 	t.Helper()
@@ -63,7 +63,7 @@ func startPeeredAgentd(t *testing.T, remoteBase, baseURL, model string, modaliti
 		Servers: []config.Server{{
 			Name: "local", Kind: "http", Listen: addr, Root: t.TempDir(),
 			Agents: []string{"build", "remote"},
-			Peers: []config.Peer{{
+			Peers: []config.A2APeer{{
 				Name: "remote", Endpoint: remoteBase, Mode: "primary",
 				Description: "A remote agent reached over A2A.",
 			}},

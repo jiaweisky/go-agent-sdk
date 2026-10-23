@@ -96,7 +96,7 @@ servers:
     workingDirectory: /tmp/agentd-work
     agents: [build]
     sandbox:
-      process: bwrap            # linux; use appcontainer on windows
+      wrapper: bwrap            # linux; use appcontainer on windows
       failurePolicy: fail-closed
       filesystem: { read: allow, write: allow }
       network: { mode: no-egress }
@@ -121,7 +121,7 @@ the tool output and the `session.next.sandbox.denied` events (`action`, `path`,
 | 8 | `unixSockets.mode: allowlist` with a test socket | reachable; an unlisted socket is not |
 | 9 | whole-process `wrap` (`bwrap` on Linux, `appcontainer` on Windows) | agentd starts and serves; scenarios 1–8 still hold |
 | 10 | remove/rename the wrapper binary | fail-closed refuses to start; `fail-open` warns and keeps the in-process guards |
-| 11 | invalid config: `network.mode: allowlist`, `allowedDomains`, a Linux deny glob, `precise` on Windows, policy fields with `process: none` | startup error (no silent fallback) |
+| 11 | invalid config: `network.mode: allowlist`, `allowedDomains`, a Linux deny glob, `precise` on Windows, policy fields with `wrapper: none` | startup error (no silent fallback) |
 | 12 | no `sandbox` block at all | commands run unsandboxed; an info line is logged; no `{Root}/data/sandbox-tmp`; no guards |
 | 13 | `read: off` / `write: off` (macOS/Linux) | macOS: no read/write rules; Linux: `read: off` = `--ro-bind / /`, `write: off` requires `read: off` and binds `/` rw |
 | 14 | Windows `read/write: off`, `processInspection: allow`, and `network: mode: off` | the first three are startup errors; `network: off` grants `internetClientServer` (verify egress) |

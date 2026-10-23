@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
@@ -23,6 +24,18 @@ func (c supervisorConfig) Validate() error {
 	if len(c.Project.Agents) == 0 {
 		return errors.New("project.agents is required")
 	}
+	if c.Project.Kind != "" && !c.Project.Kind.Valid() {
+		return fmt.Errorf("project.kind must be %s or %s, got %q", config.KindHTTP, config.KindA2A, c.Project.Kind)
+	}
+	if err := config.ValidateA2APeers(c.Project.Peers); err != nil {
+		return fmt.Errorf("project: %w", err)
+	}
+	if err := c.Project.Sandbox.Validate(); err != nil {
+		return fmt.Errorf("project: %w", err)
+	}
+	if err := c.Project.Auth.Validate(); err != nil {
+		return fmt.Errorf("project: %w", err)
+	}
 	return nil
 }
 
@@ -36,14 +49,14 @@ type endpoint struct {
 // plus the project id forms the SDK state root; the agentd control API applies the
 // isolation (worktree/overlay/copy) and prepares the view.
 type projectTemplate struct {
-	Kind             string                  `yaml:"kind"` // http | a2a
+	Kind             config.Kind             `yaml:"kind"` // config.KindHTTP | config.KindA2A
 	RootBase         string                  `yaml:"rootBase"`
 	WorkingDirectory string                  `yaml:"workingDirectory"`
 	ConfigDirs       []string                `yaml:"configDirs"`
 	Models           []string                `yaml:"models"`
 	DefaultModel     string                  `yaml:"defaultModel"`
 	Agents           []string                `yaml:"agents"`
-	Peers            []config.Peer           `yaml:"peers"`
+	Peers            []config.A2APeer        `yaml:"peers"`
 	Isolation        *config.IsolationConfig `yaml:"isolation"`
 	// Sandbox selects the command-execution seam for the instance's tools (same
 	// shape as a server's); empty means the SDK pass-through.

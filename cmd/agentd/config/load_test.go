@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 )
 
@@ -26,18 +25,18 @@ models:
     protocol: openai-compatible-chat
     modelBaseURL: ${TEST_BASE:-https://default.example}
     credentials:
-      apiKey: ${TEST_API_KEY}
+      apiKey: $TEST_API_KEY
 servers:
   - name: a2a
     kind: a2a
     listen: 127.0.0.1:1
-    root: /tmp/x
+    root: ${TEST_ROOT:=/tmp/x}
     workingDirectory: ${TEST_WORKDIR}
     agents: [build]
     cards:
       build:
         name: ${TEST_NAME:-Build}
-        description: "cost $$5 for ${TEST_API_KEY}"
+        description: "cost $$5 for ${TEST_API_KEY}, $1 literal"
 `
 	var cfg Config
 	if err := Load(writeTempConfig(t, body), &cfg); err != nil {
@@ -52,11 +51,14 @@ servers:
 	if got := cfg.Servers[0].WorkingDirectory; got != "/srv/work" {
 		t.Errorf("workingDirectory = %q, want /srv/work", got)
 	}
+	if got := cfg.Servers[0].Root; got != "/tmp/x" {
+		t.Errorf("root = %q, want the :=default", got)
+	}
 	card := cfg.Servers[0].Cards["build"]
 	if card.Name != "Build" {
 		t.Errorf("card name = %q, want the default", card.Name)
 	}
-	if card.Description != "cost $5 for sk-123" {
+	if card.Description != "cost $5 for sk-123, $1 literal" {
 		t.Errorf("card description = %q, want the escaped+expanded text", card.Description)
 	}
 }
@@ -78,42 +80,46 @@ models:
 	}
 }
 
-func TestLoadWithEnvCollectsNames(t *testing.T) {
-	t.Setenv("AGENTD_TEST_KEY", "secret-value")
-	body := `
-models:
-  - id: m
-    model: ${AGENTD_TEST_KEY}
-    protocol: openai-compatible-chat
-    credentials:
-      apiKey: ${AGENTD_TEST_KEY:-fallback}
-`
-	var cfg Config
-	names, err := LoadWithEnv(writeTempConfig(t, body), &cfg)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if !reflect.DeepEqual(names, []string{"AGENTD_TEST_KEY"}) {
-		t.Fatalf("names = %v, want [AGENTD_TEST_KEY]", names)
-	}
-	if len(cfg.Models) != 1 || cfg.Models[0].Model != "secret-value" {
-		t.Fatalf("model = %+v", cfg.Models)
-	}
-}
-
-func TestLoadWithEnvNoRefs(t *testing.T) {
-	body := `
+func TestLoadErrorsOnUnsetVariableInComment(t *testing.T) {
+	const name = "AGENTD_TEST_COMMENT_UNSET"
+	os.Unsetenv(name)
+	body := "# ${" + name + "}\n" + `
 models:
   - id: m
     model: m
     protocol: openai-compatible-chat
 `
 	var cfg Config
-	names, err := LoadWithEnv(writeTempConfig(t, body), &cfg)
-	if err != nil {
+	if err := Load(writeTempConfig(t, body), &cfg); err == nil {
+		t.Fatal("expected the whole file, comments included, to be expanded")
+	}
+}
+
+func TestLoadEmptyFileKeepsConfig(t *testing.T) {
+	cfg := Config{Models: []ModelConfig{{ID: "kept", Model: "m", Protocol: "openai-compatible-chat"}}}
+	if err := Load(writeTempConfig(t, ""), &cfg); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(names) != 0 {
-		t.Fatalf("names = %v, want none", names)
+	if len(cfg.Models) != 1 || cfg.Models[0].ID != "kept" {
+		t.Fatalf("empty file must keep the caller's values: %+v", cfg.Models)
+	}
+}
+
+func TestLoadQuotedPlaceholderKeepsYAMLSpecialChars(t *testing.T) {
+	t.Setenv("AGENTD_TEST_QUOTED", "abc # def")
+	body := `
+models:
+  - id: m
+    model: m
+    protocol: openai-compatible-chat
+    credentials:
+      apiKey: "${AGENTD_TEST_QUOTED}"
+`
+	var cfg Config
+	if err := Load(writeTempConfig(t, body), &cfg); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.Models[0].Credentials.APIKey; got != "abc # def" {
+		t.Fatalf("apiKey = %q, want the quoted value", got)
 	}
 }

@@ -8,8 +8,11 @@ client per configured **server**, each over HTTP/SSE and/or A2A.
 - **Run**: `agentd -config agentd.yaml` — `-check` validates the config and exits,
   `-version` prints the version.
 - Secrets live in the config file (keep it mode 0600) or are referenced from it
-  with `${VAR}` / `${VAR:-default}`; any string value supports this, and no
-  environment is read implicitly.
+  with `$VAR` / `${VAR}` / `${VAR:-default}` / `${VAR:=default}`. The whole file
+  is expanded first, so a variable without a fallback must be set (otherwise
+  loading fails) and no environment is read implicitly. If a value contains
+  YAML-special characters (`#`, `: `), quote its placeholder, e.g.
+  `apiKey: "${KEY}"`; `$$` only escapes a literal dollar sign.
 
 ```yaml
 models:                              # the model catalog, defined once
@@ -32,7 +35,7 @@ servers:
 ```
 
 Servers with the same `listen` share one listener and are routed by `host` (a
-virtual host) and `mount` (a path prefix); an A2A server marked `default` owns the
+virtual host) and `pathPrefix` (a URL path prefix); an A2A server marked `default` owns the
 origin-root `/.well-known/agent-card.json`, and `/.well-known/agents.json` lists
 every A2A agent on that listener.
 

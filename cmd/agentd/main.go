@@ -33,8 +33,7 @@ func runMain(args []string) error {
 		return nil
 	}
 	cfg := config.Config{}
-	env, err := config.LoadWithEnv(fl.config, &cfg)
-	if err != nil {
+	if err := config.Load(fl.config, &cfg); err != nil {
 		return err
 	}
 	if err := cfg.Validate(); err != nil {
@@ -52,5 +51,5 @@ func runMain(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return run(ctx, cfg, &introspectDoc{config: cfg, path: fl.config, env: env, version: version})
+	return run(ctx, cfg, &introspectDoc{config: cfg, path: fl.config, version: version})
 }

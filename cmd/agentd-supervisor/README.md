@@ -24,4 +24,5 @@ release  {"action":"release","project_id":"..."}
 - **Run**: `agentd-supervisor -config supervisor.yaml` (reads the request on stdin).
 - A **read-only** conversation shares the source directory; a **writable** one gets
   the configured isolated view (`worktree`/`overlay`/`copy`), prepared by agentd.
-- `${VAR}` / `${VAR:-default}` are expanded by the agentd config loader.
+- The agentd config loader expands the whole file first (`$VAR` / `${VAR}` /
+  `${VAR:-default}`); a variable without a fallback must be set.

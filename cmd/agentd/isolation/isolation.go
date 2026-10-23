@@ -24,18 +24,26 @@ import (
 type Transport string
 
 const (
+	// TransportHTTP serves the HTTP/SSE API.
 	TransportHTTP Transport = "http"
-	TransportA2A  Transport = "a2a"
+	// TransportA2A serves the A2A JSON-RPC API.
+	TransportA2A Transport = "a2a"
 )
 
 // Isolation modes.
 const (
-	ModeNone      = "none"
-	ModeCopy      = "copy"
-	ModeWorktree  = "worktree"
-	ModeOverlay   = "overlay"
+	// ModeNone shares the working directory directly.
+	ModeNone = "none"
+	// ModeCopy copies the source working directory into a per-project view.
+	ModeCopy = "copy"
+	// ModeWorktree creates a git worktree as the per-project view.
+	ModeWorktree = "worktree"
+	// ModeOverlay creates a copy-on-write overlay over the read-only source.
+	ModeOverlay = "overlay"
+	// ModeContainer runs the instance in a container; provisioned by the host.
 	ModeContainer = "container"
-	ModeRemote    = "remote"
+	// ModeRemote runs the instance on a remote host; provisioned by the host.
+	ModeRemote = "remote"
 )
 
 // ErrExternalMode reports a mode that runs in a separate process (a container,
@@ -45,8 +53,11 @@ var ErrExternalMode = errors.New("isolation mode is provisioned by the host, not
 
 // Copy-on-write mechanisms for overlay mode.
 const (
-	CowAuto      = "auto"
-	CowReflink   = "reflink"
+	// CowAuto picks the platform default: reflink on Linux, clonefile on macOS.
+	CowAuto = "auto"
+	// CowReflink uses a filesystem reflink copy (Linux).
+	CowReflink = "reflink"
+	// CowClonefile uses APFS clonefile (macOS).
 	CowClonefile = "clonefile"
 )
 

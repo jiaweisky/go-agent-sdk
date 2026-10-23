@@ -14,6 +14,11 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-23 | Split runtime assembly out of `cmd/agentd/config`: client construction and MCP/reference/A2A-peer conversion moved to `cmd/agentd/client`; the media uploader, transcoder and delivery-policy conversion to `cmd/agentd/media`; media-store backends to `cmd/agentd/storage`. `config` now holds the DTOs, their `Validate()` methods and cross-block validation (plus the sandbox policy mapping). |
+| 2026-10-22 | Renamed `sandbox.process` / `wrap.process` to `sandbox.wrapper` / `wrap.wrapper` and made the wrapper an explicit enum (`none`, `bwrap`, `seatbelt`, `appcontainer`); `/api/config` reports `wrapper`; `schemaVersion` is now `4`. |
+| 2026-10-22 | Renamed the routing key and field `mount` to `pathPrefix` (a URL path prefix, not a filesystem mount) in the config and `/api/config`; `schemaVersion` is now `3`. |
+| 2026-10-22 | Removed environment-variable name reporting: `config.LoadWithEnv` and `/api/config`'s `sources[].expanded` are gone, so the config document no longer lists which env names were referenced; `schemaVersion` is now `2`. |
+| 2026-10-22 | Config loading now expands the whole document with `envsubst` before YAML decoding: `$VAR` / `${VAR}` / `${VAR:-default}` / `${VAR:=default}` work anywhere in the file, `$$` escapes a literal `$`, names starting with a digit stay literal, and an unset variable without a fallback is a load error. |
 | 2026-10-22 | **Breaking:** server and control auth are bearer-only and explicit — `auth: {type: bearer, token: ...}`; the `username`/`password` (Basic) form and the `opencode` default username are removed. |
 | 2026-10-22 | **A2A file exchange removed from the SDK.** `storage` now serves only the model edge (provider url hosting); the AgentCard storage extension, signed-slot endpoint, inbound `FileWithUri` materialization, and A2A-only `mediaTypes`/`maxInlineBytes`/`maxBytes` are gone. |
 | 2026-10-16 | Added a per-server `peers` list (`name` + `endpoint`/`cardURL` + optional `headers`/`description`/`mode`): remote A2A agents registered as agents with an A2A backend, so a local agent (e.g. `build`) can delegate to them with the `task` tool (`mode: subagent`, the default) or run one as a primary agent. Applies to both `http` and `a2a` servers; registered in `BuildClient`; validated fail-fast; `/api/config` reports them with `headers` redacted. The control-API `POST /admin/projects` body carries the same `peers` (dynamic project instances can reach peers), and `cmd/agentd-supervisor`'s project template has a matching `peers` field. See `docs/DESIGN-A2A.md` (outbound). |
@@ -83,7 +88,7 @@ split is at the **assembly layer**, not the engine — so it can be removed.
 **Goals**
 
 - One binary (`agentd`), one config, one process, one signal handler, one graceful shutdown.
-- Mount one or more transports (`http`, `a2a`) in the same process.
+- Serve one or more transports (`http`, `a2a`) in the same process.
 - A single shared `buildClient` — one builder, so every server's `ClientOptions` *can* carry
   the full field set (values still differ per server: models, root, …); fixes the §1 drift.
 - Keep the transport **adapters** (`pkg/server`, `pkg/a2a/server`) and their wire
@@ -124,9 +129,9 @@ agentd (one binary, one config)
 ├── process services: config load, logging, signals, graceful shutdown
 └── one handler per `servers[i]` entry (each its own Client):
       http → pkg/server handler        }
-      http → pkg/server handler        }  mounted on a listener — one http.Server per
+      http → pkg/server handler        }  served on a listener — one http.Server per
       a2a  → pkg/a2a/server handler    }  distinct `listen`; several entries may share
-                                          one listener via host/mount routing (§5.2)
+                                          one listener via host/pathPrefix routing (§5.2)
 ```
 
 Rationale for one `Client` per entry: `HoldInteractions` is global and each server is an
@@ -238,15 +243,18 @@ full `ModelConfig`; a server only selects **ids**:
   Both are ids only — no model config is repeated. An agent or subagent that names a model
   (markdown `model:` frontmatter) must use an id **in that server's subset**.
 - Secrets live in the config file (keep it mode-0600), **or** are referenced from it
-  explicitly: any string value supports `${VAR}` (required) and `${VAR:-default}`, with `$$`
-  for a literal `$`. Environment is never read implicitly — only where the file asks — so the
-  command stays fully config-driven (`DESIGN-HTTP.md` §8.1).
+  explicitly: the whole file is expanded with `envsubst` before decoding, so `$VAR` /
+  `${VAR}` (must be set) and `${VAR:-default}` / `${VAR:=default}` (fallbacks) work
+  anywhere, with `$$` for a literal `$`. A value containing YAML-special characters
+  (`#`, `: `) needs its placeholder inside a quoted scalar (e.g. `apiKey: "${KEY}"`);
+  that is a YAML style choice, not escaping. Environment is never read implicitly — only
+  where the file asks — so the command stays fully config-driven (`DESIGN-HTTP.md` §8.1).
 
 **Fields by kind.** Some fields apply to one kind only:
 
 | Field | Applies to | Notes |
 |---|---|---|
-| `name` / `kind` / `listen` / `root` / `workingDirectory` / `configDirs` / `models` / `defaultModel` / `host` / `mount` | both | bind + routing + models |
+| `name` / `kind` / `listen` / `root` / `workingDirectory` / `configDirs` / `models` / `defaultModel` / `host` / `pathPrefix` | both | bind + routing + models |
 | `mediaUpload` / `inboundPermissions` / `keepAlive` / `dropErroredTurns` / `tls` / `allowInsecure` | both | `dropErroredTurns` defaults **true** |
 | `media` + `storage` + `mediaUpload` + `maxBodyBytes` | both | inbound media delivery + model-edge hosting (`DESIGN-MEDIA` {M16}/{M17}); `prefer` ∈ `inline`/`url`/`file`, where `url` is produced by the **provider-independent `storage`** store (`http` PUT base / `local` shared dir / `s3` / native `cos` object store → url) and `file` by the **provider-bound `mediaUpload`** (Files API → file_id). `media` keys: `inlineLimitBytes` / `prefer` / `upload` / `downsample` / `spool` / `maxBytes` (the two size keys are per-modality: a number or `{default, image, audio, video, file}`); `maxBodyBytes` caps an HTTP request body; `storage` keys: `backend` (`http`/`local`/`s3`/`cos`), `auth` (`none`/`basic`/`bearer`) / `username` / `password` / `token` / `header`+`value` (custom), `presignSecret` (nginx secure_link) + `presignTTL`, or `s3`/`cos` credentials (omit → anonymous/public bucket). A2A file exchange is not part of the SDK. Unset = inline-first (unchanged) |
 | `questions` | both | the `question` tool policy: `park` or `decline`; default **`decline`** for a2a (an A2A client polls task state and cannot answer), **`park`** for http |
@@ -297,13 +305,13 @@ Validation (fail-fast, reusing today's `validate()` rules per server):
 
 - `servers` non-empty; each `name` unique.
 - `listen` **may be shared**: entries with the same `listen` are multiplexed under one
-  `http.Server` and must be distinguishable by `host` / `mount` (§5.2); otherwise each
+  `http.Server` and must be distinguishable by `host` / `pathPrefix` (§5.2); otherwise each
   `listen` should be distinct.
 - each `root` present and **unique** across entries.
 - duplicate **kinds** are allowed (several `http`, several `a2a`) — only `name` / `listen` /
   `root` must be distinct.
 - at most one A2A entry may be `default`; at most one entry per `listen` has neither `host`
-  nor `mount` (it owns that listener's root).
+  nor `pathPrefix` (it owns that listener's root).
 - **models**: the global catalog is non-empty with unique ids; each server's `models` ids
   exist in the catalog; its `defaultModel` (if set) is within that server's subset; every
   `models[]` entry passes `ModelConfig` validation.
@@ -376,8 +384,8 @@ instances via a top-level router:
 ```
 http.Server{ Handler: root }               # one per distinct `listen`
   root
-    ├─ mount /a            → http.StripPrefix("/a", httpHandlerA)   (pkg/server)
-    ├─ mount /b            → http.StripPrefix("/b", a2aB)           (pkg/a2a/server)
+    ├─ pathPrefix /a            → http.StripPrefix("/a", httpHandlerA)   (pkg/server)
+    ├─ pathPrefix /b            → http.StripPrefix("/b", a2aB)           (pkg/a2a/server)
     └─ host c.example.com  → a2aC
 ```
 
@@ -385,17 +393,17 @@ Optional per-entry fields:
 
 | Field | Effect |
 |---|---|
-| `host` | virtual host: match the request host (`X-Forwarded-Host` if present, else `r.Host`; hostname, port ignored) → this server (otherwise fall back to path mount) |
-| `mount` | path prefix: mount + `StripPrefix`; for A2A it is also the source of the `baseURL` prefix |
-| `default` | **A2A only**: owns the origin-root `/.well-known/agent-card.json` — the nginx `default_server` idea. A root-mounted A2A entry (neither `host` nor `mount`) is naturally the default; otherwise it defaults to the first `a2a` entry. |
+| `host` | virtual host: match the request host (`X-Forwarded-Host` if present, else `r.Host`; hostname, port ignored) → this server (otherwise fall back to pathPrefix routing) |
+| `pathPrefix` | URL path prefix: matched against the request path and stripped before the handler (must not be `/`; omit it to serve the listener root); for A2A it is also the source of the `baseURL` prefix |
+| `default` | **A2A only**: owns the origin-root `/.well-known/agent-card.json` — the nginx `default_server` idea. An A2A entry with neither `host` nor `pathPrefix` is naturally the default; otherwise it defaults to the first `a2a` entry. |
 | `baseURL` | **optional** — the A2A card's advertised endpoint base. Unset ⇒ derived from the request origin (`scheme://host`, honoring `X-Forwarded-*`), so **host routing needs none**. Set it for **path routing** (the origin fallback carries no path) or when the public URL differs from the request host. |
 
-Resolution order: a matching `host` wins (an entry may set **both** `host` and `mount` — when
-`host` misses, its `mount` still applies); otherwise the **longest matching `mount`** prefix;
+Resolution order: a matching `host` wins (an entry may set **both** `host` and `pathPrefix` — when
+`host` misses, its `pathPrefix` still applies); otherwise the **longest matching `pathPrefix`**;
 an entry with **neither** serves the listener **root** (so at most one such entry per
 `listen` — the common single-server case). With **no `host`**, servers fall back to **port
 routing** (distinct `listen` addresses → one listener each) or, when sharing a `listen`, to
-**path routing** via distinct `mount` prefixes.
+**path routing** via distinct `pathPrefix` values.
 
 **Host vs path.**
 
@@ -409,7 +417,7 @@ routing** (distinct `listen` addresses → one listener each) or, when sharing a
   - The card *does* carry the access path: `SupportedInterfaces[].url` is the absolute
     JSON-RPC endpoint and may include the prefix. But it is built from `BaseURL` — the
     origin-based fallback `requestBaseURL` is **scheme+host only** (no path). So **every
-    path-mounted A2A entry must set `baseURL` including its prefix**, or the advertised
+    A2A entry with a `pathPrefix` must set `baseURL` including its prefix**, or the advertised
     endpoint is wrong.
   - The origin-rooted discovery `/.well-known/agent-card.json` can belong to only **one**
     entry (the `default`); the others are reached via their prefixed card URL.
@@ -431,10 +439,10 @@ routing** (distinct `listen` addresses → one listener each) or, when sharing a
   the instance itself, so `BaseURL`/`Security` stay authoritative; the request supplies the
   origin when `BaseURL` is unset), which the root handler concatenates.
 - Each entry keeps its own `/.well-known/agent-card.json` and `/.well-known/agents.json`
-  under its `mount`/`host`.
+  under its `pathPrefix`/`host`.
 
 > The top-level router intercepts `/.well-known/agent-card.json` and `/.well-known/agents.json`
-> **before** any root-mounted entry's mux, so a server that owns the listener root cannot
+> **before** any root-serving entry's mux, so a server that owns the listener root cannot
 > shadow them.
 
 **Invariants (unchanged).** Multiplexing shares only the TCP/TLS entry point. Each entry
@@ -452,7 +460,7 @@ runtime info without the config file — useful across machines.
 
 | Method + path | Body |
 |---|---|
-| `GET /api/config` | the loaded config, structurally identical to the YAML, secrets redacted, with provenance |
+| `GET /api/config` | the loaded config, structurally identical to the YAML, secrets redacted, with its source file |
 | `GET /api/info` | `{version, pid, listen, servers[], a2a[]}` for the listener it is served on |
 
 - **Served by agentd's router** (not `pkg/server`), on each listener's **origin-root** server,
@@ -471,15 +479,13 @@ runtime info without the config file — useful across machines.
   `servers[].mediaUpload.header|value|fields`,
   `servers[].storage.password|token|value|presignSecret`, `servers[].storage.s3.accessKey|secretKey`,
   `servers[].storage.cos.secretID|secretKey|sessionToken`, `control.auth.*` become
-  `{"configured": bool, "redacted": true}` (or `{"configured": false}`). Expanded `${VAR}`
-  values are treated as secret; only the variable **names** are reported. Credential-bearing
+  `{"configured": bool, "redacted": true}` (or `{"configured": false}`). Credential-bearing
   URLs (`references[].repository`, `mediaUpload.url`, `storage.url|serveBaseURL`)
   have their userinfo stripped, so an `https://user:token@host/...` cannot leak its secret.
-- **Provenance**: `sources[]` reports the config `file` path and the `env` variable names
-  expanded while loading (`config.LoadWithEnv`).
+- **Source**: `sources[]` reports the config `file` path.
 - **Errors**: `401` (missing/invalid credential), `400` (bad `section`), `405` (non-GET),
   `404` (no origin-root server), matching the `/api/*` envelope `{error, message}`.
-- **Stability**: `schemaVersion` (currently `1`); the endpoints are experimental — fields are
+- **Stability**: `schemaVersion` (currently `4`); the endpoints are experimental — fields are
   only added, a removal bumps the version. Read-only (no PATCH) and no hot reload: the config
   is loaded at startup (`--check` validates it); restart to change it.
 
@@ -498,12 +504,12 @@ func run(ctx context.Context, cfg config) error {
     for _, listen := range sortedListens(cfg.Servers) { // deterministic startup order
         root := newRouter()              // host switch / path mux
         for _, s := range cfg.Servers[listen] {
-            client, err := config.BuildClient(cfg.Models, s) // one Client per server
+            client, err := client.New(params) // one Client per server
             if err != nil { return err } // defer closes any Client created so far
             clients = append(clients, client)
             h, err := buildHandler(ctx, client, s)   // http | a2a (on s.Kind)
             if err != nil { return err }
-            mount(root, s, h)            // host / mount; wire root discovery to the default
+            serve(root, s, h)            // host / pathPrefix; wire root discovery to the default
         }
         targets = append(targets, serveTarget{
             srv: &http.Server{Addr: listen, Handler: root}, tls: cfg.Servers[listen][0].TLS})
@@ -513,16 +519,16 @@ func run(ctx context.Context, cfg config) error {
 ```
 
 - **Cleanup is a single deferred close over `clients`.** Because the deferred call is a
-  closure over the final slice, a mid-loop `BuildClient`/`buildHandler` failure closes every
+  closure over the final slice, a mid-loop `client.New`/`buildHandler` failure closes every
   Client created so far. (A plain `defer closeAllClients(targets)` would miss the
   in-progress listener's Clients *and* capture a stale slice.)
 - **Entries are grouped by `listen`**: one `http.Server` per distinct address; within a
-  listener, `host` / `mount` route to each entry's handler (§5.2), and the origin-root
+  listener, `host` / `pathPrefix` route to each entry's handler (§5.2), and the origin-root
   discovery (`/.well-known/agent-card.json` = `default`; `/.well-known/agents.json` =
   aggregate) is wired at the top. **TLS is per listener** (§5), carried on the `serveTarget`.
 - **Deterministic startup**: iterate listens/entries in a sorted order so logs and tests are
   stable.
-- `config.BuildClient` is the **extracted** `buildClient`, now shared by both
+- `client.New` (in `cmd/agentd/client`) is the **extracted** `buildClient`, now shared by both
   transports (and fixing the §1 drift). It takes the **global `models` catalog plus the
   server entry** (which selects its model subset).
 - `buildHandler` switches on the entry's `kind`: `pkg/server.New(...)` or
@@ -547,7 +553,7 @@ func run(ctx context.Context, cfg config) error {
    - **Forbidden**: sharing one **writable** directory with no copies — concurrent writes
      clobber each other, and each server's own `Root` snapshots `revert` would overwrite
      the other's edits. Copies diverge by design, which is why they can coexist.
-3. **Never mount one `Client` on two listeners** — `HoldInteractions` is global and
+3. **Never share one `Client` across two listeners** — `HoldInteractions` is global and
    interaction ownership would be ambiguous (`DESIGN-HTTP.md` §9).
 
 ## 8. Migration
@@ -568,12 +574,12 @@ compatibility shims are kept.
   it), a bad `inboundMedia`, an exposed a2a agent without a card (or with a card missing
   `name`/`description`), a card for a non-exposed agent, and `cards` skills missing
   `id`/`name`/`description`.
-- **Assembly**: `BuildClient(catalog, server)` produces the expected `ClientOptions` (incl.
+- **Assembly**: `client.New(client.Params{...})` produces the expected `ClientOptions` (incl.
   MCP / References / Title / SubagentDepth) for **both** `kind`s — guards against the §1 drift
   returning. `peers` are validated (name, `endpoint`/`cardURL`, mode, duplicates) and, once
   built, registered as agents carrying the A2A backend and a delegatable mode (the
   SDK-level delegation chain is covered by `pkg/agent`'s remote-subagent tests).
-- **Routing**: two servers on one `listen` (host and/or mount) each answer on their own
+- **Routing**: two servers on one `listen` (host and/or pathPrefix) each answer on their own
   selector; the origin-root `/.well-known/agent-card.json` is the `default`, and
   `/.well-known/agents.json` unions all A2A servers.
 - **Integration**: start `agentd` with `http` + `a2a`; assert both listeners answer and that
@@ -595,9 +601,9 @@ compatibility shims are kept.
 | D3 | Keep the transport **adapters** (`pkg/server`, `pkg/a2a/server`) unchanged. | Different wire contracts; only the assembly layer is unified. |
 | D4 | Extract `buildClient` into `cmd/agentd/config` (or `cmd/serverunner`). | Fixes the current drift; single source of truth. |
 | D5 | **Streamlined, config-driven CLI** (§5.1): essentially only `-config` (plus `-check`/`-version`); the config is the single source of truth — servers, agents, models, roots, listeners, auth and tuning all live there. No per-run behavior flags. | The two commands' ~18/13 flags overlap and sprawl; everything agentd does is a config decision, so the CLI only points at the file. |
-| D6 | **In-process one-port multiplexing** (§5.2) via a top-level router: `host` (virtual host) is the preferred A2A discriminator (zero-config, origin-built card URLs); `mount` (path prefix) is also supported and **requires** a per-entry `baseURL` including the prefix. | Both adapters return `http.Handler`, so sharing a listener is natural; host routing keeps A2A card URLs correct with no extra config. |
+| D6 | **In-process one-port multiplexing** (§5.2) via a top-level router: `host` (virtual host) is the preferred A2A discriminator (zero-config, origin-built card URLs); `pathPrefix` (path prefix) is also supported and **requires** a per-entry `baseURL` including the prefix. | Both adapters return `http.Handler`, so sharing a listener is natural; host routing keeps A2A card URLs correct with no extra config. |
 | D7 | **Cross-instance aggregate discovery** at the origin root `/.well-known/agents.json` (union of the A2A entries **on that listener**), served by `agentd` via a new exported `pkg/a2a/server.Server.Cards(r *http.Request)` accessor; the origin-root single card `/.well-known/agent-card.json` is owned by the `default` A2A entry. | Per-instance `/.well-known/agents.json` already exists; the root union lets one URL discover every A2A agent on that origin, and the `default` entry resolves the single-card root. |
-| D8 | Config keys are **camelCase** (matching `cmd/agentd/config`). Secrets are inline **or** referenced via `${VAR}`/`${VAR:-default}` (any string value; `$$` escapes a literal `$`); environment is never read implicitly. | Consistency with the existing `agentserve`/`a2aserve` config and `DESIGN-HTTP.md` §8.1; explicit references keep secrets and host-specific facts (paths, endpoints, platform) out of a committed file without giving up the config-driven design. |
+| D8 | Config keys are **camelCase** (matching `cmd/agentd/config`). Secrets are inline **or** referenced via `$VAR`/`${VAR}`/`${VAR:-default}` (the whole file is expanded; an unset variable without a fallback is an error; `$$` escapes a literal `$`); environment is never read implicitly. | Consistency with the existing `agentserve`/`a2aserve` config and `DESIGN-HTTP.md` §8.1; explicit references keep secrets and host-specific facts (paths, endpoints, platform) out of a committed file without giving up the config-driven design. |
 | D9 | **Remove `cmd/agentserve` and `cmd/a2aserve`**; `agentd` replaces them, with **no old-config compatibility** (no shims). | The two commands are the duplication being removed; keeping a shim would preserve the very drift and the flag sprawl. |
 | D10 | Unify `keepAlive` default to **`15s`** for every server (the HTTP command's default); disable heartbeats explicitly with `keepAlive: 0s`. | The two commands disagreed (HTTP defaulted 15s, A2A disabled when unset); a single default is simpler. |
 | D11 | A2A `cards` is **mandatory per exposed agent**, with an explicit `name` and `description` (validated); `version` defaults to `1.0.0`, skills stay optional. | The AgentCard is the discovery contract a client fetches first; deriving name/description from the agent's internal definition yields a cryptic name and leaks internal behavior, so the operator must author it. Enforced at the `agentd` config layer, leaving `pkg/a2a/server`'s defaults for programmatic callers. |
@@ -614,7 +620,7 @@ Open questions: **none** — the design is settled and implemented.
 - **P2** — `cmd/agentd` skeleton: config load/validate, one server, reuse `cmd/agentd/config`.
 - **P3** — Multi-server / multi-listener: `groupByListen`, per-listener TLS, `serveAll`,
   graceful shutdown and startup-failure rollback.
-- **P4** — Multiplexing (`host`/`mount`/`default`) + origin-root aggregate discovery.
+- **P4** — Multiplexing (`host`/`pathPrefix`/`default`) + origin-root aggregate discovery.
 - **P5** — Remove `cmd/agentserve` / `cmd/a2aserve` (D9) + migration examples.
 
 **Correctness.**
@@ -635,8 +641,8 @@ Open questions: **none** — the design is settled and implemented.
 | 1 | Completeness | The per-server field set matches the §5 **fields-by-kind** table (shared / http-only / a2a-only) and is the **union** of both old commands — nothing dropped (incl. `allowInsecure`, `dropErroredTurns`, `mediaUpload`, `configDirs`, `baseURL`). |
 | 2 | Error branches | Every §5 validation rule fails fast; a bind failure rolls back started listeners and closes their clients; TLS/credential load errors surface; `client.Close` on all paths; empty `models`, duplicate `default`, unknown model ids. |
 | 3 | Duplication | No duplicated `buildClient`; one serve/shutdown/rollback/CLI path; nothing copy-pasted from the two old commands. |
-| 4 | Naming | `BuildClient(catalog, server)`, `buildHandler`, `newRouter`, `groupByListen` / `sortedListens`, `serveTarget`, `mountServer` — consistent with the repo. |
+| 4 | Naming | `BuildClient(catalog, server)`, `buildHandler`, `newRouter`, `groupByListen` / `sortedListens`, `serveTarget`, `serveServer` — consistent with the repo. |
 | 5 | Comments | Comments match the code and are **self-contained** — no `§N`/cross-references to design docs inside Go code. |
 | 6 | Refactoring discipline | Behavior-preserving, small steps, adapters untouched (D3), no unrelated edits, tests green each step. |
-| 7 | Readability | `run` / `serveAll` / mount / routing split into small functions; errors carry context (which server/listen). |
-| 8 | Cyclomatic complexity | Split `run`, `buildHandler` and routing into `buildTargets` / `mountServer` / `resolveByHost` / `resolveByMount` / `closeAll`; keep functions small even where the problem is inherently complex. |
+| 7 | Readability | `run` / `serveAll` / serving / routing split into small functions; errors carry context (which server/listen). |
+| 8 | Cyclomatic complexity | Split `run`, `buildHandler` and routing into `buildTargets` / `serveServer` / `resolveByHost` / `resolveByPathPrefix` / `closeAll`; keep functions small even where the problem is inherently complex. |

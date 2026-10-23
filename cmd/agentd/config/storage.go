@@ -1,32 +1,41 @@
 package config
 
 import (
-	"bytes"
-	"context"
-	"crypto/md5"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
-
-	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
+
+// StorageBackend selects the media-store implementation.
+type StorageBackend string
+
+const (
+	// StorageHTTP writes objects with an HTTP PUT under URL.
+	StorageHTTP StorageBackend = "http"
+	// StorageLocal writes objects to a shared local directory.
+	StorageLocal StorageBackend = "local"
+	// StorageS3 writes to an S3-compatible bucket.
+	StorageS3 StorageBackend = "s3"
+	// StorageCOS writes to a Tencent COS bucket over its native API.
+	StorageCOS StorageBackend = "cos"
+)
+
+// Valid reports whether b is a supported backend. An empty backend means
+// StorageHTTP.
+func (b StorageBackend) Valid() bool {
+	switch b {
+	case "", StorageHTTP, StorageLocal, StorageS3, StorageCOS:
+		return true
+	}
+	return false
+}
 
 // StorageConfig configures the process's provider-independent media store: it
 // hosts bytes and returns an http(s) url a provider can fetch. One store serves
 // every provider.
 type StorageConfig struct {
-	// Backend names the storage mechanism: "http" (a PUT to URL), "local" (a
-	// shared directory), "s3" (S3-compatible) or "cos" (native Tencent COS).
-	Backend string `yaml:"backend"`
+	// Backend selects the storage mechanism; empty means StorageHTTP.
+	Backend StorageBackend `yaml:"backend"`
 	// URL is the http backend's upload base; a content-addressed object is
 	// written under it.
 	URL string `yaml:"url"`
@@ -53,55 +62,60 @@ type StorageConfig struct {
 	// ServeBaseURL (local) is where Root is served over HTTP, so the url is
 	// fetchable by a provider; empty leaves the object reachable only on disk.
 	ServeBaseURL string `yaml:"serveBaseURL"`
-	// S3 configures an S3-compatible object store (backend "s3").
+	// S3 configures an S3-compatible object store (backend StorageS3).
 	S3 *S3Config `yaml:"s3"`
-	// COS configures a Tencent COS bucket over its native REST API (backend "cos").
+	// COS configures a Tencent COS bucket over its native REST API (backend
+	// StorageCOS).
 	COS *COSConfig `yaml:"cos"`
 }
 
-// Store builds the SDK MediaStore from the config.
-func (c StorageConfig) Store() schema.MediaStore {
-	switch c.Backend {
-	case "local":
-		return localStore{config: c}
-	case "s3":
-		return s3Store{config: c}
-	case "cos":
-		return cosStore{config: c}
-	default:
-		return mediaStoreClient{config: c}
-	}
-}
-
-// ValidateStorage rejects a malformed store configuration.
-func ValidateStorage(s *StorageConfig) error {
+// Validate rejects a malformed store configuration. Nil is valid (storage is
+// optional).
+func (s *StorageConfig) Validate() error {
 	if s == nil {
 		return nil
 	}
 	switch s.Backend {
-	case "", "http":
+	case "", StorageHTTP:
 		if s.URL == "" {
 			return errors.New("storage.url is required")
 		}
-		if err := validateHTTPAuth(s); err != nil {
+		if err := validateNonNegativeDuration("storage.presignTTL", s.PresignTTL); err != nil {
 			return err
 		}
-	case "local":
+		return validateHTTPAuth(s)
+	case StorageLocal:
 		if s.Root == "" {
 			return errors.New("storage.root is required")
 		}
-	case "s3":
+	case StorageS3:
 		if s.S3 == nil {
 			return errors.New("storage.s3 is required when backend is s3")
 		}
-		return ValidateS3(s.S3)
-	case "cos":
+		return s.S3.Validate()
+	case StorageCOS:
 		if s.COS == nil {
 			return errors.New("storage.cos is required when backend is cos")
 		}
-		return ValidateCOS(s.COS)
+		return s.COS.Validate()
 	default:
 		return fmt.Errorf("storage.backend must be http, local, s3 or cos, got %q", s.Backend)
+	}
+	return nil
+}
+
+// validateNonNegativeDuration checks an optional duration string and rejects a
+// negative value. An empty value means the default.
+func validateNonNegativeDuration(field, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil {
+		return fmt.Errorf("%s: %w", field, err)
+	}
+	if duration < 0 {
+		return fmt.Errorf("%s must not be negative", field)
 	}
 	return nil
 }
@@ -125,103 +139,4 @@ func validateHTTPAuth(s *StorageConfig) error {
 		return errors.New("storage.header and storage.value must be set together")
 	}
 	return nil
-}
-
-type mediaStoreClient struct{ config StorageConfig }
-
-// authHeaders is the configured credential: the Auth scheme (basic/bearer) and,
-// when set, the custom Header/Value. Both reads and writes use it.
-func (c mediaStoreClient) authHeaders() map[string]string {
-	headers := map[string]string{}
-	switch c.config.Auth {
-	case "basic":
-		pair := c.config.Username + ":" + c.config.Password
-		headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(pair))
-	case "bearer":
-		headers["Authorization"] = "Bearer " + c.config.Token
-	}
-	if c.config.Header != "" && c.config.Value != "" {
-		headers[c.config.Header] = c.config.Value
-	}
-	if len(headers) == 0 {
-		return nil
-	}
-	return headers
-}
-
-// base is the store's upload/read prefix (trailing slash).
-func (c mediaStoreClient) base() string {
-	return strings.TrimRight(c.config.URL, "/") + "/"
-}
-
-// ttl bounds a presigned url's lifetime (default 15m).
-func (c mediaStoreClient) ttl() time.Duration {
-	if c.config.PresignTTL != "" {
-		if d, err := time.ParseDuration(c.config.PresignTTL); err == nil {
-			return d
-		}
-	}
-	return 15 * time.Minute
-}
-
-// presignURL signs an object url with nginx's secure_link scheme (md5+expires).
-func (c mediaStoreClient) presignURL(objectURL string, expires time.Time) (string, error) {
-	u, err := url.Parse(objectURL)
-	if err != nil {
-		return "", err
-	}
-	ts := expires.Unix()
-	sig := secureLinkMD5(u.Path, ts, c.config.PresignSecret)
-	q := u.Query()
-	q.Set("md5", sig)
-	q.Set("expires", strconv.FormatInt(ts, 10))
-	u.RawQuery = q.Encode()
-	return u.String(), nil
-}
-
-// Put writes the media under the store's base and returns a "url" reference.
-// The object name is content-addressed, so a repeated Put is idempotent. With a
-// PresignSecret the url carries a secure_link ticket, so a private origin can
-// serve it to a provider.
-func (c mediaStoreClient) Put(ctx context.Context, media schema.MediaUpload) (schema.Reference, error) {
-	if c.config.URL == "" {
-		return schema.Reference{}, errors.New("storage: url is required")
-	}
-	sum := sha256.Sum256(media.Data)
-	name := hex.EncodeToString(sum[:8])
-	if media.Name != nil && *media.Name != "" {
-		name += "-" + filepath.Base(*media.Name)
-	}
-	url := c.base() + name
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(media.Data))
-	if err != nil {
-		return schema.Reference{}, err
-	}
-	for key, value := range c.authHeaders() {
-		req.Header.Set(key, value)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return schema.Reference{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return schema.Reference{}, fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	if c.config.PresignSecret == "" {
-		return schema.Reference{Source: "url", Value: url}, nil
-	}
-	expires := time.Now().Add(c.ttl())
-	signed, err := c.presignURL(url, expires)
-	if err != nil {
-		return schema.Reference{}, err
-	}
-	return schema.Reference{Source: "url", Value: signed, ExpiresAt: &expires}, nil
-}
-
-// secureLinkMD5 computes nginx secure_link's base64url(md5("<expires><uri> <secret>")).
-func secureLinkMD5(uri string, expires int64, secret string) string {
-	sum := md5.Sum([]byte(fmt.Sprintf("%d%s %s", expires, uri, secret)))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
 }

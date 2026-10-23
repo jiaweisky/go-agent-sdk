@@ -9,32 +9,73 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandbox"
 )
 
+// Wrapper selects the sandbox implementation that wraps spawned commands.
+type Wrapper string
+
+const (
+	// WrapperNone disables the sandbox: the SDK runs commands directly.
+	WrapperNone Wrapper = "none"
+	// WrapperBwrap is the Linux bubblewrap wrapper.
+	WrapperBwrap Wrapper = "bwrap"
+	// WrapperSeatbelt is the macOS Seatbelt wrapper.
+	WrapperSeatbelt Wrapper = "seatbelt"
+	// WrapperAppContainer is the Windows AppContainer wrapper.
+	WrapperAppContainer Wrapper = "appcontainer"
+)
+
+// Valid reports whether w is a known sandbox wrapper.
+func (w Wrapper) Valid() bool {
+	switch w {
+	case WrapperNone, WrapperBwrap, WrapperSeatbelt, WrapperAppContainer:
+		return true
+	}
+	return false
+}
+
+// FailurePolicy selects what happens when a configured sandbox cannot be built.
+type FailurePolicy string
+
+const (
+	// FailurePolicyFailClosed refuses to start when the sandbox cannot be
+	// built.
+	FailurePolicyFailClosed FailurePolicy = "fail-closed"
+	// FailurePolicyFailOpen warns and runs without the sandbox when it cannot
+	// be built.
+	FailurePolicyFailOpen FailurePolicy = "fail-open"
+)
+
+// Valid reports whether p is a supported failure policy.
+func (p FailurePolicy) Valid() bool {
+	return p == "" || p == FailurePolicyFailClosed || p == FailurePolicyFailOpen
+}
+
 // Enabled reports whether a wrapper and a non-off profile are configured.
 func (s *SandboxConfig) Enabled() bool {
-	return s != nil && s.Process != "" && s.Process != "none" && s.Profile != "off"
+	return s != nil && s.Wrapper != "" && s.Wrapper != WrapperNone && s.Profile != "off"
 }
 
 // Policy resolves the effective sandbox policy for a working directory. A
-// disabled sandbox yields the zero policy (the guards become no-ops).
+// disabled sandbox yields a policy with only the working directory set, so the
+// guards become no-ops.
 func (s *SandboxConfig) Policy(workingDir string) sandbox.Policy {
 	if !s.Enabled() {
 		return sandbox.Policy{WorkingDirectory: workingDir}
 	}
-	return s.SandboxPolicy.resolve(workingDir, true)
+	return s.SandboxPolicy.resolve(workingDir)
 }
 
 // Policy resolves the whole-process sandbox policy. A disabled wrap yields the
 // zero policy.
 func (w *WrapConfig) Policy() sandbox.Policy {
-	if w == nil || w.Process == "" || w.Process == "none" || w.Profile == "off" {
+	if w == nil || w.Wrapper == "" || w.Wrapper == WrapperNone || w.Profile == "off" {
 		return sandbox.Policy{}
 	}
-	return w.SandboxPolicy.resolve("", true)
+	return w.SandboxPolicy.resolve("")
 }
 
 // resolve builds a policy from a profile and the explicit overrides.
-func (p SandboxPolicy) resolve(workingDir string, enabled bool) sandbox.Policy {
-	if !enabled || p.Profile == "off" {
+func (p SandboxPolicy) resolve(workingDir string) sandbox.Policy {
+	if p.Profile == "off" {
 		return sandbox.Policy{WorkingDirectory: workingDir}
 	}
 	var policy sandbox.Policy
@@ -69,7 +110,7 @@ func (p SandboxPolicy) resolve(workingDir string, enabled bool) sandbox.Policy {
 	}
 	if u := p.UnixSockets; u != nil {
 		switch u.Mode {
-		case "deny":
+		case sandbox.SocketDeny:
 			// Pre-rename alias: the real semantics are "follow the file policy".
 			policy.SocketMode = sandbox.SocketInherit
 		case "":
@@ -86,9 +127,9 @@ func (p SandboxPolicy) resolve(workingDir string, enabled bool) sandbox.Policy {
 	}
 	if e := p.Env; e != nil {
 		switch e.Mode {
-		case "scrub":
+		case sandbox.EnvScrub:
 			policy.ScrubEnv = append(sandbox.DefaultScrubEnv(), e.Scrub...)
-		case "inherit":
+		case sandbox.EnvInherit:
 			policy.ScrubEnv = nil
 		}
 		if e.Mode == "" && len(e.Scrub) > 0 {
@@ -117,99 +158,180 @@ func (s *SandboxConfig) hasPolicyFields() bool {
 		p.ProcessInspection != "" || p.Env != nil || p.Violations != nil
 }
 
-// ValidateSandbox checks a sandbox block for unsupported or contradictory
-// settings. An unsupported rule is a startup error, never a silent allow-all.
-func ValidateSandbox(s *SandboxConfig) error {
+// Validate checks a sandbox block for unsupported or contradictory settings.
+// An unsupported rule is a startup error, never a silent allow-all.
+func (s *SandboxConfig) Validate() error {
 	if s == nil {
 		return nil
 	}
-	// An unknown process name is resolved at startup, so fail-open can downgrade
-	// it with a warning; only an empty name (with a sandbox block present) is a
-	// configuration error.
-	if s.Process == "" {
-		return errors.New(`sandbox.process is required (use "none" to disable it)`)
+	if err := validateSandboxSelection(s); err != nil {
+		return err
+	}
+	if err := validateSandboxPolicy(s.SandboxPolicy); err != nil {
+		return err
+	}
+	return validatePlatformSandbox(s)
+}
+
+// validateSandboxSelection checks the wrapper choice and failure policy.
+func validateSandboxSelection(s *SandboxConfig) error {
+	if s.Wrapper == "" {
+		return errors.New(`sandbox.wrapper is required (use "none" to disable it)`)
+	}
+	// The wrapper is a closed set; whether it can actually run on this host
+	// (platform support, wrapper binary) is resolved at startup and governed by
+	// failurePolicy.
+	if !s.Wrapper.Valid() {
+		return fmt.Errorf("sandbox.wrapper must be none, bwrap, seatbelt or appcontainer, got %q", s.Wrapper)
 	}
 	// A disabled sandbox ignores the policy; reject that instead of silently
 	// downgrading it.
-	if (s.Process == "none" || s.Profile == "off") && s.hasPolicyFields() {
-		return errors.New("sandbox policy fields are ignored when the sandbox is disabled; remove them or name a process")
+	if (s.Wrapper == WrapperNone || s.Profile == "off") && s.hasPolicyFields() {
+		return errors.New("sandbox policy fields are ignored when the sandbox is disabled; remove them or name a wrapper")
 	}
-	switch s.FailurePolicy {
-	case "", "fail-closed", "fail-open":
-	default:
-		return fmt.Errorf("sandbox.failurePolicy must be fail-closed or fail-open, got %q", s.FailurePolicy)
+	return validateFailurePolicy("sandbox.failurePolicy", s.FailurePolicy)
+}
+
+// validateSandboxPolicy checks the inline policy fields.
+func validateSandboxPolicy(p SandboxPolicy) error {
+	if err := validateSandboxProfile(p.Profile); err != nil {
+		return err
 	}
-	switch s.Profile {
+	if err := validateSandboxFilesystem(p.Filesystem); err != nil {
+		return err
+	}
+	if err := validateSandboxNetwork(p.Network); err != nil {
+		return err
+	}
+	if err := validateSandboxUnixSockets(p.UnixSockets); err != nil {
+		return err
+	}
+	if err := validateSandboxProcessInspection(p.ProcessInspection); err != nil {
+		return err
+	}
+	if err := validateSandboxEnv(p.Env); err != nil {
+		return err
+	}
+	return validateSandboxViolations(p.Violations)
+}
+
+// validateFailurePolicy checks a fail-closed/fail-open setting.
+func validateFailurePolicy(field string, p FailurePolicy) error {
+	if p.Valid() {
+		return nil
+	}
+	return fmt.Errorf("%s must be fail-closed or fail-open, got %q", field, p)
+}
+
+func validateSandboxProfile(profile string) error {
+	switch profile {
 	case "", "off", "standard", "custom":
+		return nil
+	}
+	return fmt.Errorf("sandbox.profile must be off, standard or custom, got %q", profile)
+}
+
+func validateSandboxFilesystem(f *SandboxFilesystem) error {
+	if f == nil {
+		return nil
+	}
+	if err := validateFileAccess("read", f.Read); err != nil {
+		return err
+	}
+	if err := validateFileAccess("write", f.Write); err != nil {
+		return err
+	}
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	for _, entry := range append(append([]string{}, f.DenyRead...), f.DenyWrite...) {
+		if strings.ContainsAny(entry, "*?[") {
+			return fmt.Errorf("sandbox.filesystem deny glob %q is unsupported on linux; use a literal path", entry)
+		}
+	}
+	return nil
+}
+
+// validateFileAccess checks one filesystem access mode.
+func validateFileAccess(field, mode string) error {
+	switch mode {
+	case "", sandbox.FSModeAllow, sandbox.FSModeOff:
+		return nil
+	}
+	return fmt.Errorf("sandbox.filesystem.%s must be allow or off, got %q", field, mode)
+}
+
+func validateSandboxNetwork(n *SandboxNetwork) error {
+	if n == nil {
+		return nil
+	}
+	if len(n.AllowedDomains) > 0 {
+		return errors.New("sandbox.network.allowedDomains is not implemented; use no-egress or a host proxy")
+	}
+	switch n.Mode {
+	case "", sandbox.NetworkOff, sandbox.NetworkNoEgress:
+		return nil
+	case "allowlist":
+		return errors.New("sandbox.network.mode allowlist is not implemented; use no-egress or a host proxy")
 	default:
-		return fmt.Errorf("sandbox.profile must be off, standard or custom, got %q", s.Profile)
+		return fmt.Errorf("sandbox.network.mode must be off or no-egress, got %q", n.Mode)
 	}
-	if f := s.Filesystem; f != nil {
-		for name, mode := range map[string]string{"read": f.Read, "write": f.Write} {
-			switch mode {
-			case "", "allow", "off":
-			default:
-				return fmt.Errorf("sandbox.filesystem.%s must be allow or off, got %q", name, mode)
-			}
-		}
-		if runtime.GOOS == "linux" {
-			for _, entry := range append(append([]string{}, f.DenyRead...), f.DenyWrite...) {
-				if strings.ContainsAny(entry, "*?[") {
-					return fmt.Errorf("sandbox.filesystem deny glob %q is unsupported on linux; use a literal path", entry)
-				}
-			}
-		}
+}
+
+func validateSandboxUnixSockets(u *SandboxUnixSockets) error {
+	if u == nil {
+		return nil
 	}
-	if n := s.Network; n != nil {
-		if len(n.AllowedDomains) > 0 {
-			return errors.New("sandbox.network.allowedDomains is not implemented; use no-egress or a host proxy")
-		}
-		switch n.Mode {
-		case "", "off", "no-egress":
-		case "allowlist":
-			return errors.New("sandbox.network.mode allowlist is not implemented; use no-egress or a host proxy")
-		default:
-			return fmt.Errorf("sandbox.network.mode must be off or no-egress, got %q", n.Mode)
-		}
+	if u.Mode != sandbox.SocketAllowlist && len(u.Allow) > 0 {
+		return errors.New("sandbox.unixSockets.allow requires mode allowlist")
 	}
-	if u := s.UnixSockets; u != nil {
-		if u.Mode != "allowlist" && len(u.Allow) > 0 {
-			return errors.New("sandbox.unixSockets.allow requires mode allowlist")
+	switch u.Mode {
+	case "", sandbox.SocketInherit, sandbox.SocketDeny, sandbox.SocketAllowAll:
+		return nil
+	case sandbox.SocketAllowlist:
+		if len(u.Allow) == 0 {
+			return errors.New("sandbox.unixSockets.mode allowlist requires at least one allow path")
 		}
-		switch u.Mode {
-		case "", "inherit", "deny", "allowAll":
-		case "allowlist":
-			if len(u.Allow) == 0 {
-				return errors.New("sandbox.unixSockets.mode allowlist requires at least one allow path")
-			}
-		default:
-			return fmt.Errorf("sandbox.unixSockets.mode must be inherit, allowAll or allowlist, got %q", u.Mode)
-		}
+		return nil
+	default:
+		return fmt.Errorf("sandbox.unixSockets.mode must be inherit, allowAll or allowlist, got %q", u.Mode)
 	}
-	switch s.ProcessInspection {
+}
+
+func validateSandboxProcessInspection(mode string) error {
+	switch mode {
 	case "", "deny", "allow":
+		return nil
+	}
+	return fmt.Errorf("sandbox.processInspection must be deny or allow, got %q", mode)
+}
+
+func validateSandboxEnv(e *SandboxEnv) error {
+	if e == nil {
+		return nil
+	}
+	switch e.Mode {
+	case "", sandbox.EnvScrub, sandbox.EnvInherit:
+		return nil
+	}
+	return fmt.Errorf("sandbox.env.mode must be scrub or inherit, got %q", e.Mode)
+}
+
+func validateSandboxViolations(v *SandboxViolations) error {
+	if v == nil {
+		return nil
+	}
+	switch v.Mode {
+	case "", sandbox.ViolationHeuristic, sandbox.ViolationOff:
+		return nil
+	case sandbox.ViolationPrecise:
+		if runtime.GOOS != "linux" {
+			return fmt.Errorf("sandbox.violations.mode precise is only supported on linux (this host is %s)", runtime.GOOS)
+		}
+		return nil
 	default:
-		return fmt.Errorf("sandbox.processInspection must be deny or allow, got %q", s.ProcessInspection)
+		return fmt.Errorf("sandbox.violations.mode must be heuristic, precise or off, got %q", v.Mode)
 	}
-	if e := s.Env; e != nil {
-		switch e.Mode {
-		case "", "scrub", "inherit":
-		default:
-			return fmt.Errorf("sandbox.env.mode must be scrub or inherit, got %q", e.Mode)
-		}
-	}
-	if v := s.Violations; v != nil {
-		switch v.Mode {
-		case "", "heuristic", "off":
-		case "precise":
-			if runtime.GOOS != "linux" {
-				return fmt.Errorf("sandbox.violations.mode precise is only supported on linux (this host is %s)", runtime.GOOS)
-			}
-		default:
-			return fmt.Errorf("sandbox.violations.mode must be heuristic, precise or off, got %q", v.Mode)
-		}
-	}
-	return validatePlatformSandbox(s)
 }
 
 // validatePlatformSandbox rejects a policy the host cannot enforce. Windows
@@ -224,19 +346,23 @@ func validatePlatformSandbox(s *SandboxConfig) error {
 func validatePlatformSandboxFor(goos string, s *SandboxConfig) error {
 	policy := s.Policy("")
 	switch goos {
+	case "darwin":
+		// Seatbelt can express every supported combination: reads and writes may
+		// be independently off, and process introspection may be allowed.
 	case "windows":
 		if policy.ReadMode == sandbox.FSModeOff {
-			return errors.New("sandbox.filesystem.read: off is not supported on windows; use read: allow or process: none")
+			return errors.New("sandbox.filesystem.read: off is not supported on windows; use read: allow or wrapper: none")
 		}
 		if policy.WriteMode == sandbox.FSModeOff {
-			return errors.New("sandbox.filesystem.write: off is not supported on windows; use write: allow or process: none")
+			return errors.New("sandbox.filesystem.write: off is not supported on windows; use write: allow or wrapper: none")
 		}
 		if s.ProcessInspection == "allow" {
 			return errors.New("sandbox.processInspection: allow is not supported on windows; the AppContainer cannot be relaxed")
 		}
 	case "linux":
 		if policy.WriteMode == sandbox.FSModeOff && policy.ReadMode == sandbox.FSModeAllow {
-			return errors.New("sandbox.filesystem.write: off with read: allow is contradictory on linux; set read: off or use process: none")
+			return errors.New("sandbox.filesystem.write: off with read: allow is contradictory on linux; " +
+				"set read: off or use wrapper: none")
 		}
 	}
 	return nil

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func testModel() ModelConfig {
 	return ModelConfig{
@@ -192,7 +195,7 @@ func TestValidateRejectsUnknownQuestionPolicy(t *testing.T) {
 }
 
 func TestValidateRejectsKindMismatchedFields(t *testing.T) {
-	base := func(kind string) Config {
+	base := func(kind Kind) Config {
 		return Config{
 			Models: []ModelConfig{testModel()},
 			Servers: []Server{
@@ -200,15 +203,112 @@ func TestValidateRejectsKindMismatchedFields(t *testing.T) {
 			},
 		}
 	}
-	httpCfg := base("http")
+	httpCfg := base(KindHTTP)
 	httpCfg.Servers[0].BaseURL = "https://x"
 	if err := httpCfg.Validate(); err == nil {
 		t.Fatal("expected an a2a-only field on an http server to be rejected")
 	}
-	a2aCfg := base("a2a")
+	a2aCfg := base(KindA2A)
 	a2aCfg.Servers[0].CORS = []string{"https://x"}
 	if err := a2aCfg.Validate(); err == nil {
 		t.Fatal("expected an http-only field on an a2a server to be rejected")
+	}
+}
+
+func TestValidateRejectsUnknownKind(t *testing.T) {
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: "grpc", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an unknown server kind to be rejected")
+	}
+}
+
+func TestValidateRejectsInvalidListen(t *testing.T) {
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: KindHTTP, Listen: "not-an-address", Root: "/a", Agents: []string{"build"},
+				AllowInsecure: true},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an invalid listen address to be rejected")
+	}
+}
+
+func TestValidateRejectsRootPathPrefix(t *testing.T) {
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: KindHTTP, Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"},
+				PathPrefix: "/"},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected a root pathPrefix to be rejected")
+	}
+}
+
+func TestValidateRejectsNegativeLimits(t *testing.T) {
+	cases := []struct {
+		name  string
+		apply func(*Server)
+		want  string
+	}{
+		{"subagentDepth", func(s *Server) { s.SubagentDepth = -1 }, "subagentDepth"},
+		{"subscriberCapacity", func(s *Server) { s.SubscriberCapacity = -1 }, "subscriberCapacity"},
+		{"maxBodyBytes", func(s *Server) { s.MaxBodyBytes = -1 }, "maxBodyBytes"},
+	}
+	for _, tc := range cases {
+		server := Server{Name: "a", Kind: KindHTTP, Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}}
+		tc.apply(&server)
+		err := (Config{Models: []ModelConfig{testModel()}, Servers: []Server{server}}).Validate()
+		if err == nil {
+			t.Errorf("%s: expected an error", tc.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: error %q should name the field", tc.name, err)
+		}
+	}
+}
+
+func TestIsLoopback(t *testing.T) {
+	cases := []struct {
+		listen string
+		want   bool
+	}{
+		{"127.0.0.1:1", true},
+		{"127.0.0.2:1", true},
+		{"[::1]:1", true},
+		{"localhost:1", true},
+		{"LocalHost:1", true},
+		{"0.0.0.0:1", false},
+		{"[::]:1", false},
+		{"127.0.0.1", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := IsLoopback(tc.listen); got != tc.want {
+			t.Errorf("IsLoopback(%q) = %v, want %v", tc.listen, got, tc.want)
+		}
+	}
+}
+
+func TestValidateRejectsUnknownInboundMedia(t *testing.T) {
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: KindA2A, Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"},
+				Cards: testCards(), InboundMedia: "bogus"},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an unknown inboundMedia policy to be rejected")
 	}
 }
 
@@ -217,7 +317,7 @@ func TestValidateAllowsSharedListen(t *testing.T) {
 		Models: []ModelConfig{testModel()},
 		Servers: []Server{
 			{Name: "root", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}},
-			{Name: "api2", Kind: "http", Listen: "127.0.0.1:1", Root: "/b", Agents: []string{"build"}, Mount: "/api2"},
+			{Name: "api2", Kind: "http", Listen: "127.0.0.1:1", Root: "/b", Agents: []string{"build"}, PathPrefix: "/api2"},
 			{Name: "hosted", Kind: "http", Listen: "127.0.0.1:1", Root: "/c", Agents: []string{"build"}, Host: "h.example.com"},
 		},
 	}
@@ -239,17 +339,17 @@ func TestValidateRejectsTwoRootsOnOneListen(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsDuplicateMount(t *testing.T) {
+func TestValidateRejectsDuplicatePathPrefix(t *testing.T) {
 	cfg := Config{
 		Models: []ModelConfig{testModel()},
 		Servers: []Server{
 			{Name: "root", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}},
-			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/b", Agents: []string{"build"}, Mount: "/x"},
-			{Name: "b", Kind: "http", Listen: "127.0.0.1:1", Root: "/c", Agents: []string{"build"}, Mount: "/x/"},
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/b", Agents: []string{"build"}, PathPrefix: "/x"},
+			{Name: "b", Kind: "http", Listen: "127.0.0.1:1", Root: "/c", Agents: []string{"build"}, PathPrefix: "/x/"},
 		},
 	}
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected a duplicate mount to be rejected")
+		t.Fatal("expected a duplicate pathPrefix to be rejected")
 	}
 }
 
@@ -271,7 +371,7 @@ func TestValidateSharesListenTLS(t *testing.T) {
 		Models: []ModelConfig{testModel()},
 		Servers: []Server{
 			{Name: "root", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}, TLS: tls},
-			{Name: "api2", Kind: "http", Listen: "127.0.0.1:1", Root: "/b", Agents: []string{"build"}, Mount: "/api2", TLS: tls},
+			{Name: "api2", Kind: "http", Listen: "127.0.0.1:1", Root: "/b", Agents: []string{"build"}, PathPrefix: "/api2", TLS: tls},
 		},
 	}
 	if err := shared.Validate(); err != nil {

@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.6.0
+	github.com/a8m/envsubst v1.4.3
 	github.com/bmatcuk/doublestar v1.3.4
 	github.com/funnyfactor/mimetype v1.0.2
 	github.com/modelcontextprotocol/go-sdk v1.8.0

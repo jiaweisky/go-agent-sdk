@@ -1,4 +1,4 @@
-package config
+package media
 
 import (
 	"bytes"
@@ -16,7 +16,10 @@ const transcodeTimeout = 2 * time.Minute
 
 // videoScales are the candidate widths (largest first) tried when shrinking a
 // video; the first result that fits MaxBytes is returned.
-var videoScales = []string{"min(1280\\,iw)", "min(854\\,iw)", "min(640\\,iw)", "min(480\\,iw)", "min(360\\,iw)", "min(240\\,iw)", "min(160\\,iw)"}
+var videoScales = []string{
+	"min(1280\\,iw)", "min(854\\,iw)", "min(640\\,iw)", "min(480\\,iw)",
+	"min(360\\,iw)", "min(240\\,iw)", "min(160\\,iw)",
+}
 
 // audioBitrates are the candidate audio bitrates (largest first).
 var audioBitrates = []string{"64k", "32k", "16k", "8k"}

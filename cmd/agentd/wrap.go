@@ -21,16 +21,16 @@ const wrappedEnv = "AGENTD_SANDBOXED"
 // child reads again after the sandbox is up.
 func wrapProcess(cfg config.Config, configPath string) error {
 	w := cfg.Wrap
-	if w == nil || w.Process == "" || w.Process == "none" {
+	if w == nil || w.Wrapper == "" || w.Wrapper == config.WrapperNone {
 		return nil
 	}
 	if os.Getenv(wrappedEnv) != "" {
 		return nil
 	}
-	launcher, err := sandbox.ResolveProcess(w.Process)
+	launcher, err := sandbox.ResolveProcess(string(w.Wrapper))
 	if err != nil {
-		if w.FailurePolicy == "fail-open" {
-			fmt.Fprintf(os.Stderr, "agentd: whole-process sandbox %q unavailable (%v); running unwrapped\n", w.Process, err)
+		if w.FailurePolicy == config.FailurePolicyFailOpen {
+			fmt.Fprintf(os.Stderr, "agentd: whole-process sandbox %q unavailable (%v); running unwrapped\n", w.Wrapper, err)
 			return nil
 		}
 		return err
@@ -47,8 +47,10 @@ func wrapProcess(cfg config.Config, configPath string) error {
 	policy.AllowRead = append(policy.AllowRead, wrapReadPaths(cfg, executable, configPath, roots)...)
 	policy.AllowWrite = append(policy.AllowWrite, roots...)
 	// The sentinel marks the child as already wrapped so it does not recurse.
-	os.Setenv(wrappedEnv, w.Process)
-	fmt.Fprintf(os.Stderr, "agentd: entering whole-process sandbox %q\n", w.Process)
+	if err := os.Setenv(wrappedEnv, string(w.Wrapper)); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "agentd: entering whole-process sandbox %q\n", w.Wrapper)
 	return launcher(roots, policy, executable, os.Args[1:])
 }
 

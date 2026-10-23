@@ -117,7 +117,7 @@ func (s *supervisor) projectRequest(req request) (config.ProjectRequest, string,
 	}
 	kind := t.Kind
 	if kind == "" {
-		kind = "http"
+		kind = config.KindHTTP
 	}
 	iso := t.Isolation
 	if req.Readonly {
@@ -137,7 +137,7 @@ func (s *supervisor) projectRequest(req request) (config.ProjectRequest, string,
 		Sandbox:          t.Sandbox,
 		Readonly:         req.Readonly,
 		Auth:             t.Auth,
-	}, kind, nil
+	}, string(kind), nil
 }
 
 func (s *supervisor) release(req request) error {

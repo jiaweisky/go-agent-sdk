@@ -11,7 +11,7 @@ import (
 // contract between the control API and the supervisor command.
 type ProjectRequest struct {
 	Name             string   `json:"name"`
-	Kind             string   `json:"kind"`
+	Kind             Kind     `json:"kind"`
 	Root             string   `json:"root"`
 	WorkingDirectory string   `json:"workingDirectory"`
 	ConfigDirs       []string `json:"configDirs,omitempty"`
@@ -20,7 +20,7 @@ type ProjectRequest struct {
 	Agents           []string `json:"agents"`
 	// Peers are remote A2A agents the instance reaches as a client (same shape
 	// as a server's).
-	Peers     []Peer           `json:"peers,omitempty"`
+	Peers     []A2APeer        `json:"peers,omitempty"`
 	Isolation *IsolationConfig `json:"isolation,omitempty"`
 	// InboundPermissions overrides the instance's tool policy (same shape as a
 	// server's). Empty means the SDK default (read-only).
@@ -41,8 +41,8 @@ func (r ProjectRequest) Validate() error {
 	switch {
 	case r.Name == "":
 		return errors.New("name is required")
-	case r.Kind != "http" && r.Kind != "a2a":
-		return errors.New("kind must be http or a2a")
+	case !r.Kind.Valid():
+		return fmt.Errorf("kind must be %s or %s", KindHTTP, KindA2A)
 	case r.Root == "":
 		return errors.New("root is required")
 	case len(r.Agents) == 0:
@@ -51,16 +51,16 @@ func (r ProjectRequest) Validate() error {
 	if r.Readonly && r.Isolation != nil {
 		return errors.New("readonly shares the source directory; isolation is not allowed")
 	}
-	if err := validateAuthConfig(r.Auth); err != nil {
+	if err := r.Auth.Validate(); err != nil {
 		return err
 	}
-	if err := ValidateSandbox(r.Sandbox); err != nil {
+	if err := r.Sandbox.Validate(); err != nil {
 		return fmt.Errorf("project %q: %w", r.Name, err)
 	}
-	if err := ValidatePeers(r.Peers); err != nil {
+	if err := ValidateA2APeers(r.Peers); err != nil {
 		return fmt.Errorf("project %q: %w", r.Name, err)
 	}
-	return ValidateIsolation(r.Name, r.WorkingDirectory, r.Isolation)
+	return r.Isolation.Validate(r.Name, r.WorkingDirectory)
 }
 
 // ToServer maps a project request to the config.Server an instance serves. root

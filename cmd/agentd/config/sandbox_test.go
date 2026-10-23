@@ -8,7 +8,7 @@ import (
 )
 
 func TestSandboxStandardPolicy(t *testing.T) {
-	cfg := &SandboxConfig{Process: "seatbelt"}
+	cfg := &SandboxConfig{Wrapper: "seatbelt"}
 	policy := cfg.Policy("/work")
 	if policy.ReadMode != sandbox.FSModeAllow || policy.WriteMode != sandbox.FSModeAllow {
 		t.Fatalf("standard policy modes = %q/%q", policy.ReadMode, policy.WriteMode)
@@ -22,7 +22,7 @@ func TestSandboxStandardPolicy(t *testing.T) {
 }
 
 func TestSandboxProfileOff(t *testing.T) {
-	cfg := &SandboxConfig{Process: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "off"}}
+	cfg := &SandboxConfig{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "off"}}
 	if cfg.Enabled() {
 		t.Fatal("profile off must disable the sandbox")
 	}
@@ -33,7 +33,7 @@ func TestSandboxProfileOff(t *testing.T) {
 
 func TestSandboxCustomOff(t *testing.T) {
 	cfg := &SandboxConfig{
-		Process: "seatbelt",
+		Wrapper: "seatbelt",
 		SandboxPolicy: SandboxPolicy{
 			Profile: "custom",
 			Filesystem: &SandboxFilesystem{
@@ -57,39 +57,39 @@ func TestSandboxCustomOff(t *testing.T) {
 
 func TestValidateSandboxPolicy(t *testing.T) {
 	valid := []*SandboxConfig{
-		{Process: "none"},
-		{Process: "seatbelt"},
-		{Process: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "off"}},
-		{Process: "bwrap", SandboxPolicy: SandboxPolicy{Profile: "custom", Filesystem: &SandboxFilesystem{Read: "allow", Write: "allow"}}},
+		{Wrapper: "none"},
+		{Wrapper: "seatbelt"},
+		{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "off"}},
+		{Wrapper: "bwrap", SandboxPolicy: SandboxPolicy{Profile: "custom", Filesystem: &SandboxFilesystem{Read: "allow", Write: "allow"}}},
 	}
 	for _, cfg := range valid {
-		if err := ValidateSandbox(cfg); err != nil {
+		if err := cfg.Validate(); err != nil {
 			t.Fatalf("valid sandbox rejected: %v (%+v)", err, cfg)
 		}
 	}
 
 	invalid := []*SandboxConfig{
 		{},
-		{Process: "seatbelt", SandboxPolicy: SandboxPolicy{Network: &SandboxNetwork{Mode: "allowlist"}}},
-		{Process: "seatbelt", SandboxPolicy: SandboxPolicy{Filesystem: &SandboxFilesystem{Read: "maybe"}}},
-		{Process: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "bogus"}},
-		{Process: "seatbelt", SandboxPolicy: SandboxPolicy{UnixSockets: &SandboxUnixSockets{Mode: "allowlist"}}},
-		{Process: "seatbelt", SandboxPolicy: SandboxPolicy{UnixSockets: &SandboxUnixSockets{Mode: "inherit", Allow: []string{"/run/x.sock"}}}},
-		{Process: "seatbelt", SandboxPolicy: SandboxPolicy{Network: &SandboxNetwork{AllowedDomains: []string{"api.deepseek.com"}}}},
+		{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Network: &SandboxNetwork{Mode: "allowlist"}}},
+		{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Filesystem: &SandboxFilesystem{Read: "maybe"}}},
+		{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "bogus"}},
+		{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{UnixSockets: &SandboxUnixSockets{Mode: "allowlist"}}},
+		{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{UnixSockets: &SandboxUnixSockets{Mode: "inherit", Allow: []string{"/run/x.sock"}}}},
+		{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Network: &SandboxNetwork{AllowedDomains: []string{"api.deepseek.com"}}}},
 	}
 	for _, cfg := range invalid {
-		if err := ValidateSandbox(cfg); err == nil {
+		if err := cfg.Validate(); err == nil {
 			t.Fatalf("invalid sandbox accepted: %+v", cfg)
 		}
 	}
 
 	if runtime.GOOS == "linux" {
-		if err := ValidateSandbox(&SandboxConfig{
-			Process: "bwrap",
+		if err := (&SandboxConfig{
+			Wrapper: "bwrap",
 			SandboxPolicy: SandboxPolicy{Filesystem: &SandboxFilesystem{
 				DenyWrite: []string{"**/.env"},
 			}},
-		}); err == nil {
+		}).Validate(); err == nil {
 			t.Fatal("a write glob must be rejected on linux")
 		}
 	}
@@ -97,7 +97,7 @@ func TestValidateSandboxPolicy(t *testing.T) {
 
 func TestSandboxViolationConfig(t *testing.T) {
 	cfg := &SandboxConfig{
-		Process: "seatbelt",
+		Wrapper: "seatbelt",
 		SandboxPolicy: SandboxPolicy{
 			Violations: &SandboxViolations{Mode: "heuristic"},
 		},
@@ -114,10 +114,10 @@ func TestSandboxViolationConfig(t *testing.T) {
 
 	if runtime.GOOS != "linux" {
 		precise := &SandboxConfig{
-			Process:       "seatbelt",
+			Wrapper:       "seatbelt",
 			SandboxPolicy: SandboxPolicy{Violations: &SandboxViolations{Mode: "precise"}},
 		}
-		if err := ValidateSandbox(precise); err == nil {
+		if err := precise.Validate(); err == nil {
 			t.Fatalf("precise must be rejected on %s", runtime.GOOS)
 		}
 	}
@@ -127,17 +127,17 @@ func TestSandboxViolationConfig(t *testing.T) {
 // policy when the sandbox is disabled.
 func TestValidateSandboxDisabledPolicyFields(t *testing.T) {
 	bad := &SandboxConfig{
-		Process:       "none",
+		Wrapper:       "none",
 		SandboxPolicy: SandboxPolicy{Filesystem: &SandboxFilesystem{Read: "off"}},
 	}
-	if err := ValidateSandbox(bad); err == nil {
+	if err := bad.Validate(); err == nil {
 		t.Fatal("policy fields with process none must be rejected")
 	}
 	off := &SandboxConfig{
-		Process:       "seatbelt",
+		Wrapper:       "seatbelt",
 		SandboxPolicy: SandboxPolicy{Profile: "off", Network: &SandboxNetwork{Mode: "off"}},
 	}
-	if err := ValidateSandbox(off); err == nil {
+	if err := off.Validate(); err == nil {
 		t.Fatal("policy fields with profile off must be rejected")
 	}
 }
@@ -146,10 +146,10 @@ func TestValidateSandboxDisabledPolicyFields(t *testing.T) {
 // inherit.
 func TestSandboxSocketInheritAlias(t *testing.T) {
 	cfg := &SandboxConfig{
-		Process:       "seatbelt",
+		Wrapper:       "seatbelt",
 		SandboxPolicy: SandboxPolicy{UnixSockets: &SandboxUnixSockets{Mode: "deny"}},
 	}
-	if err := ValidateSandbox(cfg); err != nil {
+	if err := cfg.Validate(); err != nil {
 		t.Fatalf("the deny alias must validate: %v", err)
 	}
 	if mode := cfg.Policy("/work").SocketMode; mode != sandbox.SocketInherit {
@@ -160,7 +160,7 @@ func TestSandboxSocketInheritAlias(t *testing.T) {
 // TestSandboxCustomDefaults checks the custom profile starts from no
 // confinement and opts in explicitly.
 func TestSandboxCustomDefaults(t *testing.T) {
-	cfg := &SandboxConfig{Process: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "custom"}}
+	cfg := &SandboxConfig{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "custom"}}
 	policy := cfg.Policy("/work")
 	if policy.ReadMode != sandbox.FSModeOff || policy.WriteMode != sandbox.FSModeOff {
 		t.Fatalf("custom read/write = %q/%q, want off", policy.ReadMode, policy.WriteMode)
@@ -174,23 +174,23 @@ func TestSandboxCustomDefaults(t *testing.T) {
 // every host by passing the OS explicitly.
 func TestValidateSandboxPlatformOff(t *testing.T) {
 	for _, fs := range []*SandboxFilesystem{{Read: "off"}, {Write: "off"}} {
-		cfg := &SandboxConfig{Process: "appcontainer", SandboxPolicy: SandboxPolicy{Filesystem: fs}}
+		cfg := &SandboxConfig{Wrapper: "appcontainer", SandboxPolicy: SandboxPolicy{Filesystem: fs}}
 		if err := validatePlatformSandboxFor("windows", cfg); err == nil {
 			t.Fatalf("windows must reject filesystem off: %+v", fs)
 		}
 	}
-	cfg := &SandboxConfig{Process: "appcontainer", SandboxPolicy: SandboxPolicy{ProcessInspection: "allow"}}
+	cfg := &SandboxConfig{Wrapper: "appcontainer", SandboxPolicy: SandboxPolicy{ProcessInspection: "allow"}}
 	if err := validatePlatformSandboxFor("windows", cfg); err == nil {
 		t.Fatal("windows must reject processInspection: allow")
 	}
 
-	bad := &SandboxConfig{Process: "bwrap", SandboxPolicy: SandboxPolicy{
+	bad := &SandboxConfig{Wrapper: "bwrap", SandboxPolicy: SandboxPolicy{
 		Filesystem: &SandboxFilesystem{Write: "off"},
 	}}
 	if err := validatePlatformSandboxFor("linux", bad); err == nil {
 		t.Fatal("linux must reject write off with read allow")
 	}
-	ok := &SandboxConfig{Process: "bwrap", SandboxPolicy: SandboxPolicy{
+	ok := &SandboxConfig{Wrapper: "bwrap", SandboxPolicy: SandboxPolicy{
 		Filesystem: &SandboxFilesystem{Read: "off", Write: "off"},
 	}}
 	if err := validatePlatformSandboxFor("linux", ok); err != nil {
@@ -202,7 +202,7 @@ func TestValidateSandboxPlatformOff(t *testing.T) {
 }
 
 func TestSandboxGuardsForPolicies(t *testing.T) {
-	cfg := &SandboxConfig{Process: "seatbelt"}
+	cfg := &SandboxConfig{Wrapper: "seatbelt"}
 	policy := cfg.Policy("/work")
 	if policy.ReadMode == sandbox.FSModeOff || policy.WriteMode == sandbox.FSModeOff {
 		t.Fatalf("standard policy unexpectedly off: %+v", policy)

@@ -172,8 +172,9 @@ and is validated before the handler runs.
 - **A2A (client)** — set an agent's `Backend` to the A2A backend to delegate to a
   remote agent; the same path is used by the `task` tool.
 - **Server command** — `cmd/agentd` serves one agent client per configured
-  server over HTTP/SSE and/or A2A, from a single YAML config (string values may
-  reference `${VAR}`; no implicit environment reads), with an optional control API
+  server over HTTP/SSE and/or A2A, from a single YAML config (expanded first:
+  `$VAR` / `${VAR}` / `${VAR:-default}`; an unset variable without a fallback is
+  an error; no implicit environment reads), with an optional control API
   that creates isolated project instances at runtime and per-server command
   sandboxing / isolation. `cmd/agentd-supervisor` wraps that control API for a
   host's `supervisor_command`. See [`docs/DESIGN-AGENTD.md`](docs/DESIGN-AGENTD.md)

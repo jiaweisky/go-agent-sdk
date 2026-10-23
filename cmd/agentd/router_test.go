@@ -13,9 +13,9 @@ import (
 	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
 
-func stubServer(name, host, mount, kind string, cards func(*http.Request) []*a2a.AgentCard) *builtServer {
+func stubServer(name, host, pathPrefix string, kind config.Kind, cards func(*http.Request) []*a2a.AgentCard) *builtServer {
 	return &builtServer{
-		cfg: config.Server{Name: name, Kind: kind, Host: host, Mount: mount},
+		cfg: config.Server{Name: name, Kind: kind, Host: host, PathPrefix: pathPrefix},
 		handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(name))
 		}),
@@ -45,13 +45,13 @@ func routeBody(t *testing.T, h http.Handler, host, path string) string {
 func TestRouterDispatch(t *testing.T) {
 	h := newRouter([]*builtServer{
 		stubServer("root", "", "", "http", nil),
-		stubServer("mounted", "", "/api2", "http", nil),
+		stubServer("prefixed", "", "/api2", "http", nil),
 		stubServer("hosted", "h.example.com", "", "http", nil),
 	}, nil, nil)
 	cases := []struct{ host, path, want string }{
 		{"x", "/foo", "root"},
-		{"x", "/api2/bar", "mounted"},
-		{"x", "/api3", "root"},                   // no mount match → root
+		{"x", "/api2/bar", "prefixed"},
+		{"x", "/api3", "root"},                   // no pathPrefix match → root
 		{"h.example.com", "/foo", "hosted"},      // host match
 		{"H.EXAMPLE.COM", "/foo", "hosted"},      // host match is case-insensitive
 		{"h.example.com:8080", "/foo", "hosted"}, // host match ignores the port
@@ -108,10 +108,10 @@ func TestPublicBaseURL(t *testing.T) {
 		want string
 	}{
 		{"listen", config.Server{Listen: "127.0.0.1:8788"}, "http://127.0.0.1:8788"},
-		{"mount", config.Server{Listen: "127.0.0.1:8788", Mount: "/api"}, "http://127.0.0.1:8788/api"},
+		{"pathPrefix", config.Server{Listen: "127.0.0.1:8788", PathPrefix: "/api"}, "http://127.0.0.1:8788/api"},
 		{"host", config.Server{Host: "h.example.com"}, "http://h.example.com"},
 		{"tls", config.Server{Listen: "127.0.0.1:8788", TLS: &config.TLS{CertFile: "c", KeyFile: "k"}}, "https://127.0.0.1:8788"},
-		{"baseURL", config.Server{BaseURL: "https://pub.example.com/prefix/", Mount: "/api"}, "https://pub.example.com/prefix"},
+		{"baseURL", config.Server{BaseURL: "https://pub.example.com/prefix/", PathPrefix: "/api"}, "https://pub.example.com/prefix"},
 	}
 	for _, c := range cases {
 		if got := publicBaseURL(c.s, addr); got != c.want {

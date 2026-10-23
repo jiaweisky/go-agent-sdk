@@ -37,11 +37,11 @@ func TestResolveSandbox(t *testing.T) {
 		t.Fatalf("no sandbox = %v, %v", p, err)
 	}
 	// "none" also selects the SDK default.
-	if p, _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "none"}}); p != nil || err != nil {
+	if p, _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Wrapper: "none"}}); p != nil || err != nil {
 		t.Fatalf("none = %v, %v", p, err)
 	}
 	// A registered wrapper resolves to its process seam.
-	p, policy, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "agentd-resolve-test"}})
+	p, policy, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Wrapper: "agentd-resolve-test"}})
 	if err != nil || p == nil {
 		t.Fatalf("registered = %v, %v", p, err)
 	}
@@ -49,37 +49,37 @@ func TestResolveSandbox(t *testing.T) {
 		t.Fatalf("standard policy = %+v, want allow-list reads and writes", policy)
 	}
 	// An unknown wrapper with the default (fail-closed) refuses to start.
-	if _, _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: "no-such"}}); err == nil {
+	if _, _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Wrapper: "no-such"}}); err == nil {
 		t.Fatal("expected fail-closed to reject an unknown sandbox")
 	}
 	// fail-open warns and runs without the sandbox, but keeps the guard policy.
 	if p, policy, err := resolveSandbox(config.Server{
-		Sandbox: &config.SandboxConfig{Process: "no-such", FailurePolicy: "fail-open"},
+		Sandbox: &config.SandboxConfig{Wrapper: "no-such", FailurePolicy: "fail-open"},
 	}); p != nil || err != nil || policy.WriteMode != sandbox.FSModeAllow {
 		t.Fatalf("fail-open = %v, %+v, %v", p, policy, err)
 	}
 	// An explicit profile off disables both the wrapper and the guards.
 	if p, policy, err := resolveSandbox(config.Server{
-		Sandbox: &config.SandboxConfig{Process: "agentd-resolve-test", SandboxPolicy: config.SandboxPolicy{Profile: "off"}},
+		Sandbox: &config.SandboxConfig{Wrapper: "agentd-resolve-test", SandboxPolicy: config.SandboxPolicy{Profile: "off"}},
 	}); p != nil || err != nil || policy.WriteMode == sandbox.FSModeAllow {
 		t.Fatalf("profile off = %v, %+v, %v", p, policy, err)
 	}
 }
 
 func TestSandboxGuards(t *testing.T) {
-	read, write := sandboxGuards(config.Server{Sandbox: &config.SandboxConfig{Process: "none"}}, sandbox.Policy{})
+	read, write := sandboxGuards(config.Server{Sandbox: &config.SandboxConfig{Wrapper: "none"}}, sandbox.Policy{})
 	if read != nil || write != nil {
 		t.Fatal("a disabled sandbox must not install guards")
 	}
 	policy := sandbox.StandardPolicy(t.TempDir())
-	read, write = sandboxGuards(config.Server{Sandbox: &config.SandboxConfig{Process: "seatbelt"}}, policy)
+	read, write = sandboxGuards(config.Server{Sandbox: &config.SandboxConfig{Wrapper: "seatbelt"}}, policy)
 	if read == nil || write == nil {
 		t.Fatal("the standard policy must install both guards")
 	}
 
 	custom := policy
 	custom.ReadMode = sandbox.FSModeOff
-	read, write = sandboxGuards(config.Server{Sandbox: &config.SandboxConfig{Process: "seatbelt"}}, custom)
+	read, write = sandboxGuards(config.Server{Sandbox: &config.SandboxConfig{Wrapper: "seatbelt"}}, custom)
 	if read != nil || write == nil {
 		t.Fatal("read: off must drop the read guard only")
 	}
@@ -89,14 +89,14 @@ func TestSandboxGuards(t *testing.T) {
 // resolves to and checks it enforces the boundary end to end: a write outside
 // the working directory is denied, a write inside succeeds.
 func TestResolveSandboxBlocksOutsideWrite(t *testing.T) {
-	wrappers := map[string]string{"darwin": "seatbelt", "linux": "bwrap", "windows": "appcontainer"}
+	wrappers := map[string]config.Wrapper{"darwin": config.WrapperSeatbelt, "linux": config.WrapperBwrap, "windows": config.WrapperAppContainer}
 	shells := map[string]string{"darwin": "/bin/sh", "linux": "/bin/sh", "windows": "cmd"}
 	binaries := map[string]string{"seatbelt": "sandbox-exec", "bwrap": "bwrap"}
 	wrapper, ok := wrappers[runtime.GOOS]
 	if !ok {
 		t.Skip("no per-command sandbox for " + runtime.GOOS)
 	}
-	if binary, needs := binaries[wrapper]; needs {
+	if binary, needs := binaries[string(wrapper)]; needs {
 		if _, err := exec.LookPath(binary); err != nil {
 			t.Skipf("%s is not available", binary)
 		}
@@ -109,7 +109,7 @@ func TestResolveSandboxBlocksOutsideWrite(t *testing.T) {
 		return []string{"-c", command}
 	}
 	dir := t.TempDir()
-	process, _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Process: wrapper}, WorkingDirectory: dir})
+	process, _, err := resolveSandbox(config.Server{Sandbox: &config.SandboxConfig{Wrapper: wrapper}, WorkingDirectory: dir})
 	if err != nil || process == nil {
 		t.Fatalf("resolveSandbox(%s) = %v, %v", wrapper, process, err)
 	}

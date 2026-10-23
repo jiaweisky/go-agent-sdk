@@ -4,8 +4,11 @@
 # over one listener. Models are defined once in the global catalog and selected
 # per server by id.
 #
-# Any string value may reference environment variables explicitly: `${VAR}`
-# (required), `${VAR:-default}`, and `$$` for a literal `$`. No environment is
+# The whole file (including comments) is expanded with envsubst before YAML
+# decoding, so a variable without a fallback must be set, `${VAR:-default}`
+# supplies one, and `$$` is a literal dollar sign. Values containing
+# YAML-special characters (`#`, `: `) need the placeholder inside a quoted
+# scalar; quoting changes the YAML style, it is not escaping. No environment is
 # read implicitly — only where the file asks for it (shown on apiKey, token,
 # workingDirectory below; it works for modelBaseURL, cards.name/description too).
 #
@@ -61,7 +64,7 @@ servers:
     # Optional OS sandbox for this server's commands AND its in-process file
     # tools: `bwrap` on Linux, `seatbelt` on macOS, `appcontainer` on Windows.
     # sandbox:
-    #   process: seatbelt            # none (default) | bwrap | seatbelt | appcontainer
+    #   wrapper: seatbelt            # none (default) | bwrap | seatbelt | appcontainer
     #   failurePolicy: fail-closed   # fail-closed (default) | fail-open
     #   profile: standard            # off | standard | custom (default standard)
     #   filesystem:                  # read/write: allow (allow-list) | off (no confinement)
@@ -103,12 +106,12 @@ servers:
     #   backend: http                         # http | local | s3 | cos
     #   url: https://store.example/x/
     #   auth: bearer                          # none | basic | bearer (upload)
-    #   token: ${STORE_TOKEN}                 # basic → username/password; or a custom header/value
-    #   presignSecret: ${NGINX_SECURE_LINK}   # optional: sign returned urls (nginx secure_link)
+    #   token: ${STORE_TOKEN:-replace-me}                 # basic → username/password; or a custom header/value
+    #   presignSecret: ${NGINX_SECURE_LINK:-replace-me}   # optional: sign returned urls (nginx secure_link)
     # storage:
     #   backend: cos                          # http | local | s3 | cos
     #   cos: { region: ap-guangzhou, bucket: my-bucket-1250000000,
-    #          secretID: ${COS_SECRET_ID}, secretKey: ${COS_SECRET_KEY} }
+    #          secretID: ${COS_SECRET_ID:-replace-me}, secretKey: ${COS_SECRET_KEY:-replace-me} }
     auth:
       type: bearer
       token: ${AGENTD_TOKEN:-replace-me}
@@ -132,10 +135,10 @@ servers:
     # peers:
     #   - name: echo
     #     endpoint: http://127.0.0.1:9099        # remote A2A base URL (card discovery root)
-    #     cardURL: http://127.0.0.1:9099/.well-known/agent-card.json   # optional override
+    #     cardURL: http://127.0.0.1:9099/.well-known/agent-card.json   # optional; overrides endpoint
     #     description: A remote agent that echoes its input.
     #     mode: subagent                         # primary | subagent | all (default subagent)
-    #     headers: { Authorization: "Bearer ${PEER_TOKEN}" }           # optional
+    #     headers: { Authorization: "Bearer ${PEER_TOKEN:-replace-me}" }           # optional
     baseURL: http://127.0.0.1:8788
     inboundMedia: spool               # spool (default) | inline
     # Work autonomously: run every tool; deny the question tool so a confirmation
@@ -178,7 +181,7 @@ servers:
 # inherits its own environment. Its config dirs, state roots and executable are
 # re-allowed (the bootstrap exception).
 # wrap:
-#   process: seatbelt
+#   wrapper: seatbelt
 #   failurePolicy: fail-closed
 #   profile: standard
 #   filesystem: { read: allow, write: allow }

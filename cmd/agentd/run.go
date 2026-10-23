@@ -14,9 +14,12 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 
+	agentdclient "github.com/jiaweisky/go-agent-sdk/cmd/agentd/client"
 	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/isolation"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/media"
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandbox"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/storage"
 	a2aserver "github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
 	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
@@ -121,7 +124,10 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 			teardowns = append(teardowns, project.Teardown)
 		}
 		s.WorkingDirectory = project.View
-		uploader := mediaUploader(s)
+		uploader, err := mediaUploader(s)
+		if err != nil {
+			return fmt.Errorf("server %q: %w", s.Name, err)
+		}
 		client, err := buildClient(s, serverCatalog, uploader, isolationExcludes(s.WorkingDirectory, baseDirs))
 		if err != nil {
 			return fmt.Errorf("server %q: %w", s.Name, err)
@@ -216,22 +222,22 @@ func defaultModelFor(s config.Server, catalog config.Catalog) string {
 // remote A2A client polls task state and cannot answer a parked question.
 func a2aQuestions(s config.Server) string {
 	if s.Questions != "" {
-		return s.Questions
+		return string(s.Questions)
 	}
-	return "decline"
+	return string(config.QuestionsDecline)
 }
 
 // httpQuestions is an HTTP server's question policy: "park" by default, since an
 // HTTP client can answer over the API.
 func httpQuestions(s config.Server) string {
 	if s.Questions != "" {
-		return s.Questions
+		return string(s.Questions)
 	}
-	return "park"
+	return string(config.QuestionsPark)
 }
 
 // publicBaseURL is the base a client uses to reach a server: the configured
-// BaseURL when set, otherwise scheme + host (or the bound address) + mount.
+// BaseURL when set, otherwise scheme + host (or the bound address) + pathPrefix.
 func publicBaseURL(s config.Server, addr net.Addr) string {
 	if s.BaseURL != "" {
 		return strings.TrimRight(s.BaseURL, "/")
@@ -245,8 +251,8 @@ func publicBaseURL(s config.Server, addr net.Addr) string {
 		host = addr.String()
 	}
 	base := scheme + "://" + host
-	if s.Mount != "" {
-		base += config.NormalizeMount(s.Mount)
+	if s.PathPrefix != "" {
+		base += config.NormalizePathPrefix(s.PathPrefix)
 	}
 	return base
 }
@@ -256,7 +262,7 @@ func publicBaseURL(s config.Server, addr net.Addr) string {
 func defaultA2AEntry(entries []*builtServer) *builtServer {
 	var def *builtServer
 	for _, e := range entries {
-		if e.cfg.Kind != "a2a" {
+		if e.cfg.Kind != config.KindA2A {
 			continue
 		}
 		if def == nil || e.cfg.Default {
@@ -266,7 +272,7 @@ func defaultA2AEntry(entries []*builtServer) *builtServer {
 	return def
 }
 
-// discoveryBaseURL is the origin root (scheme + host, no mount) a client fetches
+// discoveryBaseURL is the origin root (scheme + host, no pathPrefix) a client fetches
 // the well-known discovery endpoints from.
 func discoveryBaseURL(s config.Server, addr net.Addr) string {
 	if s.BaseURL != "" {
@@ -302,16 +308,16 @@ func isolationSpec(s config.Server) isolation.IsolationSpec {
 		return isolation.IsolationSpec{}
 	}
 	return isolation.IsolationSpec{
-		Mode:         s.Isolation.Mode,
+		Mode:         string(s.Isolation.Mode),
 		BaseDir:      s.Isolation.BaseDir,
 		BaseReadOnly: s.Isolation.BaseReadOnly,
 		BaseRef:      s.Isolation.BaseRef,
-		CowMode:      cowMode(s.Isolation.Cow),
+		CowMode:      string(cowMode(s.Isolation.Cow)),
 	}
 }
 
 // cowMode reads the configured copy-on-write mode, defaulting to empty (auto).
-func cowMode(cow *config.CowConfig) string {
+func cowMode(cow *config.CowConfig) config.CowMode {
 	if cow == nil {
 		return ""
 	}
@@ -319,12 +325,14 @@ func cowMode(cow *config.CowConfig) string {
 }
 
 // buildClient assembles one server's agent client from its catalog subset.
-func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploaderFunc, excludes []string) (*agent.Client, error) {
-	mcpServers, err := config.MCPServers(s.MCP)
+func buildClient(
+	s config.Server, catalog config.Catalog, uploader mediaUploaderFunc, excludes []string,
+) (*agent.Client, error) {
+	mcpServers, err := agentdclient.MCPConfigs(s.MCP)
 	if err != nil {
 		return nil, err
 	}
-	references, err := config.ReferenceSources(s.References)
+	references, err := agentdclient.ReferenceSources(s.References)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +341,11 @@ func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploader
 		return nil, err
 	}
 	readGuard, writeGuard := sandboxGuards(s, policy)
-	return config.BuildClient(config.ClientParams{
+	store, err := storage.New(s.Storage)
+	if err != nil {
+		return nil, fmt.Errorf("server %q: storage: %w", s.Name, err)
+	}
+	return agentdclient.New(agentdclient.Params{
 		Root:             s.Root,
 		WorkingDirectory: s.WorkingDirectory,
 		ConfigDirs:       s.ConfigDirs,
@@ -342,8 +354,9 @@ func buildClient(s config.Server, catalog config.Catalog, uploader mediaUploader
 		// catalog's ModelInfo, not from the server.
 		Catalog:          catalog,
 		MediaUploader:    uploader,
-		Media:            s.Media.Policy(s.Root),
-		Store:            storageStore(s),
+		Media:            media.DeliveryPolicy(s.Media, s.Root),
+		MediaTranscode:   media.FFmpegTranscoder(),
+		Store:            store,
 		MCP:              mcpServers,
 		References:       references,
 		Peers:            s.Peers,
@@ -446,27 +459,36 @@ func resolveSandbox(s config.Server) (core.AppProcess, sandbox.Policy, error) {
 		_ = os.RemoveAll(policy.TempRoot)
 	}
 	if s.Sandbox == nil {
-		fmt.Fprintf(os.Stderr, "agentd: server %q: sandbox not configured; commands run unsandboxed (permission and workspace policy still apply)\n", s.Name)
+		fmt.Fprintf(os.Stderr,
+			"agentd: server %q: sandbox not configured; commands run unsandboxed "+
+				"(permission and workspace policy still apply)\n", s.Name)
 		return nil, policy, nil
 	}
 	if !s.Sandbox.Enabled() {
-		fmt.Fprintf(os.Stderr, "agentd: server %q: sandbox disabled (process %q, profile %q); commands and in-process file tools are not confined\n",
-			s.Name, s.Sandbox.Process, s.Sandbox.Profile)
+		fmt.Fprintf(os.Stderr,
+			"agentd: server %q: sandbox disabled (wrapper %q, profile %q); "+
+				"commands and in-process file tools are not confined\n",
+			s.Name, s.Sandbox.Wrapper, s.Sandbox.Profile)
 		return nil, policy, nil
 	}
-	process, err := sandbox.Resolve(s.Sandbox.Process, policy)
+	process, err := sandbox.Resolve(string(s.Sandbox.Wrapper), policy)
 	if err == nil {
 		return process, policy, nil
 	}
-	if s.Sandbox.FailurePolicy == "fail-open" {
-		fmt.Fprintf(os.Stderr, "agentd: server %q: sandbox %q unavailable (%v); continuing without the process wrapper (in-process file guards still apply)\n", s.Name, s.Sandbox.Process, err)
+	if s.Sandbox.FailurePolicy == config.FailurePolicyFailOpen {
+		fmt.Fprintf(os.Stderr,
+			"agentd: server %q: sandbox %q unavailable (%v); continuing without the process wrapper "+
+				"(in-process file guards still apply)\n", s.Name, s.Sandbox.Wrapper, err)
 		return nil, policy, nil
 	}
 	return nil, policy, err
 }
 
-// buildServer mounts one server's transport adapter, dispatching on its kind.
-func buildServer(ctx context.Context, s config.Server, client *agent.Client, catalog config.Catalog, uploader mediaUploaderFunc) (*builtServer, error) {
+// buildServer builds one server's transport adapter, dispatching on its kind.
+func buildServer(
+	ctx context.Context, s config.Server, client *agent.Client,
+	catalog config.Catalog, uploader mediaUploaderFunc,
+) (*builtServer, error) {
 	infos, err := config.ModelInfos(catalog)
 	if err != nil {
 		return nil, err
@@ -476,13 +498,15 @@ func buildServer(ctx context.Context, s config.Server, client *agent.Client, cat
 		return nil, err
 	}
 	switch s.Kind {
-	case "http":
-		handler, closeStreams, err := buildHTTPHandler(ctx, s, client, infos, uploader, keepAlive, defaultModelFor(s, catalog))
+	case config.KindHTTP:
+		handler, closeStreams, err := buildHTTPHandler(
+			ctx, s, client, infos, uploader, keepAlive, defaultModelFor(s, catalog),
+		)
 		if err != nil {
 			return nil, err
 		}
 		return &builtServer{cfg: s, handler: handler, closeStreams: closeStreams}, nil
-	case "a2a":
+	case config.KindA2A:
 		srv, err := buildA2AServer(s, client, infos, defaultModelFor(s, catalog), keepAlive)
 		if err != nil {
 			return nil, err
@@ -493,7 +517,10 @@ func buildServer(ctx context.Context, s config.Server, client *agent.Client, cat
 	}
 }
 
-func buildHTTPHandler(ctx context.Context, s config.Server, client *agent.Client, infos []schema.ModelInfo, uploader mediaUploaderFunc, keepAlive time.Duration, defaultModel string) (http.Handler, func(), error) {
+func buildHTTPHandler(
+	ctx context.Context, s config.Server, client *agent.Client, infos []schema.ModelInfo,
+	uploader mediaUploaderFunc, keepAlive time.Duration, defaultModel string,
+) (http.Handler, func(), error) {
 	timeout, err := config.InteractionTimeout(s.InteractionTimeout)
 	if err != nil {
 		return nil, nil, err
@@ -520,8 +547,11 @@ func buildHTTPHandler(ctx context.Context, s config.Server, client *agent.Client
 	return srv.Handler(), func() { _ = srv.Close() }, nil
 }
 
-func buildA2AServer(s config.Server, client *agent.Client, infos []schema.ModelInfo, defaultModel string, keepAlive time.Duration) (*a2aserver.Server, error) {
-	exposed, err := config.ExposeAgents(client, s.Agents, s.Cards, config.ModelModes(infos), defaultModel)
+func buildA2AServer(
+	s config.Server, client *agent.Client, infos []schema.ModelInfo,
+	defaultModel string, keepAlive time.Duration,
+) (*a2aserver.Server, error) {
+	exposed, err := agentdclient.ExposeAgents(client, s.Agents, s.Cards, agentdclient.ModelModes(infos), defaultModel)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +560,7 @@ func buildA2AServer(s config.Server, client *agent.Client, infos []schema.ModelI
 		factoryOpts = append(factoryOpts, agent.WithInboundPermissions(permissions))
 	}
 	if s.InboundMedia != "" {
-		factoryOpts = append(factoryOpts, agent.WithInboundMedia(s.InboundMedia))
+		factoryOpts = append(factoryOpts, agent.WithInboundMedia(string(s.InboundMedia)))
 	}
 	factoryOpts = append(factoryOpts, agent.WithInboundQuestions(a2aQuestions(s)))
 	var security *a2aserver.Security
@@ -584,12 +614,15 @@ func combineClose(entries []*builtServer) func() {
 // uploader signature.
 type mediaUploaderFunc func(schema.ProviderID) schema.MediaUploader
 
-func mediaUploader(s config.Server) mediaUploaderFunc {
-	if s.MediaUpload == nil {
-		return nil
+func mediaUploader(s config.Server) (mediaUploaderFunc, error) {
+	uploader, err := media.NewUploader(s.MediaUpload)
+	if err != nil {
+		return nil, err
 	}
-	uploader := s.MediaUpload.Uploader()
-	return func(schema.ProviderID) schema.MediaUploader { return uploader }
+	if uploader == nil {
+		return nil, nil
+	}
+	return func(schema.ProviderID) schema.MediaUploader { return uploader }, nil
 }
 
 // httpInboundPermissions extends the operator's inbound ruleset with an
@@ -622,15 +655,6 @@ func maxBodyBytes(s config.Server) int64 {
 		return s.MaxBodyBytes
 	}
 	return defaultMaxBodyBytes
-}
-
-// storageStore builds the server's provider-independent media store, or nil when
-// no storage is configured.
-func storageStore(s config.Server) schema.MediaStore {
-	if s.Storage == nil {
-		return nil
-	}
-	return s.Storage.Store()
 }
 
 // httpAuth maps a server's auth config to the HTTP server's auth options.

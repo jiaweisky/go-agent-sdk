@@ -17,7 +17,6 @@ func introspectTestHandler(cfg config.Config) http.Handler {
 	return newRouter(entries, &introspectDoc{
 		config:  cfg,
 		path:    "/etc/agentd.yaml",
-		env:     []string{"DEEPSEEK_API_KEY", "AGENTD_PLATFORM"},
 		version: "1.2.3",
 	}, nil)
 }
@@ -59,7 +58,7 @@ func TestConfigRedactsSecrets(t *testing.T) {
 			},
 		},
 		Control: &config.ControlConfig{Listen: "127.0.0.1:9090", Auth: &config.AuthConfig{Type: "bearer", Token: "ctl-leak"}},
-		Wrap:    &config.WrapConfig{Process: "seatbelt", FailurePolicy: "fail-closed"},
+		Wrap:    &config.WrapConfig{Wrapper: "seatbelt", FailurePolicy: "fail-closed"},
 	}
 	code, body := introspectGet(t, introspectTestHandler(cfg), "/api/config", "")
 	if code != http.StatusOK {
@@ -75,14 +74,13 @@ func TestConfigRedactsSecrets(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`"schemaVersion":1`,
+		`"schemaVersion":4`,
 		`"apiKey":{"configured":true,"redacted":true}`,
 		`"type":"bearer"`,
 		`"token":{"configured":true,"redacted":true}`,
 		`"tls":{"configured":true,"redacted":true}`,
 		`/etc/agentd.yaml`,
-		`"DEEPSEEK_API_KEY"`,
-		`"process":"seatbelt"`,
+		`"wrapper":"seatbelt"`,
 		`"action":"bash"`,
 		`"name":"root"`,
 		`"name":"sec"`,
@@ -179,7 +177,7 @@ func TestConfigExposesMediaStorageAndBody(t *testing.T) {
 		Models: []config.ModelConfig{{ID: "m", Model: "m", Protocol: "openai-compatible-chat"}},
 		Servers: []config.Server{{
 			Name: "a", Kind: "http", Agents: []string{"build"},
-			Media: &config.InboundMediaConfig{
+			Media: &config.MediaDeliveryConfig{
 				InlineLimitBytes: config.MediaSizeLimit{Default: 1024, Image: 2048},
 				Upload:           true,
 			},

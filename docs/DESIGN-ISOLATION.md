@@ -151,7 +151,7 @@ explicit and configurable, defaulting to **fail-closed**:
 
 The SDK only offers the seam; the wrapper decides, and no probing/capability detection belongs
 in core (it would complicate embedding). The policy itself is applied by the **command layer**:
-`agentd`'s `sandbox.failurePolicy` resolves `sandbox.process` to an `AppProcess`; a missing
+`agentd`'s `sandbox.failurePolicy` resolves `sandbox.wrapper` to an `AppProcess`; a missing
 wrapper fails startup (fail-closed) or is logged and skipped (fail-open).
 
 ### 7. Optional: file-write guard
@@ -192,10 +192,10 @@ These live outside `pkg/agent` core (e.g. `sandbox/bwrap`, `sandbox/seatbelt`) s
 public surface stays small and cross-platform CVE/compat debt stays out of core.
 
 Wrappers are named and registered (e.g. `sandbox.Register("bwrap", factory)`); the command
-layer's `sandbox.process` config value selects one by name, so the config never imports a
+layer's `sandbox.wrapper` config value selects one by name, so the config never imports a
 platform-specific package directly. **Shipped (best-effort, S4)**: `bwrap` (Linux),
 `sandbox-exec`/seatbelt (macOS) and `appcontainer` (Windows), each behind an OS build tag and
-registered on import — so `sandbox.process: bwrap` / `seatbelt` / `appcontainer` works out of
+registered on import — so `sandbox.wrapper: bwrap` / `seatbelt` / `appcontainer` works out of
 the box on those platforms.
 
 > **S5 policy** (see the `sandbox` block in §13): the wrappers enforce more than writes.
@@ -232,11 +232,11 @@ process** shares one confinement:
 
 ```yaml
 wrap:
-  process: bwrap          # none (default) | bwrap (Linux) | seatbelt (macOS)
+  wrapper: bwrap          # none (default) | bwrap (Linux) | seatbelt (macOS)
   failurePolicy: fail-closed   # fail-closed (default) | fail-open
 ```
 
-- On startup (after `-check`), if `wrap.process` names a registered
+- On startup (after `-check`), if `wrap.wrapper` names a registered
   whole-process wrapper and the process is not already wrapped (env
   `AGENTD_SANDBOXED`), agentd re-execs itself under the wrapper (`syscall.Exec`),
   passing its own args and the same environment plus the sentinel. The child
@@ -319,7 +319,7 @@ adapter) stays in `run.go`, which already handles both transports. The runner
 therefore does not know about transports, and a host can substitute the
 `Runner` (for example to delegate `Prepare` to an orchestrator).
 
-`cmd/agentd/config.BuildClient(ClientParams)` already centralizes the
+`cmd/agentd/client.New(client.Params)` already centralizes the
 `ClientOptions` assembly, so `run.go` only needs to pass the prepared `View` as
 `WorkingDirectory`.
 
@@ -384,7 +384,7 @@ servers:
       cow:
         mode: auto            # auto | reflink | clonefile
     sandbox:
-      process: seatbelt          # none | seatbelt | bwrap | appcontainer
+      wrapper: seatbelt          # none | seatbelt | bwrap | appcontainer
       failurePolicy: fail-closed # fail-closed (default) | fail-open
       profile: standard          # off | standard | custom (default: standard when enabled)
       filesystem:
@@ -420,9 +420,10 @@ holds the local modes `none | copy | worktree | overlay`.
 Validation (fail-fast, like the rest of `config.Validate`):
 - `mode != none` requires `baseDir`; `mode == overlay` also requires `baseReadOnly: true`.
 - `mode == worktree` requires a git working directory (enforced when the view is prepared).
-- `sandbox.process` is required when `sandbox` is set; `sandbox.failurePolicy` is
-  `fail-closed` (default) or `fail-open`. A name that matches no registered wrapper fails
-  startup (fail-closed) or logs and runs without the sandbox (fail-open).
+- `sandbox.wrapper` is required when `sandbox` is set and must be `none`, `bwrap`,
+  `seatbelt` or `appcontainer`; `sandbox.failurePolicy` is `fail-closed` (default) or
+  `fail-open`. Whether the wrapper can run on the host (platform support, wrapper binary)
+  is resolved at startup: fail-closed refuses to start, fail-open logs and runs without it.
 - `sandbox.profile` is `off | standard | custom`; `filesystem.read`/`write` are `allow | off`;
   `network.mode` is `off | no-egress` (a domain allow-list is rejected until a proxy exists);
   `unixSockets.mode` is `inherit | allowAll | allowlist` (allowlist requires a path; the
@@ -437,7 +438,7 @@ field, because it applies to the whole process:
 
 ```yaml
 wrap:
-  process: seatbelt
+  wrapper: seatbelt
   failurePolicy: fail-closed
   profile: standard            # off | standard | custom
   filesystem: { read: allow, write: allow }
@@ -447,8 +448,9 @@ wrap:
   # state roots and executable are re-allowed (FR12).
 ```
 
-`wrap.process` is required when `wrap` is set; `wrap.failurePolicy` is
-`fail-closed` (default) or `fail-open`. The whole-process wrapper re-allows every server's
+`wrap.wrapper` is required when `wrap` is set and must be `none`, `bwrap`, `seatbelt` or
+`appcontainer`; `wrap.failurePolicy` is `fail-closed` (default) or `fail-open`. The
+whole-process wrapper re-allows every server's
 state root, working directory, config dirs and the executable, so the process can start and
 serve; the policy still confines the commands and tools it spawns.
 
@@ -461,7 +463,7 @@ Threading the runner in keeps the existing shape:
 for each server s in cfg.Servers:
     iso, err := runner.Prepare(ctx, projectSpec(s), s.Isolation)   // view + teardown
     defer iso.Teardown(ctx)
-    client, err := config.BuildClient(clientParams(s, view=iso.View, process=sandbox))
+    client, err := client.New(clientParams(s, view=iso.View, process=sandbox))
     built, err := buildServer(ctx, s, client, …)
 …  # unchanged: group by listen, bind, serveAll
 ```
@@ -472,8 +474,8 @@ for each server s in cfg.Servers:
   `container`/`remote` are provisioned as separate processes by the host (see §15), not here.
 - `Teardown` (worktree remove / overlay unmount) runs on graceful shutdown; container teardown
   is the host's.
-- The `sandbox.process` value is translated to an `agent.ClientOptions.Process` wrapper and
-  passed through `BuildClient`.
+- The `sandbox.wrapper` value is translated to an `agent.ClientOptions.Process` wrapper and
+  passed through `client.New`.
 
 ### 15. Dynamic provisioning (supervisor vs control API)
 
@@ -617,7 +619,7 @@ orchestration remain open.
 |---|---|---|
 | S0 ✅ | `ClientOptions.Process` wired into builtins + runtime git; seam test | — |
 | S1 ✅ | (wrappers still optional) | `Runner` (`none`/`copy`/`worktree`) + `isolation` config/validation + `run.go` integration |
-| S2 ✅ | `FileWriteGuard` wired into write/edit/apply_patch | `overlay` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.process` wiring |
+| S2 ✅ | `FileWriteGuard` wired into write/edit/apply_patch | `overlay` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.wrapper` wiring |
 | S3 ◐ | — | **control API implemented for local modes**; `container`/`remote` remain host-provisioned |
 | S4 ✅ | `bwrap` (Linux) + `seatbelt` (macOS) shipped; `appcontainer` (Windows, best-effort) | whole-process `bwrap`/`seatbelt`/`appcontainer` wrapping shipped (top-level `wrap`, §8.1) |
 

@@ -13,15 +13,15 @@ import (
 )
 
 // router dispatches one listener's requests to its servers: by Host first, then
-// the longest matching Mount, then the root server. It also serves the
+// the longest matching PathPrefix, then the root server. It also serves the
 // origin-root discovery endpoints and the read-only config/info endpoints.
 type router struct {
-	hosts   []*builtServer // entries with Host set
-	mounts  []*builtServer // entries with Mount set
-	root    *builtServer   // entry with neither Host nor Mount
-	a2a     []*builtServer // every A2A entry (for the aggregate)
-	defA2A  *builtServer   // the A2A entry that owns the origin-root card
-	entries []*builtServer // every entry on this listener
+	hosts        []*builtServer // entries with Host set
+	pathPrefixes []*builtServer // entries with PathPrefix set
+	root         *builtServer   // entry with neither Host nor PathPrefix
+	a2a          []*builtServer // every A2A entry (for the aggregate)
+	defA2A       *builtServer   // the A2A entry that owns the origin-root card
+	entries      []*builtServer // every entry on this listener
 
 	introspect *introspectDoc // nil on a dynamic instance router
 	addr       net.Addr       // this listener's bound address
@@ -33,13 +33,13 @@ func newRouter(entries []*builtServer, introspect *introspectDoc, addr net.Addr)
 		if e.cfg.Host != "" {
 			r.hosts = append(r.hosts, e)
 		}
-		if e.cfg.Mount != "" {
-			r.mounts = append(r.mounts, e)
+		if e.cfg.PathPrefix != "" {
+			r.pathPrefixes = append(r.pathPrefixes, e)
 		}
-		if e.cfg.Host == "" && e.cfg.Mount == "" {
+		if e.cfg.Host == "" && e.cfg.PathPrefix == "" {
 			r.root = e
 		}
-		if e.cfg.Kind == "a2a" {
+		if e.cfg.Kind == config.KindA2A {
 			r.a2a = append(r.a2a, e)
 			if e.cfg.Default {
 				r.defA2A = e
@@ -63,8 +63,8 @@ func (r *router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		e.handler.ServeHTTP(w, req)
 		return
 	}
-	if e, mount := r.matchMount(req.URL.Path); e != nil {
-		http.StripPrefix(mount, e.handler).ServeHTTP(w, req)
+	if e, pathPrefix := r.matchPathPrefix(req.URL.Path); e != nil {
+		http.StripPrefix(pathPrefix, e.handler).ServeHTTP(w, req)
 		return
 	}
 	if r.root != nil {
@@ -87,23 +87,23 @@ func (r *router) matchHost(req *http.Request) *builtServer {
 	return nil
 }
 
-func (r *router) matchMount(path string) (*builtServer, string) {
+func (r *router) matchPathPrefix(path string) (*builtServer, string) {
 	best := (*builtServer)(nil)
-	bestMount := ""
-	for _, e := range r.mounts {
-		mount := config.NormalizeMount(e.cfg.Mount)
-		if !pathMatchesMount(path, mount) {
+	bestPathPrefix := ""
+	for _, e := range r.pathPrefixes {
+		pathPrefix := config.NormalizePathPrefix(e.cfg.PathPrefix)
+		if !pathMatchesPathPrefix(path, pathPrefix) {
 			continue
 		}
-		if len(mount) > len(bestMount) {
-			best, bestMount = e, mount
+		if len(pathPrefix) > len(bestPathPrefix) {
+			best, bestPathPrefix = e, pathPrefix
 		}
 	}
-	return best, bestMount
+	return best, bestPathPrefix
 }
 
-func pathMatchesMount(path, mount string) bool {
-	return path == mount || strings.HasPrefix(path, mount+"/")
+func pathMatchesPathPrefix(path, pathPrefix string) bool {
+	return path == pathPrefix || strings.HasPrefix(path, pathPrefix+"/")
 }
 
 // serveDiscovery handles the origin-root discovery endpoints, reporting whether
@@ -191,9 +191,6 @@ func (r *router) serveConfig(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	sources := []sourceView{{Kind: "file", Path: r.introspect.path}}
-	if len(r.introspect.env) > 0 {
-		sources = append(sources, sourceView{Kind: "env", Expanded: r.introspect.env})
-	}
 	writeJSONStatus(w, http.StatusOK, configResponse{
 		SchemaVersion: configSchemaVersion,
 		Sources:       sources,
@@ -208,7 +205,7 @@ func (r *router) serveInfo(w http.ResponseWriter) {
 	}
 	for _, e := range r.entries {
 		info.Servers = append(info.Servers, e.cfg.Name)
-		if e.cfg.Kind != "a2a" || r.addr == nil {
+		if e.cfg.Kind != config.KindA2A || r.addr == nil {
 			continue
 		}
 		base := publicBaseURL(e.cfg, r.addr)

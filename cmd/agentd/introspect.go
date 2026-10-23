@@ -8,13 +8,12 @@ import (
 	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
 
-// introspectDoc carries the loaded configuration and its provenance for the
+// introspectDoc carries the loaded configuration and its source path for the
 // read-only config/info endpoints (/api/config, /api/info). It is shared by
 // every listener; each listener reports its own address in /api/info.
 type introspectDoc struct {
 	config  config.Config
 	path    string
-	env     []string
 	version string
 }
 
@@ -68,7 +67,7 @@ func publicPath(patterns []string, path string) bool {
 }
 
 // configSchemaVersion versions the /api/config document; bump on a breaking change.
-const configSchemaVersion = 1
+const configSchemaVersion = 4
 
 // secret reports whether a sensitive value is configured without revealing it.
 type secret struct {
@@ -120,9 +119,6 @@ type configDocument struct {
 type sourceView struct {
 	Kind string `json:"kind"`
 	Path string `json:"path,omitempty"`
-	// Expanded lists the `${VAR}` references the loader substituted (their
-	// values are treated as sensitive; only the names are reported).
-	Expanded []string `json:"expanded,omitempty"`
 }
 
 type modelView struct {
@@ -168,12 +164,12 @@ type serverView struct {
 	Models             []string             `json:"models,omitempty"`
 	DefaultModel       string               `json:"defaultModel,omitempty"`
 	Agents             []string             `json:"agents,omitempty"`
-	Peers              []peerView           `json:"peers,omitempty"`
+	Peers              []a2aPeerView        `json:"peers,omitempty"`
 	Host               string               `json:"host,omitempty"`
-	Mount              string               `json:"mount,omitempty"`
+	PathPrefix         string               `json:"pathPrefix,omitempty"`
 	Default            bool                 `json:"default,omitempty"`
 	MediaUpload        *mediaUploadView     `json:"mediaUpload,omitempty"`
-	Media              *inboundMediaView    `json:"media,omitempty"`
+	Media              *mediaDeliveryView   `json:"media,omitempty"`
 	Storage            *storageView         `json:"storage,omitempty"`
 	MCP                []mcpView            `json:"mcp,omitempty"`
 	References         []referenceView      `json:"references,omitempty"`
@@ -213,7 +209,7 @@ type cowView struct {
 }
 
 type sandboxView struct {
-	Process       string `json:"process"`
+	Wrapper       string `json:"wrapper"`
 	FailurePolicy string `json:"failurePolicy,omitempty"`
 	// The policy block (profile, filesystem, network, …) is promoted; it carries
 	// no secrets.
@@ -230,7 +226,7 @@ type mediaUploadView struct {
 	Fields       secret `json:"fields"`
 }
 
-type inboundMediaView struct {
+type mediaDeliveryView struct {
 	InlineLimitBytes *mediaSizeLimitView `json:"inlineLimitBytes,omitempty"`
 	Prefer           []string            `json:"prefer,omitempty"`
 	Upload           bool                `json:"upload,omitempty"`
@@ -322,7 +318,7 @@ type mcpView struct {
 	Redacted bool   `json:"redacted,omitempty"` // command/url/environment/headers omitted
 }
 
-type peerView struct {
+type a2aPeerView struct {
 	Name        string `json:"name"`
 	Endpoint    string `json:"endpoint,omitempty"`
 	CardURL     string `json:"cardURL,omitempty"`
@@ -360,7 +356,7 @@ type controlView struct {
 }
 
 type wrapView struct {
-	Process       string `json:"process"`
+	Wrapper       string `json:"wrapper"`
 	FailurePolicy string `json:"failurePolicy,omitempty"`
 	config.SandboxPolicy
 }
@@ -381,8 +377,8 @@ func buildConfigDocument(cfg config.Config, section, server string) configDocume
 	}
 	if cfg.Wrap != nil {
 		doc.Wrap = &wrapView{
-			Process:       cfg.Wrap.Process,
-			FailurePolicy: cfg.Wrap.FailurePolicy,
+			Wrapper:       string(cfg.Wrap.Wrapper),
+			FailurePolicy: string(cfg.Wrap.FailurePolicy),
 			SandboxPolicy: cfg.Wrap.SandboxPolicy,
 		}
 	}
@@ -443,7 +439,7 @@ func modelViewOf(m config.ModelConfig) modelView {
 func serverViewOf(s config.Server) serverView {
 	return serverView{
 		Name:                s.Name,
-		Kind:                s.Kind,
+		Kind:                string(s.Kind),
 		Listen:              s.Listen,
 		Root:                s.Root,
 		WorkingDirectory:    s.WorkingDirectory,
@@ -451,11 +447,11 @@ func serverViewOf(s config.Server) serverView {
 		Models:              s.Models,
 		DefaultModel:        s.DefaultModel,
 		Agents:              s.Agents,
-		Peers:               peerViews(s.Peers),
+		Peers:               a2aPeerViews(s.Peers),
 		Host:                s.Host,
-		Mount:               s.Mount,
+		PathPrefix:          s.PathPrefix,
 		Default:             s.Default,
-		Questions:           s.Questions,
+		Questions:           string(s.Questions),
 		SubagentDepth:       s.SubagentDepth,
 		TitleAuto:           s.TitleAuto,
 		DropErroredTurns:    s.DropErroredTurns,
@@ -468,14 +464,14 @@ func serverViewOf(s config.Server) serverView {
 		MaxBodyBytes:        s.MaxBodyBytes,
 		BaseURL:             s.BaseURL,
 		Cards:               cardViews(s.Cards),
-		InboundMedia:        s.InboundMedia,
+		InboundMedia:        string(s.InboundMedia),
 		KeepAlive:           s.KeepAlive,
 		Auth:                authViewOf(s.Auth),
 		TLS:                 tlsView(s.TLS),
 		Isolation:           isolationViewOf(s.Isolation),
 		Sandbox:             sandboxViewOf(s.Sandbox),
 		MediaUpload:         mediaUploadViewOf(s.MediaUpload),
-		Media:               inboundMediaViewOf(s.Media),
+		Media:               mediaDeliveryViewOf(s.Media),
 		Storage:             storageViewOf(s.Storage),
 		MCP:                 mcpViews(s.MCP),
 		References:          referenceViews(s.References),
@@ -488,7 +484,7 @@ func storageViewOf(s *config.StorageConfig) *storageView {
 		return nil
 	}
 	return &storageView{
-		Backend:       s.Backend,
+		Backend:       string(s.Backend),
 		URL:           sanitizeURL(s.URL),
 		Auth:          s.Auth,
 		Username:      s.Username,
@@ -573,9 +569,9 @@ func isolationViewOf(iso *config.IsolationConfig) *isolationView {
 	if iso == nil {
 		return nil
 	}
-	v := &isolationView{Mode: iso.Mode, BaseDir: iso.BaseDir, BaseReadOnly: iso.BaseReadOnly, BaseRef: iso.BaseRef}
+	v := &isolationView{Mode: string(iso.Mode), BaseDir: iso.BaseDir, BaseReadOnly: iso.BaseReadOnly, BaseRef: iso.BaseRef}
 	if iso.Cow != nil {
-		v.Cow = &cowView{Mode: iso.Cow.Mode}
+		v.Cow = &cowView{Mode: string(iso.Cow.Mode)}
 	}
 	return v
 }
@@ -584,7 +580,11 @@ func sandboxViewOf(sb *config.SandboxConfig) *sandboxView {
 	if sb == nil {
 		return nil
 	}
-	return &sandboxView{Process: sb.Process, FailurePolicy: sb.FailurePolicy, SandboxPolicy: sb.SandboxPolicy}
+	return &sandboxView{
+		Wrapper:       string(sb.Wrapper),
+		FailurePolicy: string(sb.FailurePolicy),
+		SandboxPolicy: sb.SandboxPolicy,
+	}
 }
 
 func mediaUploadViewOf(up *config.MediaUploadConfig) *mediaUploadView {
@@ -602,11 +602,11 @@ func mediaUploadViewOf(up *config.MediaUploadConfig) *mediaUploadView {
 	}
 }
 
-func inboundMediaViewOf(m *config.InboundMediaConfig) *inboundMediaView {
+func mediaDeliveryViewOf(m *config.MediaDeliveryConfig) *mediaDeliveryView {
 	if m == nil {
 		return nil
 	}
-	view := &inboundMediaView{
+	view := &mediaDeliveryView{
 		InlineLimitBytes: mediaSizeLimitViewOf(m.InlineLimitBytes),
 		Prefer:           m.Prefer,
 		Upload:           m.Upload,
@@ -640,17 +640,17 @@ func mcpViews(servers []config.MCPServer) []mcpView {
 	for _, m := range servers {
 		views = append(views, mcpView{
 			Name:     m.Name,
-			Type:     m.Type,
+			Type:     string(m.Type),
 			Redacted: len(m.Command) > 0 || m.URL != "" || len(m.Environment) > 0 || len(m.Headers) > 0,
 		})
 	}
 	return views
 }
 
-func peerViews(peers []config.Peer) []peerView {
-	views := make([]peerView, 0, len(peers))
+func a2aPeerViews(peers []config.A2APeer) []a2aPeerView {
+	views := make([]a2aPeerView, 0, len(peers))
 	for _, p := range peers {
-		views = append(views, peerView{
+		views = append(views, a2aPeerView{
 			Name: p.Name, Endpoint: sanitizeURL(p.Endpoint), CardURL: sanitizeURL(p.CardURL),
 			Description: p.Description, Mode: p.ModeOrDefault(), Redacted: len(p.Headers) > 0,
 		})
@@ -662,7 +662,7 @@ func referenceViews(references []config.Reference) []referenceView {
 	views := make([]referenceView, 0, len(references))
 	for _, r := range references {
 		views = append(views, referenceView{
-			Name: r.Name, Type: r.Type, Path: r.Path, Repository: sanitizeURL(r.Repository),
+			Name: r.Name, Type: string(r.Type), Path: r.Path, Repository: sanitizeURL(r.Repository),
 			Branch: r.Branch, Description: r.Description, Hidden: r.Hidden,
 		})
 	}
@@ -692,5 +692,5 @@ func authViewOf(a *config.AuthConfig) *authView {
 	if a == nil {
 		return nil
 	}
-	return &authView{Type: a.Type, Token: redact(a.Token)}
+	return &authView{Type: string(a.Type), Token: redact(a.Token)}
 }

@@ -153,7 +153,11 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 	}
 	server.WorkingDirectory = project.View
 
-	uploader := mediaUploader(server)
+	uploader, err := mediaUploader(server)
+	if err != nil {
+		m.teardown(project)
+		return nil, fmt.Errorf("project %q: %w", req.Name, err)
+	}
 	baseDirs := append(m.activeBaseDirs(), isolationBaseDirs([]config.Server{server})...)
 	client, err := buildClient(server, catalog, uploader, isolationExcludes(server.WorkingDirectory, baseDirs))
 	if err != nil {
@@ -174,7 +178,7 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 	srv := &http.Server{Handler: newRouter([]*builtServer{built}, nil, nil), ReadHeaderTimeout: 10 * time.Second}
 	instance := &controlInstance{
 		id:               req.Name,
-		kind:             req.Kind,
+		kind:             string(req.Kind),
 		serverBase:       publicBaseURL(server, ln.Addr()),
 		root:             root,
 		workingDirectory: project.View,

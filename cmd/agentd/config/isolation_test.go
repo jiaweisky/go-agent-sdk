@@ -2,7 +2,7 @@ package config
 
 import "testing"
 
-func isolationConfig(mode, baseDir string, readOnly bool) Config {
+func isolationConfig(mode IsolationMode, baseDir string, readOnly bool) Config {
 	return Config{
 		Models: []ModelConfig{testModel()},
 		Servers: []Server{{
@@ -72,16 +72,16 @@ func TestValidateSandbox(t *testing.T) {
 			}},
 		}
 	}
-	if err := base(&SandboxConfig{Process: "none"}).Validate(); err != nil {
-		t.Fatalf("sandbox.process=none should be accepted: %v", err)
+	if err := base(&SandboxConfig{Wrapper: "none"}).Validate(); err != nil {
+		t.Fatalf("sandbox.wrapper=none should be accepted: %v", err)
 	}
 	if err := base(&SandboxConfig{}).Validate(); err == nil {
-		t.Fatal("expected an empty sandbox.process to be rejected")
+		t.Fatal("expected an empty sandbox.wrapper to be rejected")
 	}
-	if err := base(&SandboxConfig{Process: "bwrap", FailurePolicy: "fail-open"}).Validate(); err != nil {
+	if err := base(&SandboxConfig{Wrapper: "bwrap", FailurePolicy: "fail-open"}).Validate(); err != nil {
 		t.Fatalf("fail-open should be accepted: %v", err)
 	}
-	if err := base(&SandboxConfig{Process: "bwrap", FailurePolicy: "maybe"}).Validate(); err == nil {
+	if err := base(&SandboxConfig{Wrapper: "bwrap", FailurePolicy: "maybe"}).Validate(); err == nil {
 		t.Fatal("expected an unknown sandbox.failurePolicy to be rejected")
 	}
 }

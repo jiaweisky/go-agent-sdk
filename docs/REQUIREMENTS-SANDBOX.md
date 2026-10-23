@@ -57,7 +57,7 @@ added only when a deployment needs it.
 | This document | **requirements + gap analysis for the sandbox** | out of scope (see the design) |
 
 In the design's terms, this document specifies the **contract of the `Sandbox`** (the thing
-`sandbox.process` / `wrap.process` resolves to, §8 / §8.1) and of `ClientOptions.FileWriteGuard`
+`sandbox.wrapper` / `wrap.wrapper` resolves to, §8 / §8.1) and of `ClientOptions.FileWriteGuard`
 (§7): what they must *enforce*, not how they are wired.
 
 ## 2. Threat model
@@ -100,7 +100,7 @@ the level. "Level" = required for the native sandbox to be considered complete.
 | **FR4 Process introspection** | A sandboxed command may not read **other processes'** environment or memory (`process-info*`, `sysctl`, `task_for_pid`/`ptrace`). Without this, `env`/`ps eww` still yield agentd's secrets (P2/P3). | — (not covered) | ✅ **implemented (S5)**: per-command `(deny process-info*)`/`(deny sysctl-read)` on seatbelt, `--unshare-pid` on bwrap, the low-integrity AppContainer on Windows. | Required |
 | **FR5 Child environment hygiene** | Commands are spawned with a **sanitized environment**: secret variables (A2) are not inherited. | — | ✅ **implemented (S5)**: `*_KEY` / `*_SECRET` / `*_TOKEN` / `*_PASSWORD` are scrubbed for every wrapper (`env.mode: scrub`, overridable with `inherit`). | Required |
 | **FR6 UNIX sockets** | Blocked by default; allow-listed explicitly (e.g. `docker.sock`). | Part 4 (implied) | ⚠️ **partial**: `unixSockets.mode` is `inherit` (default: follow the file policy), `allowAll` (no socket-specific policy; the file policy still applies) or `allowlist` (explicit paths; granted on Windows). A **per-run private temp** (`{Root}/data/sandbox-tmp`) hides host temp sockets; a socket inside the project's writable root is still reachable unless excluded with `filesystem.denyWrite`. macOS denies remote IP only, so AF_UNIX follows the file policy and allowlist works. A true socket-wide deny needs seccomp/LSM. `deny` is a legacy alias for `inherit`. | Should |
-| **FR7 Uniform scope** | The **same** path/network policy governs (a) **per-command** spawns (`sandbox.process`), (b) **whole-process** wrapping (`wrap`), **and** (c) the **in-process tools** (`read`/`grep`/`write`/`edit`/`apply_patch`). A hole in any one is a hole. | §4/§5 (seam) + §7 (`FileWriteGuard`) + §8.1 (`wrap`) | ✅ **implemented (S5)**: one `sandbox.Policy` drives the wrapper profile and a `PathGuard` installed as `FileReadGuard` + `FileWriteGuard` (grep/glob go through the sandboxed `AppProcess`). | Required |
+| **FR7 Uniform scope** | The **same** path/network policy governs (a) **per-command** spawns (`sandbox.wrapper`), (b) **whole-process** wrapping (`wrap`), **and** (c) the **in-process tools** (`read`/`grep`/`write`/`edit`/`apply_patch`). A hole in any one is a hole. | §4/§5 (seam) + §7 (`FileWriteGuard`) + §8.1 (`wrap`) | ✅ **implemented (S5)**: one `sandbox.Policy` drives the wrapper profile and a `PathGuard` installed as `FileReadGuard` + `FileWriteGuard` (grep/glob go through the sandboxed `AppProcess`). | Required |
 | **FR8 Failure policy** | A named sandbox that cannot be built ⇒ **fail-closed** (refuse to start / refuse the command). `fail-open` is an explicit opt-out. | §6, §13, **D2** | ✅ `sandbox.failurePolicy` / `wrap.failurePolicy` (fail-closed default) | Required (done) |
 | **FR9 Violation observability** | Denied reads/writes/connects/introspection are **reported** as structured events (audit + can be fed back to the model: "blocked by sandbox"). | — | ✅ **implemented (S5)**: `session.next.sandbox.denied` reaches `Client.On`/SSE. `heuristic` (cross-platform stderr scan) is the default, `precise` (Linux syscall tracing via strace) is opt-in, and `reportToModel` appends a denial note to command output; file tools also say "blocked by sandbox". | Should |
 | **FR10 Config validation / no silent downgrade** | A rule the platform cannot honor (e.g. a write glob on Linux) **fails validation**; it is never silently ignored into "allow-all". | §13 (validation) | ✅ **implemented (S5)**: modes are validated, a Linux deny glob and a domain allow-list are rejected, and an unknown wrapper still fails closed (or warns under `fail-open`). | Required |
@@ -158,13 +158,13 @@ Notes:
 
 ## 6. Proposed config surface (extends `DESIGN-ISOLATION.md` §13)
 
-`sandbox.process` / `sandbox.failurePolicy` stay as designed. Add a policy block, named to match
+`sandbox.wrapper` / `sandbox.failurePolicy` stay as designed. Add a policy block, named to match
 `srt` (low migration cost), applied by **every** wrapper (per-command, whole-process, and the
 in-process guards):
 
 ```yaml
 sandbox:
-  process: seatbelt            # none | bwrap | seatbelt | appcontainer  (unchanged)
+  wrapper: seatbelt            # none | bwrap | seatbelt | appcontainer  (unchanged)
   failurePolicy: fail-closed   # (unchanged)
   filesystem:
     denyRead:  ["~", "/etc"]                       # broad regions to deny
@@ -192,7 +192,7 @@ S6+); the native core implements only the no-egress mode (an empty/absent block)
 
 ## 7. Scope matrix — one policy, three enforcement points (FR7)
 
-| | per-command (`sandbox.process`) | whole-process (`wrap`, §8.1) | in-process tools (`read`/`write`/`edit`) |
+| | per-command (`sandbox.wrapper`) | whole-process (`wrap`, §8.1) | in-process tools (`read`/`write`/`edit`) |
 |---|---|---|---|
 | Read (FR1) | profile `file-read*` | profile `file-read*` | path policy in the tool (new; today only `FileWriteGuard` for writes, §7) |
 | Write (FR2) | profile `file-write*` | profile `file-write*` | `FileWriteGuard` **(done, §7)** |

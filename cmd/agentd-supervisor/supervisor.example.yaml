@@ -3,7 +3,7 @@
 # A reusable host supervisor for agentd. Point a host's `supervisor_command` at
 # this binary; it satisfies the acquire/release JSON protocol by calling a
 # running agentd's control API, so the host spawns no Go processes
-# itself. String values support ${VAR} / ${VAR:-default} (the agentd loader).
+# itself. String values may reference environment variables (the agentd loader).
 
 agentd:
   baseURL: http://127.0.0.1:9090          # a running agentd with `control.listen` set
@@ -22,7 +22,7 @@ project:                                  # template cloned for each acquired pr
     baseDir: /var/lib/agentd/views
     baseReadOnly: true
   # sandbox:                              # optional command sandbox for the instance's tools
-  #   process: seatbelt                   # none (default) | bwrap | seatbelt | appcontainer
+  #   wrapper: seatbelt                   # none (default) | bwrap | seatbelt | appcontainer
   #   failurePolicy: fail-closed          # fail-closed (default) | fail-open
   auth:
     type: bearer

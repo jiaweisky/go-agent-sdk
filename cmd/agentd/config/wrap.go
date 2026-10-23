@@ -1,14 +1,42 @@
 package config
 
+import (
+	"errors"
+	"fmt"
+)
+
 // WrapConfig selects a whole-process sandbox for the agentd process.
 type WrapConfig struct {
-	// Process names the whole-process sandbox: none (default) or a wrapper
-	// registered for whole-process use (bwrap on Linux, seatbelt on macOS).
-	Process string `yaml:"process"`
+	// Wrapper selects the whole-process sandbox implementation. WrapperNone
+	// disables it; omit the whole block to leave the process unwrapped.
+	Wrapper Wrapper `yaml:"wrapper"`
 	// FailurePolicy is what to do when the named sandbox cannot be built:
-	// fail-closed (default) refuses to start; fail-open warns and runs unwrapped.
-	FailurePolicy string `yaml:"failurePolicy"`
+	// FailurePolicyFailClosed (default) refuses to start; FailurePolicyFailOpen
+	// warns and runs unwrapped.
+	FailurePolicy FailurePolicy `yaml:"failurePolicy"`
 	// The policy block (profile, filesystem, …) is inlined. The whole-process
 	// wrapper also allows the configured roots and config dirs.
 	SandboxPolicy `yaml:",inline"`
+}
+
+// Validate checks the whole-process sandbox block. Nil is valid (wrap disabled).
+func (w *WrapConfig) Validate() error {
+	if w == nil {
+		return nil
+	}
+	if w.Wrapper == "" {
+		return errors.New(`wrap.wrapper is required (use "none" to disable)`)
+	}
+	if !w.Wrapper.Valid() {
+		return fmt.Errorf("wrap.wrapper must be none, bwrap, seatbelt or appcontainer, got %q", w.Wrapper)
+	}
+	if err := validateFailurePolicy("wrap.failurePolicy", w.FailurePolicy); err != nil {
+		return err
+	}
+	cfg := &SandboxConfig{
+		Wrapper:       w.Wrapper,
+		FailurePolicy: w.FailurePolicy,
+		SandboxPolicy: w.SandboxPolicy,
+	}
+	return cfg.Validate()
 }

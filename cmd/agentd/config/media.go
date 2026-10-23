@@ -1,23 +1,11 @@
 package config
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"mime/multipart"
-	"net/http"
 	"slices"
-	"strconv"
-	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/jiaweisky/go-agent-sdk/pkg/core"
-	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
 // MediaUploadConfig configures a generic provider Files API uploader: a
@@ -40,19 +28,42 @@ type MediaUploadConfig struct {
 	ExpiresAfter int `yaml:"expiresAfter"`
 }
 
-// InboundMediaConfig is the operator-owned inbound media delivery policy (the
-// SDK's media: block). It decides, per inbound attachment, whether media reaches
-// the model inline, as a provider file reference, or spooled on disk. It is the
-// delivery policy, distinct from a model's media capability (models[].media =
-// input/sources).
-type InboundMediaConfig struct {
+// Validate rejects a malformed uploader configuration.
+func (c *MediaUploadConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	if c.URL == "" {
+		return errors.New("mediaUpload.url is required")
+	}
+	if (c.Header == "") != (c.Value == "") {
+		return errors.New("mediaUpload.header and value must be set together")
+	}
+	if c.ExpiresIn < 0 {
+		return errors.New("mediaUpload.expiresIn must not be negative")
+	}
+	if c.ExpiresAfter < 0 {
+		return errors.New("mediaUpload.expiresAfter must not be negative")
+	}
+	return nil
+}
+
+// MediaDeliveryConfig is the operator-owned inbound media delivery policy (the
+// SDK's media: block). For each inbound attachment it decides how the bytes
+// reach the model: inline (a native part, under inlineLimitBytes), as a url
+// from the media store, as a provider file reference from mediaUpload, or
+// spooled to disk; media above maxBytes is skipped. Prefer sets the attempt
+// order, Upload enables the url/file sources, and Downsample shrinks an
+// oversized payload first. This is delivery policy, not capability:
+// models[].media declares what the model accepts.
+type MediaDeliveryConfig struct {
 	// InlineLimitBytes is the per-modality size budget (raw bytes).
 	InlineLimitBytes MediaSizeLimit `yaml:"inlineLimitBytes"`
 	// Prefer is the source order the policy attempts (file, url, inline); empty
 	// means [file, inline].
 	Prefer []string `yaml:"prefer"`
-	// Upload allows adapting byte-backed media to a provider file reference via
-	// mediaUpload.
+	// Upload allows adapting byte-backed media to a non-inline reference: a url
+	// via the media store (storage) or a provider file reference via mediaUpload.
 	Upload bool `yaml:"upload"`
 	// Downsample shrinks a byte-backed payload over InlineLimitBytes before a
 	// source is chosen (independent of prefer).
@@ -94,20 +105,6 @@ func (m *MediaSizeLimit) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// limits converts the config to the SDK type.
-func (m MediaSizeLimit) limits() core.MediaSizeLimits {
-	by := map[string]int64{}
-	for name, value := range map[string]int64{"image": m.Image, "audio": m.Audio, "video": m.Video, "file": m.File} {
-		if value > 0 {
-			by[name] = value
-		}
-	}
-	if len(by) == 0 {
-		by = nil
-	}
-	return core.MediaSizeLimits{Default: m.Default, ByModality: by}
-}
-
 // MediaSpoolConfig is the last-resort spool location. {Root} expands to the
 // server's state root, so a managed spool lives under it, never in the
 // workspace.
@@ -115,114 +112,50 @@ type MediaSpoolConfig struct {
 	Dir string `yaml:"dir"`
 }
 
-// Policy converts the config to the SDK policy, expanding {Root} in spool.dir to
-// root. A nil config yields nil (the SDK keeps the caller-declared behavior).
-func (c *InboundMediaConfig) Policy(root string) *core.MediaPolicy {
-	if c == nil {
-		return nil
-	}
-	prefer := make([]core.MediaPolicySource, 0, len(c.Prefer))
-	for _, name := range c.Prefer {
-		prefer = append(prefer, core.MediaPolicySource(name))
-	}
-	var spool *core.MediaSpoolPolicy
-	if c.Spool != nil {
-		spool = &core.MediaSpoolPolicy{Dir: strings.ReplaceAll(c.Spool.Dir, "{Root}", root)}
-	}
-	return &core.MediaPolicy{
-		InlineLimitBytes: c.InlineLimitBytes.limits(),
-		Prefer:           prefer,
-		Upload:           c.Upload,
-		Downsample:       c.Downsample,
-		Spool:            spool,
-		MaxBytes:         c.MaxBytes.limits(),
-	}
-}
-
-// ValidateInboundMedia rejects a malformed media delivery policy at load.
-func ValidateInboundMedia(m *InboundMediaConfig) error {
+// Validate rejects a malformed media delivery policy at load: a negative size
+// limit, an unknown prefer source, or a spool without a dir.
+func (m *MediaDeliveryConfig) Validate() error {
 	if m == nil {
 		return nil
 	}
-	return m.Policy("").Validate()
-}
-
-// Uploader builds an SDK MediaUploader from the config.
-func (c MediaUploadConfig) Uploader() schema.MediaUploader {
-	return mediaUploadClient{config: c}
-}
-
-type mediaUploadClient struct{ config MediaUploadConfig }
-
-// Upload posts the media as multipart/form-data and returns the file reference.
-func (c mediaUploadClient) Upload(ctx context.Context, media schema.MediaUpload) (schema.Reference, error) {
-	if c.config.URL == "" {
-		return schema.Reference{}, errors.New("media upload: url is required")
+	if err := m.InlineLimitBytes.validate("inlineLimitBytes"); err != nil {
+		return err
 	}
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	name := "file"
-	if media.Name != nil && *media.Name != "" {
-		name = *media.Name
+	if err := m.MaxBytes.validate("maxBytes"); err != nil {
+		return err
 	}
-	part, err := writer.CreateFormFile("file", name)
-	if err != nil {
-		return schema.Reference{}, err
-	}
-	if _, err := part.Write(media.Data); err != nil {
-		return schema.Reference{}, err
-	}
-	for key, value := range c.config.Fields {
-		if err := writer.WriteField(key, value); err != nil {
-			return schema.Reference{}, err
+	for _, source := range m.Prefer {
+		switch source {
+		case "file", "url", "inline":
+		default:
+			return fmt.Errorf("media: unknown prefer source %q (file, url, inline)", source)
 		}
 	}
-	if c.config.ExpiresAfter > 0 {
-		_ = writer.WriteField("expires_after[anchor]", "created_at")
-		_ = writer.WriteField("expires_after[seconds]", strconv.Itoa(c.config.ExpiresAfter))
+	if m.Spool != nil && m.Spool.Dir == "" {
+		return errors.New("media: spool requires a dir")
 	}
-	if err := writer.Close(); err != nil {
-		return schema.Reference{}, err
+	return nil
+}
+
+// validate rejects a negative budget for any modality.
+func (m MediaSizeLimit) validate(field string) error {
+	if m.Default < 0 {
+		return fmt.Errorf("media: %s.default must not be negative", field)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.URL, &buf)
-	if err != nil {
-		return schema.Reference{}, err
+	for _, limit := range []struct {
+		name  string
+		value int64
+	}{
+		{"image", m.Image},
+		{"audio", m.Audio},
+		{"video", m.Video},
+		{"file", m.File},
+	} {
+		if limit.value < 0 {
+			return fmt.Errorf("media: %s.%s must not be negative", field, limit.name)
+		}
 	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	if c.config.Header != "" && c.config.Value != "" {
-		req.Header.Set(c.config.Header, c.config.Value)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return schema.Reference{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return schema.Reference{}, fmt.Errorf("media upload: %s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	var decoded map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return schema.Reference{}, err
-	}
-	idField := c.config.IDField
-	if idField == "" {
-		idField = "id"
-	}
-	id, _ := decoded[idField].(string)
-	if id == "" {
-		return schema.Reference{}, fmt.Errorf("media upload: response has no %q", idField)
-	}
-	ref := schema.Reference{Source: "file", Value: id}
-	lifetime := c.config.ExpiresIn
-	if lifetime == 0 {
-		lifetime = c.config.ExpiresAfter
-	}
-	if lifetime > 0 {
-		expires := time.Now().Add(time.Duration(lifetime) * time.Second)
-		ref.ExpiresAt = &expires
-	}
-	return ref, nil
+	return nil
 }
 
 // InputModalityNames are the model input modalities a host may declare.

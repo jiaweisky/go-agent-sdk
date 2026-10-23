@@ -1,6 +1,9 @@
 package sandbox
 
-import "fmt"
+import (
+	"fmt"
+	"runtime"
+)
 
 // ProcessLauncher takes over the current process, launching command (with args)
 // under the sandbox with write access to roots. It does not return on success.
@@ -33,7 +36,7 @@ func ResolveProcess(name string) (ProcessLauncher, error) {
 	}
 	launcher, ok := processRegistry[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown wrap.process %q", name)
+		return nil, fmt.Errorf("wrap.wrapper %q is not available on %s", name, runtime.GOOS)
 	}
 	if err := checkAvailable(name); err != nil {
 		return nil, err

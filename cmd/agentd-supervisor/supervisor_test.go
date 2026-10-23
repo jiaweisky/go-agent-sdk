@@ -160,12 +160,12 @@ func TestAcquireCarriesSandbox(t *testing.T) {
 	defer server.Close()
 
 	cfg := testConfig(server.URL, "")
-	cfg.Project.Sandbox = &config.SandboxConfig{Process: "seatbelt", FailurePolicy: "fail-open"}
+	cfg.Project.Sandbox = &config.SandboxConfig{Wrapper: "seatbelt", FailurePolicy: "fail-open"}
 	sup := newSupervisor(cfg)
 	if _, err := sup.acquire(request{Action: "acquire", ProjectID: "p1"}); err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	if created.Sandbox == nil || created.Sandbox.Process != "seatbelt" || created.Sandbox.FailurePolicy != "fail-open" {
+	if created.Sandbox == nil || created.Sandbox.Wrapper != "seatbelt" || created.Sandbox.FailurePolicy != "fail-open" {
 		t.Fatalf("sandbox was not carried into the project request: %+v", created.Sandbox)
 	}
 }
@@ -251,5 +251,26 @@ func TestUnknownActionFails(t *testing.T) {
 	sup := newSupervisor(testConfig("http://example.invalid", ""))
 	if _, err := sup.handle(request{Action: "nope"}); err == nil {
 		t.Fatal("expected an unknown action to fail")
+	}
+}
+
+func TestSupervisorConfigRejectsInvalidProject(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*supervisorConfig)
+	}{
+		{"kind", func(c *supervisorConfig) { c.Project.Kind = "ftp" }},
+		{"peer", func(c *supervisorConfig) { c.Project.Peers = []config.A2APeer{{Name: "echo"}} }},
+		{"sandbox", func(c *supervisorConfig) { c.Project.Sandbox = &config.SandboxConfig{} }},
+		{"auth", func(c *supervisorConfig) { c.Project.Auth = &config.AuthConfig{} }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := testConfig("http://x", "")
+			tc.mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatalf("expected %s to be rejected", tc.name)
+			}
+		})
 	}
 }

@@ -63,7 +63,7 @@ func Resolve(name string, policy Policy) (core.AppProcess, error) {
 	}
 	factory, ok := registry[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown sandbox.process %q", name)
+		return nil, fmt.Errorf("sandbox wrapper %q is not available on %s", name, runtime.GOOS)
 	}
 	if err := checkAvailable(name); err != nil {
 		return nil, err

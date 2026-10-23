@@ -1,4 +1,4 @@
-package config
+package media
 
 import (
 	"context"
@@ -9,8 +9,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
+
+func newUploader(t *testing.T, cfg *config.MediaUploadConfig) schema.MediaUploader {
+	t.Helper()
+	uploader, err := NewUploader(cfg)
+	if err != nil {
+		t.Fatalf("new uploader: %v", err)
+	}
+	return uploader
+}
 
 func TestMediaUploaderPostsMultipartAndReadsRef(t *testing.T) {
 	type capture struct {
@@ -35,14 +45,14 @@ func TestMediaUploaderPostsMultipartAndReadsRef(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	uploader := MediaUploadConfig{
+	uploader := newUploader(t, &config.MediaUploadConfig{
 		URL:       srv.URL + "/files",
 		Header:    "Authorization",
 		Value:     "Bearer tok",
 		Fields:    map[string]string{"purpose": "vision"},
 		IDField:   "file_id",
 		ExpiresIn: 60,
-	}.Uploader()
+	})
 
 	name := "red.png"
 	before := time.Now()
@@ -70,7 +80,7 @@ func TestMediaUploaderPostsMultipartAndReadsRef(t *testing.T) {
 }
 
 func TestMediaUploaderErrors(t *testing.T) {
-	if _, err := (MediaUploadConfig{}).Uploader().Upload(context.Background(), schema.MediaUpload{Data: []byte("x")}); err == nil {
+	if _, err := NewUploader(&config.MediaUploadConfig{}); err == nil {
 		t.Fatal("expected an error when url is unset")
 	}
 
@@ -78,7 +88,7 @@ func TestMediaUploaderErrors(t *testing.T) {
 		http.Error(w, "nope", http.StatusForbidden)
 	}))
 	defer srv.Close()
-	if _, err := (MediaUploadConfig{URL: srv.URL}).Uploader().Upload(context.Background(), schema.MediaUpload{Data: []byte("x")}); err == nil {
+	if _, err := newUploader(t, &config.MediaUploadConfig{URL: srv.URL}).Upload(context.Background(), schema.MediaUpload{Data: []byte("x")}); err == nil {
 		t.Fatal("expected an error on a non-2xx response")
 	}
 
@@ -86,7 +96,7 @@ func TestMediaUploaderErrors(t *testing.T) {
 		fmt.Fprint(w, `{}`)
 	}))
 	defer empty.Close()
-	if _, err := (MediaUploadConfig{URL: empty.URL}).Uploader().Upload(context.Background(), schema.MediaUpload{Data: []byte("x")}); err == nil {
+	if _, err := newUploader(t, &config.MediaUploadConfig{URL: empty.URL}).Upload(context.Background(), schema.MediaUpload{Data: []byte("x")}); err == nil {
 		t.Fatal("expected an error when the response has no id")
 	}
 }
@@ -105,7 +115,7 @@ func TestMediaUploaderSendsExpiresAfter(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	uploader := MediaUploadConfig{URL: srv.URL, ExpiresAfter: 3600, IDField: "id"}.Uploader()
+	uploader := newUploader(t, &config.MediaUploadConfig{URL: srv.URL, ExpiresAfter: 3600, IDField: "id"})
 	ref, err := uploader.Upload(context.Background(), schema.MediaUpload{Mime: "image/png", Data: []byte("x")})
 	if err != nil {
 		t.Fatalf("upload: %v", err)
