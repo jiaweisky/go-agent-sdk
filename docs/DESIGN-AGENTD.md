@@ -14,6 +14,7 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-23 | Renamed `mediaUpload.expiresIn` / `expiresAfter` to `expiresInSeconds` / `expiresAfterSeconds`; `/api/config` reports the new names; `schemaVersion` is now `5`. |
 | 2026-10-23 | Moved sandbox policy translation to `cmd/agentd/sandboxpolicy`, shared sandbox mode values to `cmd/agentd/sandboxmode`, and model metadata adaptation to `cmd/agentd/modelinfo`; `config` no longer imports `cmd/agentd/sandbox` or `pkg/agent`. |
 | 2026-10-23 | Split runtime assembly out of `cmd/agentd/config`: client construction and MCP/reference/A2A-peer conversion moved to `cmd/agentd/client`; the media uploader, transcoder and delivery-policy conversion to `cmd/agentd/media`; media-store backends to `cmd/agentd/storage`. `config` now holds the DTOs, their `Validate()` methods and cross-block validation. |
 | 2026-10-22 | Renamed `sandbox.process` / `wrap.process` to `sandbox.wrapper` / `wrap.wrapper` and made the wrapper an explicit enum (`none`, `bwrap`, `seatbelt`, `appcontainer`); `/api/config` reports `wrapper`; `schemaVersion` is now `4`. |
@@ -215,7 +216,7 @@ servers:
     #              # `s3` is S3-compatible (AWS S3 / MinIO, and COS via its S3 endpoint); the native `cos` backend
     #              # drives Tencent COS over its own REST API: { cos: { region, bucket, secretID, secretKey, sessionToken? } }
     #              # omit the s3/cos credentials (or set http auth none) for an anonymous/public origin or bucket
-    # mediaUpload: { url: https://api.deepseek.com/files, fields: {purpose: user_data}, idField: id, expiresAfter: 86400 }  # provider Files API → file_id; expiresAfter → provider expires_after
+    # mediaUpload: { url: https://api.deepseek.com/files, fields: {purpose: user_data}, idField: id, expiresAfterSeconds: 86400 }  # provider Files API → file_id; expiresAfterSeconds → provider expires_after
     cards: { build: { name: ..., description: ... } }   # REQUIRED per exposed agent (name + description)
     auth: { type: bearer, token: sk-... }   # A2A is bearer-only, like HTTP
     dropErroredTurns: true
@@ -489,7 +490,7 @@ runtime info without the config file — useful across machines.
 - **Source**: `sources[]` reports the config `file` path.
 - **Errors**: `401` (missing/invalid credential), `400` (bad `section`), `405` (non-GET),
   `404` (no origin-root server), matching the `/api/*` envelope `{error, message}`.
-- **Stability**: `schemaVersion` (currently `4`); the endpoints are experimental — fields are
+- **Stability**: `schemaVersion` (currently `5`); the endpoints are experimental — fields are
   only added, a removal bumps the version. Read-only (no PATCH) and no hot reload: the config
   is loaded at startup (`--check` validates it); restart to change it.
 

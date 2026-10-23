@@ -86,9 +86,9 @@ func (c uploadClient) multipartBody(media schema.MediaUpload) ([]byte, string, e
 			return nil, "", err
 		}
 	}
-	if c.config.ExpiresAfter > 0 {
+	if c.config.ExpiresAfterSeconds > 0 {
 		_ = writer.WriteField("expires_after[anchor]", "created_at")
-		_ = writer.WriteField("expires_after[seconds]", strconv.Itoa(c.config.ExpiresAfter))
+		_ = writer.WriteField("expires_after[seconds]", strconv.Itoa(c.config.ExpiresAfterSeconds))
 	}
 	if err := writer.Close(); err != nil {
 		return nil, "", err
@@ -122,11 +122,11 @@ func (c uploadClient) decodeReference(resp *http.Response) (schema.Reference, er
 	return ref, nil
 }
 
-// referenceLifetime is the local cache bound: ExpiresIn, or ExpiresAfter when
-// ExpiresIn is unset.
+// referenceLifetime is the local cache bound: ExpiresInSeconds, or ExpiresAfterSeconds when
+// ExpiresInSeconds is unset.
 func (c uploadClient) referenceLifetime() int {
-	if c.config.ExpiresIn != 0 {
-		return c.config.ExpiresIn
+	if c.config.ExpiresInSeconds != 0 {
+		return c.config.ExpiresInSeconds
 	}
-	return c.config.ExpiresAfter
+	return c.config.ExpiresAfterSeconds
 }

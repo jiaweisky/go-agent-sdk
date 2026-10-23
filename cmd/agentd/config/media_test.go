@@ -17,8 +17,8 @@ func TestValidateMediaUpload(t *testing.T) {
 	if err := (&MediaUploadConfig{URL: "https://up.example", Header: "X-K"}).Validate(); err == nil {
 		t.Fatal("header without value must be rejected")
 	}
-	if err := (&MediaUploadConfig{URL: "https://up.example", ExpiresIn: -1}).Validate(); err == nil {
-		t.Fatal("a negative expiresIn must be rejected")
+	if err := (&MediaUploadConfig{URL: "https://up.example", ExpiresInSeconds: -1}).Validate(); err == nil {
+		t.Fatal("a negative expiresInSeconds must be rejected")
 	}
 	if err := (&MediaUploadConfig{URL: "https://up.example", Header: "X-K", Value: "v"}).Validate(); err != nil {
 		t.Fatalf("valid uploader rejected: %v", err)

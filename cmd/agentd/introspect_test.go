@@ -74,7 +74,7 @@ func TestConfigRedactsSecrets(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`"schemaVersion":4`,
+		`"schemaVersion":5`,
 		`"apiKey":{"configured":true,"redacted":true}`,
 		`"type":"bearer"`,
 		`"token":{"configured":true,"redacted":true}`,
@@ -181,7 +181,7 @@ func TestConfigExposesMediaStorageAndBody(t *testing.T) {
 				InlineLimitBytes: config.MediaSizeLimit{Default: 1024, Image: 2048},
 				Upload:           true,
 			},
-			MediaUpload: &config.MediaUploadConfig{URL: "https://user:tok@up.example/api", ExpiresIn: 60, ExpiresAfter: 120},
+			MediaUpload: &config.MediaUploadConfig{URL: "https://user:tok@up.example/api", ExpiresInSeconds: 60, ExpiresAfterSeconds: 120},
 			Storage: &config.StorageConfig{
 				Backend: "http", URL: "https://user:tok@store.example/", Auth: "bearer", Token: "s3cret",
 				PresignSecret: "ps",
@@ -195,8 +195,8 @@ func TestConfigExposesMediaStorageAndBody(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"inlineLimitBytes":{"default":1024,"image":2048}`,
-		`"expiresIn":60`,
-		`"expiresAfter":120`,
+		`"expiresInSeconds":60`,
+		`"expiresAfterSeconds":120`,
 		`"storage":{"backend":"http","url":"https://store.example/"`,
 		`"presignSecret":{"configured":true,"redacted":true}`,
 		`"maxBodyBytes":2097152`,

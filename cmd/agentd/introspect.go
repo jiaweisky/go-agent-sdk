@@ -67,7 +67,7 @@ func publicPath(patterns []string, path string) bool {
 }
 
 // configSchemaVersion versions the /api/config document; bump on a breaking change.
-const configSchemaVersion = 4
+const configSchemaVersion = 5
 
 // secret reports whether a sensitive value is configured without revealing it.
 type secret struct {
@@ -217,13 +217,13 @@ type sandboxView struct {
 }
 
 type mediaUploadView struct {
-	URL          string `json:"url,omitempty"`
-	IDField      string `json:"idField,omitempty"`
-	ExpiresIn    int    `json:"expiresIn,omitempty"`
-	ExpiresAfter int    `json:"expiresAfter,omitempty"`
-	Header       secret `json:"header"`
-	Value        secret `json:"value"`
-	Fields       secret `json:"fields"`
+	URL                 string `json:"url,omitempty"`
+	IDField             string `json:"idField,omitempty"`
+	ExpiresInSeconds    int    `json:"expiresInSeconds,omitempty"`
+	ExpiresAfterSeconds int    `json:"expiresAfterSeconds,omitempty"`
+	Header              secret `json:"header"`
+	Value               secret `json:"value"`
+	Fields              secret `json:"fields"`
 }
 
 type mediaDeliveryView struct {
@@ -592,13 +592,13 @@ func mediaUploadViewOf(up *config.MediaUploadConfig) *mediaUploadView {
 		return nil
 	}
 	return &mediaUploadView{
-		URL:          sanitizeURL(up.URL),
-		IDField:      up.IDField,
-		ExpiresIn:    up.ExpiresIn,
-		ExpiresAfter: up.ExpiresAfter,
-		Header:       redact(up.Header),
-		Value:        redact(up.Value),
-		Fields:       redactSet(len(up.Fields) > 0),
+		URL:                 sanitizeURL(up.URL),
+		IDField:             up.IDField,
+		ExpiresInSeconds:    up.ExpiresInSeconds,
+		ExpiresAfterSeconds: up.ExpiresAfterSeconds,
+		Header:              redact(up.Header),
+		Value:               redact(up.Value),
+		Fields:              redactSet(len(up.Fields) > 0),
 	}
 }
 

@@ -46,12 +46,12 @@ func TestMediaUploaderPostsMultipartAndReadsRef(t *testing.T) {
 	defer srv.Close()
 
 	uploader := newUploader(t, &config.MediaUploadConfig{
-		URL:       srv.URL + "/files",
-		Header:    "Authorization",
-		Value:     "Bearer tok",
-		Fields:    map[string]string{"purpose": "vision"},
-		IDField:   "file_id",
-		ExpiresIn: 60,
+		URL:              srv.URL + "/files",
+		Header:           "Authorization",
+		Value:            "Bearer tok",
+		Fields:           map[string]string{"purpose": "vision"},
+		IDField:          "file_id",
+		ExpiresInSeconds: 60,
 	})
 
 	name := "red.png"
@@ -115,7 +115,7 @@ func TestMediaUploaderSendsExpiresAfter(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	uploader := newUploader(t, &config.MediaUploadConfig{URL: srv.URL, ExpiresAfter: 3600, IDField: "id"})
+	uploader := newUploader(t, &config.MediaUploadConfig{URL: srv.URL, ExpiresAfterSeconds: 3600, IDField: "id"})
 	ref, err := uploader.Upload(context.Background(), schema.MediaUpload{Mime: "image/png", Data: []byte("x")})
 	if err != nil {
 		t.Fatalf("upload: %v", err)
@@ -124,6 +124,6 @@ func TestMediaUploaderSendsExpiresAfter(t *testing.T) {
 		t.Fatalf("expires_after = %q/%q, want created_at/3600", anchor, seconds)
 	}
 	if ref.ExpiresAt == nil {
-		t.Fatal("expiresAfter should also bound the local reference cache")
+		t.Fatal("expiresAfterSeconds should also bound the local reference cache")
 	}
 }
