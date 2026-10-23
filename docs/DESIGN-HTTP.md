@@ -4,8 +4,8 @@
 > Scope: a language-agnostic HTTP API for go-agent-sdk, so hosts written in other
 > languages (Python / Node / Java / …) can drive the SDK across a process boundary
 > Relationship: this document is a sub-volume of `docs/DESIGN.md`, covering only
-> the HTTP API. The general architecture, public API and porting rules are still
-> defined by `docs/DESIGN.md` and `AGENTS.md`.
+> the HTTP API. The general architecture and public API are still defined by
+> `docs/DESIGN.md`; historical porting rules live in `docs/PORTING-REFERENCE.md`.
 > Convention: the Go code below is **illustrative only**; it expresses type
 > boundaries and contracts, not final signatures.
 
@@ -107,7 +107,7 @@ the authoritative endpoint list and §5.5 names the dropped groups.
 | permission / question request + reply routes | same, over `Client.Permission()` / `Client.Question()` |
 | auth: Basic user/password from `OPENCODE_*` env | **Bearer only** (`auth.type` + `auth.token`); **no env**, secrets from config (§8.1) |
 | location-scoped routes (`location` query) | **dropped**: one `Client` = one project/root |
-| provider / model catalog (models.dev) + credential / integration (OAuth) routes | **dropped**: the host supplies `Protocol` + credentials; `catalog`/`credential`/`integration` are not ported (`AGENTS.md`) |
+| provider / model catalog (models.dev) + credential / integration (OAuth) routes | **dropped**: the host supplies `Protocol` + credentials; `catalog`/`credential`/`integration` are not ported (`docs/PORTING-REFERENCE.md`) |
 | `pty` / `project-copy` / `reference` / `fs` / `command` routes | **dropped** (§5.5) |
 | `session.active` / `session.history` routes | same, aligning v2 (B6): `/api/session/active` and `/api/session/{id}/history` (§5.2) |
 
@@ -178,7 +178,7 @@ cmd/agentd/                     multi-transport server command (YAML config, no 
 Notes:
 
 - **Go-specific package.** It has no direct TS counterpart (like `a2a/`), so it
-  should be registered in `AGENTS.md`'s package table rather than claimed as a
+  should be registered in `AGENTS.md`'s package architecture rather than claimed as a
   mirror of a `packages/*` directory. The HTTP *shape* is modeled on
   `packages/server` + `packages/protocol`; the Effect `HttpApi` / DI internals
   are not ported.
@@ -570,7 +570,7 @@ Consequences:
 
 `provider`, `model`, `integration`, `credential`, `project-copy`, `pty`,
 `reference`, `fs`, `command`, `location`. Reasons: no SDK equivalent, CLI
-infrastructure excluded by `AGENTS.md`, or subsumed by the agent's own tools
+infrastructure excluded by `docs/PORTING-REFERENCE.md`, or subsumed by the agent's own tools
 (`fs`/`command` would duplicate `read`/`glob`/`grep`/`bash` while bypassing the
 permission system). Note `reference` here means the reference *routes*; reference
 *sources* become command config (§12.6).
@@ -1386,7 +1386,7 @@ below.
   omits media the protocol or model cannot carry (replaced with a text note)
   instead of failing the turn — so an unsupported attachment can never wedge a
   session, and switching models re-evaluates it. The catalog is not ported
-  (`AGENTS.md`): the host supplies capabilities, and both commands expose
+  (`docs/PORTING-REFERENCE.md`): the host supplies capabilities, and both commands expose
   `inputModalities` for that.*
 
 ### Go-specific (no TS counterpart)

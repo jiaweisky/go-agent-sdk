@@ -1,7 +1,10 @@
 # go-agent-sdk
 
-An embeddable Go SDK for building LLM agents — a Go port of
-[opencode](https://github.com/anomalyco/opencode).
+An embeddable Go SDK for building LLM agents. It originated as a Go port of
+[opencode](https://github.com/anomalyco/opencode); the TypeScript/Effect → Go
+porting phase is complete, and it is now maintained as a Go-native SDK.
+Historical porting notes live in
+[`docs/PORTING-REFERENCE.md`](docs/PORTING-REFERENCE.md).
 
 `go-agent-sdk` packages a complete agent runtime behind a small public API: a
 multi-protocol LLM layer, the tool-calling agent loop, a permission system,
@@ -192,15 +195,18 @@ go-agent-sdk/
 │   │   ├── route/    Route, Protocol, transport, auth
 │   │   ├── protocols/ openai-chat, openai-responses, anthropic-messages, gemini, bedrock-converse
 │   │   └── provider/ provider facades
-│   ├── core/       core engine types (permission, agent, project, event)
+│   ├── core/       core engine types (permission, agent, project, event) and
+│   │               the public tool / skill / systemcontext packages
 │   ├── mcp/        MCP client and tool adapter
 │   ├── a2a/        A2A protocol: client, a2ago (a2a-go adapter), server
 │   ├── server/     language-agnostic HTTP/SSE API
 │   ├── session/    public session-store interfaces (e.g. TurnStore)
 │   └── jsonschema/ typed JSON Schema AST for tool schemas
 ├── internal/     engine internals (not importable outside this module)
-│   ├── core/       session, session/runner, database, tool, skill, ...
-│   └── defs/       agent and skill definitions loaded from markdown
+│   ├── core/       session, session/runner, database, effect, util, project,
+│   │               reference, ripgrep, installation, instructions, wire
+│   ├── defs/       config and skill definitions loaded from markdown
+│   └── llm/        LLM internals (utils, protocols/utils)
 └── cmd/          commands (cmd/agentd: HTTP/SSE + A2A + control API;
                   cmd/agentd-supervisor: host supervisor_command)
 ```

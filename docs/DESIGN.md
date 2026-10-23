@@ -45,7 +45,7 @@ Based on the above design, the first version (MVP) implements the following core
 | Provider facade (preset base URLs for OpenRouter / xAI / Azure / Cloudflare / GitHub Copilot / Google / Bedrock) | Protocols and facades are implemented; the `agent` layer uses `Protocol` + `ModelInfo`, and facades are only for callers using the `llm` package directly (see §5.4) |
 | `bash` advanced features (tree-sitter, arity, background tasks, progress stream) | See the TODO in `core/tool/bash.go` |
 | `edit` advanced features (fuzzy match, formatter, watcher, snapshot, LSP) | See the TODO in `core/tool/edit.go` |
-| credential / catalog / integration services | CLI infrastructure; the SDK uses narrow input instead (see AGENTS.md) |
+| credential / catalog / integration services | CLI infrastructure; the SDK uses narrow input instead (see docs/PORTING-REFERENCE.md) |
 | `weak` package, `os.Root` and other security features | To be hardened later |
 
 > `apply_patch` supports neither moves nor atomic rollback because v2 core does not either — `packages/core/src/tool/apply-patch.ts` rejects moves and says "Moves and atomic rollback are not supported yet". The Go port matches it, so this is parity, not a deferred feature.
@@ -148,7 +148,7 @@ agent ──> core/tool ──┐
 
 ## 4. Package structure
 
-Go directories **directly mirror opencode's TS monorepo package structure**: `packages/<pkg>/src/<path>` → `<pkg>/<path>` (kebab-case → snake_case), without using `pkg/` or `internal/`. The full conventions (symbol prefixes, circular-dependency handling, index.ts rules) are in `AGENTS.md`.
+Go directories **directly mirror opencode's TS monorepo package structure**: `packages/<pkg>/src/<path>` → `<pkg>/<path>` (kebab-case → snake_case), without using `pkg/` or `internal/`. The full porting conventions (symbol prefixes, circular-dependency handling, index.ts rules) are in `docs/PORTING-REFERENCE.md`; current package architecture is in `AGENTS.md`.
 
 ```
 go-agent-sdk/                            opencode TS
@@ -574,7 +574,7 @@ func RegisterWrite(registry *Registry, deps WriteDeps) (func(), error)
 
 ## 8. MCP integration
 
-**Implemented** (the `mcp/` package). Ports opencode `packages/opencode/src/mcp/`'s **client + adapter** only; OAuth/credentials/browser/TUI/v1 config are narrowed away per AGENTS.md and replaced by a passed-in `ServerConfig`.
+**Implemented** (the `mcp/` package). Ports opencode `packages/opencode/src/mcp/`'s **client + adapter** only; OAuth/credentials/browser/TUI/v1 config are narrowed away per `docs/PORTING-REFERENCE.md` and replaced by a passed-in `ServerConfig`.
 
 The protocol layer uses the official Go SDK `github.com/modelcontextprotocol/go-sdk` (parallel to TS using the official `@modelcontextprotocol/sdk`).
 

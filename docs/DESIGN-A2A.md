@@ -2,7 +2,7 @@
 
 > Status: **implemented (Phases 0–5 all landed; includes cross-implementation interop tests with ADK-go)**
 > Scope: add A2A (Agent2Agent) protocol support to go-agent-sdk (inbound + outbound)
-> Relationship: this document is a sub-volume of `docs/DESIGN.md`, covering only A2A; the general architecture, public API and porting rules are still defined by `docs/DESIGN.md` and `AGENTS.md`
+> Relationship: this document is a sub-volume of `docs/DESIGN.md`, covering only A2A; the general architecture and public API are still defined by `docs/DESIGN.md`. Historical porting rules live in `docs/PORTING-REFERENCE.md`.
 > Convention: the Go code snippets in this document are **illustrative only**; they express type boundaries and contracts, not final signatures
 
 ## Change log
@@ -205,7 +205,7 @@ Once these two are settled, outbound and inbound are merely writing one adapter 
 
 ### 2.2 Non-goals
 
-- Do not build opencode CLI's launcher / multi-form entry points (consistent with `AGENTS.md`'s principle of not copying CLI infrastructure);
+- Do not build opencode CLI's launcher / multi-form entry points (consistent with the CLI-infrastructure principle in `docs/PORTING-REFERENCE.md`);
 - Do not build an A2A registry / discovery service;
 - Do not introduce OTel / telemetry (the SDK currently has no telemetry, not introduced here);
 - Do not invent **additional** capability-negotiation mechanisms beyond AgentCard declarations (no bidirectional capability handshake / downgrade negotiation). Do only minimal adaptation based on the AgentCard's `capabilities` / `defaultInputModes` / `defaultOutputModes` / `protocolVersion`: unknown non-required extensions are safely ignored, and an unsupported `required` extension is rejected (see §6.2);
@@ -215,7 +215,7 @@ Once these two are settled, outbound and inbound are merely writing one adapter 
 
 ## 3. Package structure and dependency strategy
 
-A2A has **no counterpart** in opencode TS; it is a Go-specific capability and should be explicitly registered as "no corresponding TS directory" in `AGENTS.md`'s package architecture table, like `jsonschema/`.
+A2A has **no counterpart** in opencode TS; it is a Go-specific capability and should be explicitly registered as "no corresponding TS directory" in `AGENTS.md`'s package architecture, like `jsonschema/`.
 
 ```
 a2a/                     protocol-agnostic core: types, mapping, state machine (no transport dependency)
@@ -751,7 +751,7 @@ The **test matrix** references adk-go's A2A tests (`a2a_e2e_test.go` + `*_compat
 
 ## 9. Risks
 
-**No architectural-level risk.** A2A is a standard protocol; interoperability is guaranteed by protocol correctness; security is resolved by §5.5; semantic loss is the known degradation of §4.6; the documentation is synced (`AGENTS.md` package architecture table, `docs/DESIGN.md` §4 package structure and the A2A note); promoting `turn` to first-class is a decided cost (A8).
+**No architectural-level risk.** A2A is a standard protocol; interoperability is guaranteed by protocol correctness; security is resolved by §5.5; semantic loss is the known degradation of §4.6; the documentation is synced (`AGENTS.md` package architecture, `docs/DESIGN.md` §4 package structure and the A2A note); promoting `turn` to first-class is a decided cost (A8).
 
 The only thing that needs test coverage is **concurrency correctness** (parking + persistence + event dispatch) — that is an **implementation-quality** concern (present in any concurrent code), not a design risk: cover it with `go test -race` + `testing/synctest`; Phase 0 builds the turn state model first, and the recovery path references ADK's `HandleInputRequired`.
 
@@ -760,7 +760,7 @@ The remaining items are not risks (stated to avoid over-worrying):
 - **Interop**: guaranteed by protocol correctness. §4.2's adoption of the `adk_*` conventions is only a **fidelity enhancement** (letting tool trace / thought be restorable on the peer), not part of the protocol; even if it drifts, unknown data parts are gracefully degraded to text by ADK, **without affecting core interoperability**.
 - **Security** (a remote triggering local code execution): resolved by §5.5 — auth inherited from a2a-go, authorization denying dangerous tools by default, workspace isolation, and prohibiting metadata privilege escalation. It is a **configuration surface**.
 - **Semantic loss**: the **known degradation** of §4.6.
-- **Documentation consistency**: `AGENTS.md` and `docs/DESIGN.md` are already synced (package architecture table / package structure / A2A note).
+- **Documentation consistency**: `AGENTS.md` and `docs/DESIGN.md` are already synced (package architecture / package structure / A2A note).
 - **Promoting `turn` to first-class**: the **cost** of the decided option C (A8).
 
 ---

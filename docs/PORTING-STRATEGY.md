@@ -1,5 +1,10 @@
 # go-agent-sdk porting technical plan
 
+> **Status: historical.** The TypeScript/Effect → Go porting phase is complete.
+> This plan is retained for provenance and to explain past implementation
+> decisions; it is not an active implementation plan. Current scope and API are
+> governed by `docs/DESIGN.md` and the other current design documents.
+
 ## Overview
 
 This plan defines the technical strategy for porting opencode (TypeScript/Effect) to Go. Goal: produce a Go-native, strongly typed, maintainable SDK.
@@ -772,7 +777,7 @@ opencode's agent and skill definitions come from `{agent,agents}/**/*.md`, `{mod
 
 ## 14. Symbol cross-reference (Go ↔ TS)
 
-Used when reviewing a port to locate the TS source. File names themselves follow AGENTS.md's rules
+Used when reviewing a port to locate the TS source. File names themselves follow `docs/PORTING-REFERENCE.md`'s rules
 (`packages/<pkg>/src/<path>/<name>.ts` → `<pkg>/<path>/<name>.go`, kebab-case → snake_case);
 the table below lists only what **cannot be derived by the rule**: when the TS source file and the Go file have different names, the actual path is given, and when a symbol name differs from the Go name, the mapping is given.
 

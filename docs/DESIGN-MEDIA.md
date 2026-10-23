@@ -88,7 +88,7 @@ told (existing behavior). No new transport, no schema-first codegen.
 
 **Non-goals.** Media **output** (the model generating audio/video), transcription
 post-processing, provider file-upload lifecycle, and porting the models.dev
-catalog (see `AGENTS.md`).
+catalog (see `docs/PORTING-REFERENCE.md`).
 
 ## 2. Current state (analysis)
 
@@ -298,7 +298,7 @@ commands), not to invent one. Four details it must handle explicitly:
   the `models`/`media` types in `serveconfig` so both embed them, and relax
   `validateRequired` for a catalog-only config.
 
-This keeps the `AGENTS.md` rule "do not port the catalog; the host supplies a
+This keeps the `docs/PORTING-REFERENCE.md` rule "do not port the catalog; the host supplies a
 narrow input": the host declares exactly the models it exposes, each with its own
 capabilities. The SDK API is the same shape — `ClientOptions.ModelInfo`/
 `Credentials` already resolve per id; only the capability descriptor is added
@@ -542,7 +542,7 @@ side-effecting call with storage/quota/expiry semantics. Which form is available
 modality** (DeepSeek: image only), and **two** hosts produce them ({M17}, §4.10 Axis 3): the
 provider Files API (`file_id`; DeepSeek needs the form field `purpose=user_data`, and its
 Anthropic wire the header `anthropic-beta: files-api-2025-04-14`) and object storage (`url`). Per
-`AGENTS.md` (no provider/credential infrastructure in the SDK), the SDK **references** file
+`docs/PORTING-REFERENCE.md` (no provider/credential infrastructure in the SDK), the SDK **references** file
 ids/urls; hosting is the host's job via `MediaUploader(providerID)` (provider-bound) and
 `MediaStore` (provider-independent) — the planner writes the produced source onto the part before
 re-checking feasibility.
@@ -732,7 +732,7 @@ ClientOptions.MediaUploader func(providerID schema.ProviderID) MediaUploader
   store, or a new Files API — each is one `MediaStore`/`MediaUploader` implementation.
 - **Lifecycle belongs to the host**; the SDK never deletes provider-side. A host reclaims a
   reference by its own means (provider `expires_after`, an object-store lifecycle rule, a presigned
-  url TTL). agentd's `mediaUpload.expiresAfter` (seconds) requests a provider file lifetime —
+  url TTL). agentd's `mediaUpload.expiresAfterSeconds` (seconds) requests a provider file lifetime —
   it is sent as the Files API `expires_after[anchor]=created_at` + `expires_after[seconds]=N`
   (DeepSeek/OpenAI convention) — and unset leaves the file permanent. The `Reference.ExpiresAt`
   the host reports bounds only the SDK's content-hash upload cache.
