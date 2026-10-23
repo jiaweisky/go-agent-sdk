@@ -36,6 +36,9 @@ func (c supervisorConfig) Validate() error {
 	if err := c.Project.Auth.Validate(); err != nil {
 		return fmt.Errorf("project: %w", err)
 	}
+	if err := c.Project.Isolation.Validate(c.Project.WorkingDirectory); err != nil {
+		return fmt.Errorf("project: %w", err)
+	}
 	return nil
 }
 

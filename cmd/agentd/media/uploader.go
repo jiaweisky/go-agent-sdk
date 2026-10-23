@@ -33,9 +33,41 @@ type uploadClient struct{ config *config.MediaUploadConfig }
 
 // Upload posts the media as multipart/form-data and returns the file reference.
 func (c uploadClient) Upload(ctx context.Context, media schema.MediaUpload) (schema.Reference, error) {
-	if c.config.URL == "" {
-		return schema.Reference{}, errors.New("media upload: url is required")
+	req, err := c.newRequest(ctx, media)
+	if err != nil {
+		return schema.Reference{}, err
 	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return schema.Reference{}, err
+	}
+	defer resp.Body.Close()
+	return c.decodeReference(resp)
+}
+
+// newRequest builds the multipart upload request.
+func (c uploadClient) newRequest(ctx context.Context, media schema.MediaUpload) (*http.Request, error) {
+	if c.config.URL == "" {
+		return nil, errors.New("media upload: url is required")
+	}
+	body, contentType, err := c.multipartBody(media)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.URL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if c.config.Header != "" && c.config.Value != "" {
+		req.Header.Set(c.config.Header, c.config.Value)
+	}
+	return req, nil
+}
+
+// multipartBody renders the file part, configured fields and optional
+// provider-side expiry.
+func (c uploadClient) multipartBody(media schema.MediaUpload) ([]byte, string, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	name := "file"
@@ -44,14 +76,14 @@ func (c uploadClient) Upload(ctx context.Context, media schema.MediaUpload) (sch
 	}
 	part, err := writer.CreateFormFile("file", name)
 	if err != nil {
-		return schema.Reference{}, err
+		return nil, "", err
 	}
 	if _, err := part.Write(media.Data); err != nil {
-		return schema.Reference{}, err
+		return nil, "", err
 	}
 	for key, value := range c.config.Fields {
 		if err := writer.WriteField(key, value); err != nil {
-			return schema.Reference{}, err
+			return nil, "", err
 		}
 	}
 	if c.config.ExpiresAfter > 0 {
@@ -59,21 +91,13 @@ func (c uploadClient) Upload(ctx context.Context, media schema.MediaUpload) (sch
 		_ = writer.WriteField("expires_after[seconds]", strconv.Itoa(c.config.ExpiresAfter))
 	}
 	if err := writer.Close(); err != nil {
-		return schema.Reference{}, err
+		return nil, "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.URL, &buf)
-	if err != nil {
-		return schema.Reference{}, err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	if c.config.Header != "" && c.config.Value != "" {
-		req.Header.Set(c.config.Header, c.config.Value)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return schema.Reference{}, err
-	}
-	defer resp.Body.Close()
+	return buf.Bytes(), writer.FormDataContentType(), nil
+}
+
+// decodeReference validates the response and reads the provider's file id.
+func (c uploadClient) decodeReference(resp *http.Response) (schema.Reference, error) {
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return schema.Reference{}, fmt.Errorf("media upload: %s: %s", resp.Status, strings.TrimSpace(string(body)))
@@ -91,13 +115,18 @@ func (c uploadClient) Upload(ctx context.Context, media schema.MediaUpload) (sch
 		return schema.Reference{}, fmt.Errorf("media upload: response has no %q", idField)
 	}
 	ref := schema.Reference{Source: "file", Value: id}
-	lifetime := c.config.ExpiresIn
-	if lifetime == 0 {
-		lifetime = c.config.ExpiresAfter
-	}
-	if lifetime > 0 {
+	if lifetime := c.referenceLifetime(); lifetime > 0 {
 		expires := time.Now().Add(time.Duration(lifetime) * time.Second)
 		ref.ExpiresAt = &expires
 	}
 	return ref, nil
+}
+
+// referenceLifetime is the local cache bound: ExpiresIn, or ExpiresAfter when
+// ExpiresIn is unset.
+func (c uploadClient) referenceLifetime() int {
+	if c.config.ExpiresIn != 0 {
+		return c.config.ExpiresIn
+	}
+	return c.config.ExpiresAfter
 }

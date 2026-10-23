@@ -60,7 +60,10 @@ func (r ProjectRequest) Validate() error {
 	if err := ValidateA2APeers(r.Peers); err != nil {
 		return fmt.Errorf("project %q: %w", r.Name, err)
 	}
-	return r.Isolation.Validate(r.Name, r.WorkingDirectory)
+	if err := r.Isolation.Validate(r.WorkingDirectory); err != nil {
+		return fmt.Errorf("project %q: %w", r.Name, err)
+	}
+	return nil
 }
 
 // ToServer maps a project request to the config.Server an instance serves. root

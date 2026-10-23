@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandbox"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandboxmode"
 )
 
 // Wrapper selects the sandbox implementation that wraps spawned commands.
@@ -52,103 +52,6 @@ func (p FailurePolicy) Valid() bool {
 // Enabled reports whether a wrapper and a non-off profile are configured.
 func (s *SandboxConfig) Enabled() bool {
 	return s != nil && s.Wrapper != "" && s.Wrapper != WrapperNone && s.Profile != "off"
-}
-
-// Policy resolves the effective sandbox policy for a working directory. A
-// disabled sandbox yields a policy with only the working directory set, so the
-// guards become no-ops.
-func (s *SandboxConfig) Policy(workingDir string) sandbox.Policy {
-	if !s.Enabled() {
-		return sandbox.Policy{WorkingDirectory: workingDir}
-	}
-	return s.SandboxPolicy.resolve(workingDir)
-}
-
-// Policy resolves the whole-process sandbox policy. A disabled wrap yields the
-// zero policy.
-func (w *WrapConfig) Policy() sandbox.Policy {
-	if w == nil || w.Wrapper == "" || w.Wrapper == WrapperNone || w.Profile == "off" {
-		return sandbox.Policy{}
-	}
-	return w.SandboxPolicy.resolve("")
-}
-
-// resolve builds a policy from a profile and the explicit overrides.
-func (p SandboxPolicy) resolve(workingDir string) sandbox.Policy {
-	if p.Profile == "off" {
-		return sandbox.Policy{WorkingDirectory: workingDir}
-	}
-	var policy sandbox.Policy
-	switch p.Profile {
-	case "", "standard":
-		policy = sandbox.StandardPolicy(workingDir)
-	case "custom":
-		// Start from no confinement; explicit fields opt in.
-		policy = sandbox.Policy{
-			WorkingDirectory: workingDir,
-			ReadMode:         sandbox.FSModeOff,
-			WriteMode:        sandbox.FSModeOff,
-			NetworkMode:      sandbox.NetworkOff,
-			SocketMode:       sandbox.SocketAllowAll,
-		}
-	}
-
-	if f := p.Filesystem; f != nil {
-		if f.Read != "" {
-			policy.ReadMode = f.Read
-		}
-		if f.Write != "" {
-			policy.WriteMode = f.Write
-		}
-		policy.DenyRead = append(policy.DenyRead, f.DenyRead...)
-		policy.AllowRead = append(policy.AllowRead, f.AllowRead...)
-		policy.DenyWrite = append(policy.DenyWrite, f.DenyWrite...)
-		policy.AllowWrite = append(policy.AllowWrite, f.AllowWrite...)
-	}
-	if n := p.Network; n != nil && n.Mode != "" {
-		policy.NetworkMode = n.Mode
-	}
-	if u := p.UnixSockets; u != nil {
-		switch u.Mode {
-		case sandbox.SocketDeny:
-			// Pre-rename alias: the real semantics are "follow the file policy".
-			policy.SocketMode = sandbox.SocketInherit
-		case "":
-		default:
-			policy.SocketMode = u.Mode
-		}
-		policy.SocketAllow = append(policy.SocketAllow, u.Allow...)
-	}
-	switch p.ProcessInspection {
-	case "deny":
-		policy.DenyProcessInfo = true
-	case "allow":
-		policy.DenyProcessInfo = false
-	}
-	if e := p.Env; e != nil {
-		switch e.Mode {
-		case sandbox.EnvScrub:
-			policy.ScrubEnv = append(sandbox.DefaultScrubEnv(), e.Scrub...)
-		case sandbox.EnvInherit:
-			policy.ScrubEnv = nil
-		}
-		if e.Mode == "" && len(e.Scrub) > 0 {
-			policy.ScrubEnv = append(policy.ScrubEnv, e.Scrub...)
-		}
-	}
-	// Violation reporting defaults to heuristic and appends a note to the tool
-	// output; both are explicitly overridable.
-	policy.ViolationMode = sandbox.ViolationHeuristic
-	policy.ReportToModel = true
-	if v := p.Violations; v != nil {
-		if v.Mode != "" {
-			policy.ViolationMode = v.Mode
-		}
-		if v.ReportToModel != nil {
-			policy.ReportToModel = *v.ReportToModel
-		}
-	}
-	return policy
 }
 
 // hasPolicyFields reports whether any policy field is set.
@@ -255,7 +158,7 @@ func validateSandboxFilesystem(f *SandboxFilesystem) error {
 // validateFileAccess checks one filesystem access mode.
 func validateFileAccess(field, mode string) error {
 	switch mode {
-	case "", sandbox.FSModeAllow, sandbox.FSModeOff:
+	case "", sandboxmode.FSModeAllow, sandboxmode.FSModeOff:
 		return nil
 	}
 	return fmt.Errorf("sandbox.filesystem.%s must be allow or off, got %q", field, mode)
@@ -269,7 +172,7 @@ func validateSandboxNetwork(n *SandboxNetwork) error {
 		return errors.New("sandbox.network.allowedDomains is not implemented; use no-egress or a host proxy")
 	}
 	switch n.Mode {
-	case "", sandbox.NetworkOff, sandbox.NetworkNoEgress:
+	case "", sandboxmode.NetworkOff, sandboxmode.NetworkNoEgress:
 		return nil
 	case "allowlist":
 		return errors.New("sandbox.network.mode allowlist is not implemented; use no-egress or a host proxy")
@@ -282,13 +185,13 @@ func validateSandboxUnixSockets(u *SandboxUnixSockets) error {
 	if u == nil {
 		return nil
 	}
-	if u.Mode != sandbox.SocketAllowlist && len(u.Allow) > 0 {
+	if u.Mode != sandboxmode.SocketAllowlist && len(u.Allow) > 0 {
 		return errors.New("sandbox.unixSockets.allow requires mode allowlist")
 	}
 	switch u.Mode {
-	case "", sandbox.SocketInherit, sandbox.SocketDeny, sandbox.SocketAllowAll:
+	case "", sandboxmode.SocketInherit, sandboxmode.SocketDeny, sandboxmode.SocketAllowAll:
 		return nil
-	case sandbox.SocketAllowlist:
+	case sandboxmode.SocketAllowlist:
 		if len(u.Allow) == 0 {
 			return errors.New("sandbox.unixSockets.mode allowlist requires at least one allow path")
 		}
@@ -311,7 +214,7 @@ func validateSandboxEnv(e *SandboxEnv) error {
 		return nil
 	}
 	switch e.Mode {
-	case "", sandbox.EnvScrub, sandbox.EnvInherit:
+	case "", sandboxmode.EnvScrub, sandboxmode.EnvInherit:
 		return nil
 	}
 	return fmt.Errorf("sandbox.env.mode must be scrub or inherit, got %q", e.Mode)
@@ -322,9 +225,9 @@ func validateSandboxViolations(v *SandboxViolations) error {
 		return nil
 	}
 	switch v.Mode {
-	case "", sandbox.ViolationHeuristic, sandbox.ViolationOff:
+	case "", sandboxmode.ViolationHeuristic, sandboxmode.ViolationOff:
 		return nil
-	case sandbox.ViolationPrecise:
+	case sandboxmode.ViolationPrecise:
 		if runtime.GOOS != "linux" {
 			return fmt.Errorf("sandbox.violations.mode precise is only supported on linux (this host is %s)", runtime.GOOS)
 		}
@@ -344,26 +247,48 @@ func validatePlatformSandbox(s *SandboxConfig) error {
 // validatePlatformSandboxFor is validatePlatformSandbox with an explicit OS, so
 // every platform's rules are testable on any host.
 func validatePlatformSandboxFor(goos string, s *SandboxConfig) error {
-	policy := s.Policy("")
+	if !s.Enabled() {
+		return nil
+	}
+	readMode, writeMode := s.SandboxPolicy.EffectiveAccess()
 	switch goos {
 	case "darwin":
 		// Seatbelt can express every supported combination: reads and writes may
 		// be independently off, and process introspection may be allowed.
 	case "windows":
-		if policy.ReadMode == sandbox.FSModeOff {
+		if readMode == sandboxmode.FSModeOff {
 			return errors.New("sandbox.filesystem.read: off is not supported on windows; use read: allow or wrapper: none")
 		}
-		if policy.WriteMode == sandbox.FSModeOff {
+		if writeMode == sandboxmode.FSModeOff {
 			return errors.New("sandbox.filesystem.write: off is not supported on windows; use write: allow or wrapper: none")
 		}
 		if s.ProcessInspection == "allow" {
 			return errors.New("sandbox.processInspection: allow is not supported on windows; the AppContainer cannot be relaxed")
 		}
 	case "linux":
-		if policy.WriteMode == sandbox.FSModeOff && policy.ReadMode == sandbox.FSModeAllow {
+		if writeMode == sandboxmode.FSModeOff && readMode == sandboxmode.FSModeAllow {
 			return errors.New("sandbox.filesystem.write: off with read: allow is contradictory on linux; " +
 				"set read: off or use wrapper: none")
 		}
 	}
 	return nil
+}
+
+// EffectiveAccess returns the profile's read/write modes after explicit overrides.
+func (p SandboxPolicy) EffectiveAccess() (readMode, writeMode string) {
+	switch p.Profile {
+	case "", "standard":
+		readMode, writeMode = sandboxmode.FSModeAllow, sandboxmode.FSModeAllow
+	case "custom":
+		readMode, writeMode = sandboxmode.FSModeOff, sandboxmode.FSModeOff
+	}
+	if p.Filesystem != nil {
+		if p.Filesystem.Read != "" {
+			readMode = p.Filesystem.Read
+		}
+		if p.Filesystem.Write != "" {
+			writeMode = p.Filesystem.Write
+		}
+	}
+	return readMode, writeMode
 }

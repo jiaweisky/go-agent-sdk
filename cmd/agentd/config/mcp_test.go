@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestValidateMCP(t *testing.T) {
 	cases := []struct {
@@ -30,5 +33,17 @@ func TestValidateMCPRejectsNegativeTimeout(t *testing.T) {
 	err := ValidateMCP([]MCPServer{{Name: "a", Type: MCPLocal, Command: []string{"srv"}, Timeout: "-1s"}})
 	if err == nil {
 		t.Fatal("a negative timeout must be rejected")
+	}
+}
+func TestMCPTimeouts(t *testing.T) {
+	timeouts, err := MCPTimeouts([]MCPServer{
+		{Name: "a", Type: MCPLocal, Command: []string{"srv"}, Timeout: "5s"},
+		{Name: "b", Type: MCPRemote, URL: "https://mcp.example"},
+	})
+	if err != nil {
+		t.Fatalf("MCPTimeouts: %v", err)
+	}
+	if len(timeouts) != 2 || timeouts[0] != 5*time.Second || timeouts[1] != 0 {
+		t.Fatalf("timeouts = %v", timeouts)
 	}
 }

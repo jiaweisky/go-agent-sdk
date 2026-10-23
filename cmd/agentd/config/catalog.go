@@ -3,7 +3,8 @@ package config
 import (
 	"fmt"
 
-	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/protocols"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
@@ -45,27 +46,27 @@ type ModelConfig struct {
 	OutputLimit  int `yaml:"outputLimit"`
 }
 
-// providerID returns the credential key: ProviderID, or the Protocol.
-func (m ModelConfig) providerID() schema.ProviderID {
+// ProviderKey returns the credential key: ProviderID, or the Protocol.
+func (m ModelConfig) ProviderKey() schema.ProviderID {
 	if m.ProviderID != "" {
 		return schema.ProviderID(m.ProviderID)
 	}
 	return schema.ProviderID(m.Protocol)
 }
 
-// inputs returns the declared input modalities (Media.Input wins over the
-// InputModalities shorthand).
-func (m ModelConfig) inputs() []string {
+// EffectiveInputs returns the declared input modalities (Media.Input wins over
+// the InputModalities shorthand).
+func (m ModelConfig) EffectiveInputs() []string {
 	if m.Media != nil && len(m.Media.Input) > 0 {
 		return m.Media.Input
 	}
 	return m.InputModalities
 }
 
-// baseURL returns the model's endpoint: an explicit ModelBaseURL, a
+// Endpoint returns the model's endpoint: an explicit ModelBaseURL, a
 // region-derived Amazon Bedrock endpoint when only AWS credentials are set, or
 // "" to use the protocol's default endpoint.
-func (m ModelConfig) baseURL() string {
+func (m ModelConfig) Endpoint() string {
 	if m.ModelBaseURL != "" {
 		return m.ModelBaseURL
 	}
@@ -87,12 +88,15 @@ func (m ModelConfig) Validate() error {
 	if m.Protocol == "" {
 		return fmt.Errorf("model %q requires a protocol", m.ID)
 	}
+	if _, ok := protocols.LookupProtocol(llmschema.ProtocolID(m.Protocol)); !ok {
+		return fmt.Errorf("model %q: unknown protocol %q", m.ID, m.Protocol)
+	}
 	if aws := m.Credentials.AWS; aws != nil {
 		if aws.Region == "" || aws.AccessKeyID == "" || aws.SecretAccessKey == "" {
 			return fmt.Errorf("model %q: aws credentials require region, accessKeyId and secretAccessKey", m.ID)
 		}
 	}
-	if err := ValidateInputModalities(m.inputs()); err != nil {
+	if err := ValidateInputModalities(m.EffectiveInputs()); err != nil {
 		return err
 	}
 	if m.Media != nil {
@@ -127,7 +131,7 @@ func NewCatalog(defaultEntry ModelConfig, models []ModelConfig) (Catalog, error)
 		}
 		catalog.entries[entry.ID] = entry
 		catalog.order = append(catalog.order, entry.ID)
-		catalog.recordCredential(entry.providerID(), toSchemaCredential(entry.Credentials))
+		catalog.recordCredential(entry.ProviderKey(), toSchemaCredential(entry.Credentials))
 	}
 	if len(catalog.order) == 0 {
 		return Catalog{}, fmt.Errorf("catalog requires at least one model")
@@ -151,37 +155,16 @@ func (c Catalog) DefaultID() string { return c.defaultID }
 // IDs returns the catalog's model ids in registration order.
 func (c Catalog) IDs() []string { return append([]string(nil), c.order...) }
 
-// ModelInfo resolves a model id to SDK metadata, applying the entry's provider
-// id, endpoint, token limits, modalities and media sources. An unknown id falls
-// back to the default entry.
-func (c Catalog) ModelInfo(id string) (schema.ModelInfo, error) {
+// Entry returns a model entry and whether the id exists.
+func (c Catalog) Entry(id string) (ModelConfig, bool) {
 	entry, ok := c.entries[id]
-	if !ok {
-		entry = c.entries[c.defaultID]
-	}
-	info, err := agent.NewModelInfo(
-		schema.ProtocolID(entry.Protocol),
-		entry.Model,
-		entry.baseURL(),
-		schema.ModelLimit{Context: entry.ContextLimit, Output: entry.OutputLimit},
-	)
-	if err != nil {
-		return schema.ModelInfo{}, err
-	}
-	// ID is the catalog/agent-facing id; the wire model name lives in API.ID
-	// (set by NewModelInfo from the entry's model).
-	info.ID = schema.ModelID(entry.ID)
-	info.ProviderID = entry.providerID()
-	if inputs := entry.inputs(); len(inputs) > 0 {
-		info.Capabilities.Input = inputs
-	}
-	if entry.Media != nil && len(entry.Media.Forms) > 0 {
-		info.Capabilities.Media = &schema.ModelMediaCapability{Forms: entry.Media.Forms}
-	}
-	for name, value := range entry.Headers {
-		info.Request.Headers[name] = value
-	}
-	return info, nil
+	return entry, ok
+}
+
+// DefaultEntry returns the catalog's default model entry.
+func (c Catalog) DefaultEntry() (ModelConfig, bool) {
+	entry, ok := c.entries[c.defaultID]
+	return entry, ok
 }
 
 // Credentials returns the credential for a provider id.
@@ -233,18 +216,4 @@ func (c Catalog) Subset(ids []string, defaultID string) (Catalog, error) {
 // credentialEmpty reports whether a credential carries no secret.
 func credentialEmpty(credential schema.Credential) bool {
 	return credential.APIKey == "" && credential.AWS == nil
-}
-
-// ModelInfos resolves every catalog model's metadata for the discovery APIs.
-func ModelInfos(catalog Catalog) ([]schema.ModelInfo, error) {
-	ids := catalog.IDs()
-	infos := make([]schema.ModelInfo, 0, len(ids))
-	for _, id := range ids {
-		info, err := catalog.ModelInfo(id)
-		if err != nil {
-			return nil, err
-		}
-		infos = append(infos, info)
-	}
-	return infos, nil
 }

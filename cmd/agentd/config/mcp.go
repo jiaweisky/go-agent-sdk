@@ -34,8 +34,8 @@ type MCPServer struct {
 	Timeout     string            `yaml:"timeout"`
 }
 
-// parseOptionalDuration parses a duration string; an empty string means zero.
-func parseOptionalDuration(raw string) (time.Duration, error) {
+// ParseOptionalDuration parses a duration string; an empty string means zero.
+func ParseOptionalDuration(raw string) (time.Duration, error) {
 	if raw == "" {
 		return 0, nil
 	}
@@ -51,22 +51,35 @@ func parseOptionalDuration(raw string) (time.Duration, error) {
 
 // ValidateMCP checks that every MCP server entry is well formed.
 func ValidateMCP(servers []MCPServer) error {
-	for _, server := range servers {
+	_, err := MCPTimeouts(servers)
+	return err
+}
+
+// MCPTimeouts validates the servers and returns each parsed timeout (zero when
+// unset), so a caller converting them does not parse the same value twice.
+func MCPTimeouts(servers []MCPServer) ([]time.Duration, error) {
+	if len(servers) == 0 {
+		return nil, nil
+	}
+	timeouts := make([]time.Duration, len(servers))
+	for i, server := range servers {
 		switch {
 		case server.Name == "":
-			return errors.New("mcp: each server requires a name")
+			return nil, errors.New("mcp: each server requires a name")
 		case server.Type == "":
-			return fmt.Errorf("mcp %s: type is required (local or remote)", server.Name)
+			return nil, fmt.Errorf("mcp %s: type is required (local or remote)", server.Name)
 		case !server.Type.Valid():
-			return fmt.Errorf("mcp %s: type must be local or remote, got %q", server.Name, server.Type)
+			return nil, fmt.Errorf("mcp %s: type must be local or remote, got %q", server.Name, server.Type)
 		case server.Type == MCPLocal && len(server.Command) == 0:
-			return fmt.Errorf("mcp %s: local requires command", server.Name)
+			return nil, fmt.Errorf("mcp %s: local requires command", server.Name)
 		case server.Type == MCPRemote && server.URL == "":
-			return fmt.Errorf("mcp %s: remote requires url", server.Name)
+			return nil, fmt.Errorf("mcp %s: remote requires url", server.Name)
 		}
-		if _, err := parseOptionalDuration(server.Timeout); err != nil {
-			return fmt.Errorf("mcp %s: timeout: %w", server.Name, err)
+		timeout, err := ParseOptionalDuration(server.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("mcp %s: timeout: %w", server.Name, err)
 		}
+		timeouts[i] = timeout
 	}
-	return nil
+	return timeouts, nil
 }

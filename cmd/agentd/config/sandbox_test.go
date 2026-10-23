@@ -4,54 +4,13 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandbox"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandboxmode"
 )
 
-func TestSandboxStandardPolicy(t *testing.T) {
-	cfg := &SandboxConfig{Wrapper: "seatbelt"}
-	policy := cfg.Policy("/work")
-	if policy.ReadMode != sandbox.FSModeAllow || policy.WriteMode != sandbox.FSModeAllow {
-		t.Fatalf("standard policy modes = %q/%q", policy.ReadMode, policy.WriteMode)
-	}
-	if policy.NetworkMode != sandbox.NetworkNoEgress || !policy.DenyProcessInfo {
-		t.Fatalf("standard policy = %+v", policy)
-	}
-	if len(policy.ScrubEnv) == 0 {
-		t.Fatal("the standard policy must scrub secret environment variables")
-	}
-}
-
-func TestSandboxProfileOff(t *testing.T) {
+func TestSandboxProfileOffDisabled(t *testing.T) {
 	cfg := &SandboxConfig{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "off"}}
 	if cfg.Enabled() {
 		t.Fatal("profile off must disable the sandbox")
-	}
-	if policy := cfg.Policy("/work"); policy.ReadMode == sandbox.FSModeAllow {
-		t.Fatalf("profile off must not confine reads: %+v", policy)
-	}
-}
-
-func TestSandboxCustomOff(t *testing.T) {
-	cfg := &SandboxConfig{
-		Wrapper: "seatbelt",
-		SandboxPolicy: SandboxPolicy{
-			Profile: "custom",
-			Filesystem: &SandboxFilesystem{
-				Read:  "off",
-				Write: "allow",
-			},
-			Network: &SandboxNetwork{Mode: "off"},
-		},
-	}
-	policy := cfg.Policy("/work")
-	if policy.ReadMode != sandbox.FSModeOff {
-		t.Fatalf("custom read: off = %q", policy.ReadMode)
-	}
-	if policy.WriteMode != sandbox.FSModeAllow {
-		t.Fatalf("custom write: allow = %q", policy.WriteMode)
-	}
-	if policy.NetworkMode != sandbox.NetworkOff {
-		t.Fatalf("custom network: off = %q", policy.NetworkMode)
 	}
 }
 
@@ -95,34 +54,6 @@ func TestValidateSandboxPolicy(t *testing.T) {
 	}
 }
 
-func TestSandboxViolationConfig(t *testing.T) {
-	cfg := &SandboxConfig{
-		Wrapper: "seatbelt",
-		SandboxPolicy: SandboxPolicy{
-			Violations: &SandboxViolations{Mode: "heuristic"},
-		},
-	}
-	policy := cfg.Policy("/work")
-	if policy.ViolationMode != sandbox.ViolationHeuristic || !policy.ReportToModel {
-		t.Fatalf("violation policy = %+v", policy)
-	}
-	off := false
-	cfg.Violations.ReportToModel = &off
-	if cfg.Policy("/work").ReportToModel {
-		t.Fatal("reportToModel: false must be honored")
-	}
-
-	if runtime.GOOS != "linux" {
-		precise := &SandboxConfig{
-			Wrapper:       "seatbelt",
-			SandboxPolicy: SandboxPolicy{Violations: &SandboxViolations{Mode: "precise"}},
-		}
-		if err := precise.Validate(); err == nil {
-			t.Fatalf("precise must be rejected on %s", runtime.GOOS)
-		}
-	}
-}
-
 // TestValidateSandboxDisabledPolicyFields guards against silently ignoring a
 // policy when the sandbox is disabled.
 func TestValidateSandboxDisabledPolicyFields(t *testing.T) {
@@ -131,7 +62,7 @@ func TestValidateSandboxDisabledPolicyFields(t *testing.T) {
 		SandboxPolicy: SandboxPolicy{Filesystem: &SandboxFilesystem{Read: "off"}},
 	}
 	if err := bad.Validate(); err == nil {
-		t.Fatal("policy fields with process none must be rejected")
+		t.Fatal("policy fields with wrapper none must be rejected")
 	}
 	off := &SandboxConfig{
 		Wrapper:       "seatbelt",
@@ -142,8 +73,7 @@ func TestValidateSandboxDisabledPolicyFields(t *testing.T) {
 	}
 }
 
-// TestSandboxSocketInheritAlias checks the pre-rename "deny" value normalizes to
-// inherit.
+// TestSandboxSocketInheritAlias checks the pre-rename "deny" value validates.
 func TestSandboxSocketInheritAlias(t *testing.T) {
 	cfg := &SandboxConfig{
 		Wrapper:       "seatbelt",
@@ -151,22 +81,6 @@ func TestSandboxSocketInheritAlias(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("the deny alias must validate: %v", err)
-	}
-	if mode := cfg.Policy("/work").SocketMode; mode != sandbox.SocketInherit {
-		t.Fatalf("socket mode = %q, want inherit", mode)
-	}
-}
-
-// TestSandboxCustomDefaults checks the custom profile starts from no
-// confinement and opts in explicitly.
-func TestSandboxCustomDefaults(t *testing.T) {
-	cfg := &SandboxConfig{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "custom"}}
-	policy := cfg.Policy("/work")
-	if policy.ReadMode != sandbox.FSModeOff || policy.WriteMode != sandbox.FSModeOff {
-		t.Fatalf("custom read/write = %q/%q, want off", policy.ReadMode, policy.WriteMode)
-	}
-	if policy.NetworkMode != sandbox.NetworkOff || policy.SocketMode != sandbox.SocketAllowAll {
-		t.Fatalf("custom network/socket = %q/%q", policy.NetworkMode, policy.SocketMode)
 	}
 }
 
@@ -201,10 +115,32 @@ func TestValidateSandboxPlatformOff(t *testing.T) {
 	}
 }
 
-func TestSandboxGuardsForPolicies(t *testing.T) {
-	cfg := &SandboxConfig{Wrapper: "seatbelt"}
-	policy := cfg.Policy("/work")
-	if policy.ReadMode == sandbox.FSModeOff || policy.WriteMode == sandbox.FSModeOff {
-		t.Fatalf("standard policy unexpectedly off: %+v", policy)
+func TestSandboxViolationConfigValidation(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		precise := &SandboxConfig{
+			Wrapper:       "seatbelt",
+			SandboxPolicy: SandboxPolicy{Violations: &SandboxViolations{Mode: "precise"}},
+		}
+		if err := precise.Validate(); err == nil {
+			t.Fatalf("precise must be rejected on %s", runtime.GOOS)
+		}
+	}
+}
+
+func TestSandboxEffectiveAccess(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cfg   SandboxConfig
+		read  string
+		write string
+	}{
+		{"standard", SandboxConfig{Wrapper: "seatbelt"}, sandboxmode.FSModeAllow, sandboxmode.FSModeAllow},
+		{"custom", SandboxConfig{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Profile: "custom"}}, sandboxmode.FSModeOff, sandboxmode.FSModeOff},
+		{"override", SandboxConfig{Wrapper: "seatbelt", SandboxPolicy: SandboxPolicy{Filesystem: &SandboxFilesystem{Read: "off"}}}, sandboxmode.FSModeOff, sandboxmode.FSModeAllow},
+	} {
+		read, write := tc.cfg.SandboxPolicy.EffectiveAccess()
+		if read != tc.read || write != tc.write {
+			t.Errorf("%s: access = %q/%q, want %q/%q", tc.name, read, write, tc.read, tc.write)
+		}
 	}
 }

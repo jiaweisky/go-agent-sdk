@@ -1,21 +1,26 @@
-package config
+package config_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/modelinfo"
+)
 
 func TestCatalogResolvesPerModel(t *testing.T) {
-	def := ModelConfig{
+	def := config.ModelConfig{
 		ID: "deepseek-flash", Model: "deepseek-flash", Protocol: "openai-compatible-chat",
 		ModelBaseURL: "https://api.deepseek.com", ProviderID: "deepseek",
-		Media:        &MediaConfig{Input: []string{"text", "image"}, Forms: map[string][]string{"image": {"inline", "url", "file"}}},
-		Credentials:  Credentials{APIKey: "ds"},
+		Media:        &config.MediaConfig{Input: []string{"text", "image"}, Forms: map[string][]string{"image": {"inline", "url", "file"}}},
+		Credentials:  config.Credentials{APIKey: "ds"},
 		ContextLimit: 1000, OutputLimit: 100,
 	}
-	models := []ModelConfig{{
+	models := []config.ModelConfig{{
 		ID: "gemini-2.5-flash", Model: "gemini-2.5-flash", Protocol: "gemini", ProviderID: "google",
-		Media:       &MediaConfig{Input: []string{"text", "image", "audio", "video"}, Forms: map[string][]string{"image": {"inline", "file"}, "audio": {"inline", "file"}, "video": {"inline", "file"}}},
-		Credentials: Credentials{APIKey: "goog"},
+		Media:       &config.MediaConfig{Input: []string{"text", "image", "audio", "video"}, Forms: map[string][]string{"image": {"inline", "file"}, "audio": {"inline", "file"}, "video": {"inline", "file"}}},
+		Credentials: config.Credentials{APIKey: "goog"},
 	}}
-	catalog, err := NewCatalog(def, models)
+	catalog, err := config.NewCatalog(def, models)
 	if err != nil {
 		t.Fatalf("NewCatalog: %v", err)
 	}
@@ -23,9 +28,9 @@ func TestCatalogResolvesPerModel(t *testing.T) {
 		t.Fatalf("defaultID = %q", catalog.DefaultID())
 	}
 
-	info, err := catalog.ModelInfo("gemini-2.5-flash")
+	info, err := modelinfo.Resolve(catalog, "gemini-2.5-flash")
 	if err != nil {
-		t.Fatalf("ModelInfo: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
 	if info.ProviderID != "google" {
 		t.Fatalf("providerID = %q, want google", info.ProviderID)
@@ -45,9 +50,9 @@ func TestCatalogResolvesPerModel(t *testing.T) {
 	}
 
 	// An unknown id falls back to the default entry.
-	unknown, err := catalog.ModelInfo("something-else")
+	unknown, err := modelinfo.Resolve(catalog, "something-else")
 	if err != nil {
-		t.Fatalf("unknown ModelInfo: %v", err)
+		t.Fatalf("unknown Resolve: %v", err)
 	}
 	if unknown.ProviderID != "deepseek" || unknown.Limit.Context != 1000 {
 		t.Fatalf("unknown = %+v", unknown)
@@ -64,15 +69,15 @@ func TestCatalogResolvesPerModel(t *testing.T) {
 func TestCatalogSeparatesIDFromWireModel(t *testing.T) {
 	// Two catalog entries can share one wire model name (e.g. the same model
 	// over different protocols); the catalog ids must stay distinct.
-	chat := ModelConfig{ID: "deepseek-flash", Model: "deepseek-flash", Protocol: "openai-compatible-chat", Credentials: Credentials{APIKey: "k"}}
-	anthropic := ModelConfig{ID: "deepseek-flash-anthropic", Model: "deepseek-flash", Protocol: "anthropic-messages", Credentials: Credentials{APIKey: "k"}}
-	catalog, err := NewCatalog(chat, []ModelConfig{anthropic})
+	chat := config.ModelConfig{ID: "deepseek-flash", Model: "deepseek-flash", Protocol: "openai-compatible-chat", Credentials: config.Credentials{APIKey: "k"}}
+	anthropic := config.ModelConfig{ID: "deepseek-flash-anthropic", Model: "deepseek-flash", Protocol: "anthropic-messages", Credentials: config.Credentials{APIKey: "k"}}
+	catalog, err := config.NewCatalog(chat, []config.ModelConfig{anthropic})
 	if err != nil {
 		t.Fatalf("NewCatalog: %v", err)
 	}
-	info, err := catalog.ModelInfo("deepseek-flash-anthropic")
+	info, err := modelinfo.Resolve(catalog, "deepseek-flash-anthropic")
 	if err != nil {
-		t.Fatalf("ModelInfo: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
 	if info.ID != "deepseek-flash-anthropic" {
 		t.Fatalf("id = %q, want the catalog id", info.ID)
@@ -83,15 +88,15 @@ func TestCatalogSeparatesIDFromWireModel(t *testing.T) {
 }
 
 func TestCatalogProviderIDDefaultsToProtocol(t *testing.T) {
-	catalog, err := NewCatalog(ModelConfig{
-		ID: "m", Model: "m", Protocol: "gemini", Credentials: Credentials{APIKey: "k"},
+	catalog, err := config.NewCatalog(config.ModelConfig{
+		ID: "m", Model: "m", Protocol: "gemini", Credentials: config.Credentials{APIKey: "k"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewCatalog: %v", err)
 	}
-	info, err := catalog.ModelInfo("m")
+	info, err := modelinfo.Resolve(catalog, "m")
 	if err != nil {
-		t.Fatalf("ModelInfo: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
 	if info.ProviderID != "gemini" {
 		t.Fatalf("providerID = %q, want gemini", info.ProviderID)
@@ -99,50 +104,54 @@ func TestCatalogProviderIDDefaultsToProtocol(t *testing.T) {
 }
 
 func TestNewCatalogErrors(t *testing.T) {
-	if _, err := NewCatalog(ModelConfig{Protocol: "x"}, nil); err == nil {
+	if _, err := config.NewCatalog(config.ModelConfig{Protocol: "gemini"}, nil); err == nil {
 		t.Fatal("expected a missing-id error")
 	}
-	if _, err := NewCatalog(ModelConfig{ID: "a", Protocol: "x"}, nil); err == nil {
+	if _, err := config.NewCatalog(config.ModelConfig{ID: "a", Protocol: "gemini"}, nil); err == nil {
 		t.Fatal("expected a missing-model error")
 	}
-	if _, err := NewCatalog(ModelConfig{ID: "a", Model: "a", Protocol: "x"}, []ModelConfig{{ID: "a", Model: "a", Protocol: "y"}}); err == nil {
+	if _, err := config.NewCatalog(config.ModelConfig{ID: "a", Model: "a", Protocol: "gemini"}, []config.ModelConfig{{ID: "a", Model: "a", Protocol: "gemini"}}); err == nil {
 		t.Fatal("expected a duplicate-id error")
 	}
 }
 
 func TestModelConfigValidate(t *testing.T) {
-	ok := ModelConfig{ID: "m", Model: "m", Protocol: "gemini", Media: &MediaConfig{Forms: map[string][]string{"image": {"inline", "url"}}}}
+	ok := config.ModelConfig{ID: "m", Model: "m", Protocol: "gemini", Media: &config.MediaConfig{Forms: map[string][]string{"image": {"inline", "url"}}}}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("valid: %v", err)
 	}
-	missingModel := ModelConfig{ID: "m", Protocol: "gemini"}
+	missingModel := config.ModelConfig{ID: "m", Protocol: "gemini"}
 	if err := missingModel.Validate(); err == nil {
 		t.Fatal("expected a missing-model error")
 	}
-	badSource := ModelConfig{ID: "m", Model: "m", Protocol: "gemini", Media: &MediaConfig{Forms: map[string][]string{"image": {"carrier-pigeon"}}}}
+	badSource := config.ModelConfig{ID: "m", Model: "m", Protocol: "gemini", Media: &config.MediaConfig{Forms: map[string][]string{"image": {"carrier-pigeon"}}}}
 	if err := badSource.Validate(); err == nil {
 		t.Fatal("expected an unknown-source error")
 	}
-	badModality := ModelConfig{ID: "m", Model: "m", Protocol: "gemini", InputModalities: []string{"hologram"}}
+	badModality := config.ModelConfig{ID: "m", Model: "m", Protocol: "gemini", InputModalities: []string{"hologram"}}
 	if err := badModality.Validate(); err == nil {
 		t.Fatal("expected an unknown-modality error")
+	}
+	badProtocol := config.ModelConfig{ID: "m", Model: "m", Protocol: "nope"}
+	if err := badProtocol.Validate(); err == nil {
+		t.Fatal("expected an unknown-protocol error")
 	}
 }
 
 // TestModelInfoCarriesHeaders: a model's extra request headers reach the
 // resolved ModelInfo (e.g. the anthropic-beta header for Files API references).
 func TestModelInfoCarriesHeaders(t *testing.T) {
-	entry := ModelConfig{
+	entry := config.ModelConfig{
 		ID: "claude", Model: "claude-3", Protocol: "anthropic-messages",
 		Headers: map[string]string{"anthropic-beta": "files-api-2025-04-14"},
 	}
-	catalog, err := NewCatalog(entry, nil)
+	catalog, err := config.NewCatalog(entry, nil)
 	if err != nil {
 		t.Fatalf("NewCatalog: %v", err)
 	}
-	info, err := catalog.ModelInfo("claude")
+	info, err := modelinfo.Resolve(catalog, "claude")
 	if err != nil {
-		t.Fatalf("ModelInfo: %v", err)
+		t.Fatalf("Resolve: %v", err)
 	}
 	if got := info.Request.Headers["anthropic-beta"]; got != "files-api-2025-04-14" {
 		t.Fatalf("headers = %v", info.Request.Headers)

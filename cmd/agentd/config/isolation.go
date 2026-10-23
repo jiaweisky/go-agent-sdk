@@ -2,9 +2,9 @@ package config
 
 import "fmt"
 
-// Validate checks a per-server isolation configuration against the server name
-// and working directory. Nil is valid (shares the working directory).
-func (i *IsolationConfig) Validate(name, workingDirectory string) error {
+// Validate checks a per-server isolation configuration against its working
+// directory. Nil is valid (shares the working directory).
+func (i *IsolationConfig) Validate(workingDirectory string) error {
 	if i == nil {
 		return nil
 	}
@@ -13,36 +13,36 @@ func (i *IsolationConfig) Validate(name, workingDirectory string) error {
 		return nil
 	case IsolationCopy, IsolationWorktree:
 		if i.BaseDir == "" {
-			return fmt.Errorf("server %q: isolation.baseDir is required for mode %s", name, i.Mode)
+			return fmt.Errorf("isolation.baseDir is required for mode %s", i.Mode)
 		}
 	case IsolationOverlay:
-		if err := i.validateOverlay(name); err != nil {
+		if err := i.validateOverlay(); err != nil {
 			return err
 		}
 	case IsolationContainer, IsolationRemote:
 		return fmt.Errorf(
-			"server %q: isolation.mode %s is external; "+
+			"isolation.mode %s is external; "+
 				"such an instance runs its own agentd and is provisioned by the host",
-			name, i.Mode)
+			i.Mode)
 	default:
-		return fmt.Errorf("server %q: isolation.mode must be none, copy, worktree or overlay, got %q", name, i.Mode)
+		return fmt.Errorf("isolation.mode must be none, copy, worktree or overlay, got %q", i.Mode)
 	}
 	if workingDirectory == "" {
-		return fmt.Errorf("server %q: isolation mode %s requires workingDirectory", name, i.Mode)
+		return fmt.Errorf("isolation mode %s requires workingDirectory", i.Mode)
 	}
 	return nil
 }
 
 // validateOverlay checks the fields overlay mode requires.
-func (i *IsolationConfig) validateOverlay(name string) error {
+func (i *IsolationConfig) validateOverlay() error {
 	if i.BaseDir == "" {
-		return fmt.Errorf("server %q: isolation.baseDir is required for mode %s", name, IsolationOverlay)
+		return fmt.Errorf("isolation.baseDir is required for mode %s", IsolationOverlay)
 	}
 	if !i.BaseReadOnly {
-		return fmt.Errorf("server %q: isolation.baseReadOnly is required for mode %s", name, IsolationOverlay)
+		return fmt.Errorf("isolation.baseReadOnly is required for mode %s", IsolationOverlay)
 	}
 	if i.Cow != nil && !i.Cow.Mode.Valid() {
-		return fmt.Errorf("server %q: isolation.cow.mode must be auto, reflink or clonefile, got %q", name, i.Cow.Mode)
+		return fmt.Errorf("isolation.cow.mode must be auto, reflink or clonefile, got %q", i.Cow.Mode)
 	}
 	return nil
 }

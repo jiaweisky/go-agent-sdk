@@ -10,58 +10,55 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandboxmode"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 
 // Filesystem modes.
 const (
 	// FSModeAllow confines access to an allow-list (the secure default).
-	FSModeAllow = "allow"
+	FSModeAllow = sandboxmode.FSModeAllow
 	// FSModeOff disables confinement for that dimension.
-	FSModeOff = "off"
+	FSModeOff = sandboxmode.FSModeOff
 )
 
-// Network modes. A domain allow-list needs a proxy and is not implemented by
-// the native sandbox; other values are rejected by configuration validation.
+// Network modes.
 const (
 	// NetworkOff disables network access for sandboxed commands.
-	NetworkOff = "off"
+	NetworkOff = sandboxmode.NetworkOff
 	// NetworkNoEgress allows local traffic but blocks outbound connections.
-	NetworkNoEgress = "no-egress"
+	NetworkNoEgress = sandboxmode.NetworkNoEgress
 )
 
-// UNIX-socket modes. A socket is a filesystem object, so the sandbox enforces
-// these through the file policy rather than a socket-specific filter.
+// UNIX-socket modes.
 const (
-	// SocketInherit follows the filesystem policy: only sockets inside a
-	// readable/writable root are reachable.
-	SocketInherit = "inherit"
+	// SocketInherit follows the filesystem policy.
+	SocketInherit = sandboxmode.SocketInherit
 	// SocketAllowAll disables the socket restriction.
-	SocketAllowAll = "allowAll"
+	SocketAllowAll = sandboxmode.SocketAllowAll
 	// SocketAllowlist explicitly allows the listed socket paths.
-	SocketAllowlist = "allowlist"
-	// SocketDeny is the pre-rename name for SocketInherit. The config layer
-	// accepts it as an alias and normalizes it.
-	SocketDeny = "deny"
+	SocketAllowlist = sandboxmode.SocketAllowlist
+	// SocketDeny is the pre-rename name for SocketInherit.
+	SocketDeny = sandboxmode.SocketDeny
 )
 
 // Environment modes.
 const (
 	// EnvScrub removes the configured environment-name globs before a command
 	// starts.
-	EnvScrub = "scrub"
+	EnvScrub = sandboxmode.EnvScrub
 	// EnvInherit passes the environment through unchanged.
-	EnvInherit = "inherit"
+	EnvInherit = sandboxmode.EnvInherit
 )
 
 // Violation-reporting modes.
 const (
 	// ViolationHeuristic scans a command's stderr for OS denial messages.
-	ViolationHeuristic = "heuristic"
+	ViolationHeuristic = sandboxmode.ViolationHeuristic
 	// ViolationPrecise parses syscall-level denials (Linux, via strace).
-	ViolationPrecise = "precise"
+	ViolationPrecise = sandboxmode.ViolationPrecise
 	// ViolationOff disables command-side reporting.
-	ViolationOff = "off"
+	ViolationOff = sandboxmode.ViolationOff
 )
 
 // Policy is a resolved sandbox policy shared by the per-command wrapper, the

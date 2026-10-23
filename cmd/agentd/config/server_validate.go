@@ -110,8 +110,8 @@ func validateServerPolicy(s Server) error {
 	if !s.Questions.Valid() {
 		return fmt.Errorf("server %q: questions must be park or decline, got %q", s.Name, s.Questions)
 	}
-	if err := s.Isolation.Validate(s.Name, s.WorkingDirectory); err != nil {
-		return err
+	if err := s.Isolation.Validate(s.WorkingDirectory); err != nil {
+		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
 	return nil
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/isolation"
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/media"
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandbox"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandboxpolicy"
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/storage"
 	a2aserver "github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
 	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
@@ -112,63 +113,89 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 	baseDirs := isolationBaseDirs(cfg.Servers)
 	var built []*builtServer
 	for _, s := range cfg.Servers {
-		serverCatalog, err := global.Subset(s.Models, s.DefaultModel)
+		runtime, err := buildRuntime(ctx, s, global, baseDirs, runner)
+		if runtime.teardown != nil {
+			teardowns = append(teardowns, runtime.teardown)
+		}
 		if err != nil {
-			return fmt.Errorf("server %q: %w", s.Name, err)
+			return err
 		}
-		project, err := runner.Prepare(ctx, projectSpec(s), isolationSpec(s))
-		if err != nil {
-			return fmt.Errorf("server %q: %w", s.Name, err)
-		}
-		if project.Teardown != nil {
-			teardowns = append(teardowns, project.Teardown)
-		}
-		s.WorkingDirectory = project.View
-		uploader, err := mediaUploader(s)
-		if err != nil {
-			return fmt.Errorf("server %q: %w", s.Name, err)
-		}
-		client, err := buildClient(s, serverCatalog, uploader, isolationExcludes(s.WorkingDirectory, baseDirs))
-		if err != nil {
-			return fmt.Errorf("server %q: %w", s.Name, err)
-		}
-		clients = append(clients, client)
-		b, err := buildServer(ctx, s, client, serverCatalog, uploader)
-		if err != nil {
-			return fmt.Errorf("server %q: %w", s.Name, err)
-		}
-		built = append(built, b)
+		clients = append(clients, runtime.client)
+		built = append(built, runtime.server)
 	}
 
-	byListen, order := groupByListen(built)
-
-	// Bind every listener up front so a port conflict fails startup
-	// synchronously (before serving) and the "listening" log reflects the real
-	// address. Close them if a later bind fails.
-	var targets []serveTarget
-	defer func() {
-		for _, target := range targets {
-			_ = target.ln.Close()
+	targets, err := bindServeTargets(built, introspect)
+	if err != nil {
+		return err
+	}
+	defer func() { closeServeTargets(targets) }()
+	if cfg.Control != nil {
+		target, closeManager, err := bindControlTarget(ctx, global, cfg.Control)
+		if err != nil {
+			return err
 		}
-	}()
+		defer closeManager()
+		targets = append(targets, target)
+	}
+	return serveAll(ctx, targets)
+}
+
+// builtRuntime is one fully prepared server and the resources it owns.
+type builtRuntime struct {
+	client   *agent.Client
+	server   *builtServer
+	teardown func(context.Context) error
+}
+
+// buildRuntime prepares one server's view, client and transport handler. On
+// failure it closes anything it already created and still returns the project
+// teardown so the caller can release the view.
+func buildRuntime(
+	ctx context.Context, s config.Server, catalog config.Catalog,
+	baseDirs []string, runner isolation.Runner,
+) (builtRuntime, error) {
+	serverCatalog, err := catalog.Subset(s.Models, s.DefaultModel)
+	if err != nil {
+		return builtRuntime{}, fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	project, err := runner.Prepare(ctx, projectSpec(s), isolationSpec(s))
+	if err != nil {
+		return builtRuntime{}, fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	runtime := builtRuntime{teardown: project.Teardown}
+	s.WorkingDirectory = project.View
+	uploader, err := mediaUploader(s)
+	if err != nil {
+		return runtime, fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	client, err := buildClient(s, serverCatalog, uploader, isolationExcludes(s.WorkingDirectory, baseDirs))
+	if err != nil {
+		return runtime, fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	server, err := buildServer(ctx, s, client, serverCatalog, uploader)
+	if err != nil {
+		_ = client.Close()
+		return runtime, fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	runtime.client = client
+	runtime.server = server
+	return runtime, nil
+}
+
+// bindServeTargets binds every configured listener up front so a port conflict
+// fails startup before serving. Already-bound listeners are closed on failure.
+func bindServeTargets(built []*builtServer, introspect *introspectDoc) ([]serveTarget, error) {
+	byListen, order := groupByListen(built)
+	var targets []serveTarget
 	for _, listen := range order {
 		entries := byListen[listen]
 		ln, err := net.Listen("tcp", listen)
 		if err != nil {
-			return fmt.Errorf("listen %s: %w", listen, err)
+			closeServeTargets(targets)
+			return nil, fmt.Errorf("listen %s: %w", listen, err)
 		}
 		fmt.Fprintf(os.Stderr, "agentd: listening on %s (%d server(s))\n", ln.Addr(), len(entries))
-		if def := defaultA2AEntry(entries); def != nil {
-			base := discoveryBaseURL(def.cfg, ln.Addr())
-			fmt.Fprintf(os.Stderr, "agentd: a2a discovery: %s/.well-known/agent-card.json (default card)\n", base)
-			fmt.Fprintf(os.Stderr, "agentd: a2a discovery: %s/.well-known/agents.json (all cards, codebuddy)\n", base)
-		}
-		for _, e := range entries {
-			base := publicBaseURL(e.cfg, ln.Addr())
-			for _, path := range e.cardPaths {
-				fmt.Fprintf(os.Stderr, "agentd: a2a agent card: %s%s\n", base, path)
-			}
-		}
+		logDiscoveryEndpoints(entries, ln.Addr())
 		targets = append(targets, serveTarget{
 			srv:          &http.Server{Handler: newRouter(entries, introspect, ln.Addr()), ReadHeaderTimeout: 10 * time.Second},
 			ln:           ln,
@@ -176,23 +203,49 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 			closeStreams: combineClose(entries),
 		})
 	}
-	if cfg.Control != nil {
-		manager := newProjectManager(ctx, global, cfg.Control)
-		defer manager.Close()
-		ln, err := net.Listen("tcp", cfg.Control.Listen)
-		if err != nil {
-			return fmt.Errorf("control listen %s: %w", cfg.Control.Listen, err)
-		}
-		fmt.Fprintf(os.Stderr, "agentd: control API on %s\n", ln.Addr())
-		targets = append(targets, serveTarget{
-			srv: &http.Server{
-				Handler:           newControlHandler(manager, cfg.Control.Auth),
-				ReadHeaderTimeout: 10 * time.Second,
-			},
-			ln: ln,
-		})
+	return targets, nil
+}
+
+// logDiscoveryEndpoints reports the cards served by one listener.
+func logDiscoveryEndpoints(entries []*builtServer, addr net.Addr) {
+	if def := defaultA2AEntry(entries); def != nil {
+		base := discoveryBaseURL(def.cfg, addr)
+		fmt.Fprintf(os.Stderr, "agentd: a2a discovery: %s/.well-known/agent-card.json (default card)\n", base)
+		fmt.Fprintf(os.Stderr, "agentd: a2a discovery: %s/.well-known/agents.json (all cards, codebuddy)\n", base)
 	}
-	return serveAll(ctx, targets)
+	for _, e := range entries {
+		base := publicBaseURL(e.cfg, addr)
+		for _, path := range e.cardPaths {
+			fmt.Fprintf(os.Stderr, "agentd: a2a agent card: %s%s\n", base, path)
+		}
+	}
+}
+
+// bindControlTarget binds the optional control API and returns its cleanup.
+func bindControlTarget(
+	ctx context.Context, catalog config.Catalog, control *config.ControlConfig,
+) (serveTarget, func(), error) {
+	manager := newProjectManager(ctx, catalog, control)
+	ln, err := net.Listen("tcp", control.Listen)
+	if err != nil {
+		manager.Close()
+		return serveTarget{}, nil, fmt.Errorf("control listen %s: %w", control.Listen, err)
+	}
+	fmt.Fprintf(os.Stderr, "agentd: control API on %s\n", ln.Addr())
+	return serveTarget{
+		srv: &http.Server{
+			Handler:           newControlHandler(manager, control.Auth),
+			ReadHeaderTimeout: 10 * time.Second,
+		},
+		ln: ln,
+	}, manager.Close, nil
+}
+
+// closeServeTargets closes every listener that has been bound.
+func closeServeTargets(targets []serveTarget) {
+	for _, target := range targets {
+		_ = target.ln.Close()
+	}
 }
 
 // groupByListen groups entries by their listen address, returning the addresses
@@ -451,7 +504,7 @@ func insidePath(root, path string) (string, bool) {
 // a named sandbox cannot be built, fail-closed (the default) refuses to start;
 // fail-open warns and runs without it (the in-process guards still apply).
 func resolveSandbox(s config.Server) (core.AppProcess, sandbox.Policy, error) {
-	policy := s.Sandbox.Policy(s.WorkingDirectory)
+	policy := sandboxpolicy.ForServer(s.Sandbox, s.WorkingDirectory)
 	if s.Root != "" {
 		policy.TempRoot = filepath.Join(s.Root, "data", "sandbox-tmp")
 		// Drop per-run temp left by a crashed previous process. The server owns
@@ -489,7 +542,7 @@ func buildServer(
 	ctx context.Context, s config.Server, client *agent.Client,
 	catalog config.Catalog, uploader mediaUploaderFunc,
 ) (*builtServer, error) {
-	infos, err := config.ModelInfos(catalog)
+	infos, err := agentdclient.ModelInfos(catalog)
 	if err != nil {
 		return nil, err
 	}

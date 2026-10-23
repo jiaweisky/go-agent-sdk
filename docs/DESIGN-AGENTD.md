@@ -14,7 +14,8 @@
 
 | Date | Change |
 |---|---|
-| 2026-10-23 | Split runtime assembly out of `cmd/agentd/config`: client construction and MCP/reference/A2A-peer conversion moved to `cmd/agentd/client`; the media uploader, transcoder and delivery-policy conversion to `cmd/agentd/media`; media-store backends to `cmd/agentd/storage`. `config` now holds the DTOs, their `Validate()` methods and cross-block validation (plus the sandbox policy mapping). |
+| 2026-10-23 | Moved sandbox policy translation to `cmd/agentd/sandboxpolicy`, shared sandbox mode values to `cmd/agentd/sandboxmode`, and model metadata adaptation to `cmd/agentd/modelinfo`; `config` no longer imports `cmd/agentd/sandbox` or `pkg/agent`. |
+| 2026-10-23 | Split runtime assembly out of `cmd/agentd/config`: client construction and MCP/reference/A2A-peer conversion moved to `cmd/agentd/client`; the media uploader, transcoder and delivery-policy conversion to `cmd/agentd/media`; media-store backends to `cmd/agentd/storage`. `config` now holds the DTOs, their `Validate()` methods and cross-block validation. |
 | 2026-10-22 | Renamed `sandbox.process` / `wrap.process` to `sandbox.wrapper` / `wrap.wrapper` and made the wrapper an explicit enum (`none`, `bwrap`, `seatbelt`, `appcontainer`); `/api/config` reports `wrapper`; `schemaVersion` is now `4`. |
 | 2026-10-22 | Renamed the routing key and field `mount` to `pathPrefix` (a URL path prefix, not a filesystem mount) in the config and `/api/config`; `schemaVersion` is now `3`. |
 | 2026-10-22 | Removed environment-variable name reporting: `config.LoadWithEnv` and `/api/config`'s `sources[].expanded` are gone, so the config document no longer lists which env names were referenced; `schemaVersion` is now `2`. |
@@ -104,8 +105,11 @@ split is at the **assembly layer**, not the engine — so it can be removed.
 
 ## 3. Current state (facts)
 
-- `cmd/agentd/config` holds the **transport-agnostic** pieces: YAML loading
-  (`config.Load`), `PermissionRuleset`, and the catalog/credential/media-uploader helpers.
+- `cmd/agentd/config` holds transport-agnostic configuration DTOs, YAML loading
+  (`config.Load`) and validation. Client assembly lives in `cmd/agentd/client`; model
+  metadata adaptation in `cmd/agentd/modelinfo`; media upload/transcode in
+  `cmd/agentd/media`; media stores in `cmd/agentd/storage`; sandbox policy translation
+  and mode values in `cmd/agentd/sandboxpolicy` / `cmd/agentd/sandboxmode`.
   Graceful serve (`serve(ctx, *http.Server, *TLS, beforeShutdown)`) lives in `cmd/agentd/run.go`
   (it owns `shutdownTimeout`), since it is command lifecycle, not configuration.
 - HTTP path: `server.New(ctx, client, server.Options{…})` → `srv.Handler()`; the HTTP server

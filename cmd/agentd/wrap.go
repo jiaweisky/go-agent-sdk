@@ -8,6 +8,7 @@ import (
 
 	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandbox"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/sandboxpolicy"
 )
 
 // wrappedEnv marks a process already inside the whole-process sandbox so the
@@ -40,7 +41,7 @@ func wrapProcess(cfg config.Config, configPath string) error {
 		return err
 	}
 	roots := wrapRoots(cfg)
-	policy := w.Policy()
+	policy := sandboxpolicy.ForWrap(w)
 	// The wrapped process must still read its own executable, config file, DNS
 	// and CA-trust files, state roots and config dirs to start and serve;
 	// writes stay limited to the shared roots.

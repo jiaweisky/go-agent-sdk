@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"time"
 
 	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
@@ -10,6 +9,7 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
+	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/modelinfo"
 )
 
 // Params is the set of options the serve commands share when building an agent
@@ -59,7 +59,7 @@ func New(p Params) (*agent.Client, error) {
 		ConfigDirs:       p.ConfigDirs,
 		Model:            p.Model,
 		Protocol:         schema.ProtocolID(p.Protocol),
-		ModelInfo:        p.Catalog.ModelInfo,
+		ModelInfo:        func(id string) (schema.ModelInfo, error) { return modelinfo.Resolve(p.Catalog, id) },
 		Credentials:      p.Catalog.Credentials,
 		MediaUploader:    p.MediaUploader,
 		MediaPolicy:      p.Media,
@@ -93,22 +93,15 @@ func New(p Params) (*agent.Client, error) {
 
 // MCPConfigs converts configured MCP servers into SDK client configs.
 func MCPConfigs(servers []config.MCPServer) ([]agent.MCPConfig, error) {
-	if err := config.ValidateMCP(servers); err != nil {
+	timeouts, err := config.MCPTimeouts(servers)
+	if err != nil {
 		return nil, err
 	}
 	if len(servers) == 0 {
 		return nil, nil
 	}
 	result := make([]agent.MCPConfig, 0, len(servers))
-	for _, server := range servers {
-		var timeout time.Duration
-		if server.Timeout != "" {
-			parsed, err := time.ParseDuration(server.Timeout)
-			if err != nil {
-				return nil, fmt.Errorf("mcp %s: timeout: %w", server.Name, err)
-			}
-			timeout = parsed
-		}
+	for i, server := range servers {
 		result = append(result, agent.MCPConfig{
 			Name: server.Name,
 			Server: mcp.ServerConfig{
@@ -119,7 +112,7 @@ func MCPConfigs(servers []config.MCPServer) ([]agent.MCPConfig, error) {
 				URL:         server.URL,
 				Headers:     server.Headers,
 				Enabled:     server.Enabled,
-				Timeout:     timeout,
+				Timeout:     timeouts[i],
 			},
 		})
 	}
@@ -158,4 +151,9 @@ func a2aPeerAgentConfig(peer config.A2APeer) agent.AgentConfig {
 			},
 		},
 	}
+}
+
+// ModelInfos resolves every catalog model's metadata for discovery.
+func ModelInfos(catalog config.Catalog) ([]schema.ModelInfo, error) {
+	return modelinfo.List(catalog)
 }
