@@ -49,9 +49,32 @@ func (p FailurePolicy) Valid() bool {
 	return p == "" || p == FailurePolicyFailClosed || p == FailurePolicyFailOpen
 }
 
+// Profile selects how much of the sandbox policy is applied.
+type Profile string
+
+const (
+	// ProfileDefault is the unset profile: standard when the sandbox is enabled.
+	ProfileDefault Profile = ""
+	// ProfileStandard applies the secure defaults.
+	ProfileStandard Profile = "standard"
+	// ProfileCustom starts from no confinement and applies explicit fields.
+	ProfileCustom Profile = "custom"
+	// ProfileOff disables the policy and the sandbox itself.
+	ProfileOff Profile = "off"
+)
+
+// Valid reports whether p is a supported profile.
+func (p Profile) Valid() bool {
+	switch p {
+	case ProfileDefault, ProfileStandard, ProfileCustom, ProfileOff:
+		return true
+	}
+	return false
+}
+
 // Enabled reports whether a wrapper and a non-off profile are configured.
 func (s *SandboxConfig) Enabled() bool {
-	return s != nil && s.Wrapper != "" && s.Wrapper != WrapperNone && s.Profile != "off"
+	return s != nil && s.Wrapper != "" && s.Wrapper != WrapperNone && s.Profile != ProfileOff
 }
 
 // hasPolicyFields reports whether any policy field is set.
@@ -89,7 +112,7 @@ func validateSandboxSelection(s *SandboxConfig) error {
 	}
 	// A disabled sandbox ignores the policy; reject that instead of silently
 	// downgrading it.
-	if (s.Wrapper == WrapperNone || s.Profile == "off") && s.hasPolicyFields() {
+	if (s.Wrapper == WrapperNone || s.Profile == ProfileOff) && s.hasPolicyFields() {
 		return errors.New("sandbox policy fields are ignored when the sandbox is disabled; remove them or name a wrapper")
 	}
 	return validateFailurePolicy("sandbox.failurePolicy", s.FailurePolicy)
@@ -126,9 +149,8 @@ func validateFailurePolicy(field string, p FailurePolicy) error {
 	return fmt.Errorf("%s must be fail-closed or fail-open, got %q", field, p)
 }
 
-func validateSandboxProfile(profile string) error {
-	switch profile {
-	case "", "off", "standard", "custom":
+func validateSandboxProfile(profile Profile) error {
+	if profile.Valid() {
 		return nil
 	}
 	return fmt.Errorf("sandbox.profile must be off, standard or custom, got %q", profile)
@@ -238,8 +260,9 @@ func validateSandboxViolations(v *SandboxViolations) error {
 }
 
 // validatePlatformSandbox rejects a policy the host cannot enforce. Windows
-// AppContainer cannot disable read/write confinement or allow process
-// introspection; bwrap cannot allow writes everywhere while confining reads.
+// AppContainer cannot disable read/write confinement, allow process
+// introspection or carve explicit deny paths out of granted roots; bwrap cannot
+// allow writes everywhere while confining reads.
 func validatePlatformSandbox(s *SandboxConfig) error {
 	return validatePlatformSandboxFor(runtime.GOOS, s)
 }
@@ -265,6 +288,10 @@ func validatePlatformSandboxFor(goos string, s *SandboxConfig) error {
 		if s.ProcessInspection == "allow" {
 			return errors.New("sandbox.processInspection: allow is not supported on windows; the AppContainer cannot be relaxed")
 		}
+		if fs := s.Filesystem; fs != nil && (len(fs.DenyRead) > 0 || len(fs.DenyWrite) > 0) {
+			return errors.New("sandbox.filesystem denyRead/denyWrite are not supported on windows; " +
+				"the AppContainer only grants allow-list access")
+		}
 	case "linux":
 		if writeMode == sandboxmode.FSModeOff && readMode == sandboxmode.FSModeAllow {
 			return errors.New("sandbox.filesystem.write: off with read: allow is contradictory on linux; " +
@@ -277,9 +304,9 @@ func validatePlatformSandboxFor(goos string, s *SandboxConfig) error {
 // EffectiveAccess returns the profile's read/write modes after explicit overrides.
 func (p SandboxPolicy) EffectiveAccess() (readMode, writeMode string) {
 	switch p.Profile {
-	case "", "standard":
+	case ProfileDefault, ProfileStandard:
 		readMode, writeMode = sandboxmode.FSModeAllow, sandboxmode.FSModeAllow
-	case "custom":
+	case ProfileCustom:
 		readMode, writeMode = sandboxmode.FSModeOff, sandboxmode.FSModeOff
 	}
 	if p.Filesystem != nil {

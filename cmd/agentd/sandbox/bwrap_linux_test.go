@@ -3,7 +3,9 @@
 package sandbox
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -85,6 +87,102 @@ func TestBwrapPreciseTrace(t *testing.T) {
 	}
 }
 
+func TestBwrapDenyRead(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(dir, "secret.env")
+	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(dir, "private")
+	if err := os.Mkdir(private, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	policy := StandardPolicy(dir)
+	policy.DenyRead = []string{secret, private}
+	_, argv := bwrapLaunch(dir, policy, "ls", nil)
+
+	bind := indexOfArg(argv, "--bind", dir, dir)
+	if bind < 0 {
+		t.Fatalf("write root is not bound: %v", argv)
+	}
+	if mask := indexOfArg(argv, "--ro-bind", "/dev/null", secret); mask < 0 || mask < bind {
+		t.Fatalf("denyRead file mask must come after the write bind: %v", argv)
+	}
+	if mask := indexOfArg(argv, "--tmpfs", private); mask < 0 || mask < bind {
+		t.Fatalf("denyRead directory mask must come after the write bind: %v", argv)
+	}
+}
+
+func TestBwrapDenySymlink(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "target.env")
+	if err := os.WriteFile(target, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.env")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	policy := StandardPolicy(dir)
+	policy.DenyRead = []string{link}
+	_, argv := bwrapLaunch(dir, policy, "ls", nil)
+
+	if indexOfArg(argv, "--ro-bind", "/dev/null", target) < 0 {
+		t.Fatalf("denyRead symlink target is not masked: %v", argv)
+	}
+	if indexOfArg(argv, "--ro-bind", "/dev/null", link) >= 0 {
+		t.Fatalf("bwrap must not mount over the symlink destination: %v", argv)
+	}
+}
+
+func TestBwrapDenyWrite(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(dir, "config.env")
+	if err := os.WriteFile(blocked, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "future.env")
+	privateTemp := filepath.Join(dir, "private-temp")
+	if err := os.Mkdir(privateTemp, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.env")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	policy := StandardPolicy(dir)
+	policy.PrivateTemp = privateTemp
+	policy.DenyWrite = []string{blocked, missing, outside}
+	_, argv := bwrapLaunch(dir, policy, "ls", nil)
+
+	bind := indexOfArg(argv, "--bind", dir, dir)
+	if bind < 0 {
+		t.Fatalf("write root is not bound: %v", argv)
+	}
+	mask := indexOfArg(argv, "--ro-bind", blocked, blocked)
+	if mask < 0 || mask < bind {
+		t.Fatalf("denyWrite file is not masked after the write root: %v", argv)
+	}
+	if indexOfArg(argv, "--tmpfs", missing) < 0 {
+		t.Fatalf("missing denyWrite path is not masked: %v", argv)
+	}
+	if indexOfArg(argv, "--ro-bind", outside, outside) >= 0 {
+		t.Fatalf("denyWrite outside the writable roots must not be bound: %v", argv)
+	}
+}
+
 func TestBwrapRegistered(t *testing.T) {
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		t.Skip("bwrap is not available")
@@ -122,7 +220,7 @@ func TestBwrapProcessRegistered(t *testing.T) {
 // and fail-open warns.
 func TestResolveMissingBinary(t *testing.T) {
 	Register("probe-test", func(Policy) core.AppProcess { return nil })
-	RegisterProcess("probe-test", func([]string, Policy, string, []string) error { return nil })
+	RegisterProcess("probe-test", func(Policy, string, []string) error { return nil })
 	RegisterAvailable("probe-test", func() error { return exec.ErrNotFound })
 	if _, err := Resolve("probe-test", StandardPolicy("")); err == nil {
 		t.Fatal("Resolve(probe-test) succeeded despite the missing binary")

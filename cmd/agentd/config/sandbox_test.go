@@ -115,6 +115,21 @@ func TestValidateSandboxPlatformOff(t *testing.T) {
 	}
 }
 
+func TestValidateSandboxPlatformDenies(t *testing.T) {
+	for _, fs := range []*SandboxFilesystem{
+		{DenyRead: []string{"secret"}},
+		{DenyWrite: []string{"secret"}},
+	} {
+		cfg := &SandboxConfig{Wrapper: "appcontainer", SandboxPolicy: SandboxPolicy{Filesystem: fs}}
+		if err := validatePlatformSandboxFor("windows", cfg); err == nil {
+			t.Fatalf("windows must reject explicit deny paths: %+v", fs)
+		}
+		if err := validatePlatformSandboxFor("linux", cfg); err != nil {
+			t.Fatalf("linux must accept a literal deny path: %v", err)
+		}
+	}
+}
+
 func TestSandboxViolationConfigValidation(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		precise := &SandboxConfig{

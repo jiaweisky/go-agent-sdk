@@ -33,14 +33,14 @@ func seatbeltLaunch(dir string, policy Policy, command string, args []string) (s
 // seatbeltProcess wraps the whole process in seatbelt under the resolved policy.
 // The network stays up (the process serves listeners and calls the model) and
 // process introspection is not denied (agentd manages its own children).
-func seatbeltProcess(roots []string, policy Policy, command string, args []string) error {
-	return execReplace("sandbox-exec", seatbeltProcessArgs(roots, policy, command, args))
+func seatbeltProcess(policy Policy, command string, args []string) error {
+	return execReplace("sandbox-exec", seatbeltProcessArgs(policy, command, args))
 }
 
-// seatbeltProcessArgs is the sandbox-exec argument vector (excluding the program
-// name).
-func seatbeltProcessArgs(roots []string, policy Policy, command string, args []string) []string {
-	return append([]string{"-p", seatbeltProcessProfile(roots, policy), command}, args...)
+// seatbeltProcessArgs is the whole-process sandbox-exec argument vector
+// (excluding the program name).
+func seatbeltProcessArgs(policy Policy, command string, args []string) []string {
+	return append([]string{"-p", seatbeltProcessProfile(policy), command}, args...)
 }
 
 // seatbeltCommandProfile is the per-command profile: it adds the network denial
@@ -50,12 +50,9 @@ func seatbeltCommandProfile(dir string, policy Policy) string {
 }
 
 // seatbeltProcessProfile is the whole-process profile; it keeps the network and
-// process introspection up.
-func seatbeltProcessProfile(roots []string, policy Policy) string {
-	var clauses []string
-	clauses = append(clauses, roots...)
-	clauses = append(clauses, policy.WorkingDirectory)
-	return writeSeatbeltProfile(clauses, policy, false)
+// process introspection up and takes its roots from the policy.
+func seatbeltProcessProfile(policy Policy) string {
+	return writeSeatbeltProfile(nil, policy, false)
 }
 
 // writeSeatbeltProfile renders the sandbox-exec profile in precedence order
@@ -82,20 +79,26 @@ func seatbeltNetworkDeny() string {
 	return "(deny network* (remote ip))"
 }
 
+// seatbeltProcessInfoDeny denies process introspection and the sysctl reads
+// that expose it.
 func seatbeltProcessInfoDeny() string {
 	return "(deny process-info*)(deny sysctl-read)"
 }
 
+// seatbeltWriteRules denies all writes, re-allows the write roots and sockets,
+// then applies explicit denies so the most specific rule wins.
 func seatbeltWriteRules(dirs []string, policy Policy) string {
 	if policy.WriteMode != FSModeAllow {
 		return ""
 	}
-	roots := dedupe(append(append([]string{}, dirs...), policy.WriteRoots()...))
+	roots := append(append([]string{}, dirs...), policy.WriteRoots()...)
 	roots = append(roots, policy.SocketPaths()...)
-	return "(deny file-write*)(allow file-write* " + seatbeltClauses(roots) + ")" +
+	return "(deny file-write*)(allow file-write* " + seatbeltClauses(dedupe(roots)) + ")" +
 		seatbeltDenies("file-write*", policy.DeniedWrite())
 }
 
+// seatbeltReadRules denies broad regions, re-allows the read roots and sockets,
+// then applies explicit denies so the most specific rule wins.
 func seatbeltReadRules(dirs []string, policy Policy) string {
 	if policy.ReadMode != FSModeAllow {
 		// read: off means no read confinement; no credential masks either.

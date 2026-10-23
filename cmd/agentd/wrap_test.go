@@ -55,6 +55,12 @@ func TestWrapProcessNoop(t *testing.T) {
 	if err := wrapProcess(config.Config{Wrap: &config.WrapConfig{Wrapper: "none"}}, ""); err != nil {
 		t.Fatalf("wrap.wrapper=none must be a no-op: %v", err)
 	}
+	if err := wrapProcess(config.Config{Wrap: &config.WrapConfig{
+		Wrapper:       "bwrap",
+		SandboxPolicy: config.SandboxPolicy{Profile: "off"},
+	}}, ""); err != nil {
+		t.Fatalf("wrap with profile: off must be a no-op: %v", err)
+	}
 	t.Setenv(wrappedEnv, "seatbelt")
 	if err := wrapProcess(config.Config{Wrap: &config.WrapConfig{Wrapper: "seatbelt"}}, ""); err != nil {
 		t.Fatalf("an already-wrapped process must not re-exec: %v", err)

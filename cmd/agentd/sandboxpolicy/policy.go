@@ -20,15 +20,22 @@ func ForServer(cfg *config.SandboxConfig, workingDir string) sandbox.Policy {
 // ForWrap resolves the whole-process sandbox policy. A disabled wrap yields the
 // zero policy.
 func ForWrap(cfg *config.WrapConfig) sandbox.Policy {
-	if cfg == nil || cfg.Wrapper == "" || cfg.Wrapper == config.WrapperNone || cfg.Profile == "off" {
+	if !cfg.Enabled() {
 		return sandbox.Policy{}
 	}
 	return resolve(cfg.SandboxPolicy, "")
 }
 
+// profileHasStandardDefaults reports whether the profile starts from the
+// standard secure defaults.
+func profileHasStandardDefaults(profile config.Profile) bool {
+	return profile == config.ProfileDefault || profile == config.ProfileStandard
+}
+
 // resolve builds a policy from a profile and the explicit overrides.
 func resolve(p config.SandboxPolicy, workingDir string) sandbox.Policy {
-	if p.Profile == "off" {
+	// Callers normally filter disabled configs first; keep this defensive.
+	if p.Profile == config.ProfileOff {
 		return sandbox.Policy{WorkingDirectory: workingDir}
 	}
 	policy := basePolicy(p, workingDir)
@@ -37,7 +44,7 @@ func resolve(p config.SandboxPolicy, workingDir string) sandbox.Policy {
 	applyUnixSockets(&policy, p.UnixSockets)
 	applyProcessInspection(&policy, p.ProcessInspection)
 	applyEnv(&policy, p.Env)
-	applyViolations(&policy, p.Violations)
+	applyViolations(&policy, p.Violations, profileHasStandardDefaults(p.Profile))
 	return policy
 }
 
@@ -45,16 +52,17 @@ func resolve(p config.SandboxPolicy, workingDir string) sandbox.Policy {
 // no confinement for custom.
 func basePolicy(p config.SandboxPolicy, workingDir string) sandbox.Policy {
 	var policy sandbox.Policy
-	switch p.Profile {
-	case "", "standard":
+	switch {
+	case profileHasStandardDefaults(p.Profile):
 		policy = sandbox.StandardPolicy(workingDir)
-	case "custom":
+	case p.Profile == config.ProfileCustom:
 		policy = sandbox.Policy{
 			WorkingDirectory: workingDir,
 			NetworkMode:      sandbox.NetworkOff,
 			SocketMode:       sandbox.SocketAllowAll,
 		}
 	default:
+		// Unvalidated or unknown profiles get no confinement.
 		policy = sandbox.Policy{WorkingDirectory: workingDir}
 	}
 	policy.ReadMode, policy.WriteMode = p.EffectiveAccess()
@@ -89,6 +97,7 @@ func applyUnixSockets(policy *sandbox.Policy, sockets *config.SandboxUnixSockets
 	case sandbox.SocketDeny:
 		policy.SocketMode = sandbox.SocketInherit
 	case "":
+		// Keep the profile default.
 	default:
 		policy.SocketMode = sockets.Mode
 	}
@@ -105,7 +114,9 @@ func applyProcessInspection(policy *sandbox.Policy, mode string) {
 	}
 }
 
-// applyEnv applies the environment mode and scrub list.
+// applyEnv applies the environment mode and scrub list. With no mode, an
+// explicit scrub list extends the profile's set: the standard profile starts
+// with DefaultScrubEnv, custom starts empty.
 func applyEnv(policy *sandbox.Policy, env *config.SandboxEnv) {
 	if env == nil {
 		return
@@ -121,10 +132,13 @@ func applyEnv(policy *sandbox.Policy, env *config.SandboxEnv) {
 	}
 }
 
-// applyViolations sets the default violation reporting and applies overrides.
-func applyViolations(policy *sandbox.Policy, violations *config.SandboxViolations) {
-	policy.ViolationMode = sandbox.ViolationHeuristic
-	policy.ReportToModel = true
+// applyViolations gives the standard profile its default reporting and applies
+// overrides. Custom starts with reporting off and enables only what it names.
+func applyViolations(policy *sandbox.Policy, violations *config.SandboxViolations, standardDefaults bool) {
+	if standardDefaults {
+		policy.ViolationMode = sandbox.ViolationHeuristic
+		policy.ReportToModel = true
+	}
 	if violations == nil {
 		return
 	}

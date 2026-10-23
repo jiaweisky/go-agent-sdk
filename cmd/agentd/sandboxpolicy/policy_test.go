@@ -1,6 +1,7 @@
 package sandboxpolicy
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
@@ -81,6 +82,99 @@ func TestForServerViolations(t *testing.T) {
 	}
 }
 
+func TestForServerFilesystemPaths(t *testing.T) {
+	cfg := &config.SandboxConfig{
+		Wrapper: "seatbelt",
+		SandboxPolicy: config.SandboxPolicy{
+			Filesystem: &config.SandboxFilesystem{
+				DenyRead:   []string{"/secret"},
+				AllowRead:  []string{"/data"},
+				DenyWrite:  []string{"/locked"},
+				AllowWrite: []string{"/out"},
+			},
+		},
+	}
+	policy := ForServer(cfg, "/work")
+	for _, tc := range []struct {
+		name string
+		got  []string
+		want string
+	}{
+		{"denyRead", policy.DenyRead, "/secret"},
+		{"allowRead", policy.AllowRead, "/data"},
+		{"denyWrite", policy.DenyWrite, "/locked"},
+		{"allowWrite", policy.AllowWrite, "/out"},
+	} {
+		if !slices.Contains(tc.got, tc.want) {
+			t.Errorf("%s = %v, missing %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestForServerProcessInspection(t *testing.T) {
+	standard := ForServer(&config.SandboxConfig{Wrapper: "seatbelt"}, "/work")
+	if !standard.DenyProcessInfo {
+		t.Fatalf("standard policy must deny process inspection: %+v", standard)
+	}
+	custom := &config.SandboxConfig{
+		Wrapper:       "seatbelt",
+		SandboxPolicy: config.SandboxPolicy{Profile: "custom", ProcessInspection: "allow"},
+	}
+	if ForServer(custom, "/work").DenyProcessInfo {
+		t.Fatal("custom processInspection: allow must not deny process inspection")
+	}
+}
+
+func TestForServerEnv(t *testing.T) {
+	cfg := &config.SandboxConfig{
+		Wrapper:       "seatbelt",
+		SandboxPolicy: config.SandboxPolicy{Env: &config.SandboxEnv{Scrub: []string{"MY_SECRET"}}},
+	}
+	policy := ForServer(cfg, "/work")
+	if !slices.Contains(policy.ScrubEnv, "*_KEY") || !slices.Contains(policy.ScrubEnv, "MY_SECRET") {
+		t.Fatalf("standard scrub = %v, want defaults plus MY_SECRET", policy.ScrubEnv)
+	}
+
+	cfg.Env = &config.SandboxEnv{Mode: "inherit"}
+	if got := ForServer(cfg, "/work").ScrubEnv; len(got) != 0 {
+		t.Fatalf("env inherit = %v, want no scrubbing", got)
+	}
+
+	custom := &config.SandboxConfig{
+		Wrapper: "seatbelt",
+		SandboxPolicy: config.SandboxPolicy{
+			Profile: "custom",
+			Env:     &config.SandboxEnv{Scrub: []string{"ONLY"}},
+		},
+	}
+	if got := ForServer(custom, "/work").ScrubEnv; !slices.Equal(got, []string{"ONLY"}) {
+		t.Fatalf("custom scrub = %v, want the explicit list only", got)
+	}
+}
+
+func TestForServerCustomViolations(t *testing.T) {
+	cfg := &config.SandboxConfig{
+		Wrapper:       "seatbelt",
+		SandboxPolicy: config.SandboxPolicy{Profile: "custom"},
+	}
+	policy := ForServer(cfg, "/work")
+	if policy.ViolationMode != "" || policy.ReportToModel {
+		t.Fatalf("custom must not enable violation reporting by default: %+v", policy)
+	}
+
+	cfg.Violations = &config.SandboxViolations{Mode: "heuristic"}
+	policy = ForServer(cfg, "/work")
+	if policy.ViolationMode != sandbox.ViolationHeuristic || policy.ReportToModel {
+		t.Fatalf("custom violations = %+v, want heuristic without model notes", policy)
+	}
+
+	report := true
+	cfg.Violations.ReportToModel = &report
+	if !ForServer(cfg, "/work").ReportToModel {
+		t.Fatal("explicit reportToModel: true must be honored")
+	}
+}
+
 func TestForServerSocketAlias(t *testing.T) {
 	cfg := &config.SandboxConfig{
 		Wrapper:       "seatbelt",
@@ -97,6 +191,12 @@ func TestForWrapDisabled(t *testing.T) {
 	}
 	if policy := ForWrap(&config.WrapConfig{Wrapper: "none"}); policy.ReadMode != "" {
 		t.Fatalf("wrapper none policy = %+v, want zero", policy)
+	}
+	if policy := ForWrap(&config.WrapConfig{
+		Wrapper:       "bwrap",
+		SandboxPolicy: config.SandboxPolicy{Profile: "off"},
+	}); policy.ReadMode != "" {
+		t.Fatalf("profile off policy = %+v, want zero", policy)
 	}
 }
 

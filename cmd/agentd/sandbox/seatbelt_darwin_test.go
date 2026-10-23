@@ -46,6 +46,24 @@ func TestSeatbeltProfile(t *testing.T) {
 	}
 }
 
+// TestSeatbeltExplicitDenies checks the explicit deny lists are emitted after
+// their allow rules, so a more specific deny wins.
+func TestSeatbeltExplicitDenies(t *testing.T) {
+	policy := StandardPolicy("/work")
+	policy.DenyRead = []string{"/work/secret"}
+	policy.DenyWrite = []string{"/work/config"}
+	profile := seatbeltCommandProfile("/work", policy)
+
+	readDeny := `(deny file-read* (subpath "/work/secret"))`
+	if deny, allow := strings.Index(profile, readDeny), strings.Index(profile, "(allow file-read*"); deny < 0 || deny < allow {
+		t.Fatalf("explicit read deny must follow the allow rule: %s", profile)
+	}
+	writeDeny := `(deny file-write* (subpath "/work/config"))`
+	if deny, allow := strings.Index(profile, writeDeny), strings.Index(profile, "(allow file-write*"); deny < 0 || deny < allow {
+		t.Fatalf("explicit write deny must follow the allow rule: %s", profile)
+	}
+}
+
 // TestSeatbeltProfileReadOff checks that an explicit read: off drops the read
 // allow-list (an explicit opt-out, not the default).
 func TestSeatbeltProfileReadOff(t *testing.T) {
@@ -230,7 +248,8 @@ func TestSeatbeltRegistered(t *testing.T) {
 
 func TestSeatbeltProcessProfile(t *testing.T) {
 	policy := StandardPolicy("")
-	profile := seatbeltProcessProfile([]string{"/work", "/state"}, policy)
+	policy.AllowWrite = []string{"/work", "/state"}
+	profile := seatbeltProcessProfile(policy)
 	for _, want := range []string{
 		"(version 1)", "(allow default)", "(deny file-write*)",
 		`(subpath "/work")`, `(subpath "/state")`,
@@ -263,7 +282,7 @@ func TestSeatbeltProcessEnforcesWrites(t *testing.T) {
 	}
 	root := t.TempDir()
 	policy := StandardPolicy(root)
-	argv := seatbeltProcessArgs([]string{root}, policy, "/bin/sh",
+	argv := seatbeltProcessArgs(policy, "/bin/sh",
 		[]string{"-c", "echo hi > " + filepath.Join(root, "inside.txt")})
 	if out, err := exec.Command("sandbox-exec", argv...).CombinedOutput(); err != nil {
 		t.Fatalf("write inside a wrapped root was denied: %v (%s)", err, out)
@@ -277,7 +296,7 @@ func TestSeatbeltProcessEnforcesWrites(t *testing.T) {
 		t.Skip("no home directory")
 	}
 	outside := filepath.Join(home, ".agentd-wrap-deny-test")
-	denyArgv := seatbeltProcessArgs([]string{root}, policy, "/bin/sh", []string{"-c", "echo bad > " + outside})
+	denyArgv := seatbeltProcessArgs(policy, "/bin/sh", []string{"-c", "echo bad > " + outside})
 	if err := exec.Command("sandbox-exec", denyArgv...).Run(); err == nil {
 		_ = os.Remove(outside)
 		t.Fatalf("write outside the wrapped roots was allowed: %s", outside)

@@ -32,15 +32,6 @@ func init() {
 	RegisterProcess("appcontainer", execInAppContainer)
 }
 
-// appContainerProcess runs every command inside a Windows AppContainer: a
-// low-integrity sandbox with no network and no filesystem access except the
-// paths the policy grants. It is best-effort — the SDK ships no guarantee for
-// it; Windows whole-process isolation is a container/Job Object deployment
-// concern.
-type appContainerProcess struct {
-	policy Policy
-}
-
 const (
 	// containerName is the AppContainer profile, created on first use.
 	containerName = "go-agent-sdk.agentd.sandbox"
@@ -82,7 +73,7 @@ func appContainerSID(name string) (*windows.SID, error) {
 		return nil, err
 	}
 	var sid *windows.SID
-	r1, _, _ := procCreateAppContainerProfile.Call(
+	r1, _, createErr := procCreateAppContainerProfile.Call(
 		uintptr(unsafe.Pointer(wide)), // name
 		uintptr(unsafe.Pointer(wide)), // display name
 		uintptr(unsafe.Pointer(wide)), // description
@@ -93,25 +84,26 @@ func appContainerSID(name string) (*windows.SID, error) {
 		return sid, nil
 	}
 	// The profile usually already exists; derive its SID instead.
-	r1, _, callErr := procDeriveAppContainerSidFromAppContainerName.Call(
+	r1, _, deriveErr := procDeriveAppContainerSidFromAppContainerName.Call(
 		uintptr(unsafe.Pointer(wide)),
 		uintptr(unsafe.Pointer(&sid)),
 	)
 	if r1 != 0 {
-		return nil, fmt.Errorf("derive AppContainer %q: %w", name, callErr)
+		return nil, fmt.Errorf("derive AppContainer %q: %w (profile creation: %v)", name, deriveErr, createErr)
 	}
 	return sid, nil
 }
 
-// grantedDirs remembers directories already granted to the profile, so the
-// (comparatively slow) icacls call runs once per directory, not per command.
-var grantedDirs sync.Map
-
-// grantedReads remembers directories already granted read-only access.
-var grantedReads sync.Map
-
-// grantedTraverse remembers directories already granted traverse-only access.
-var grantedTraverse sync.Map
+// Grant caches remember paths already given to the profile, so the
+// comparatively slow icacls call runs once per path, not per command.
+var (
+	// grantedDirs remembers paths granted modify access.
+	grantedDirs sync.Map
+	// grantedReads remembers paths granted read-only access.
+	grantedReads sync.Map
+	// grantedTraverse remembers paths granted traverse-only access.
+	grantedTraverse sync.Map
+)
 
 // grantTraverse lets the profile walk to a child directory without listing or
 // reading its siblings.
@@ -143,36 +135,46 @@ func grantTempTraversal(policy Policy, sid *windows.SID) error {
 	return nil
 }
 
-// grantRead gives the sandbox profile read and execute access to dir, for paths
-// the policy allows beyond the run directory.
-func grantRead(dir string, sid *windows.SID) error {
-	if dir == "" {
+// grantRead gives the sandbox profile read and execute access to path, for
+// paths the policy allows beyond the run directory.
+func grantRead(path string, sid *windows.SID) error {
+	if path == "" {
 		return nil
 	}
-	if _, ok := grantedReads.Load(dir); ok {
+	if _, ok := grantedReads.Load(path); ok {
 		return nil
 	}
-	if err := icacls(dir, sid, "(OI)(CI)RX"); err != nil {
+	if err := grantRights(path, sid, "(OI)(CI)RX", "(RX)"); err != nil {
 		return err
 	}
-	grantedReads.Store(dir, struct{}{})
+	grantedReads.Store(path, struct{}{})
 	return nil
 }
 
-// grantAccess gives the sandbox profile modify access to dir, so the wrapped
+// grantAccess gives the sandbox profile modify access to path, so the wrapped
 // command can read and write its run directory (and, by inheritance, children).
-func grantAccess(dir string, sid *windows.SID) error {
-	if dir == "" {
+func grantAccess(path string, sid *windows.SID) error {
+	if path == "" {
 		return nil
 	}
-	if _, ok := grantedDirs.Load(dir); ok {
+	if _, ok := grantedDirs.Load(path); ok {
 		return nil
 	}
-	if err := icacls(dir, sid, "(OI)(CI)M"); err != nil {
+	if err := grantRights(path, sid, "(OI)(CI)M", "(M)"); err != nil {
 		return err
 	}
-	grantedDirs.Store(dir, struct{}{})
+	grantedDirs.Store(path, struct{}{})
 	return nil
+}
+
+// grantRights grants directory inheritance rights to a directory and plain
+// rights to a file, because (OI)(CI) is only meaningful on a container.
+func grantRights(path string, sid *windows.SID, dirRights, fileRights string) error {
+	rights := dirRights
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		rights = fileRights
+	}
+	return icacls(path, sid, rights)
 }
 
 // icacls grants the profile SID the given rights mask on path.
@@ -184,18 +186,10 @@ func icacls(path string, sid *windows.SID, rights string) error {
 	return nil
 }
 
-// execInAppContainer re-launches agentd inside the AppContainer profile with the
-// internetClientServer capability (so it can serve listeners and call the
-// model), granting write access to roots and read/execute to the agentd binary,
-// then waits and exits with the child's status. Best-effort: an AppContainer
-// blocks loopback by default, so it also attempts a loopback exemption for the
-// profile (the host may need to configure one itself).
-func execInAppContainer(roots []string, policy Policy, command string, args []string) error {
-	sid, err := appContainerSID(containerName)
-	if err != nil {
-		return err
-	}
-	for _, root := range append(roots, policy.WriteRoots()...) {
+// grantPolicyAccess grants the profile every path the policy allows, shared by
+// the per-command and whole-process launch paths.
+func grantPolicyAccess(policy Policy, sid *windows.SID) error {
+	for _, root := range policy.WriteRoots() {
 		if err := grantAccess(root, sid); err != nil {
 			return err
 		}
@@ -210,7 +204,22 @@ func execInAppContainer(roots []string, policy Policy, command string, args []st
 			return err
 		}
 	}
-	if err := grantTempTraversal(policy, sid); err != nil {
+	return grantTempTraversal(policy, sid)
+}
+
+// execInAppContainer re-launches agentd inside the AppContainer profile with the
+// internetClientServer capability (so it can serve listeners and call the
+// model), granting write access to the policy's roots and read/execute to the
+// agentd binary, then waits and exits with the child's status. Best-effort: an
+// AppContainer blocks loopback by default, so it also attempts a loopback
+// exemption for the profile (the host may need to configure one itself).
+func execInAppContainer(policy Policy, command string, args []string) error {
+	sid, err := appContainerSID(containerName)
+	if err != nil {
+		return err
+	}
+
+	if err := grantPolicyAccess(policy, sid); err != nil {
 		return err
 	}
 	// The binary itself must be readable and executable by the profile.
@@ -219,20 +228,44 @@ func execInAppContainer(roots []string, policy Policy, command string, args []st
 	}
 	exemptLoopback(sid)
 
-	security, err := networkSecurity(sid, true)
+	inherited, err := inheritStdHandles()
 	if err != nil {
 		return err
 	}
 
-	// The re-executed process keeps this process's std handles. A handle the
-	// host left non-inheritable (a redirected output file, say) would dangle in
-	// the child — with bInheritHandles=TRUE the value is copied, the handle is
-	// not — and a dangling std handle inside an AppContainer crashes the child
-	// during initialization (the same failure the per-command spawn() guards
-	// against). Make every std handle inheritable and restrict inheritance to
-	// exactly those handles. HANDLE_LIST entries must be inheritable and must
-	// not repeat.
-	inherited := make([]windows.Handle, 0, 3)
+	attributeList, err := childAttributeList(sid, inherited, true)
+	if err != nil {
+		return err
+	}
+	defer attributeList.Delete()
+
+	startup := stdStartup(attributeList)
+	commandLine := windows.ComposeCommandLine(append([]string{command}, args...))
+	info, err := createProcess(commandLine, nil, nil, &startup.startupInfo)
+	if err != nil {
+		return err
+	}
+
+	os.Exit(waitProcess(info))
+	return nil
+}
+
+// stdHandle returns a standard handle, or 0 (which makes the child inherit it).
+func stdHandle(id uint32) windows.Handle {
+	handle, err := windows.GetStdHandle(id)
+	if err != nil || handle == 0 || handle == windows.InvalidHandle {
+		return 0
+	}
+	return handle
+}
+
+// inheritStdHandles makes the standard handles inheritable and returns them
+// once each, as PROC_THREAD_ATTRIBUTE_HANDLE_LIST requires. A handle the host
+// left non-inheritable would dangle in the child: with bInheritHandles=TRUE the
+// value is copied, the handle is not, and a dangling std handle inside an
+// AppContainer crashes the child during initialization.
+func inheritStdHandles() ([]windows.Handle, error) {
+	handles := make([]windows.Handle, 0, 3)
 	for _, id := range []uint32{
 		windows.STD_INPUT_HANDLE, windows.STD_OUTPUT_HANDLE, windows.STD_ERROR_HANDLE,
 	} {
@@ -241,19 +274,18 @@ func execInAppContainer(roots []string, policy Policy, command string, args []st
 			continue
 		}
 		if err := windows.SetHandleInformation(handle, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
-			return err
+			return nil, err
 		}
-		if !slices.Contains(inherited, handle) {
-			inherited = append(inherited, handle)
+		if !slices.Contains(handles, handle) {
+			handles = append(handles, handle)
 		}
 	}
+	return handles, nil
+}
 
-	attributeList, err := newChildAttributeList(security, inherited)
-	if err != nil {
-		return err
-	}
-	defer attributeList.Delete()
-
+// stdStartup builds the STARTUPINFOEX for a child that inherits this process's
+// standard handles.
+func stdStartup(attributeList *windows.ProcThreadAttributeListContainer) startupInfoEx {
 	var startup startupInfoEx
 	startup.startupInfo = windows.StartupInfo{
 		Cb:        uint32(unsafe.Sizeof(startup)),
@@ -263,35 +295,37 @@ func execInAppContainer(roots []string, policy Policy, command string, args []st
 		StdErr:    stdHandle(windows.STD_ERROR_HANDLE),
 	}
 	startup.attributeList = attributeList.List()
+	return startup
+}
 
-	commandPtr, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(append([]string{command}, args...)))
+// createProcess starts a child with the AppContainer attribute list. environment
+// and dir are optional (nil inherits).
+func createProcess(commandLine string, environment, dir *uint16, startup *windows.StartupInfo) (windows.ProcessInformation, error) {
+	commandPtr, err := windows.UTF16PtrFromString(commandLine)
 	if err != nil {
-		return err
+		return windows.ProcessInformation{}, err
 	}
 	var info windows.ProcessInformation
-	if err := windows.CreateProcess(
+	err = windows.CreateProcess(
 		nil, commandPtr, nil, nil, true,
 		windows.CREATE_UNICODE_ENVIRONMENT|extendedStartupInfoPresent,
-		nil, nil, &startup.startupInfo, &info,
-	); err != nil {
-		return err
+		environment, dir, startup, &info,
+	)
+	if err != nil {
+		return windows.ProcessInformation{}, err
 	}
+	return info, nil
+}
+
+// waitProcess waits for the child, releases its handles and returns its exit
+// code.
+func waitProcess(info windows.ProcessInformation) int {
 	windows.CloseHandle(info.Thread)
 	_, _ = windows.WaitForSingleObject(info.Process, windows.INFINITE)
 	var exitCode uint32
 	_ = windows.GetExitCodeProcess(info.Process, &exitCode)
 	windows.CloseHandle(info.Process)
-	os.Exit(int(exitCode))
-	return nil
-}
-
-// stdHandle returns a standard handle, or 0 (which makes the child inherit it).
-func stdHandle(id uint32) windows.Handle {
-	handle, err := windows.GetStdHandle(id)
-	if err != nil {
-		return 0
-	}
-	return handle
+	return int(exitCode)
 }
 
 // exemptLoopback best-effort exempts the profile SID from the AppContainer
@@ -449,39 +483,23 @@ func newChildAttributeList(
 	return attributeList, nil
 }
 
+// childAttributeList builds the AppContainer capabilities and process attribute
+// list for a spawned child.
+func childAttributeList(sid *windows.SID, inherited []windows.Handle, allowNetwork bool) (*windows.ProcThreadAttributeListContainer, error) {
+	security, err := networkSecurity(sid, allowNetwork)
+	if err != nil {
+		return nil, err
+	}
+	return newChildAttributeList(security, inherited)
+}
+
 // spawn starts the command inside the AppContainer, returning the process
 // handle and the readable ends of its stdout (and stderr, unless merged into
 // stdout). On error nothing survives: every pipe end is closed and the returned
 // handles and files are invalid.
-func spawn(policy Policy, dir, commandLine string, envBlock []uint16, stdin []byte, mergeStderr bool) (process windows.Handle, stdout, stderr *os.File, err error) {
-	sid, err := appContainerSID(containerName)
+func spawn(policy Policy, dir, commandLine string, env []uint16, stdin []byte, mergeStderr bool) (process windows.Handle, stdout, stderr *os.File, err error) {
+	sid, dir, err := prepareSpawn(policy, dir)
 	if err != nil {
-		return 0, nil, nil, err
-	}
-	if dir == "" {
-		if dir, err = os.Getwd(); err != nil {
-			return 0, nil, nil, err
-		}
-	}
-	if err := grantAccess(dir, sid); err != nil {
-		return 0, nil, nil, err
-	}
-	for _, root := range policy.WriteRoots() {
-		if err := grantAccess(root, sid); err != nil {
-			return 0, nil, nil, err
-		}
-	}
-	for _, root := range policy.AllowRead {
-		if err := grantRead(root, sid); err != nil {
-			return 0, nil, nil, err
-		}
-	}
-	for _, socket := range policy.SocketPaths() {
-		if err := grantAccess(socket, sid); err != nil {
-			return 0, nil, nil, err
-		}
-	}
-	if err := grantTempTraversal(policy, sid); err != nil {
 		return 0, nil, nil, err
 	}
 
@@ -498,24 +516,57 @@ func spawn(policy Policy, dir, commandLine string, envBlock []uint16, stdin []by
 	}()
 
 	allowNetwork := policy.NetworkMode == NetworkOff
-	security, err := networkSecurity(sid, allowNetwork)
-	if err != nil {
-		return 0, nil, nil, err
-	}
 	if allowNetwork {
 		exemptLoopback(sid)
 	}
-	attributeList, err := newChildAttributeList(security, pipes.childHandles())
+	attributeList, err := childAttributeList(sid, pipes.childHandles(), allowNetwork)
 	if err != nil {
 		return 0, nil, nil, err
 	}
 	defer attributeList.Delete()
 
-	// Inside an AppContainer, CreateProcess with bInheritHandles=TRUE corrupts
-	// child initialization (STATUS_DLL_INIT_FAILED / access violation) when any
-	// inheritable handle is copied. The explicit handle list restricts
-	// inheritance to exactly the std pipe handles, which avoids that.
-	startup := startupInfoEx{
+	startup := pipeStartup(pipes, attributeList)
+	dirPtr, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	info, err := createProcess(commandLine, &env[0], dirPtr, &startup.startupInfo)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+
+	process, stdout, stderr = finishSpawn(info, pipes, stdin, mergeStderr)
+	return process, stdout, stderr, nil
+}
+
+// prepareSpawn resolves the profile SID and run directory and grants the policy
+// access to both.
+func prepareSpawn(policy Policy, dir string) (*windows.SID, string, error) {
+	sid, err := appContainerSID(containerName)
+	if err != nil {
+		return nil, "", err
+	}
+	if dir == "" {
+		if dir, err = os.Getwd(); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := grantAccess(dir, sid); err != nil {
+		return nil, "", err
+	}
+	if err := grantPolicyAccess(policy, sid); err != nil {
+		return nil, "", err
+	}
+	return sid, dir, nil
+}
+
+// pipeStartup builds the STARTUPINFOEX for a child fed by the spawn pipes.
+// Inside an AppContainer, CreateProcess with bInheritHandles=TRUE corrupts child
+// initialization (STATUS_DLL_INIT_FAILED / access violation) when any inheritable
+// handle is copied; the explicit handle list restricts inheritance to exactly
+// the std pipe handles.
+func pipeStartup(pipes *stdioPipes, attributeList *windows.ProcThreadAttributeListContainer) startupInfoEx {
+	return startupInfoEx{
 		startupInfo: windows.StartupInfo{
 			Cb:        uint32(unsafe.Sizeof(startupInfoEx{})),
 			Flags:     windows.STARTF_USESTDHANDLES,
@@ -525,22 +576,11 @@ func spawn(policy Policy, dir, commandLine string, envBlock []uint16, stdin []by
 		},
 		attributeList: attributeList.List(),
 	}
-	commandPtr, err := windows.UTF16PtrFromString(commandLine)
-	if err != nil {
-		return 0, nil, nil, err
-	}
-	dirPtr, err := windows.UTF16PtrFromString(dir)
-	if err != nil {
-		return 0, nil, nil, err
-	}
-	var info windows.ProcessInformation
-	if err = windows.CreateProcess(
-		nil, commandPtr, nil, nil, true,
-		windows.CREATE_UNICODE_ENVIRONMENT|extendedStartupInfoPresent,
-		&envBlock[0], dirPtr, &startup.startupInfo, &info,
-	); err != nil {
-		return 0, nil, nil, err
-	}
+}
+
+// finishSpawn releases the child's pipe ends and wires stdin and the readable
+// output ends.
+func finishSpawn(info windows.ProcessInformation, pipes *stdioPipes, stdin []byte, mergeStderr bool) (windows.Handle, *os.File, *os.File) {
 	windows.CloseHandle(info.Thread)
 	pipes.closeChildEnds()
 
@@ -551,10 +591,12 @@ func spawn(policy Policy, dir, commandLine string, envBlock []uint16, stdin []by
 	} else {
 		_ = stdinFile.Close()
 	}
+
+	var stderr *os.File
 	if !mergeStderr {
 		stderr = os.NewFile(uintptr(pipes.parentStderrRead), "stderr")
 	}
-	return info.Process, os.NewFile(uintptr(pipes.parentStdoutRead), "stdout"), stderr, nil
+	return info.Process, os.NewFile(uintptr(pipes.parentStdoutRead), "stdout"), stderr
 }
 
 // envBlock renders the child environment (base = os.Environ() unless a non-nil
@@ -579,13 +621,21 @@ func envBlock(env map[string]string, extend bool) []uint16 {
 	return append(block, 0)
 }
 
+// waitResult is one process exit delivered by wait.
+type waitResult struct {
+	exitCode uint32
+	err      error
+}
+
 // wait blocks until the process exits, its context is canceled, or the timeout
-// elapses (returning core.ErrTimedOut for the last).
+// elapses. Cancellation returns ctx.Err(); a timeout returns core.ErrTimedOut.
 func wait(ctx context.Context, process windows.Handle, timeout time.Duration) (uint32, error) {
 	stop := make(chan struct{})
-	defer close(stop)
+	var watcher sync.WaitGroup
 	if ctx != nil {
+		watcher.Add(1)
 		go func() {
+			defer watcher.Done()
 			select {
 			case <-ctx.Done():
 				_ = windows.TerminateProcess(process, 1)
@@ -593,6 +643,13 @@ func wait(ctx context.Context, process windows.Handle, timeout time.Duration) (u
 			}
 		}()
 	}
+	// Join the watcher before the caller closes the process handle, so a late
+	// TerminateProcess cannot race with handle reuse.
+	defer func() {
+		close(stop)
+		watcher.Wait()
+	}()
+
 	millis := uint32(windows.INFINITE)
 	if timeout > 0 {
 		millis = uint32(timeout / time.Millisecond)
@@ -610,9 +667,40 @@ func wait(ctx context.Context, process windows.Handle, timeout time.Duration) (u
 	if err := windows.GetExitCodeProcess(process, &exitCode); err != nil {
 		return 0, err
 	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return 0, core.ErrTimedOut
+			}
+			return 0, err
+		}
+	}
 	return exitCode, nil
 }
 
+// waitAsync waits for the process on a goroutine so the caller can drain its
+// output concurrently.
+func waitAsync(ctx context.Context, process windows.Handle, timeout time.Duration) <-chan waitResult {
+	waited := make(chan waitResult, 1)
+	go func() {
+		exitCode, err := wait(ctx, process, timeout)
+		waited <- waitResult{exitCode: exitCode, err: err}
+	}()
+	return waited
+}
+
+// appContainerProcess runs every command inside a Windows AppContainer: a
+// low-integrity sandbox with no network and no filesystem access except the
+// paths the policy grants. It is best-effort — the SDK ships no guarantee for
+// it; Windows whole-process isolation is a container/Job Object deployment
+// concern.
+type appContainerProcess struct {
+	policy Policy
+}
+
+// Run runs one command inside the AppContainer. Detached and ForceKillAfter
+// are not implemented on Windows: a timed-out or canceled process is terminated
+// immediately.
 func (p *appContainerProcess) Run(
 	ctx context.Context,
 	command string,
@@ -624,17 +712,19 @@ func (p *appContainerProcess) Run(
 		return nil, err
 	}
 	defer cleanup()
+
 	options = withTempEnv(options, policy)
 	var opts core.RunOptions
 	if len(options) > 0 {
 		opts = options[0]
 	}
-	description := util.DescribeCommand(command, args)
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
+
+	description := util.DescribeCommand(command, args)
 	commandLine := windows.ComposeCommandLine(append([]string{command}, args...))
 	process, stdout, stderr, err := spawn(policy, opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), opts.Stdin, opts.CombineOutput)
 	if err != nil {
@@ -650,42 +740,26 @@ func (p *appContainerProcess) Run(
 		wg.Add(1)
 		go func() { defer wg.Done(); _, _ = io.Copy(&stderrBuf, stderr) }()
 	}
+
 	exitCode, waitErr := wait(ctx, process, opts.Timeout)
 	wg.Wait()
 	_ = stdout.Close()
 	if stderr != nil {
 		_ = stderr.Close()
 	}
+
 	if errors.Is(waitErr, core.ErrTimedOut) {
 		return nil, &core.AppProcessError{Command: description, Cause: core.ErrTimedOut}
 	}
 	if waitErr != nil {
 		return nil, &core.AppProcessError{Command: description, Cause: waitErr}
 	}
-	if opts.CombineOutput {
-		merged := append(stdoutBuf.Bytes(), stderrBuf.Bytes()...)
-		output, truncated := util.Truncate(merged, opts.MaxOutputBytes)
-		return &core.RunResult{
-			Command:         description,
-			ExitCode:        int(exitCode),
-			Output:          output,
-			Stdout:          []byte{},
-			Stderr:          []byte{},
-			OutputTruncated: truncated,
-		}, nil
-	}
-	out, stdoutTruncated := util.Truncate(stdoutBuf.Bytes(), opts.MaxOutputBytes)
-	errOut, stderrTruncated := util.Truncate(stderrBuf.Bytes(), opts.MaxErrorBytes)
-	return &core.RunResult{
-		Command:         description,
-		ExitCode:        int(exitCode),
-		Stdout:          out,
-		Stderr:          errOut,
-		StdoutTruncated: stdoutTruncated,
-		StderrTruncated: stderrTruncated,
-	}, nil
+	return runResult(description, exitCode, opts, stdoutBuf.Bytes(), stderrBuf.Bytes()), nil
 }
 
+// RunStream streams one command inside the AppContainer. Detached and
+// ForceKillAfter are not implemented on Windows: a timed-out or canceled
+// process is terminated immediately.
 func (p *appContainerProcess) RunStream(
 	ctx context.Context,
 	command string,
@@ -700,6 +774,7 @@ func (p *appContainerProcess) RunStream(
 			return
 		}
 		defer cleanup()
+
 		options = withStreamTempEnv(options, policy)
 		var opts core.RunStreamOptions
 		if len(options) > 0 {
@@ -710,6 +785,7 @@ func (p *appContainerProcess) RunStream(
 			ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 			defer cancel()
 		}
+
 		commandLine := windows.ComposeCommandLine(append([]string{command}, args...))
 		process, stdout, stderr, err := spawn(policy, opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), nil, opts.IncludeStderr)
 		if err != nil {
@@ -718,31 +794,132 @@ func (p *appContainerProcess) RunStream(
 		}
 		defer windows.CloseHandle(process)
 
-		if stderr != nil {
-			go func() { _, _ = io.Copy(io.Discard, stderr); _ = stderr.Close() }()
-		}
+		stderrBuf, stderrDone := streamStderr(stderr, opts.MaxErrorBytes)
+
+		// Wait concurrently with reading so a timeout or cancellation can
+		// terminate the process and unblock the stream.
+		waited := waitAsync(ctx, process, opts.Timeout)
+
 		stopped, readFailure := util.StreamReadLines(stdout, yield)
 		_ = stdout.Close()
-		exitCode, waitErr := wait(ctx, process, opts.Timeout)
+		if stopped {
+			_ = windows.TerminateProcess(process, 1)
+		}
+		result := <-waited
+		if stderrDone != nil {
+			<-stderrDone
+		}
 		if stopped {
 			return
 		}
-		if errors.Is(waitErr, core.ErrTimedOut) {
-			yield("", &core.AppProcessError{Command: description, Cause: core.ErrTimedOut})
+
+		if err := streamWaitError(description, result.err, readFailure); err != nil {
+			yield("", err)
 			return
 		}
-		if readFailure != nil {
-			yield("", &core.AppProcessError{Command: description, Cause: readFailure})
-			return
+		stderrText := ""
+		if stderrBuf != nil {
+			stderrText = stderrBuf.String()
 		}
-		if waitErr != nil {
-			yield("", &core.AppProcessError{Command: description, Cause: waitErr})
-			return
-		}
-		if len(opts.OkExitCodes) > 0 && !slices.Contains(opts.OkExitCodes, int(exitCode)) {
-			code := int(exitCode)
-			empty := ""
-			yield("", &core.AppProcessError{Command: description, ExitCode: &code, Stderr: &empty})
+		if err := streamExitError(description, result.exitCode, opts.OkExitCodes, stderrText); err != nil {
+			yield("", err)
 		}
 	}
+}
+
+// runResult assembles a completed command's output under the caller's limits.
+func runResult(description string, exitCode uint32, opts core.RunOptions, stdout, stderr []byte) *core.RunResult {
+	if opts.CombineOutput {
+		merged := append(stdout, stderr...)
+		output, truncated := util.Truncate(merged, opts.MaxOutputBytes)
+		return &core.RunResult{
+			Command:         description,
+			ExitCode:        int(exitCode),
+			Output:          output,
+			Stdout:          []byte{},
+			Stderr:          []byte{},
+			OutputTruncated: truncated,
+		}
+	}
+	out, stdoutTruncated := util.Truncate(stdout, opts.MaxOutputBytes)
+	errOut, stderrTruncated := util.Truncate(stderr, opts.MaxErrorBytes)
+	return &core.RunResult{
+		Command:         description,
+		ExitCode:        int(exitCode),
+		Stdout:          out,
+		Stderr:          errOut,
+		StdoutTruncated: stdoutTruncated,
+		StderrTruncated: stderrTruncated,
+	}
+}
+
+// boundedBuffer keeps at most limit bytes; a negative limit is unbounded.
+type boundedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+// newBoundedBuffer returns a buffer capped at max bytes; nil is unbounded.
+func newBoundedBuffer(max *int) *boundedBuffer {
+	limit := -1
+	if max != nil {
+		limit = *max
+	}
+	return &boundedBuffer{limit: limit}
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if b.limit < 0 {
+		return b.buf.Write(p)
+	}
+	written := len(p)
+	if remaining := b.limit - b.buf.Len(); remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		b.buf.Write(p)
+	}
+	return written, nil
+}
+
+func (b *boundedBuffer) String() string { return b.buf.String() }
+
+// streamStderr drains the child's stderr, keeping at most max bytes, and
+// reports when the copy is done.
+func streamStderr(stderr *os.File, max *int) (*boundedBuffer, <-chan struct{}) {
+	if stderr == nil {
+		return nil, nil
+	}
+	buf := newBoundedBuffer(max)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = io.Copy(buf, stderr)
+		_ = stderr.Close()
+	}()
+	return buf, done
+}
+
+// streamWaitError maps a wait or read failure to the stream's terminal error.
+func streamWaitError(description string, waitErr, readFailure error) error {
+	if errors.Is(waitErr, core.ErrTimedOut) {
+		return &core.AppProcessError{Command: description, Cause: core.ErrTimedOut}
+	}
+	if readFailure != nil {
+		return &core.AppProcessError{Command: description, Cause: readFailure}
+	}
+	if waitErr != nil {
+		return &core.AppProcessError{Command: description, Cause: waitErr}
+	}
+	return nil
+}
+
+// streamExitError rejects an exit code the caller did not allow, carrying the
+// captured stderr as context.
+func streamExitError(description string, exitCode uint32, okExitCodes []int, stderr string) error {
+	if len(okExitCodes) == 0 || slices.Contains(okExitCodes, int(exitCode)) {
+		return nil
+	}
+	code := int(exitCode)
+	return &core.AppProcessError{Command: description, ExitCode: &code, Stderr: &stderr}
 }

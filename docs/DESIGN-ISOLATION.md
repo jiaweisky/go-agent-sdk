@@ -429,9 +429,10 @@ Validation (fail-fast, like the rest of `config.Validate`):
   `unixSockets.mode` is `inherit | allowAll | allowlist` (allowlist requires a path; the
   pre-rename `deny` is accepted as an alias for inherit);
   `processInspection` is `deny | allow`; `env.mode` is `scrub | inherit`. Unsupported rules fail
-  startup — notably a **write glob on Linux** (bwrap cannot express it), Windows `read/write: off`
-  and `processInspection: allow` (the AppContainer cannot express them), and Linux `write: off`
-  together with `read: allow` (contradictory) — never a silent allow-all.
+  startup — notably a **write glob on Linux** (bwrap cannot express it), Windows `read/write: off`,
+  explicit `denyRead`/`denyWrite` and `processInspection: allow` (the AppContainer cannot express
+  them), and Linux `write: off` together with `read: allow` (contradictory) — never a silent
+  allow-all.
 
 Whole-process wrapping is a **top-level** `wrap` block (§8.1), not a per-server
 field, because it applies to the whole process:

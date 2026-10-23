@@ -142,3 +142,20 @@ func TestAppProcessRunStreamRejectsUnexpectedExit(t *testing.T) {
 		t.Fatal("expected an exit-code error")
 	}
 }
+
+func TestBoundedBufferConsumesAll(t *testing.T) {
+	limit := 4
+	buf := newBoundedBuffer(&limit)
+	if n, err := buf.Write([]byte("abcdef")); n != 6 || err != nil {
+		t.Fatalf("write = %d, %v; want 6, nil", n, err)
+	}
+	if got := buf.String(); got != "abcd" {
+		t.Fatalf("buffer = %q, want abcd", got)
+	}
+	if n, err := buf.Write([]byte("gh")); n != 2 || err != nil {
+		t.Fatalf("overflow write = %d, %v; want 2, nil", n, err)
+	}
+	if got := buf.String(); got != "abcd" {
+		t.Fatalf("buffer = %q after overflow, want abcd", got)
+	}
+}

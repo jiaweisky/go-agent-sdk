@@ -317,13 +317,14 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	if b.limit < 0 {
 		return b.buf.Write(p)
 	}
+	written := len(p)
 	if remaining := b.limit - b.buf.Len(); remaining > 0 {
 		if len(p) > remaining {
 			p = p[:remaining]
 		}
 		b.buf.Write(p)
 	}
-	return len(p), nil
+	return written, nil
 }
 
 func (b *boundedBuffer) String() string { return b.buf.String() }

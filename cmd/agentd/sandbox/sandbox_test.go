@@ -63,3 +63,62 @@ func TestResolveProcessUnknownErrors(t *testing.T) {
 		t.Fatal("expected an unknown whole-process wrapper to be rejected")
 	}
 }
+
+func TestResolveInvalidViolationMode(t *testing.T) {
+	Register("violation-mode-test", func(Policy) core.AppProcess { return dummyProcess{} })
+	_, err := Resolve("violation-mode-test", Policy{ViolationMode: "bogus"})
+	if err == nil {
+		t.Fatal("expected an unknown violation mode to be rejected")
+	}
+}
+
+func TestRegisterValidation(t *testing.T) {
+	factory := func(Policy) core.AppProcess { return dummyProcess{} }
+	probe := func() error { return nil }
+	for _, name := range []string{"", "none"} {
+		t.Run("reserved "+name, func(t *testing.T) {
+			mustPanic(t, func() { Register(name, factory) })
+		})
+	}
+	t.Run("nil factory", func(t *testing.T) {
+		mustPanic(t, func() { Register("nil-factory-test", nil) })
+	})
+	t.Run("duplicate", func(t *testing.T) {
+		Register("duplicate-register-test", factory)
+		mustPanic(t, func() { Register("duplicate-register-test", factory) })
+	})
+	t.Run("nil probe", func(t *testing.T) {
+		mustPanic(t, func() { RegisterAvailable("nil-probe-test", nil) })
+	})
+	t.Run("duplicate probe", func(t *testing.T) {
+		RegisterAvailable("duplicate-probe-test", probe)
+		mustPanic(t, func() { RegisterAvailable("duplicate-probe-test", probe) })
+	})
+}
+
+func TestRegisterProcessValidation(t *testing.T) {
+	noop := func(Policy, string, []string) error { return nil }
+	for _, name := range []string{"", "none"} {
+		t.Run("reserved "+name, func(t *testing.T) {
+			mustPanic(t, func() { RegisterProcess(name, noop) })
+		})
+	}
+	t.Run("nil launcher", func(t *testing.T) {
+		mustPanic(t, func() { RegisterProcess("nil-launcher-test", nil) })
+	})
+	t.Run("duplicate", func(t *testing.T) {
+		RegisterProcess("duplicate-process-test", noop)
+		mustPanic(t, func() { RegisterProcess("duplicate-process-test", noop) })
+	})
+}
+
+// mustPanic fails the test unless fn panics.
+func mustPanic(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected a panic")
+		}
+	}()
+	fn()
+}

@@ -196,7 +196,7 @@ type SandboxConfig struct {
 // secure defaults; "custom" applies only the explicit fields; "off" disables the
 // policy (and the sandbox itself).
 type SandboxPolicy struct {
-	Profile           string              `yaml:"profile" json:"profile,omitempty"`
+	Profile           Profile             `yaml:"profile" json:"profile,omitempty"`
 	Filesystem        *SandboxFilesystem  `yaml:"filesystem" json:"filesystem,omitempty"`
 	Network           *SandboxNetwork     `yaml:"network" json:"network,omitempty"`
 	UnixSockets       *SandboxUnixSockets `yaml:"unixSockets" json:"unixSockets,omitempty"`

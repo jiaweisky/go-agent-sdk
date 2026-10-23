@@ -19,6 +19,12 @@ type WrapConfig struct {
 	SandboxPolicy `yaml:",inline"`
 }
 
+// Enabled reports whether a whole-process wrapper and a non-off profile are
+// configured.
+func (w *WrapConfig) Enabled() bool {
+	return w != nil && w.Wrapper != "" && w.Wrapper != WrapperNone && w.Profile != ProfileOff
+}
+
 // Validate checks the whole-process sandbox block. Nil is valid (wrap disabled).
 func (w *WrapConfig) Validate() error {
 	if w == nil {
