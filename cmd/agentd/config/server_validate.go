@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path"
 	"slices"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Validate checks one server's fields against the global catalog.
@@ -19,24 +22,83 @@ func (s Server) Validate(catalog Catalog) error {
 	return validateA2AFields(s)
 }
 
+// validateRoutingFields checks the per-server fields that select a route on a
+// listener. Cross-server rules (duplicate hosts or path prefixes, one root
+// server, and consistent TLS) are checked by validateListenerGroups.
+func (s Server) validateRoutingFields() error {
+	if err := s.validateHostField(); err != nil {
+		return err
+	}
+	if err := s.validatePathPrefixField(); err != nil {
+		return err
+	}
+	if s.TLS != nil && (s.TLS.CertFile == "" || s.TLS.KeyFile == "") {
+		return fmt.Errorf("server %q: tls requires both certFile and keyFile", s.Name)
+	}
+	return nil
+}
+
+// validateHostField checks a virtual host used for request routing.
+func (s Server) validateHostField() error {
+	if s.Host == "" {
+		return nil
+	}
+	if NormalizeHost(s.Host) == "" {
+		return fmt.Errorf("server %q: host must not be empty", s.Name)
+	}
+	if invalidHostPort(s.Host) ||
+		strings.ContainsAny(s.Host, `/\?#,@`) ||
+		containsSpaceOrControl(s.Host) {
+		return fmt.Errorf("server %q: host %q is invalid", s.Name, s.Host)
+	}
+	return nil
+}
+
+// validatePathPrefixField checks a URL path prefix used for request routing.
+func (s Server) validatePathPrefixField() error {
+	prefix := s.PathPrefix
+	if prefix == "" {
+		return nil
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		return fmt.Errorf("server %q: pathPrefix must start with /", s.Name)
+	}
+	normalized := NormalizePathPrefix(prefix)
+	if normalized == "/" {
+		return fmt.Errorf("server %q: pathPrefix must not be /; omit it to serve the listener root", s.Name)
+	}
+	if strings.ContainsAny(prefix, `?#\%`) || containsSpaceOrControl(prefix) {
+		return fmt.Errorf("server %q: pathPrefix %q is invalid", s.Name, prefix)
+	}
+	if path.Clean(normalized) != normalized {
+		return fmt.Errorf("server %q: pathPrefix %q is not a clean path", s.Name, prefix)
+	}
+	return nil
+}
+
 // validateServerCommon checks the fields every server shares, regardless of
 // kind. Kind-specific fields are validated separately.
 func validateServerCommon(s Server, catalog Catalog) error {
 	if err := validateServerShape(s); err != nil {
 		return err
 	}
+
 	if err := validateServerCatalog(s, catalog); err != nil {
 		return err
 	}
+
 	if err := validateServerComponents(s); err != nil {
 		return err
 	}
+
 	return validateServerPolicy(s)
 }
 
 // validateServerShape checks the fields that describe the server itself.
 func validateServerShape(s Server) error {
 	switch {
+	case s.Name == "":
+		return errors.New("server name is required")
 	case !s.Kind.Valid():
 		return fmt.Errorf("server %q: kind must be %s or %s", s.Name, KindHTTP, KindA2A)
 	case s.Listen == "":
@@ -45,24 +107,48 @@ func validateServerShape(s Server) error {
 		return fmt.Errorf("server %q: root is required", s.Name)
 	case len(s.Agents) == 0:
 		return fmt.Errorf("server %q: at least one agent is required", s.Name)
-	case s.PathPrefix != "" && !strings.HasPrefix(s.PathPrefix, "/"):
-		return fmt.Errorf("server %q: pathPrefix must start with /", s.Name)
 	case s.SubagentDepth < 0:
 		return fmt.Errorf("server %q: subagentDepth must not be negative, got %d", s.Name, s.SubagentDepth)
 	case s.SubscriberCapacity < 0:
 		return fmt.Errorf("server %q: subscriberCapacity must not be negative, got %d", s.Name, s.SubscriberCapacity)
 	case s.MaxBodyBytes < 0:
 		return fmt.Errorf("server %q: maxBodyBytes must not be negative, got %d", s.Name, s.MaxBodyBytes)
-	case s.TLS != nil && (s.TLS.CertFile == "" || s.TLS.KeyFile == ""):
-		return fmt.Errorf("server %q: tls requires both certFile and keyFile", s.Name)
 	}
 	if _, _, err := net.SplitHostPort(s.Listen); err != nil {
 		return fmt.Errorf("server %q: listen: %w", s.Name, err)
 	}
-	if NormalizePathPrefix(s.PathPrefix) == "/" {
-		return fmt.Errorf("server %q: pathPrefix must not be /; omit it to serve the listener root", s.Name)
+	return s.validateRoutingFields()
+}
+
+// invalidHostPort reports whether a host with a port has a malformed port, or
+// whether a bracketed host is not an IP literal.
+func invalidHostPort(host string) bool {
+	if !strings.Contains(host, ":") {
+		return false
 	}
-	return nil
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return net.ParseIP(host[1:len(host)-1]) == nil
+	}
+	if net.ParseIP(host) != nil {
+		return false
+	}
+	_, port, err := net.SplitHostPort(host)
+	if err != nil {
+		return true
+	}
+	_, err = strconv.Atoi(port)
+	return err != nil
+}
+
+// containsSpaceOrControl reports whether a value contains whitespace or a
+// control character.
+func containsSpaceOrControl(value string) bool {
+	for _, r := range value {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // validateServerCatalog checks the server's model subset against the catalog.
@@ -84,6 +170,7 @@ func validateServerComponents(s Server) error {
 	if err := ValidateA2APeers(s.Peers); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	if err := s.Media.Validate(); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
@@ -93,13 +180,14 @@ func validateServerComponents(s Server) error {
 	if err := s.Storage.Validate(); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	if err := ValidateReferences(s.References); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
 	return nil
 }
 
-// validateServerPolicy checks auth, lifetime and interaction policy.
+// validateServerPolicy checks auth, lifetime, interaction policy and isolation.
 func validateServerPolicy(s Server) error {
 	if err := validateServerAuth(s); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
@@ -144,8 +232,7 @@ func validateA2AFields(s Server) error {
 			"server %q: interactionTimeout, interactionFallback, "+
 				"subscriberCapacity, publicRoutes and cors are http-only", s.Name)
 	}
-	switch {
-	case !s.InboundMedia.Valid():
+	if !s.InboundMedia.Valid() {
 		return fmt.Errorf("server %q: inboundMedia must be spool or inline, got %q", s.Name, s.InboundMedia)
 	}
 	return validateAgentCards(s)

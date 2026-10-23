@@ -10,6 +10,11 @@ func TestValidateReferences(t *testing.T) {
 	if err := ValidateReferences(valid); err != nil {
 		t.Fatalf("valid references rejected: %v", err)
 	}
+	for _, ref := range valid {
+		if err := ref.Validate(); err != nil {
+			t.Fatalf("valid reference %q rejected: %v", ref.Name, err)
+		}
+	}
 	cases := []struct {
 		name string
 		ref  Reference
@@ -20,8 +25,11 @@ func TestValidateReferences(t *testing.T) {
 		{"unknown type", Reference{Name: "bad", Type: "ftp"}},
 	}
 	for _, tc := range cases {
-		if err := ValidateReferences([]Reference{tc.ref}); err == nil {
+		if err := tc.ref.Validate(); err == nil {
 			t.Errorf("%s: expected an error", tc.name)
 		}
+	}
+	if err := ValidateReferences([]Reference{{Name: "bad", Type: "ftp"}}); err == nil {
+		t.Fatal("expected ValidateReferences to surface the entry error")
 	}
 }

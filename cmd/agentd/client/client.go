@@ -93,15 +93,16 @@ func New(p Params) (*agent.Client, error) {
 
 // MCPConfigs converts configured MCP servers into SDK client configs.
 func MCPConfigs(servers []config.MCPServer) ([]agent.MCPConfig, error) {
-	timeouts, err := config.MCPTimeouts(servers)
+	entries, err := config.ValidateMCPConfigs(servers)
 	if err != nil {
 		return nil, err
 	}
-	if len(servers) == 0 {
+	if len(entries) == 0 {
 		return nil, nil
 	}
-	result := make([]agent.MCPConfig, 0, len(servers))
-	for i, server := range servers {
+	result := make([]agent.MCPConfig, 0, len(entries))
+	for _, entry := range entries {
+		server := entry.Server
 		result = append(result, agent.MCPConfig{
 			Name: server.Name,
 			Server: mcp.ServerConfig{
@@ -112,7 +113,7 @@ func MCPConfigs(servers []config.MCPServer) ([]agent.MCPConfig, error) {
 				URL:         server.URL,
 				Headers:     server.Headers,
 				Enabled:     server.Enabled,
-				Timeout:     timeouts[i],
+				Timeout:     entry.Timeout,
 			},
 		})
 	}

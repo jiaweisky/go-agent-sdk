@@ -32,23 +32,31 @@ type Reference struct {
 	Hidden      *bool         `yaml:"hidden"`
 }
 
+// Validate checks one reference source.
+func (r Reference) Validate() error {
+	if r.Name == "" {
+		return errors.New("references: each requires a name")
+	}
+	switch r.Type {
+	case ReferenceLocal:
+		if r.Path == "" {
+			return fmt.Errorf("reference %s: local requires path", r.Name)
+		}
+	case ReferenceGit:
+		if r.Repository == "" {
+			return fmt.Errorf("reference %s: git requires repository", r.Name)
+		}
+	default:
+		return fmt.Errorf("reference %s: type must be local or git, got %q", r.Name, r.Type)
+	}
+	return nil
+}
+
 // ValidateReferences checks configured reference sources.
 func ValidateReferences(refs []Reference) error {
 	for _, ref := range refs {
-		if ref.Name == "" {
-			return errors.New("references: each requires a name")
-		}
-		switch ref.Type {
-		case ReferenceLocal:
-			if ref.Path == "" {
-				return fmt.Errorf("reference %s: local requires path", ref.Name)
-			}
-		case ReferenceGit:
-			if ref.Repository == "" {
-				return fmt.Errorf("reference %s: git requires repository", ref.Name)
-			}
-		default:
-			return fmt.Errorf("reference %s: type must be local or git, got %q", ref.Name, ref.Type)
+		if err := ref.Validate(); err != nil {
+			return err
 		}
 	}
 	return nil

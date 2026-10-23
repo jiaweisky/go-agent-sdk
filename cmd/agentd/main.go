@@ -28,10 +28,12 @@ func runMain(args []string) error {
 	if err := fl.parse(args); err != nil {
 		return err
 	}
+
 	if fl.version {
 		fmt.Println(version)
 		return nil
 	}
+
 	cfg := config.Config{}
 	if err := config.Load(fl.config, &cfg); err != nil {
 		return err
@@ -39,16 +41,19 @@ func runMain(args []string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+
 	// -check validates the configuration and exits without serving.
 	if fl.check {
 		fmt.Fprintf(os.Stderr, "agentd: configuration %s is valid\n", fl.config)
 		return nil
 	}
+
 	// Wrap, when configured, re-executes agentd inside a whole-process sandbox
 	// (does not return on success).
 	if err := wrapProcess(cfg, fl.config); err != nil {
 		return err
 	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return run(ctx, cfg, &introspectDoc{config: cfg, path: fl.config, version: version})

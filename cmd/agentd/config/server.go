@@ -1,11 +1,5 @@
 package config
 
-import (
-	"errors"
-	"fmt"
-	"time"
-)
-
 // Server is one served instance: one client. Servers with the same Listen share
 // one listener and are routed by Host and PathPrefix.
 type Server struct {
@@ -35,7 +29,8 @@ type Server struct {
 	// by Host or PathPrefix. A server with neither serves the listener root.
 	Host string `yaml:"host"`
 	// PathPrefix is a URL path prefix (not a filesystem mount); requests below
-	// it are served by this server.
+	// it are served by this server. It must be a clean, decoded path:
+	// percent-encoded values and dot segments are rejected.
 	PathPrefix string `yaml:"pathPrefix"`
 	// Default marks the A2A server that owns the origin-root agent card.
 	Default bool `yaml:"default"`
@@ -250,35 +245,4 @@ type SandboxUnixSockets struct {
 type SandboxEnv struct {
 	Mode  string   `yaml:"mode" json:"mode,omitempty"`
 	Scrub []string `yaml:"scrub" json:"scrub,omitempty"`
-}
-
-// KeepAliveDuration parses a keepAlive value; empty means the 15s default
-// (0 disables).
-func KeepAliveDuration(keepAlive string) (time.Duration, error) {
-	if keepAlive == "" {
-		return 15 * time.Second, nil
-	}
-	duration, err := time.ParseDuration(keepAlive)
-	if err != nil {
-		return 0, fmt.Errorf("keepAlive: %w", err)
-	}
-	if duration < 0 {
-		return 0, errors.New("keepAlive must not be negative")
-	}
-	return duration, nil
-}
-
-// InteractionTimeout parses an interactionTimeout value; empty means no timeout.
-func InteractionTimeout(interactionTimeout string) (time.Duration, error) {
-	if interactionTimeout == "" {
-		return 0, nil
-	}
-	duration, err := time.ParseDuration(interactionTimeout)
-	if err != nil {
-		return 0, fmt.Errorf("interactionTimeout: %w", err)
-	}
-	if duration < 0 {
-		return 0, errors.New("interactionTimeout must not be negative")
-	}
-	return duration, nil
 }

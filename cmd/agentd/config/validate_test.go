@@ -1,6 +1,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,6 +17,10 @@ func testModel() ModelConfig {
 	}
 }
 
+func testCards() map[string]CardConfig {
+	return map[string]CardConfig{"build": {Name: "Build Agent", Description: "A build agent."}}
+}
+
 func TestValidateExampleConfig(t *testing.T) {
 	cfg := Config{}
 	if err := Load("../agentd.example.yaml", &cfg); err != nil {
@@ -22,10 +29,6 @@ func TestValidateExampleConfig(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("validate example: %v", err)
 	}
-}
-
-func testCards() map[string]CardConfig {
-	return map[string]CardConfig{"build": {Name: "Build Agent", Description: "A build agent."}}
 }
 
 func TestValidateRejectsSharedRoot(t *testing.T) {
@@ -383,5 +386,174 @@ func TestValidateSharesListenTLS(t *testing.T) {
 	mismatched.Servers[1].TLS = nil
 	if err := mismatched.Validate(); err == nil {
 		t.Fatal("expected mismatched tls on a shared listen to be rejected")
+	}
+}
+
+func TestValidateRejectsEmptyModels(t *testing.T) {
+	if err := (Config{}).Validate(); err == nil || err.Error() != "models is required" {
+		t.Fatalf("empty models error = %v", err)
+	}
+}
+
+func TestValidateRejectsCaseVariantRoot(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("case-insensitive paths are a Windows concern")
+	}
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: `C:\state`, Agents: []string{"build"}},
+			{Name: "b", Kind: "http", Listen: "127.0.0.1:2", Root: `c:\state`, Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected case-variant roots to be rejected on Windows")
+	}
+}
+
+func TestValidateRejectsSymlinkRoot(t *testing.T) {
+	root := t.TempDir()
+	linkParent := t.TempDir()
+	link := filepath.Join(linkParent, "state")
+	if err := os.Symlink(root, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: root, Agents: []string{"build"}},
+			{Name: "b", Kind: "http", Listen: "127.0.0.1:2", Root: link, Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected symlinked roots to be rejected")
+	}
+}
+
+func TestValidateRejectsControlListenOverlap(t *testing.T) {
+	cfg := Config{
+		Models:  []ModelConfig{testModel()},
+		Control: &ControlConfig{Listen: "127.0.0.1:1"},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected a control listen overlapping a server listen to be rejected")
+	}
+}
+
+func TestValidateRejectsEmptyNormalizedHost(t *testing.T) {
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}, Host: ":8080"},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected a host that normalizes to empty to be rejected")
+	}
+}
+
+func TestValidateGroupsEquivalentListenAddresses(t *testing.T) {
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}},
+			{Name: "b", Kind: "http", Listen: "127.0.0.1:01", Root: "/b", Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected equivalent listen addresses to share a listener group")
+	}
+}
+
+func TestValidateRejectsUnroutableHost(t *testing.T) {
+	for _, host := range []string{" ", ":8080", "example.com/path", "example.com:bad"} {
+		cfg := Config{
+			Models: []ModelConfig{testModel()},
+			Servers: []Server{
+				{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}, Host: host},
+			},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("host %q: expected an error", host)
+		}
+	}
+}
+
+func TestValidateRejectsUnroutablePathPrefix(t *testing.T) {
+	for _, prefix := range []string{"/x?y", "/x y", "/x/../y", "/x//y"} {
+		cfg := Config{
+			Models: []ModelConfig{testModel()},
+			Servers: []Server{
+				{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}, PathPrefix: prefix},
+			},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("pathPrefix %q: expected an error", prefix)
+		}
+	}
+}
+
+func TestValidateRejectsControlListenOverlapWithPortFormatting(t *testing.T) {
+	cfg := Config{
+		Models:  []ModelConfig{testModel()},
+		Control: &ControlConfig{Listen: "127.0.0.1:01"},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected normalized control/server ports to conflict")
+	}
+}
+
+func TestValidateRejectsControlProjectListenOverlap(t *testing.T) {
+	cfg := Config{
+		Models:  []ModelConfig{testModel()},
+		Control: &ControlConfig{Listen: "127.0.0.1:1", ProjectListen: "127.0.0.1:1"},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:2", Root: "/a", Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected control.projectListen to conflict with control.listen")
+	}
+}
+
+func TestValidateRejectsEquivalentIPv6Listen(t *testing.T) {
+	cfg := Config{
+		Models:  []ModelConfig{testModel()},
+		Control: &ControlConfig{Listen: "[0:0:0:0:0:0:0:1]:1"},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "[::1]:1", Root: "/a", Agents: []string{"build"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected equivalent IPv6 listen addresses to conflict")
+	}
+}
+
+func TestValidateRejectsPercentEncodedPathPrefix(t *testing.T) {
+	cfg := Config{
+		Models: []ModelConfig{testModel()},
+		Servers: []Server{
+			{Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}, PathPrefix: "/x%20y"},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected a percent-encoded pathPrefix to be rejected")
+	}
+}
+
+func TestServerValidateRejectsEmptyName(t *testing.T) {
+	catalog, err := (Config{Models: []ModelConfig{testModel()}}).Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := Server{Kind: KindHTTP, Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}}
+	if err := server.Validate(catalog); err == nil {
+		t.Fatal("expected an empty server name to be rejected")
 	}
 }

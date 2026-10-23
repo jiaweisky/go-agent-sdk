@@ -34,52 +34,77 @@ type MCPServer struct {
 	Timeout     string            `yaml:"timeout"`
 }
 
-// ParseOptionalDuration parses a duration string; an empty string means zero.
-func ParseOptionalDuration(raw string) (time.Duration, error) {
-	if raw == "" {
-		return 0, nil
+// MCPEntry is a validated MCP server and its parsed timeout.
+type MCPEntry struct {
+	Server  MCPServer
+	Timeout time.Duration
+}
+
+// Validate checks one MCP server entry.
+func (s MCPServer) Validate() error {
+	_, err := s.validateAndParse()
+	return err
+}
+
+// validateAndParse checks one server and returns its parsed timeout.
+func (s MCPServer) validateAndParse() (time.Duration, error) {
+	switch {
+	case s.Name == "":
+		return 0, errors.New("mcp: each server requires a name")
+	case s.Type == "":
+		return 0, fmt.Errorf("mcp %s: type is required (local or remote)", s.Name)
+	case !s.Type.Valid():
+		return 0, fmt.Errorf("mcp %s: type must be local or remote, got %q", s.Name, s.Type)
+	case s.Type == MCPLocal && len(s.Command) == 0:
+		return 0, fmt.Errorf("mcp %s: local requires command", s.Name)
+	case s.Type == MCPRemote && s.URL == "":
+		return 0, fmt.Errorf("mcp %s: remote requires url", s.Name)
 	}
-	duration, err := time.ParseDuration(raw)
+	timeout, err := ParseOptionalDuration(s.Timeout)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("mcp %s: timeout: %w", s.Name, err)
 	}
-	if duration < 0 {
-		return 0, errors.New("must not be negative")
-	}
-	return duration, nil
+	return timeout, nil
 }
 
 // ValidateMCP checks that every MCP server entry is well formed.
 func ValidateMCP(servers []MCPServer) error {
-	_, err := MCPTimeouts(servers)
+	_, err := ValidateMCPConfigs(servers)
 	return err
 }
 
-// MCPTimeouts validates the servers and returns each parsed timeout (zero when
-// unset), so a caller converting them does not parse the same value twice.
-func MCPTimeouts(servers []MCPServer) ([]time.Duration, error) {
+// ValidateMCPConfigs validates the server entries and returns them with parsed
+// timeouts (zero when unset), so a converting caller need not parse them again.
+func ValidateMCPConfigs(servers []MCPServer) ([]MCPEntry, error) {
 	if len(servers) == 0 {
 		return nil, nil
 	}
-	timeouts := make([]time.Duration, len(servers))
+	entries := make([]MCPEntry, len(servers))
 	for i, server := range servers {
-		switch {
-		case server.Name == "":
-			return nil, errors.New("mcp: each server requires a name")
-		case server.Type == "":
-			return nil, fmt.Errorf("mcp %s: type is required (local or remote)", server.Name)
-		case !server.Type.Valid():
-			return nil, fmt.Errorf("mcp %s: type must be local or remote, got %q", server.Name, server.Type)
-		case server.Type == MCPLocal && len(server.Command) == 0:
-			return nil, fmt.Errorf("mcp %s: local requires command", server.Name)
-		case server.Type == MCPRemote && server.URL == "":
-			return nil, fmt.Errorf("mcp %s: remote requires url", server.Name)
-		}
-		timeout, err := ParseOptionalDuration(server.Timeout)
+		timeout, err := server.validateAndParse()
 		if err != nil {
-			return nil, fmt.Errorf("mcp %s: timeout: %w", server.Name, err)
+			return nil, err
 		}
-		timeouts[i] = timeout
+		entries[i] = MCPEntry{Server: server, Timeout: timeout}
+	}
+	return entries, nil
+}
+
+// MCPTimeouts returns each server's parsed timeout.
+//
+// Deprecated: use ValidateMCPConfigs, which also returns the validated server
+// entries.
+func MCPTimeouts(servers []MCPServer) ([]time.Duration, error) {
+	entries, err := ValidateMCPConfigs(servers)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	timeouts := make([]time.Duration, len(entries))
+	for i, entry := range entries {
+		timeouts[i] = entry.Timeout
 	}
 	return timeouts, nil
 }

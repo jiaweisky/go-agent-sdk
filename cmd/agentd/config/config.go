@@ -19,10 +19,15 @@ type Config struct {
 	Wrap *WrapConfig `yaml:"wrap"`
 }
 
+// errModelsRequired is returned when a config has no model entries. It is a
+// sentinel so validation can keep the concise message without repeating the
+// length check.
+var errModelsRequired = errors.New("models is required")
+
 // Catalog builds the global model catalog from the configured entries.
 func (c Config) Catalog() (Catalog, error) {
 	if len(c.Models) == 0 {
-		return Catalog{}, errors.New("models is required")
+		return Catalog{}, errModelsRequired
 	}
 	return NewCatalog(c.Models[0], c.Models[1:])
 }

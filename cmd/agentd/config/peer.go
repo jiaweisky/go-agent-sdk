@@ -40,30 +40,51 @@ func (p A2APeer) ModeOrDefault() string {
 	return p.Mode
 }
 
+// validate checks the peer's discovery target and mode. Name uniqueness is a
+// collection-level concern handled by ValidateA2APeers.
+func (p A2APeer) validate() error {
+	if err := p.validateTarget(); err != nil {
+		return err
+	}
+	return p.validateMode()
+}
+
+// validateTarget checks where the remote card is discovered: an endpoint (the
+// SDK fetches /.well-known/agent-card.json under it) or a direct card URL. Both
+// may be set; CardURL is preferred and Endpoint is then ignored.
+func (p A2APeer) validateTarget() error {
+	if p.Endpoint == "" && p.CardURL == "" {
+		return fmt.Errorf("peer %q: endpoint or cardURL is required", p.Name)
+	}
+	return nil
+}
+
+// validateMode checks the optional primary/subagent/all mode.
+func (p A2APeer) validateMode() error {
+	switch p.Mode {
+	case "", schema.AgentModePrimary, schema.AgentModeSubagent, schema.AgentModeAll:
+		return nil
+	}
+	return fmt.Errorf("peer %q: mode must be primary, subagent or all, got %q", p.Name, p.Mode)
+}
+
 // ValidateA2APeers checks each A2A peer's name, discovery target and mode, and
 // rejects duplicate names.
 func ValidateA2APeers(peers []A2APeer) error {
 	seen := make(map[string]bool, len(peers))
 	for _, peer := range peers {
-		if err := validateA2APeer(peer, seen); err != nil {
+		if err := validateA2APeerName(peer.Name, seen); err != nil {
+			return err
+		}
+		if err := peer.validate(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// validateA2APeer checks one A2A peer and records its name for duplicate
+// validateA2APeerName checks an A2A peer name and records it for duplicate
 // detection.
-func validateA2APeer(peer A2APeer, seen map[string]bool) error {
-	if err := validateA2APeerName(peer.Name, seen); err != nil {
-		return err
-	}
-	if err := validateA2APeerTarget(peer); err != nil {
-		return err
-	}
-	return validateA2APeerMode(peer)
-}
-
 func validateA2APeerName(name string, seen map[string]bool) error {
 	if name == "" {
 		return errors.New("peers: each A2A peer requires a name")
@@ -73,22 +94,4 @@ func validateA2APeerName(name string, seen map[string]bool) error {
 	}
 	seen[name] = true
 	return nil
-}
-
-// validateA2APeerTarget checks where the remote card is discovered: an endpoint
-// (the SDK fetches /.well-known/agent-card.json under it) or a direct card URL.
-// Both may be set; CardURL is preferred and Endpoint is then ignored.
-func validateA2APeerTarget(peer A2APeer) error {
-	if peer.Endpoint == "" && peer.CardURL == "" {
-		return fmt.Errorf("peer %q: endpoint or cardURL is required", peer.Name)
-	}
-	return nil
-}
-
-func validateA2APeerMode(peer A2APeer) error {
-	switch peer.Mode {
-	case "", schema.AgentModePrimary, schema.AgentModeSubagent, schema.AgentModeAll:
-		return nil
-	}
-	return fmt.Errorf("peer %q: mode must be primary, subagent or all, got %q", peer.Name, peer.Mode)
 }

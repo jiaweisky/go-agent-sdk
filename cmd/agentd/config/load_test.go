@@ -123,3 +123,23 @@ models:
 		t.Fatalf("apiKey = %q, want the quoted value", got)
 	}
 }
+
+func TestLoadRejectsNilDestination(t *testing.T) {
+	if err := Load(writeTempConfig(t, "models: []\n"), (*Config)(nil)); err == nil {
+		t.Fatal("expected a nil-destination error")
+	}
+}
+
+func TestLoadRejectsMultipleDocuments(t *testing.T) {
+	body := "models: []\n---\nmodels: []\n"
+	var cfg Config
+	if err := Load(writeTempConfig(t, body), &cfg); err == nil {
+		t.Fatal("expected multiple YAML documents to be rejected")
+	}
+}
+func TestLoadAllowsLeadingDocumentMarker(t *testing.T) {
+	var cfg Config
+	if err := Load(writeTempConfig(t, "---\nmodels: []\n"), &cfg); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+}
