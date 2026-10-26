@@ -117,8 +117,6 @@ go-agent-sdk/
   (HTTP/SSE and/or A2A, one client per configured server) with shared packages
   `cmd/agentd/config` (DTOs + validation), `client` (assembly), `media`,
   `storage`, `modelinfo`, `sandbox`, `sandboxmode`, `sandboxpolicy`.
-  `cmd/agentd-supervisor` is a host supervisor that speaks the
-  `supervisor_command` JSON protocol and fronts agentd's control API.
 - Dependency injection is constructor-based; there is no DI container.
 
 ## Same-package symbol naming

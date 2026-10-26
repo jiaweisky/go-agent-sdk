@@ -54,7 +54,7 @@ endif
 
 EXAMPLES := chat tool notesmcp weathermcp a2a-embedded agentd-client
 BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(EXAMPLES)))
-CMDS := agentd agentd-supervisor
+CMDS := agentd
 CMD_BINARIES := $(addprefix $(BIN)/,$(addsuffix $(EXE),$(CMDS)))
 GO_SOURCES := $(shell find . -name '*.go' -not -path './bin/*')
 
@@ -76,12 +76,6 @@ $(BIN)/agentd$(EXE): FORCE $(GO_SOURCES) go.mod go.sum
 
 # Always out of date: used to re-evaluate the stamped version.
 FORCE:
-
-# Build the host supervisor command: it speaks the supervisor_command JSON
-# protocol and satisfies it via a running agentd's control API.
-$(BIN)/agentd-supervisor$(EXE): $(GO_SOURCES) go.mod go.sum
-	@mkdir -p $(BIN)
-	$(GO) build -o $@ ./cmd/agentd-supervisor
 
 # Run agentd. Uses the git-ignored local config; override with
 # CONFIG=path (see cmd/agentd/agentd.example.yaml). Serves until Ctrl+C.

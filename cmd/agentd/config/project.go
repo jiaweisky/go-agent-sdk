@@ -8,7 +8,7 @@ import (
 // ProjectRequest is the body of the control API's POST /admin/projects: one
 // isolated project instance to create. Root and WorkingDirectory must be
 // absolute host paths; Isolation is optional (default: none). It is the shared
-// contract between the control API and the supervisor command.
+// contract between the control API and a host supervisor.
 type ProjectRequest struct {
 	Name             string   `json:"name"`
 	Kind             Kind     `json:"kind"`

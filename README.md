@@ -179,8 +179,7 @@ and is validated before the handler runs.
   `$VAR` / `${VAR}` / `${VAR:-default}`; an unset variable without a fallback is
   an error; no implicit environment reads), with an optional control API
   that creates isolated project instances at runtime and per-server command
-  sandboxing / isolation. `cmd/agentd-supervisor` wraps that control API for a
-  host's `supervisor_command`. See [`docs/DESIGN-AGENTD.md`](docs/DESIGN-AGENTD.md)
+  sandboxing / isolation. See [`docs/DESIGN-AGENTD.md`](docs/DESIGN-AGENTD.md)
   and [`docs/DESIGN-ISOLATION.md`](docs/DESIGN-ISOLATION.md).
 
 ## Package layout
@@ -207,8 +206,7 @@ go-agent-sdk/
 │   │               reference, ripgrep, installation, instructions, wire
 │   ├── defs/       config and skill definitions loaded from markdown
 │   └── llm/        LLM internals (utils, protocols/utils)
-└── cmd/          commands (cmd/agentd: HTTP/SSE + A2A + control API;
-                  cmd/agentd-supervisor: host supervisor_command)
+└── cmd/          commands (cmd/agentd: HTTP/SSE + A2A + control API)
 ```
 
 > The public API is `pkg/...`; everything under `internal/` is implementation

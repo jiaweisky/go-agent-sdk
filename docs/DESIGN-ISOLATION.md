@@ -484,7 +484,8 @@ provisioning **at runtime**. Two options:
 1. **Host supervisor.** The host spawns a dedicated agentd per project:
    `agentd --config <generated>` (or the same binary with `--project/--isolation` flags), then
    registers the resulting `base_url` with the bridge. No new network surface; lifecycle is the
-   host's. Tether drives this via its `ProjectProvider`/`supervisor_command`.
+   host's. A host may implement this itself (for example an IM bridge or Tether's
+   `ProjectProvider`).
 2. **Control API (implemented, opt-in).** A long-running agentd exposes a control API when
    `control.listen` is set:
 
@@ -513,16 +514,11 @@ exclusive with `isolation` — a read-only lease shares the source directory.
 > path. Container/VM orchestration remains a deployment concern; run a containerized agentd and
 > reach it directly, or wrap it with a host supervisor.
 >
-> **Reference supervisor:** `cmd/agentd-supervisor` implements the `supervisor_command` JSON
-> protocol (acquire/release) and satisfies it through the control API — a host points
-> `supervisor_command` at it and gains option-1 ergonomics (one short-lived command per request)
-> over option 2, while the host still spawns no agentd itself.
->
 > **Container/remote provisioning (deployment).** A `container`/`remote` view is an external
 > agentd (in a container/VM/another host) that this process never orchestrates (§11, §15). Two
 > workable host patterns:
 > - **Remote / one agentd per deployment.** Run a containerized agentd whose `control.listen` is
->   reachable from the host and point the supervisor's `agentd.baseURL` at it; a remote base URL
+>   reachable from the host and point the host's control-API client at it; a remote base URL
 >   works unchanged, so no SDK change is needed for `remote`.
 > - **One container per project.** The host runs `agentd` in a container **per project**,
 >   publishing that instance's server port, and returns the published `server_base`.
@@ -532,9 +528,9 @@ exclusive with `isolation` — a read-only lease shares the source directory.
 > container publishes only its own control port, so the per-project `server_base` it returns
 > (`127.0.0.1:<port>`) lives *inside* the container and is unreachable from the host.
 > Containerizing the orchestrator therefore only works when the container shares the host network
-> namespace (`--network host` on Linux) or a per-project container publishes its own port. The
-> reference supervisor targets an agentd reachable as-is; container/VM orchestration stays a
-> deployment concern.
+> namespace (`--network host` on Linux) or a per-project container publishes its own port. A host
+> supervisor targets an agentd reachable as-is; container/VM orchestration stays a deployment
+> concern.
 
 ### 16. Lifecycle, ownership and quotas
 
@@ -553,7 +549,7 @@ the agentd runner instead of implementing filesystems itself:
 
 ```
 Tether.ProjectProvider.acquire(conv, readonly) →
-   supervisor_command(project_id, isolation_spec, transport)   # host side
+   host supervisor(project_id, isolation_spec, transport)      # host side
      → supervisor starts an agentd instance for the view       # local: runner prepares, agentd serves
      → (container/remote mode: supervisor runs agentd in a container/VM instead)
      → returns {project_id, transport:"http", server_base, working_directory}

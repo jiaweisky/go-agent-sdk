@@ -77,7 +77,7 @@ VERSION_ENV = call set "VERSION_SET=1" &
 
 # NMAKE has no addprefix, so the binary list repeats the example names.
 EXAMPLE_BINS = $(BIN)\chat$(EXE) $(BIN)\tool$(EXE) $(BIN)\notesmcp$(EXE) $(BIN)\weathermcp$(EXE) $(BIN)\a2a-embedded$(EXE) $(BIN)\agentd-client$(EXE)
-CMD_BINS = $(BIN)\agentd$(EXE) $(BIN)\agentd-supervisor$(EXE)
+CMD_BINS = $(BIN)\agentd$(EXE)
 
 all: examples cmds
 
@@ -95,9 +95,6 @@ _bin: FORCE
 $(BIN)\agentd$(EXE): _bin FORCE
 	@$(VERSION_ENV) for /f "usebackq delims=" %v in (`$(VERSIONSTAMP) ldflag`) do @$(GO) build -ldflags "%v" -o "$@" .\cmd\agentd
 	@if not exist "$@" (echo versionstamp failed, see $(VERSIONSTAMP) 1>&2 & exit /b 1)
-
-$(BIN)\agentd-supervisor$(EXE): _bin FORCE
-	$(GO) build -o "$@" .\cmd\agentd-supervisor
 
 $(BIN)\chat$(EXE): _bin FORCE
 	$(GO) build -o "$@" .\examples\chat
@@ -170,7 +167,6 @@ release: FORCE
 	@if exist "$(DIST)" rmdir /s /q "$(DIST)"
 	@for /f "usebackq delims=" %v in (`$(VERSIONSTAMP) version`) do @mkdir "$(DIST)\go-agent-sdk-%v"
 	@for /f "usebackq delims=" %v in (`$(VERSIONSTAMP) version`) do @$(GO) build -trimpath -ldflags "-s -w -X main.version=%v" -o "$(DIST)\go-agent-sdk-%v\agentd$(EXE)" .\cmd\agentd
-	@for /f "usebackq delims=" %v in (`$(VERSIONSTAMP) version`) do @$(GO) build -trimpath -ldflags "-s -w -X main.version=%v" -o "$(DIST)\go-agent-sdk-%v\agentd-supervisor$(EXE)" .\cmd\agentd-supervisor
 	@for /f "usebackq delims=" %v in (`$(VERSIONSTAMP) version`) do @tar -czf "$(DIST)\go-agent-sdk-%v.tar.gz" -C "$(DIST)" "go-agent-sdk-%v"
 	@for /f "usebackq delims=" %v in (`$(VERSIONSTAMP) version`) do @$(POWERSHELL) scripts\release-dist.ps1 rmtree "$(DIST)\go-agent-sdk-%v"
 	@$(POWERSHELL) scripts\release-dist.ps1 sha256sums "$(DIST)"

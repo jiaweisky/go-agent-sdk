@@ -24,8 +24,6 @@ agentd.yaml
 # or `./examples/...` writes here; the Makefile builds into /bin instead)
 /agentd
 /agentd.exe
-/agentd-supervisor
-/agentd-supervisor.exe
 /agentd-client
 /agentd-client.exe
 /a2a-embedded
