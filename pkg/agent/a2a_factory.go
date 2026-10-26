@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"iter"
 	"net/url"
@@ -518,6 +519,30 @@ func a2aEventFrom(event Event) (server.Event, bool) {
 		}, true
 	case ErrorEvent:
 		return server.Event{Kind: server.EventError, Err: e.Err}, true
+	case StepFailed:
+		return server.Event{Kind: server.EventError, Err: stepFailedError(e.Error)}, true
+	case SandboxDenied:
+		text := "sandbox denied"
+		var parts []string
+		if e.Action != "" {
+			parts = append(parts, e.Action)
+		}
+		if e.Path != "" {
+			parts = append(parts, e.Path)
+		}
+		if e.Host != "" {
+			parts = append(parts, e.Host)
+		}
+		if len(parts) > 0 {
+			text += ": " + strings.Join(parts, " ")
+		}
+		if e.Rule != "" {
+			text += " (rule " + e.Rule + ")"
+		}
+		if e.Certainty != "" {
+			text += " [" + e.Certainty + "]"
+		}
+		return server.Event{Kind: server.EventNotice, Text: text}, true
 	case AttachmentOmitted:
 		text := fmt.Sprintf("attachment omitted: %s (%s; %s)", e.Name, e.MIME, e.Reason)
 		if e.Detail != "" {
@@ -529,4 +554,43 @@ func a2aEventFrom(event Event) (server.Event, bool) {
 	default:
 		return server.Event{}, false
 	}
+}
+
+// stepFailedError turns a step failure payload into an error for the A2A task
+// status. The payload is decoded from JSON, so it is usually a map; an error or
+// string is also accepted for direct callers.
+func stepFailedError(value any) error {
+	switch v := value.(type) {
+	case error:
+		return v
+	case schema.SessionMessageUnknownError:
+		return errors.New(sessionMessageError(v))
+	case *schema.SessionMessageUnknownError:
+		if v != nil {
+			return errors.New(sessionMessageError(*v))
+		}
+	case map[string]any:
+		message, _ := v["message"].(string)
+		if message == "" {
+			message = fmt.Sprintf("%v", v)
+		}
+		if kind, _ := v["type"].(string); kind != "" {
+			return errors.New(kind + ": " + message)
+		}
+		return errors.New(message)
+	case string:
+		if v != "" {
+			return errors.New(v)
+		}
+	}
+	return errors.New("step failed")
+}
+
+// sessionMessageError formats a failed-step payload without producing a
+// dangling "type: " prefix when the type is empty.
+func sessionMessageError(value schema.SessionMessageUnknownError) string {
+	if value.Type == "" {
+		return value.Message
+	}
+	return value.Type + ": " + value.Message
 }

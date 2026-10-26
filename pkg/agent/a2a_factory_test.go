@@ -158,6 +158,56 @@ func TestA2AEventFromPermissionAskedCarriesDetails(t *testing.T) {
 	}
 }
 
+func TestA2AEventFromStepFailedIsError(t *testing.T) {
+	event, ok := a2aEventFrom(StepFailed{Error: map[string]any{
+		"type": "provider", "message": "provider exploded",
+	}})
+	if !ok || event.Kind != server.EventError || event.Err == nil {
+		t.Fatalf("event = %+v, ok = %v", event, ok)
+	}
+	if !strings.Contains(event.Err.Error(), "provider exploded") {
+		t.Fatalf("error = %q", event.Err)
+	}
+}
+
+func TestA2AEventFromStepFailedLivePayload(t *testing.T) {
+	payload := schema.EventPayload{
+		Type: schema.SessionEventStepFailed.Type,
+		Data: map[string]any{
+			"sessionID":          "ses_1",
+			"assistantMessageID": "msg_1",
+			"error": schema.SessionMessageUnknownError{
+				Type: "provider", Message: "provider exploded",
+			},
+		},
+	}
+	event, ok := mapEvent(payload)
+	if !ok {
+		t.Fatal("step.failed payload did not map to an event")
+	}
+	mapped, ok := a2aEventFrom(event)
+	if !ok || mapped.Kind != server.EventError || mapped.Err == nil {
+		t.Fatalf("event = %+v, ok = %v", mapped, ok)
+	}
+	if !strings.Contains(mapped.Err.Error(), "provider exploded") {
+		t.Fatalf("error = %q", mapped.Err)
+	}
+}
+
+func TestA2AEventFromSandboxDeniedIsNotice(t *testing.T) {
+	event, ok := a2aEventFrom(SandboxDenied{
+		Action: "write", Path: "/etc/passwd", Rule: "deny-write", Certainty: "enforced",
+	})
+	if !ok || event.Kind != server.EventNotice {
+		t.Fatalf("event = %+v, ok = %v", event, ok)
+	}
+	for _, want := range []string{"sandbox denied", "/etc/passwd", "deny-write", "enforced"} {
+		if !strings.Contains(event.Text, want) {
+			t.Fatalf("notice = %q, want %q", event.Text, want)
+		}
+	}
+}
+
 // TestA2AFactoryDeclinesQuestions guards the "decline" questions policy: a
 // question ask resolves immediately with a rejection instead of parking, while
 // permissions stay held.

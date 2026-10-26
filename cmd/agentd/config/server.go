@@ -65,12 +65,28 @@ type Server struct {
 	BaseURL      string                `yaml:"baseURL"`
 	Cards        map[string]CardConfig `yaml:"cards"`
 	InboundMedia InboundMediaPolicy    `yaml:"inboundMedia"`
+	// PushNotifications enables A2A push notifications. The client supplies the
+	// per-task webhook configuration at runtime.
+	PushNotifications *PushNotificationsConfig `yaml:"pushNotifications"`
+	// Signing enables AgentCard signing. Signatures are computed by the server.
+	Signing *SigningConfig `yaml:"signing"`
+	// Transports lists the protocol bindings to serve (jsonrpc, rest). Empty
+	// means jsonrpc only.
+	Transports []A2ATransport `yaml:"transports"`
 
 	// KeepAlive is the SSE heartbeat; empty means the 15s default, "0s" disables.
 	KeepAlive string `yaml:"keepAlive"`
 	// MaxBodyBytes caps an HTTP request body (0 = a 128 MiB default; negative is
 	// rejected). Guards against an oversized inline media payload.
 	MaxBodyBytes int64 `yaml:"maxBodyBytes"`
+}
+
+// EffectiveTransports is the configured transport list, defaulting to JSON-RPC.
+func (s Server) EffectiveTransports() []A2ATransport {
+	if len(s.Transports) == 0 {
+		return []A2ATransport{A2ATransportJSONRPC}
+	}
+	return s.Transports
 }
 
 // QuestionsPolicy selects how the question tool behaves.

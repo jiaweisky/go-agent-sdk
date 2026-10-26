@@ -242,6 +242,16 @@ servers:
     #     headers: { Authorization: "Bearer ${PEER_TOKEN:-replace-me}" }           # optional
     baseURL: http://127.0.0.1:8788
     inboundMedia: spool               # spool (default) | inline
+    # transports: [jsonrpc, rest]     # protocol bindings; default [jsonrpc]
+    # pushNotifications:              # client supplies the per-task webhook at runtime
+    #   enabled: true                 # in-memory config store; lost on restart
+    #   timeout: 10s
+    #   allowPrivateNetworks: false   # keep the SSRF guard unless webhooks are internal
+    # signing:                        # signatures are computed from this key
+    #   keyFile: ./keys/card.pem
+    #   keyID: key-1
+    #   algorithm: ES256              # inferred from the key when omitted
+    #   jwksURL: https://example/jwks.json
     # Work autonomously: run every tool; deny the question tool so a confirmation
     # request becomes a model-visible failure and the agent keeps working, rather
     # than parking at input-required (or ending the turn, as `questions: decline`).
@@ -256,6 +266,13 @@ servers:
         # documentationUrl and provider are optional card metadata (omit them freely):
         documentationUrl: https://github.com/jiaweisky/go-agent-sdk
         provider: { organization: jiaweisky, url: https://github.com/jiaweisky }
+        # cardPath: /agents/build/.well-known/agent-card.json
+        # defaultInputModes: [text/plain, application/json, image/png]
+        # defaultOutputModes: [text/plain, application/json]
+        # extended:                    # authenticated extended card; inherits public fields
+        #   description: "Authenticated details for trusted clients."
+        #   skills:
+        #     - { id: review, name: Review, description: "reviews code", tags: [code] }
         # skills:                     # operator-authored labels; omitted → the card advertises []
     auth:
       type: bearer

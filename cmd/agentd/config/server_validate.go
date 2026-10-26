@@ -200,8 +200,9 @@ func validateServerPolicy(s Server) error {
 
 // validateHTTPFields rejects A2A-only fields and checks the HTTP tuning.
 func validateHTTPFields(s Server) error {
-	if s.BaseURL != "" || len(s.Cards) > 0 || s.InboundMedia != "" || s.Default {
-		return fmt.Errorf("server %q: baseURL, cards, inboundMedia and default are a2a-only", s.Name)
+	if s.BaseURL != "" || len(s.Cards) > 0 || s.InboundMedia != "" || s.Default ||
+		s.PushNotifications != nil || s.Signing != nil || len(s.Transports) > 0 {
+		return fmt.Errorf("server %q: baseURL, cards, inboundMedia, pushNotifications, signing, transports and default are a2a-only", s.Name)
 	}
 	if s.InteractionFallback != "" && s.InteractionFallback != "reject" && s.InteractionFallback != "allow" {
 		return fmt.Errorf("server %q: interactionFallback must be reject or allow", s.Name)
@@ -226,8 +227,20 @@ func validateA2AFields(s Server) error {
 			"server %q: interactionTimeout, interactionFallback, "+
 				"subscriberCapacity, publicRoutes and cors are http-only", s.Name)
 	}
+	if s.Host != "" && s.PathPrefix != "" {
+		return fmt.Errorf("server %q: an a2a server cannot combine host and pathPrefix (the card endpoint would be ambiguous)", s.Name)
+	}
 	if !s.InboundMedia.Valid() {
 		return fmt.Errorf("server %q: inboundMedia must be spool or inline, got %q", s.Name, s.InboundMedia)
+	}
+	if err := s.PushNotifications.Validate(); err != nil {
+		return fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	if err := s.Signing.Validate(); err != nil {
+		return fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	if err := validateTransports(s.Transports); err != nil {
+		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
 	return validateAgentCards(s)
 }
@@ -237,8 +250,18 @@ func validateA2AFields(s Server) error {
 // fetches first, so its name and description must be explicit rather than
 // derived from the agent's internal definition; skills stay optional.
 func validateAgentCards(s Server) error {
+	seenAgents := make(map[string]bool, len(s.Agents))
+	for _, agent := range s.Agents {
+		if seenAgents[agent] {
+			return fmt.Errorf("server %q: duplicate agent %q", s.Name, agent)
+		}
+		seenAgents[agent] = true
+	}
 	if err := validateCards(s.Cards); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	if err := validateCardPaths(s); err != nil {
+		return err
 	}
 	if err := validateCardOwners(s); err != nil {
 		return err

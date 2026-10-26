@@ -710,14 +710,31 @@ func buildA2AServer(
 		security = &a2aserver.Security{Bearer: s.Auth.Token}
 	}
 
+	pushNotifications, err := a2aPushOptions(s.PushNotifications)
+	if err != nil {
+		return nil, fmt.Errorf("server %q: %w", s.Name, err)
+	}
+	signing, err := a2aSigningOptions(s.Signing)
+	if err != nil {
+		return nil, fmt.Errorf("server %q: %w", s.Name, err)
+	}
+
 	return a2aserver.New(a2aserver.Options{
-		Factory:      agent.NewA2AFactory(client, factoryOpts...),
-		Turns:        client.TurnStore(),
-		Agents:       exposed,
-		BaseURL:      s.BaseURL,
-		KeepAlive:    keepAlive,
-		Security:     security,
-		MaxBodyBytes: maxBodyBytes(s),
+		Factory:           agent.NewA2AFactory(client, factoryOpts...),
+		Turns:             client.TurnStore(),
+		Agents:            exposed,
+		BaseURL:           s.BaseURL,
+		PathPrefix:        config.NormalizePathPrefix(s.PathPrefix),
+		KeepAlive:         keepAlive,
+		Security:          security,
+		MaxBodyBytes:      maxBodyBytes(s),
+		Transports:        a2aTransports(s.Transports),
+		PushNotifications: pushNotifications,
+		ExtendedCards:     a2aExtendedCards(s.Cards, exposed),
+		Signing:           signing,
+		OnError: func(err error) {
+			fmt.Fprintf(os.Stderr, "agentd: server %q: card discovery: %v\n", s.Name, err)
+		},
 	})
 }
 

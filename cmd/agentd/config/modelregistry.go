@@ -76,9 +76,11 @@ func (m ModelConfig) Endpoint() string {
 	if m.ModelBaseURL != "" {
 		return m.ModelBaseURL
 	}
+
 	if m.Protocol == "bedrock-converse" && m.Credentials.AWS != nil && m.Credentials.AWS.Region != "" {
 		return fmt.Sprintf("https://bedrock-runtime.%s.amazonaws.com", m.Credentials.AWS.Region)
 	}
+
 	return ""
 }
 
@@ -94,14 +96,17 @@ func (m ModelConfig) Validate() error {
 	if m.Protocol == "" {
 		return fmt.Errorf("model %q requires a protocol", m.ID)
 	}
+
 	if _, ok := protocols.LookupProtocol(llmschema.ProtocolID(m.Protocol)); !ok {
 		return fmt.Errorf("model %q: unknown protocol %q", m.ID, m.Protocol)
 	}
+
 	if aws := m.Credentials.AWS; aws != nil {
 		if aws.Region == "" || aws.AccessKeyID == "" || aws.SecretAccessKey == "" {
 			return fmt.Errorf("model %q: aws credentials require region, accessKeyId and secretAccessKey", m.ID)
 		}
 	}
+
 	if err := ValidateInputModalities(m.EffectiveInputs()); err != nil {
 		return err
 	}
@@ -110,6 +115,7 @@ func (m ModelConfig) Validate() error {
 			return err
 		}
 	}
+
 	for _, mime := range m.InputMIMEs {
 		if mime != strings.TrimSpace(mime) || !strings.Contains(mime, "/") || mime != strings.ToLower(mime) {
 			return fmt.Errorf("model %q: inputMIMEs entry %q must be a lower-case MIME type without spaces", m.ID, mime)
@@ -134,6 +140,7 @@ func NewModelRegistry(defaultEntry ModelConfig, models []ModelConfig) (ModelRegi
 		entries:    make(map[string]ModelConfig),
 		byProvider: make(map[schema.ProviderID]schema.Credential),
 	}
+
 	for _, entry := range append([]ModelConfig{defaultEntry}, models...) {
 		if err := entry.Validate(); err != nil {
 			return ModelRegistry{}, err
@@ -145,9 +152,11 @@ func NewModelRegistry(defaultEntry ModelConfig, models []ModelConfig) (ModelRegi
 		registry.order = append(registry.order, entry.ID)
 		registry.recordCredential(entry.ProviderKey(), toSchemaCredential(entry.Credentials))
 	}
+
 	if len(registry.order) == 0 {
 		return ModelRegistry{}, fmt.Errorf("model registry requires at least one model")
 	}
+
 	registry.defaultID = registry.order[0]
 	return registry, nil
 }
@@ -184,6 +193,7 @@ func (r ModelRegistry) Credentials(providerID schema.ProviderID) (schema.Credent
 	if credential, ok := r.byProvider[providerID]; ok {
 		return credential, nil
 	}
+
 	return schema.Credential{}, fmt.Errorf("unknown provider: %s", providerID)
 }
 
@@ -196,6 +206,7 @@ func (r ModelRegistry) Subset(ids []string, defaultID string) (ModelRegistry, er
 			return ModelRegistry{}, fmt.Errorf("default model %q is not in the model registry", defaultID)
 		}
 	}
+
 	if len(ids) == 0 {
 		out := r
 		if defaultID != "" {
@@ -203,6 +214,7 @@ func (r ModelRegistry) Subset(ids []string, defaultID string) (ModelRegistry, er
 		}
 		return out, nil
 	}
+
 	out := ModelRegistry{entries: make(map[string]ModelConfig, len(ids)), byProvider: r.byProvider}
 	for _, id := range ids {
 		entry, ok := r.entries[id]
@@ -215,6 +227,7 @@ func (r ModelRegistry) Subset(ids []string, defaultID string) (ModelRegistry, er
 		out.entries[id] = entry
 		out.order = append(out.order, id)
 	}
+
 	out.defaultID = out.order[0]
 	if defaultID != "" {
 		if _, ok := out.entries[defaultID]; !ok {

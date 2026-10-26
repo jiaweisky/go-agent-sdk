@@ -48,6 +48,46 @@ func TestApplyCard(t *testing.T) {
 	}
 }
 
+func TestApplyCardMapsExtendedFields(t *testing.T) {
+	card := config.CardConfig{
+		Name: "Build", Description: "builds",
+		CardPath:           "/custom/card.json",
+		DefaultInputModes:  []string{"text/plain", "image/png"},
+		DefaultOutputModes: []string{"text/plain", "application/json"},
+	}
+	expose := schema.AgentExpose{}
+	applyCard(&expose, card)
+	if expose.Path != card.CardPath || len(expose.InputModes) != 2 || len(expose.OutputModes) != 2 {
+		t.Fatalf("expose = %+v", expose)
+	}
+
+	card.Extended = &config.ExtendedCardConfig{
+		Description:       "authenticated",
+		DefaultInputModes: []string{"audio/wav"},
+		Skills:            []config.SkillConfig{{ID: "review", Name: "Review", Description: "reviews"}},
+	}
+	extended := ExtendedExposeFrom(expose, card)
+	if extended.Description != "authenticated" {
+		t.Fatalf("description = %q", extended.Description)
+	}
+	if len(extended.InputModes) != 1 || extended.InputModes[0] != "audio/wav" {
+		t.Fatalf("inputModes = %v", extended.InputModes)
+	}
+	if len(extended.Skills) != 1 || extended.Skills[0].ID != "review" {
+		t.Fatalf("skills = %+v", extended.Skills)
+	}
+
+	modelBase := schema.AgentExpose{InputModes: []string{"text/plain", "image/png"}}
+	inherited := ExtendedExposeFrom(modelBase, card)
+	if len(inherited.InputModes) != 1 || inherited.InputModes[0] != "audio/wav" {
+		t.Fatalf("extended override lost: %v", inherited.InputModes)
+	}
+	empty := ExtendedExposeFrom(schema.AgentExpose{InputModes: []string{"text/plain", "image/png"}}, config.CardConfig{})
+	if len(empty.InputModes) != 2 {
+		t.Fatalf("model-derived modes not inherited: %v", empty.InputModes)
+	}
+}
+
 func TestPeerAgentConfig(t *testing.T) {
 	cfg := a2aPeerAgentConfig(config.A2APeer{
 		Name:        "echo",

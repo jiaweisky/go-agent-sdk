@@ -68,21 +68,72 @@ func ExposeAgents(
 
 // applyCard copies a card override into an AgentExpose.
 func applyCard(expose *schema.AgentExpose, card config.CardConfig) {
+	expose.Path = card.CardPath
 	expose.Name = card.Name
 	expose.Description = card.Description
 	expose.Version = card.Version
 	expose.DocumentationURL = card.DocumentationURL
 	expose.IconURL = card.IconURL
+	expose.InputModes = slices.Clone(card.DefaultInputModes)
+	expose.OutputModes = slices.Clone(card.DefaultOutputModes)
 	if card.Provider != nil {
 		expose.Provider = &schema.AgentProvider{
 			Organization: card.Provider.Organization,
 			URL:          card.Provider.URL,
 		}
 	}
+	expose.Skills = cardSkills(card.Skills)
+}
 
-	expose.Skills = make([]schema.AgentSkill, 0, len(card.Skills))
-	for _, skill := range card.Skills {
-		expose.Skills = append(expose.Skills, schema.AgentSkill{
+// ExtendedExposeFrom applies an extended-card override to an already-resolved
+// public expose (including model-derived input modes).
+func ExtendedExposeFrom(base schema.AgentExpose, card config.CardConfig) schema.AgentExpose {
+	base.Path = ""
+	if card.Extended != nil {
+		applyExtendedCard(&base, *card.Extended)
+	}
+	return base
+}
+
+// applyExtendedCard merges non-empty extended-card fields over the public card.
+func applyExtendedCard(expose *schema.AgentExpose, extended config.ExtendedCardConfig) {
+	if extended.Name != "" {
+		expose.Name = extended.Name
+	}
+	if extended.Description != "" {
+		expose.Description = extended.Description
+	}
+	if extended.Version != "" {
+		expose.Version = extended.Version
+	}
+	if extended.DocumentationURL != "" {
+		expose.DocumentationURL = extended.DocumentationURL
+	}
+	if extended.IconURL != "" {
+		expose.IconURL = extended.IconURL
+	}
+	if extended.Provider != nil {
+		expose.Provider = &schema.AgentProvider{
+			Organization: extended.Provider.Organization,
+			URL:          extended.Provider.URL,
+		}
+	}
+	if extended.DefaultInputModes != nil {
+		expose.InputModes = slices.Clone(extended.DefaultInputModes)
+	}
+	if extended.DefaultOutputModes != nil {
+		expose.OutputModes = slices.Clone(extended.DefaultOutputModes)
+	}
+	if extended.Skills != nil {
+		expose.Skills = cardSkills(extended.Skills)
+	}
+}
+
+// cardSkills maps configured skill labels to SDK card skills.
+func cardSkills(skills []config.SkillConfig) []schema.AgentSkill {
+	out := make([]schema.AgentSkill, 0, len(skills))
+	for _, skill := range skills {
+		out = append(out, schema.AgentSkill{
 			ID:          skill.ID,
 			Name:        skill.Name,
 			Description: skill.Description,
@@ -92,6 +143,7 @@ func applyCard(expose *schema.AgentExpose, card config.CardConfig) {
 			OutputModes: slices.Clone(skill.OutputModes),
 		})
 	}
+	return out
 }
 
 // ModelModes maps each registry model id to the A2A input MIME modes its

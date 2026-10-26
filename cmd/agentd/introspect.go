@@ -190,9 +190,12 @@ type serverView struct {
 	CORS                []string `json:"cors,omitempty"`
 	MaxBodyBytes        int64    `json:"maxBodyBytes,omitempty"`
 	// A2A-only.
-	BaseURL      string              `json:"baseURL,omitempty"`
-	Cards        map[string]cardView `json:"cards,omitempty"`
-	InboundMedia string              `json:"inboundMedia,omitempty"`
+	BaseURL           string                 `json:"baseURL,omitempty"`
+	Cards             map[string]cardView    `json:"cards,omitempty"`
+	InboundMedia      string                 `json:"inboundMedia,omitempty"`
+	PushNotifications *pushNotificationsView `json:"pushNotifications,omitempty"`
+	Signing           *signingView           `json:"signing,omitempty"`
+	Transports        []string               `json:"transports,omitempty"`
 
 	KeepAlive string `json:"keepAlive,omitempty"`
 }
@@ -301,13 +304,44 @@ type cosStorageView struct {
 // cardView mirrors an operator-authored AgentCard override; cards carry no
 // secrets.
 type cardView struct {
-	Name             string        `json:"name,omitempty"`
-	Description      string        `json:"description,omitempty"`
-	Version          string        `json:"version,omitempty"`
-	DocumentationURL string        `json:"documentationUrl,omitempty"`
-	IconURL          string        `json:"iconUrl,omitempty"`
-	Provider         *providerView `json:"provider,omitempty"`
-	Skills           []skillView   `json:"skills,omitempty"`
+	Name               string            `json:"name,omitempty"`
+	Description        string            `json:"description,omitempty"`
+	Version            string            `json:"version,omitempty"`
+	DocumentationURL   string            `json:"documentationUrl,omitempty"`
+	IconURL            string            `json:"iconUrl,omitempty"`
+	Provider           *providerView     `json:"provider,omitempty"`
+	Skills             []skillView       `json:"skills,omitempty"`
+	CardPath           string            `json:"cardPath,omitempty"`
+	DefaultInputModes  []string          `json:"defaultInputModes,omitempty"`
+	DefaultOutputModes []string          `json:"defaultOutputModes,omitempty"`
+	Extended           *extendedCardView `json:"extended,omitempty"`
+}
+
+// extendedCardView mirrors an extended-card override.
+type extendedCardView struct {
+	Name               string        `json:"name,omitempty"`
+	Description        string        `json:"description,omitempty"`
+	Version            string        `json:"version,omitempty"`
+	DocumentationURL   string        `json:"documentationUrl,omitempty"`
+	IconURL            string        `json:"iconUrl,omitempty"`
+	Provider           *providerView `json:"provider,omitempty"`
+	Skills             []skillView   `json:"skills,omitempty"`
+	DefaultInputModes  []string      `json:"defaultInputModes,omitempty"`
+	DefaultOutputModes []string      `json:"defaultOutputModes,omitempty"`
+}
+
+type pushNotificationsView struct {
+	Enabled              bool   `json:"enabled"`
+	Timeout              string `json:"timeout,omitempty"`
+	AllowPrivateNetworks bool   `json:"allowPrivateNetworks,omitempty"`
+	FailOnError          bool   `json:"failOnError,omitempty"`
+}
+
+type signingView struct {
+	KeyFile   string `json:"keyFile,omitempty"`
+	KeyID     string `json:"keyID,omitempty"`
+	Algorithm string `json:"algorithm,omitempty"`
+	JWKSURL   string `json:"jwksURL,omitempty"`
 }
 
 type providerView struct {
@@ -492,6 +526,9 @@ func serverViewOf(s config.Server) serverView {
 		BaseURL:             s.BaseURL,
 		Cards:               cardViews(s.Cards),
 		InboundMedia:        string(s.InboundMedia),
+		PushNotifications:   pushNotificationsViewOf(s.PushNotifications),
+		Signing:             signingViewOf(s.Signing),
+		Transports:          transportStrings(s.Transports),
 		KeepAlive:           s.KeepAlive,
 		Auth:                authViewOf(s.Auth),
 		TLS:                 tlsView(s.TLS),
@@ -569,25 +606,91 @@ func cardViews(cards map[string]config.CardConfig) map[string]cardView {
 
 func cardViewOf(c config.CardConfig) cardView {
 	v := cardView{
-		Name:             c.Name,
-		Description:      c.Description,
-		Version:          c.Version,
-		DocumentationURL: sanitizeURL(c.DocumentationURL),
-		IconURL:          sanitizeURL(c.IconURL),
+		Name:               c.Name,
+		Description:        c.Description,
+		Version:            c.Version,
+		DocumentationURL:   sanitizeURL(c.DocumentationURL),
+		IconURL:            sanitizeURL(c.IconURL),
+		CardPath:           c.CardPath,
+		DefaultInputModes:  c.DefaultInputModes,
+		DefaultOutputModes: c.DefaultOutputModes,
 	}
 	if c.Provider != nil {
 		v.Provider = &providerView{Organization: c.Provider.Organization, URL: sanitizeURL(c.Provider.URL)}
 	}
 	if len(c.Skills) > 0 {
-		v.Skills = make([]skillView, 0, len(c.Skills))
-		for _, s := range c.Skills {
-			v.Skills = append(v.Skills, skillView{
-				ID: s.ID, Name: s.Name, Description: s.Description,
-				Tags: s.Tags, Examples: s.Examples, InputModes: s.InputModes, OutputModes: s.OutputModes,
-			})
-		}
+		v.Skills = skillViews(c.Skills)
+	}
+	v.Extended = extendedCardViewOf(c.Extended)
+	return v
+}
+
+func extendedCardViewOf(c *config.ExtendedCardConfig) *extendedCardView {
+	if c == nil {
+		return nil
+	}
+	v := &extendedCardView{
+		Name:               c.Name,
+		Description:        c.Description,
+		Version:            c.Version,
+		DocumentationURL:   sanitizeURL(c.DocumentationURL),
+		IconURL:            sanitizeURL(c.IconURL),
+		DefaultInputModes:  c.DefaultInputModes,
+		DefaultOutputModes: c.DefaultOutputModes,
+	}
+	if c.Provider != nil {
+		v.Provider = &providerView{Organization: c.Provider.Organization, URL: sanitizeURL(c.Provider.URL)}
+	}
+	if len(c.Skills) > 0 {
+		v.Skills = skillViews(c.Skills)
 	}
 	return v
+}
+
+func skillViews(skills []config.SkillConfig) []skillView {
+	out := make([]skillView, 0, len(skills))
+	for _, s := range skills {
+		out = append(out, skillView{
+			ID: s.ID, Name: s.Name, Description: s.Description,
+			Tags: s.Tags, Examples: s.Examples, InputModes: s.InputModes, OutputModes: s.OutputModes,
+		})
+	}
+	return out
+}
+
+func pushNotificationsViewOf(p *config.PushNotificationsConfig) *pushNotificationsView {
+	if p == nil {
+		return nil
+	}
+	return &pushNotificationsView{
+		Enabled:              p.Enabled,
+		Timeout:              p.Timeout,
+		AllowPrivateNetworks: p.AllowPrivateNetworks,
+		FailOnError:          p.FailOnError,
+	}
+}
+
+func signingViewOf(s *config.SigningConfig) *signingView {
+	if s == nil {
+		return nil
+	}
+	return &signingView{
+		KeyFile:   s.KeyFile,
+		KeyID:     s.KeyID,
+		Algorithm: s.Algorithm,
+		JWKSURL:   sanitizeURL(s.JWKSURL),
+	}
+}
+
+func transportStrings(transports []config.A2ATransport) []string {
+	if len(transports) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(transports))
+	for _, transport := range transports {
+		out = append(out, string(transport))
+	}
+	return out
 }
 
 func isolationViewOf(iso *config.IsolationConfig) *isolationView {

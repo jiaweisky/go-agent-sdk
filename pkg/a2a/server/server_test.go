@@ -2,6 +2,9 @@ package server_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
 	"io/fs"
 	"iter"
@@ -514,6 +517,349 @@ func TestServerDerivesCardEndpointFromRequest(t *testing.T) {
 	}
 	if want := ts.URL + "/agents/build/"; card.SupportedInterfaces[0].URL != want {
 		t.Fatalf("endpoint = %q, want %q", card.SupportedInterfaces[0].URL, want)
+	}
+}
+
+func TestServerCardEndpointIncludesPathPrefix(t *testing.T) {
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: agent.ApproveAll,
+		LLM: stubLLM{reply: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Expose: &schema.AgentExpose{Name: "Prefixed"},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	srv, err := server.New(server.Options{
+		Factory:    agent.NewA2AFactory(client),
+		Agents:     client.Agents().All(),
+		PathPrefix: "/api",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	ts := httptest.NewServer(http.StripPrefix("/api", srv.Handler()))
+	t.Cleanup(ts.Close)
+
+	response, err := http.Get(ts.URL + "/api/.well-known/agent-card.json")
+	if err != nil {
+		t.Fatalf("get card: %v", err)
+	}
+	defer response.Body.Close()
+	var card a2a.AgentCard
+	if err := json.NewDecoder(response.Body).Decode(&card); err != nil {
+		t.Fatalf("decode card: %v", err)
+	}
+	if len(card.SupportedInterfaces) != 1 {
+		t.Fatalf("interfaces = %d, want 1", len(card.SupportedInterfaces))
+	}
+	if want := ts.URL + "/api/agents/build/"; card.SupportedInterfaces[0].URL != want {
+		t.Fatalf("endpoint = %q, want %q", card.SupportedInterfaces[0].URL, want)
+	}
+}
+
+func testA2AFactory(t *testing.T) server.Factory {
+	t.Helper()
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: agent.ApproveAll,
+		LLM: stubLLM{reply: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return agent.NewA2AFactory(client)
+}
+
+func TestServerRejectsNilSigningKey(t *testing.T) {
+	_, err := server.New(server.Options{
+		Factory: testA2AFactory(t),
+		Agents:  []schema.AgentInfo{{ID: "build", Expose: &schema.AgentExpose{Name: "Build"}}},
+		Signing: &server.SigningConfig{},
+	})
+	if err == nil {
+		t.Fatal("expected a nil signing key to be rejected")
+	}
+}
+
+func TestServerRejectsDuplicateAgents(t *testing.T) {
+	_, err := server.New(server.Options{
+		Factory: testA2AFactory(t),
+		Agents: []schema.AgentInfo{
+			{ID: "build", Expose: &schema.AgentExpose{Name: "Build"}},
+			{ID: "build", Expose: &schema.AgentExpose{Name: "Build"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate agents to be rejected")
+	}
+}
+
+func TestServerRejectsConflictingCardPaths(t *testing.T) {
+	_, err := server.New(server.Options{
+		Factory: testA2AFactory(t),
+		Agents: []schema.AgentInfo{
+			{ID: "a", Expose: &schema.AgentExpose{Name: "A", Path: "/shared/card.json"}},
+			{ID: "b", Expose: &schema.AgentExpose{Name: "B", Path: "/shared/card.json"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected conflicting card paths to be rejected")
+	}
+}
+
+func TestServerRejectsReservedCardPath(t *testing.T) {
+	_, err := server.New(server.Options{
+		Factory: testA2AFactory(t),
+		Agents:  []schema.AgentInfo{{ID: "build", Expose: &schema.AgentExpose{Name: "Build", Path: "/.well-known/agent-card.json"}}},
+	})
+	if err == nil {
+		t.Fatal("expected a reserved card path to be rejected")
+	}
+}
+
+func TestServerRejectsUnknownExtendedCard(t *testing.T) {
+	_, err := server.New(server.Options{
+		Factory:       testA2AFactory(t),
+		Agents:        []schema.AgentInfo{{ID: "build", Expose: &schema.AgentExpose{Name: "Build"}}},
+		ExtendedCards: map[schema.AgentID]schema.AgentExpose{"other": {Name: "Other"}},
+	})
+	if err == nil {
+		t.Fatal("expected an extended card for an unexposed agent to be rejected")
+	}
+}
+
+func TestServerRejectsDuplicateTransports(t *testing.T) {
+	_, err := server.New(server.Options{
+		Factory:    testA2AFactory(t),
+		Agents:     []schema.AgentInfo{{ID: "build", Expose: &schema.AgentExpose{Name: "Build"}}},
+		Transports: []server.Transport{server.TransportJSONRPC, server.TransportJSONRPC},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate transports to be rejected")
+	}
+}
+
+func TestServerRejectsNegativeMaxBodyBytes(t *testing.T) {
+	_, err := server.New(server.Options{
+		Factory:      testA2AFactory(t),
+		Agents:       []schema.AgentInfo{{ID: "build", Expose: &schema.AgentExpose{Name: "Build"}}},
+		MaxBodyBytes: -1,
+	})
+	if err == nil {
+		t.Fatal("expected a negative MaxBodyBytes to be rejected")
+	}
+}
+
+func TestServerTrimsBaseURLTrailingSlash(t *testing.T) {
+	srv, err := server.New(server.Options{
+		Factory: testA2AFactory(t),
+		Agents:  []schema.AgentInfo{{ID: "build", Expose: &schema.AgentExpose{Name: "Build"}}},
+		BaseURL: "https://example.com/",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	cards := srv.Cards(nil)
+	if len(cards) != 1 || len(cards[0].SupportedInterfaces) != 1 {
+		t.Fatalf("cards = %+v", cards)
+	}
+	if got, want := cards[0].SupportedInterfaces[0].URL, "https://example.com/agents/build/"; got != want {
+		t.Fatalf("endpoint = %q, want %q", got, want)
+	}
+}
+
+func TestServerExtendedCard(t *testing.T) {
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: agent.ApproveAll,
+		LLM: stubLLM{reply: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Expose: &schema.AgentExpose{Name: "Public", Description: "public card"},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	srv, err := server.New(server.Options{
+		Factory: agent.NewA2AFactory(client),
+		Agents:  client.Agents().All(),
+		ExtendedCards: map[schema.AgentID]schema.AgentExpose{
+			"build": {Name: "Extended", Description: "authenticated card"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	card := fetchCard(t, ts.URL)
+	if !card.Capabilities.ExtendedAgentCard {
+		t.Fatal("public card does not advertise extendedAgentCard")
+	}
+	client2, err := a2aclient.NewFromCard(context.Background(), card)
+	if err != nil {
+		t.Fatalf("a2a client: %v", err)
+	}
+	t.Cleanup(func() { _ = client2.Destroy() })
+	extended, err := client2.GetExtendedAgentCard(context.Background(), &a2a.GetExtendedAgentCardRequest{})
+	if err != nil {
+		t.Fatalf("get extended card: %v", err)
+	}
+	if extended.Name != "Extended" || extended.Description != "authenticated card" {
+		t.Fatalf("extended card = %+v", extended)
+	}
+}
+
+func TestServerPushNotificationsCapability(t *testing.T) {
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: agent.ApproveAll,
+		LLM: stubLLM{reply: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Expose: &schema.AgentExpose{Name: "Push"},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	srv, err := server.New(server.Options{
+		Factory:           agent.NewA2AFactory(client),
+		Agents:            client.Agents().All(),
+		PushNotifications: &server.PushNotificationsConfig{Timeout: 5 * time.Second},
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	if card := fetchCard(t, ts.URL); !card.Capabilities.PushNotifications {
+		t.Fatal("card does not advertise pushNotifications")
+	}
+}
+
+func TestServerSignsCards(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: agent.ApproveAll,
+		LLM: stubLLM{reply: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Expose: &schema.AgentExpose{Name: "Signed"},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	srv, err := server.New(server.Options{
+		Factory: agent.NewA2AFactory(client),
+		Agents:  client.Agents().All(),
+		Signing: &server.SigningConfig{PrivateKey: key, KeyID: "test-key"},
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	card := fetchCard(t, ts.URL)
+	if len(card.Signatures) != 1 || card.Signatures[0].Protected == "" || card.Signatures[0].Signature == "" {
+		t.Fatalf("signatures = %+v", card.Signatures)
+	}
+}
+
+func TestServerRejectsMismatchedSigningAlgorithm(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: agent.ApproveAll,
+		LLM: stubLLM{reply: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Expose: &schema.AgentExpose{Name: "Signed"},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	_, err = server.New(server.Options{
+		Factory: agent.NewA2AFactory(client),
+		Agents:  client.Agents().All(),
+		Signing: &server.SigningConfig{PrivateKey: key, Algorithm: "RS256"},
+	})
+	if err == nil {
+		t.Fatal("expected a mismatched signing algorithm to be rejected")
+	}
+}
+
+func TestServerServesRESTBinding(t *testing.T) {
+	client, err := agent.NewClient(&agent.ClientOptions{
+		Protocol: "openai-responses", Credentials: agent.APIKey("test"),
+		Model: "test-model", Root: t.TempDir(), Permission: agent.ApproveAll,
+		LLM: stubLLM{reply: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err := client.RegisterAgent("build", agent.AgentConfig{
+		Expose: &schema.AgentExpose{Name: "REST"},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	srv, err := server.New(server.Options{
+		Factory:    agent.NewA2AFactory(client),
+		Agents:     client.Agents().All(),
+		Transports: []server.Transport{server.TransportJSONRPC, server.TransportREST},
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	card := fetchCard(t, ts.URL)
+	if len(card.SupportedInterfaces) != 2 {
+		t.Fatalf("interfaces = %d, want 2", len(card.SupportedInterfaces))
+	}
+	if got := card.SupportedInterfaces[1]; got.ProtocolBinding != a2a.TransportProtocolHTTPJSON || got.URL != ts.URL+"/agents/build/rest" {
+		t.Fatalf("REST interface = %+v", got)
+	}
+	response, err := http.Post(ts.URL+"/agents/build/rest/message:send", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("post REST: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed {
+		t.Fatalf("REST handler not mounted: status %d", response.StatusCode)
 	}
 }
 

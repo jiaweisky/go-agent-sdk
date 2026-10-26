@@ -14,6 +14,7 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-26 | A2A card and capability expansion: `cards[].cardPath`, `defaultInputModes`, `defaultOutputModes`, and `extended` overrides; per-server `transports` (`jsonrpc`/`rest`), `pushNotifications`, and `signing` (PEM key; signatures computed). `pathPrefix` is now included in origin-built card endpoints; `baseURL` remains the complete public base when set. Push config data stays client-supplied; capability flags are derived from the wiring, not hand-authored. gRPC is intentionally not supported: its fixed service path would require tenant dispatch or a port per agent. |
 | 2026-10-26 | Renamed the Go model set type `config.Catalog` to `config.ModelRegistry` (`NewModelRegistry`, `Config.ModelRegistry()`, file `cmd/agentd/config/modelregistry.go`), and the `Params` field to `ModelRegistry`; the user-facing `models:` block is now described as the **model registry**. No config or wire change. |
 | 2026-10-25 | **Breaking:** provider-aware media uploads. Removed the flat `mediaUpload` block and top-level `storage`; added reusable `providerFileAPIs`, per-model `providerID` + `providerFileAPI`, and server `media.delivery` + `media.uploads.urlHost`. `prefer` is now `inline`/`url`/`providerFile`; `media.upload` is now `media.delivery.allowUploads`. `/api/config` reports the new shape; `schemaVersion` is now `6`. |
 | 2026-10-23 | Renamed `mediaUpload.expiresIn` / `expiresAfter` to `expiresInSeconds` / `expiresAfterSeconds`; `/api/config` reports the new names; `schemaVersion` is now `5`. |
@@ -248,6 +249,9 @@ servers:
           # s3: S3-compatible; cos: native Tencent COS — see agentd.example.yaml
     maxBodyBytes: 134217728             # HTTP request-body cap (0 = 128 MiB default; 413 above)
     cards: { build: { name: ..., description: ... } }   # REQUIRED per exposed agent (name + description)
+    # transports: [jsonrpc, rest]         # default [jsonrpc]
+    # pushNotifications: { enabled: true, timeout: 10s }
+    # signing: { keyFile: ./keys/card.pem, keyID: key-1, algorithm: ES256 }
     auth: { type: bearer, token: sk-... }   # A2A is bearer-only, like HTTP
     dropErroredTurns: true
     allowInsecure: false
@@ -297,7 +301,7 @@ full `ModelConfig`; a server only selects **ids**:
 | `agents` | both | http = reachable allow-list; a2a = exposed agents |
 | `peers` | both | remote A2A agents registered as agents with an A2A backend (`name` + `endpoint`/`cardURL`, optional `headers`/`description`/`mode`, default `subagent`); the local model delegates to one with the `task` tool, or runs it as a primary agent (`mode: primary`/`all`). See `DESIGN-A2A.md` (outbound) |
 | `interactionTimeout` / `interactionFallback` / `subscriberCapacity` / `cors` / `publicRoutes` | **http only** | hold-mode HITL + SSE/browser tuning |
-| `baseURL` / `cards` / `inboundMedia` / `default` | **a2a only** | card advertising + inbound media (`spool` / `inline`) + origin-root card owner; `cards` is **required per exposed agent** |
+| `baseURL` / `cards` / `inboundMedia` / `default` / `transports` / `pushNotifications` / `signing` | **a2a only** | card advertising + inbound media (`spool` / `inline`) + origin-root card owner + protocol bindings (`jsonrpc`/`rest`) + push notifications + card signing; `cards` is **required per exposed agent** |
 
 MCP servers and references are `Client`-level per server (both kinds, after the merge).
 `subscriberCapacity: 0` (the default) uses the HTTP adapter's built-in SSE bound.
@@ -306,7 +310,10 @@ operator-authored `name` and `description` (the card is the discovery contract a
 fetches first, so it is explicit rather than derived from the agent's internal definition);
 `version` defaults to `1.0.0`, and `cards.<agent>.skills` entries are optional
 **operator-authored descriptive labels** that must carry `id` + `name` + `description` (an
-agent with none advertises `[]`). A card for an agent not in `agents[]` is rejected.
+agent with none advertises `[]`). Optional `cards.<agent>.cardPath` is relative to the
+server's `pathPrefix` (do not repeat the prefix); `defaultInputModes`/`defaultOutputModes`
+override the card MIME lists, and `extended` supplies the authenticated extended card.
+A card for an agent not in `agents[]` is rejected.
 
 `servers` is a **list**: any number of entries, in any mix, **including several of the
 same kind**. Each entry is independent — its own `Client` (own `root`), its own listener,
@@ -429,16 +436,16 @@ Optional per-entry fields:
 | Field | Effect |
 |---|---|
 | `host` | virtual host: match the request host (`X-Forwarded-Host` if present, else `r.Host`; hostname, port ignored) → this server (otherwise fall back to pathPrefix routing) |
-| `pathPrefix` | URL path prefix: matched against the request path and stripped before the handler (must not be `/`; omit it to serve the listener root); for A2A it is also the source of the `baseURL` prefix |
+| `pathPrefix` | URL path prefix: matched against the request path and stripped before the handler (must not be `/`; omit it to serve the listener root); for A2A it is also included in the advertised endpoint when `baseURL` is unset |
 | `default` | **A2A only**: owns the origin-root `/.well-known/agent-card.json` — the nginx `default_server` idea. An A2A entry with neither `host` nor `pathPrefix` is naturally the default; otherwise it defaults to the first `a2a` entry. |
-| `baseURL` | **optional** — the A2A card's advertised endpoint base. Unset ⇒ derived from the request origin (`scheme://host`, honoring `X-Forwarded-*`), so **host routing needs none**. Set it for **path routing** (the origin fallback carries no path) or when the public URL differs from the request host. |
+| `baseURL` | **optional** — the A2A card's advertised endpoint base. Unset ⇒ derived from the request origin (`scheme://host`, honoring `X-Forwarded-*`) plus `pathPrefix`, so host and path routing need none. Set it when the public URL differs from the request host; it must be the complete public base, including any prefix. |
 
-Resolution order: a matching `host` wins (an entry may set **both** `host` and `pathPrefix` — when
-`host` misses, its `pathPrefix` still applies); otherwise the **longest matching `pathPrefix`**;
+Resolution order: a matching `host` wins; otherwise the **longest matching `pathPrefix`**;
 an entry with **neither** serves the listener **root** (so at most one such entry per
-`listen` — the common single-server case). With **no `host`**, servers fall back to **port
-routing** (distinct `listen` addresses → one listener each) or, when sharing a `listen`, to
-**path routing** via distinct `pathPrefix` values.
+`listen` — the common single-server case). An **A2A** entry cannot combine `host` with
+`pathPrefix` (the card endpoint would be ambiguous). With **no `host`**, servers fall back to
+**port routing** (distinct `listen` addresses → one listener each) or, when sharing a `listen`,
+to **path routing** via distinct `pathPrefix` values.
 
 **Host vs path.**
 
@@ -448,12 +455,10 @@ routing** (distinct `listen` addresses → one listener each) or, when sharing a
   no extra config; it also pairs naturally with TLS/SNI and multiple certificates. **Host
   matching uses the same origin rule** (`X-Forwarded-Host` first, then `r.Host`), so it stays
   correct behind a proxy.
-- **Path** — works for both, with two A2A caveats:
-  - The card *does* carry the access path: `SupportedInterfaces[].url` is the absolute
-    JSON-RPC endpoint and may include the prefix. But it is built from `BaseURL` — the
-    origin-based fallback `requestBaseURL` is **scheme+host only** (no path). So **every
-    A2A entry with a `pathPrefix` must set `baseURL` including its prefix**, or the advertised
-    endpoint is wrong.
+- **Path** — works for both; for A2A the advertised endpoint includes the mount
+  `pathPrefix` automatically (the origin is derived from the request, then the prefix and
+  the agent endpoint path are appended). `baseURL` remains available when the public URL
+  differs from the request host, and must then include the prefix itself.
   - The origin-rooted discovery `/.well-known/agent-card.json` can belong to only **one**
     entry (the `default`); the others are reached via their prefixed card URL.
 
@@ -637,7 +642,7 @@ compatibility shims are kept.
 | D3 | Keep the transport **adapters** (`pkg/server`, `pkg/a2a/server`) unchanged. | Different wire contracts; only the assembly layer is unified. |
 | D4 | Extract `buildClient` into `cmd/agentd/config` (or `cmd/serverunner`). | Fixes the current drift; single source of truth. |
 | D5 | **Streamlined, config-driven CLI** (§5.1): essentially only `-config` (plus `-check`/`-version`); the config is the single source of truth — servers, agents, models, roots, listeners, auth and tuning all live there. No per-run behavior flags. | The two commands' ~18/13 flags overlap and sprawl; everything agentd does is a config decision, so the CLI only points at the file. |
-| D6 | **In-process one-port multiplexing** (§5.2) via a top-level router: `host` (virtual host) is the preferred A2A discriminator (zero-config, origin-built card URLs); `pathPrefix` (path prefix) is also supported and **requires** a per-entry `baseURL` including the prefix. | Both adapters return `http.Handler`, so sharing a listener is natural; host routing keeps A2A card URLs correct with no extra config. |
+| D6 | **In-process one-port multiplexing** (§5.2) via a top-level router: `host` (virtual host) is the preferred A2A discriminator (zero-config, origin-built card URLs); `pathPrefix` (path prefix) is also supported and is included in origin-built card URLs automatically; `baseURL` overrides the public base (including any prefix). | Both adapters return `http.Handler`, so sharing a listener is natural; host routing keeps A2A card URLs correct with no extra config. |
 | D7 | **Cross-instance aggregate discovery** at the origin root `/.well-known/agents.json` (union of the A2A entries **on that listener**), served by `agentd` via a new exported `pkg/a2a/server.Server.Cards(r *http.Request)` accessor; the origin-root single card `/.well-known/agent-card.json` is owned by the `default` A2A entry. | Per-instance `/.well-known/agents.json` already exists; the root union lets one URL discover every A2A agent on that origin, and the `default` entry resolves the single-card root. |
 | D8 | Config keys are **camelCase** (matching `cmd/agentd/config`). Secrets are inline **or** referenced via `$VAR`/`${VAR}`/`${VAR:-default}` (the whole file is expanded; an unset variable without a fallback is an error; `$$` escapes a literal `$`); environment is never read implicitly. | Consistency with the existing `agentserve`/`a2aserve` config and `DESIGN-HTTP.md` §8.1; explicit references keep secrets and host-specific facts (paths, endpoints, platform) out of a committed file without giving up the config-driven design. |
 | D9 | **Remove `cmd/agentserve` and `cmd/a2aserve`**; `agentd` replaces them, with **no old-config compatibility** (no shims). | The two commands are the duplication being removed; keeping a shim would preserve the very drift and the flag sprawl. |

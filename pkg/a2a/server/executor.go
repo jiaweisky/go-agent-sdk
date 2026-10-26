@@ -251,104 +251,144 @@ func (e *executor) mapStream(
 	stream iter.Seq2[Event, error],
 	yield func(a2a.Event, error) bool,
 ) {
-	var artifactID a2a.ArtifactID
-	var usage any
-
-	appendPart := func(part *a2a.Part) bool {
-		var event *a2a.TaskArtifactUpdateEvent
-		if artifactID == "" {
-			event = a2a.NewArtifactEvent(execCtx, part)
-			artifactID = event.Artifact.ID
-		} else {
-			event = a2a.NewArtifactUpdateEvent(execCtx, artifactID, part)
-		}
-		if e.artifacts != nil {
-			replacement, err := e.artifacts(ctx, string(execCtx.TaskID), event.Artifact)
-			if err != nil {
-				e.fail(execCtx, err, yield)
-				return false
-			}
-			if artifact, ok := replacement.(*a2a.Artifact); ok && artifact != nil {
-				event.Artifact = artifact
-			}
-		}
-		return yield(event, nil)
+	m := &streamMapper{
+		exec:    e,
+		ctx:     ctx,
+		execCtx: execCtx,
+		sess:    sess,
+		yield:   yield,
 	}
+	m.deltas = &deltaBuffer{emit: m.appendText}
+	m.run(stream)
+}
 
-	appendText := func(text string, thought bool) bool {
-		part := a2a.NewTextPart(text)
-		if thought {
-			part.SetMeta(a2acommon.ToA2AMetaKey(a2acommon.MetaThought), true)
-		}
-		return appendPart(part)
-	}
+// streamMapper owns the per-turn artifact and usage state while one session
+// event stream is mapped to A2A events.
+type streamMapper struct {
+	exec       *executor
+	ctx        context.Context
+	execCtx    *a2asrv.ExecutorContext
+	sess       Session
+	yield      func(a2a.Event, error) bool
+	artifactID a2a.ArtifactID
+	usage      any
+	deltas     *deltaBuffer
+}
 
-	deltas := &deltaBuffer{emit: appendText}
-
+// run consumes the session stream and stops on the first terminal event or
+// failed yield.
+func (m *streamMapper) run(stream iter.Seq2[Event, error]) {
 	for event, err := range stream {
 		if err != nil {
-			if !deltas.flush() {
+			if !m.flush() {
 				return
 			}
-			e.fail(execCtx, err, yield)
+			m.exec.fail(m.execCtx, err, m.yield)
 			return
 		}
-		switch event.Kind {
-		case EventText, EventReasoning:
+		if isDeltaEvent(event.Kind) {
 			if event.Text == "" {
 				continue
 			}
-			if !deltas.add(event.Kind, event.Text) {
+			if !m.deltas.add(event.Kind, event.Text) {
 				return
 			}
-		default:
-			if !deltas.flush() {
-				return
-			}
-			switch event.Kind {
-			case EventToolCalled:
-				if !appendPart(toolCallPart(event)) {
-					return
-				}
-			case EventToolResult:
-				if !appendPart(toolResultPart(event)) {
-					return
-				}
-				for _, diff := range fileDiffParts(event.Structured) {
-					if !appendPart(diff) {
-						return
-					}
-				}
-			case EventNotice:
-				if event.Text == "" {
-					continue
-				}
-				if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, noticeMessage(execCtx, event.Text)), nil) {
-					return
-				}
-			case EventToolProgress, EventStepStarted:
-				if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, nil), nil) {
-					return
-				}
-			case EventUsage:
-				usage = event.Usage
-			case EventAwaitInput:
-				e.awaitInput(execCtx, sess, artifactID, event, yield)
-				return
-			case EventError:
-				e.fail(execCtx, event.Err, yield)
-				return
-			case EventIdle:
-				e.complete(execCtx, artifactID, usage, yield)
-				return
-			}
+			continue
+		}
+		if !m.flush() {
+			return
+		}
+		if m.handleEvent(event) {
+			return
 		}
 	}
 	// The stream ended without EventIdle; treat it as a completed turn.
-	if !deltas.flush() {
+	if !m.flush() {
 		return
 	}
-	e.complete(execCtx, artifactID, usage, yield)
+	m.exec.complete(m.execCtx, m.artifactID, m.usage, m.yield)
+}
+
+// isDeltaEvent reports whether kind contributes to the text/reasoning buffer.
+func isDeltaEvent(kind EventKind) bool {
+	return kind == EventText || kind == EventReasoning
+}
+
+// handleEvent emits one non-delta event. It reports whether the stream is done.
+func (m *streamMapper) handleEvent(event Event) bool {
+	switch event.Kind {
+	case EventToolCalled:
+		return !m.appendPart(toolCallPart(event))
+	case EventToolResult:
+		if !m.appendPart(toolResultPart(event)) {
+			return true
+		}
+		for _, diff := range fileDiffParts(event.Structured) {
+			if !m.appendPart(diff) {
+				return true
+			}
+		}
+		return false
+	case EventNotice:
+		if event.Text == "" {
+			return false
+		}
+		return !m.yield(a2a.NewStatusUpdateEvent(m.execCtx, a2a.TaskStateWorking, noticeMessage(m.execCtx, event.Text)), nil)
+	case EventToolProgress, EventStepStarted:
+		return !m.yield(a2a.NewStatusUpdateEvent(m.execCtx, a2a.TaskStateWorking, nil), nil)
+	case EventUsage:
+		m.usage = event.Usage
+		return false
+	case EventAwaitInput:
+		m.exec.awaitInput(m.execCtx, m.sess, m.artifactID, event, m.yield)
+		return true
+	case EventError:
+		m.exec.fail(m.execCtx, event.Err, m.yield)
+		return true
+	case EventIdle:
+		m.exec.complete(m.execCtx, m.artifactID, m.usage, m.yield)
+		return true
+	default:
+		return false
+	}
+}
+
+// appendPart appends one part to the turn's artifact, creating the artifact on
+// the first part and applying the optional externalizer.
+func (m *streamMapper) appendPart(part *a2a.Part) bool {
+	var event *a2a.TaskArtifactUpdateEvent
+	if m.artifactID == "" {
+		event = a2a.NewArtifactEvent(m.execCtx, part)
+		m.artifactID = event.Artifact.ID
+	} else {
+		event = a2a.NewArtifactUpdateEvent(m.execCtx, m.artifactID, part)
+	}
+	if m.exec.artifacts != nil {
+		replacement, err := m.exec.artifacts(m.ctx, string(m.execCtx.TaskID), event.Artifact)
+		if err != nil {
+			m.exec.fail(m.execCtx, err, m.yield)
+			return false
+		}
+		if artifact, ok := replacement.(*a2a.Artifact); ok && artifact != nil {
+			event.Artifact = artifact
+		}
+	}
+	return m.yield(event, nil)
+}
+
+// appendText emits one buffered text chunk as a text part, marking reasoning
+// output with the thought metadata.
+func (m *streamMapper) appendText(text string, thought bool) bool {
+	part := a2a.NewTextPart(text)
+	if thought {
+		part.SetMeta(a2acommon.ToA2AMetaKey(a2acommon.MetaThought), true)
+	}
+	return m.appendPart(part)
+}
+
+// flush emits any buffered deltas.
+func (m *streamMapper) flush() bool {
+	return m.deltas.flush()
 }
 
 // Text and reasoning deltas are accumulated before being emitted as one

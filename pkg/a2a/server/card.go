@@ -6,10 +6,40 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 )
 
-// buildCard builds the AgentCard for one exposed agent. A card describes a
-// single agent (one card = one agent); its URL is where the JSON-RPC endpoint
-// is mounted. When security is set, the card declares the bearer scheme.
+// Transport is one protocol binding an A2A server exposes.
+type Transport string
+
+const (
+	// TransportJSONRPC is the JSON-RPC binding.
+	TransportJSONRPC Transport = "jsonrpc"
+	// TransportREST is the HTTP+JSON/REST binding.
+	TransportREST Transport = "rest"
+)
+
+// cardConfig is the resolved input for one card.
+type cardConfig struct {
+	expose       *schema.AgentExpose
+	endpoint     string
+	security     *Security
+	capabilities a2a.AgentCapabilities
+	transports   []Transport
+}
+
+// buildCard builds the default streaming/JSON-RPC card for tests and callers
+// that do not need the server's configured capabilities.
 func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.AgentCard {
+	return buildCardWith(info, cardConfig{
+		expose:       info.Expose,
+		endpoint:     endpoint,
+		security:     security,
+		capabilities: a2a.AgentCapabilities{Streaming: true},
+		transports:   []Transport{TransportJSONRPC},
+	})
+}
+
+// buildCardWith builds one AgentCard. A card describes a single agent (one card
+// = one agent); its URLs are where the matching bindings are mounted.
+func buildCardWith(info schema.AgentInfo, cfg cardConfig) *a2a.AgentCard {
 	name := string(info.ID)
 	description := ""
 	if info.Description != nil {
@@ -23,8 +53,8 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 	skills := []a2a.AgentSkill{}
 	inputModes := []string{"text/plain", "application/json", "image/png", "image/jpeg", "image/gif", "image/webp"}
 	outputModes := []string{"text/plain", "application/json"}
-	if info.Expose != nil {
-		expose := info.Expose
+	if cfg.expose != nil {
+		expose := cfg.expose
 		if expose.Name != "" {
 			name = expose.Name
 		}
@@ -54,22 +84,29 @@ func buildCard(info schema.AgentInfo, endpoint string, security *Security) *a2a.
 		DocumentationURL: documentationURL,
 		IconURL:          iconURL,
 		Provider:         provider,
-		Capabilities: a2a.AgentCapabilities{
-			Streaming: true,
-		},
+		Capabilities:     cfg.capabilities,
 		// Input: text prompts, structured data parts, and the image types the read
 		// tool can ingest. Output: assistant text and structured (data) parts.
 		DefaultInputModes:  inputModes,
 		DefaultOutputModes: outputModes,
 		Skills:             skills,
 	}
-	if endpoint != "" {
-		card.SupportedInterfaces = []*a2a.AgentInterface{
-			a2a.NewAgentInterface(endpoint, a2a.TransportProtocolJSONRPC),
+	for _, transport := range cfg.transports {
+		switch transport {
+		case TransportJSONRPC:
+			if cfg.endpoint != "" {
+				card.SupportedInterfaces = append(card.SupportedInterfaces,
+					a2a.NewAgentInterface(cfg.endpoint, a2a.TransportProtocolJSONRPC))
+			}
+		case TransportREST:
+			if cfg.endpoint != "" {
+				card.SupportedInterfaces = append(card.SupportedInterfaces,
+					a2a.NewAgentInterface(cfg.endpoint+"rest", a2a.TransportProtocolHTTPJSON))
+			}
 		}
 	}
-	if security != nil {
-		scheme := a2a.SecuritySchemeName(security.securitySchemeName())
+	if cfg.security != nil {
+		scheme := a2a.SecuritySchemeName(cfg.security.securitySchemeName())
 		card.SecuritySchemes = a2a.NamedSecuritySchemes{
 			scheme: a2a.HTTPAuthSecurityScheme{Scheme: "Bearer"},
 		}
