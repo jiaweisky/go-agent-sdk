@@ -41,7 +41,7 @@ type controlInstance struct {
 // separate process provisioned by the host.
 type projectManager struct {
 	ctx           context.Context
-	catalog       config.Catalog
+	registry      config.ModelRegistry
 	models        []config.ModelConfig
 	profiles      map[string]*config.ProviderFileAPI
 	projectListen string
@@ -54,14 +54,14 @@ type projectManager struct {
 	reserved  map[string]bool   // ids being built (claimed before the slow build)
 }
 
-func newProjectManager(ctx context.Context, catalog config.Catalog, control *config.ControlConfig, models []config.ModelConfig, profiles map[string]*config.ProviderFileAPI) *projectManager {
+func newProjectManager(ctx context.Context, registry config.ModelRegistry, control *config.ControlConfig, models []config.ModelConfig, profiles map[string]*config.ProviderFileAPI) *projectManager {
 	projectListen := control.ProjectListen
 	if projectListen == "" {
 		projectListen = "127.0.0.1:0"
 	}
 	return &projectManager{
 		ctx:           ctx,
-		catalog:       catalog,
+		registry:      registry,
 		models:        models,
 		profiles:      profiles,
 		projectListen: projectListen,
@@ -147,7 +147,7 @@ func (m *projectManager) register(name string, instance *controlInstance) {
 // nothing.
 func (m *projectManager) prepare(req config.ProjectRequest, root string) (*controlInstance, error) {
 	server := req.ToServer(root)
-	catalog, err := m.catalog.Subset(server.Models, server.DefaultModel)
+	registry, err := m.registry.Subset(server.Models, server.DefaultModel)
 	if err != nil {
 		return nil, err
 	}
@@ -165,13 +165,13 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 	}
 	fileHeaders := mediaFileHeadersFor(server, m.models, m.profiles)
 	baseDirs := append(m.activeBaseDirs(), isolationBaseDirs([]config.Server{server})...)
-	client, err := buildClient(server, catalog, uploader, fileHeaders, isolationExcludes(source, baseDirs))
+	client, err := buildClient(m.ctx, server, registry, uploader, fileHeaders, isolationExcludes(source, baseDirs))
 	if err != nil {
 		m.teardown(project)
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
-	built, err := buildServer(ctx, server, client, catalog, uploader)
+	builtSrv, err := buildServer(ctx, server, client, registry, uploader)
 	if err != nil {
 		m.abandon(project, client, cancel)
 		return nil, err
@@ -181,7 +181,7 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 		m.abandon(project, client, cancel)
 		return nil, fmt.Errorf("bind project listener: %w", err)
 	}
-	srv := &http.Server{Handler: newRouter([]*builtServer{built}, nil, nil), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: newRouter([]*builtServer{builtSrv}, nil, nil), ReadHeaderTimeout: 10 * time.Second}
 	instance := &controlInstance{
 		id:               req.Name,
 		kind:             string(req.Kind),
@@ -197,7 +197,7 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 		teardown:         project.Teardown,
 	}
 	go func() {
-		_ = serve(ctx, srv, ln, nil, built.closeStreams)
+		_ = serve(ctx, srv, ln, nil, builtSrv.closeStreams)
 		close(instance.done)
 	}()
 	return instance, nil

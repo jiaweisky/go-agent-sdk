@@ -171,7 +171,7 @@ func TestValidateAuthRequiresExplicitBearerToken(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsUnknownDefaultModelWholeCatalog(t *testing.T) {
+func TestValidateRejectsUnknownDefaultModelWholeRegistry(t *testing.T) {
 	cfg := Config{
 		Models: []ModelConfig{testModel()},
 		Servers: []Server{
@@ -180,7 +180,7 @@ func TestValidateRejectsUnknownDefaultModelWholeCatalog(t *testing.T) {
 		},
 	}
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected an unknown defaultModel to be rejected even with the whole catalog")
+		t.Fatal("expected an unknown defaultModel to be rejected even with the whole registry")
 	}
 }
 
@@ -548,12 +548,12 @@ func TestValidateRejectsPercentEncodedPathPrefix(t *testing.T) {
 }
 
 func TestServerValidateRejectsEmptyName(t *testing.T) {
-	catalog, err := (Config{Models: []ModelConfig{testModel()}}).Catalog()
+	registry, err := (Config{Models: []ModelConfig{testModel()}}).ModelRegistry()
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := Server{Kind: KindHTTP, Listen: "127.0.0.1:1", Root: "/a", Agents: []string{"build"}}
-	if err := server.Validate(catalog); err == nil {
+	if err := server.Validate(registry); err == nil {
 		t.Fatal("expected an empty server name to be rejected")
 	}
 }

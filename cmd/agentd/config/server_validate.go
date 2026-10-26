@@ -11,9 +11,9 @@ import (
 	"unicode"
 )
 
-// Validate checks one server's fields against the global catalog.
-func (s Server) Validate(catalog Catalog) error {
-	if err := validateServerCommon(s, catalog); err != nil {
+// Validate checks one server's fields against the global registry.
+func (s Server) Validate(registry ModelRegistry) error {
+	if err := validateServerCommon(s, registry); err != nil {
 		return err
 	}
 	if s.Kind == KindHTTP {
@@ -78,12 +78,12 @@ func (s Server) validatePathPrefixField() error {
 
 // validateServerCommon checks the fields every server shares, regardless of
 // kind. Kind-specific fields are validated separately.
-func validateServerCommon(s Server, catalog Catalog) error {
+func validateServerCommon(s Server, registry ModelRegistry) error {
 	if err := validateServerShape(s); err != nil {
 		return err
 	}
 
-	if err := validateServerCatalog(s, catalog); err != nil {
+	if err := validateServerModels(s, registry); err != nil {
 		return err
 	}
 
@@ -151,9 +151,9 @@ func containsSpaceOrControl(value string) bool {
 	return false
 }
 
-// validateServerCatalog checks the server's model subset against the catalog.
-func validateServerCatalog(s Server, catalog Catalog) error {
-	if _, err := catalog.Subset(s.Models, s.DefaultModel); err != nil {
+// validateServerModels checks the server's model subset against the registry.
+func validateServerModels(s Server, registry ModelRegistry) error {
+	if _, err := registry.Subset(s.Models, s.DefaultModel); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
 	return nil

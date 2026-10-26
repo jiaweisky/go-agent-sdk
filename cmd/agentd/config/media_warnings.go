@@ -12,7 +12,7 @@ import (
 // preferred source for some or all models. Startup and --check print them so a
 // typo does not silently fall back to another source.
 func MediaWarnings(cfg Config) []string {
-	catalog, err := cfg.Catalog()
+	registry, err := cfg.ModelRegistry()
 	if err != nil {
 		return nil
 	}
@@ -20,7 +20,7 @@ func MediaWarnings(cfg Config) []string {
 	for _, server := range cfg.Servers {
 		ids := server.Models
 		if len(ids) == 0 {
-			ids = catalog.IDs()
+			ids = registry.IDs()
 		}
 		var delivery *MediaDeliveryConfig
 		if server.Media != nil {
@@ -44,7 +44,7 @@ func MediaWarnings(cfg Config) []string {
 
 		fileModels := 0
 		for _, id := range ids {
-			entry, ok := catalog.Entry(id)
+			entry, ok := registry.Entry(id)
 			if !ok || entry.ProviderFileAPI == "" {
 				continue
 			}

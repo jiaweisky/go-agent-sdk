@@ -18,7 +18,7 @@ func (c Config) Validate() error {
 	if err := validateModelProviderFileAPIs(c.Models, c.ProviderFileAPIs); err != nil {
 		return err
 	}
-	catalog, err := c.Catalog()
+	registry, err := c.ModelRegistry()
 	if errors.Is(err, errModelsRequired) {
 		return err
 	}
@@ -29,7 +29,7 @@ func (c Config) Validate() error {
 	if len(c.Servers) == 0 {
 		return errors.New("at least one server is required")
 	}
-	if err := validateServers(c.Servers, catalog, c.ProviderFileAPIs); err != nil {
+	if err := validateServers(c.Servers, registry, c.ProviderFileAPIs); err != nil {
 		return err
 	}
 
@@ -50,16 +50,16 @@ func (c Config) Validate() error {
 }
 
 // validateServers validates every server and rejects duplicate names.
-func validateServers(servers []Server, catalog Catalog, profiles map[string]*ProviderFileAPI) error {
+func validateServers(servers []Server, registry ModelRegistry, profiles map[string]*ProviderFileAPI) error {
 	names := make(map[string]bool, len(servers))
 	for _, s := range servers {
 		if err := validateServerName(s, names); err != nil {
 			return err
 		}
-		if err := s.Validate(catalog); err != nil {
+		if err := s.Validate(registry); err != nil {
 			return err
 		}
-		if err := validateServerProviderFiles(s, catalog, profiles); err != nil {
+		if err := validateServerProviderFiles(s, registry, profiles); err != nil {
 			return err
 		}
 		if err := validateServerDeliverySources(s); err != nil {
@@ -70,14 +70,14 @@ func validateServers(servers []Server, catalog Catalog, profiles map[string]*Pro
 }
 
 // validateServerProviderFiles enforces the runtime providerID -> profile map.
-func validateServerProviderFiles(s Server, catalog Catalog, profiles map[string]*ProviderFileAPI) error {
+func validateServerProviderFiles(s Server, registry ModelRegistry, profiles map[string]*ProviderFileAPI) error {
 	ids := s.Models
 	if len(ids) == 0 {
-		ids = catalog.IDs()
+		ids = registry.IDs()
 	}
 	byProvider := map[string]string{}
 	for _, id := range ids {
-		entry, ok := catalog.Entry(id)
+		entry, ok := registry.Entry(id)
 		if !ok {
 			continue
 		}

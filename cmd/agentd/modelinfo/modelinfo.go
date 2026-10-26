@@ -71,27 +71,27 @@ func FromConfig(entry config.ModelConfig) (schema.ModelInfo, error) {
 }
 
 // Resolve returns a model id's SDK metadata. An unknown id falls back to the
-// catalog's default entry.
-func Resolve(catalog config.Catalog, id string) (schema.ModelInfo, error) {
-	entry, ok := catalog.Entry(id)
+// registry's default entry.
+func Resolve(registry config.ModelRegistry, id string) (schema.ModelInfo, error) {
+	entry, ok := registry.Entry(id)
 	if !ok {
-		entry, ok = catalog.DefaultEntry()
+		entry, ok = registry.DefaultEntry()
 	}
 	if !ok {
-		return schema.ModelInfo{}, fmt.Errorf("model %q: catalog has no entry", id)
+		return schema.ModelInfo{}, fmt.Errorf("model %q: model registry has no entry", id)
 	}
 	return FromConfig(entry)
 }
 
-// List resolves every catalog model's metadata in registration order.
-func List(catalog config.Catalog) ([]schema.ModelInfo, error) {
-	ids := catalog.IDs()
+// List resolves every registry model's metadata in registration order.
+func List(registry config.ModelRegistry) ([]schema.ModelInfo, error) {
+	ids := registry.IDs()
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("catalog has no models")
+		return nil, fmt.Errorf("model registry has no models")
 	}
 	infos := make([]schema.ModelInfo, 0, len(ids))
 	for _, id := range ids {
-		info, err := Resolve(catalog, id)
+		info, err := Resolve(registry, id)
 		if err != nil {
 			return nil, err
 		}

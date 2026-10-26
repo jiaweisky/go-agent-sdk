@@ -37,6 +37,16 @@ func TestValidateMCPRejectsNegativeTimeout(t *testing.T) {
 	}
 }
 
+func TestValidateMCPRejectsDuplicateNames(t *testing.T) {
+	err := ValidateMCP([]MCPServer{
+		{Name: "a", Type: MCPLocal, Command: []string{"srv"}},
+		{Name: "a", Type: MCPRemote, URL: "https://mcp.example"},
+	})
+	if err == nil {
+		t.Fatal("duplicate MCP server names must be rejected")
+	}
+}
+
 func TestValidateMCPConfigs(t *testing.T) {
 	entries, err := ValidateMCPConfigs([]MCPServer{
 		{Name: "a", Type: MCPLocal, Command: []string{"srv"}, Timeout: "5s"},

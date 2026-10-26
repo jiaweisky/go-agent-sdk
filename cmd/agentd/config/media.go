@@ -230,7 +230,7 @@ func validateProviderFileAPIs(profiles map[string]*ProviderFileAPI) error {
 	return nil
 }
 
-// validateModelProviderFileAPIs checks model references before the catalog is
+// validateModelProviderFileAPIs checks model references before the registry is
 // built.
 func validateModelProviderFileAPIs(models []ModelConfig, profiles map[string]*ProviderFileAPI) error {
 	for _, m := range models {

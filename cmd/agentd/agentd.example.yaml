@@ -1,8 +1,8 @@
 # agentd example configuration.
 #
 # One process serves the configured `servers`; each server is one agent client
-# over one listener. Models are defined once in the global catalog and selected
-# per server by id.
+# over one listener. Models are defined once in the global model registry and
+# selected per server by id.
 #
 # The whole file (including comments) is expanded with envsubst before YAML
 # decoding, so a variable without a fallback must be set, `${VAR:-default}`
@@ -16,7 +16,7 @@
 # (`/chat/completions`, `/responses`, `/messages`).
 
 models:
-  # deepseek-flash speaks three wire protocols. Each is a separate catalog entry:
+  # deepseek-flash speaks three wire protocols. Each is a separate registry entry:
   # `id` is the agent-facing name, `model` is the value actually sent to the
   # provider. They are equal here but need not be.
 

@@ -48,11 +48,40 @@ func TestApplyCard(t *testing.T) {
 	}
 }
 
+func TestPeerAgentConfig(t *testing.T) {
+	cfg := a2aPeerAgentConfig(config.A2APeer{
+		Name:        "echo",
+		Endpoint:    "http://127.0.0.1:9099",
+		Headers:     map[string]string{"Authorization": "Bearer x"},
+		Description: "echoes",
+	})
+	if cfg.Mode == nil || *cfg.Mode != schema.AgentModeSubagent {
+		t.Fatalf("default mode = %v, want subagent", cfg.Mode)
+	}
+	if cfg.Description != "echoes" {
+		t.Fatalf("description = %q", cfg.Description)
+	}
+	if cfg.Backend == nil || cfg.Backend.Type != schema.AgentBackendA2A || cfg.Backend.A2A == nil {
+		t.Fatalf("backend = %+v", cfg.Backend)
+	}
+	if cfg.Backend.A2A.Endpoint != "http://127.0.0.1:9099" {
+		t.Fatalf("endpoint = %q", cfg.Backend.A2A.Endpoint)
+	}
+	if cfg.Backend.A2A.Headers["Authorization"] != "Bearer x" {
+		t.Fatalf("headers = %v", cfg.Backend.A2A.Headers)
+	}
+
+	primary := a2aPeerAgentConfig(config.A2APeer{Name: "p", Endpoint: "http://a", Mode: schema.AgentModePrimary})
+	if primary.Mode == nil || *primary.Mode != schema.AgentModePrimary {
+		t.Fatalf("explicit mode = %v, want primary", primary.Mode)
+	}
+}
+
 func TestExposeAgents(t *testing.T) {
 	client, err := New(Params{
-		Root:    t.TempDir(),
-		Model:   "test-model",
-		Catalog: testCatalog(t),
+		Root:          t.TempDir(),
+		Model:         "test-model",
+		ModelRegistry: testModelRegistry(t),
 	})
 	if err != nil {
 		t.Fatalf("build client: %v", err)
@@ -75,9 +104,9 @@ func TestExposeAgents(t *testing.T) {
 
 func TestExposeAgentsRejectsUnknown(t *testing.T) {
 	client, err := New(Params{
-		Root:    t.TempDir(),
-		Model:   "test-model",
-		Catalog: testCatalog(t),
+		Root:          t.TempDir(),
+		Model:         "test-model",
+		ModelRegistry: testModelRegistry(t),
 	})
 	if err != nil {
 		t.Fatalf("build client: %v", err)
@@ -100,9 +129,9 @@ func containsString(values []string, want string) bool {
 
 func TestExposeAgentsValidatesBeforeRegistering(t *testing.T) {
 	client, err := New(Params{
-		Root:    t.TempDir(),
-		Model:   "test-model",
-		Catalog: testCatalog(t),
+		Root:          t.TempDir(),
+		Model:         "test-model",
+		ModelRegistry: testModelRegistry(t),
 	})
 	if err != nil {
 		t.Fatalf("build client: %v", err)

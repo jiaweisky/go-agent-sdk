@@ -2,7 +2,7 @@ package config
 
 import "errors"
 
-// Config is the agentd configuration: a global model catalog plus a list of
+// Config is the agentd configuration: a global model registry plus a list of
 // servers, each exposing one model subset. The file is envsubst-expanded before
 // decoding, so it may reference environment variables explicitly (`$VAR` /
 // `${VAR}` / `${VAR:-default}`); none are read implicitly.
@@ -27,10 +27,10 @@ type Config struct {
 // length check.
 var errModelsRequired = errors.New("models is required")
 
-// Catalog builds the global model catalog from the configured entries.
-func (c Config) Catalog() (Catalog, error) {
+// ModelRegistry builds the global model registry from the configured entries.
+func (c Config) ModelRegistry() (ModelRegistry, error) {
 	if len(c.Models) == 0 {
-		return Catalog{}, errModelsRequired
+		return ModelRegistry{}, errModelsRequired
 	}
-	return NewCatalog(c.Models[0], c.Models[1:])
+	return NewModelRegistry(c.Models[0], c.Models[1:])
 }

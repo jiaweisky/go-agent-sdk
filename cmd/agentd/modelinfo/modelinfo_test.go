@@ -6,20 +6,20 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
 
-func TestResolveEmptyCatalog(t *testing.T) {
-	if _, err := Resolve(config.Catalog{}, "missing"); err == nil {
-		t.Fatal("expected an empty catalog to be rejected")
+func TestResolveEmptyModelRegistry(t *testing.T) {
+	if _, err := Resolve(config.ModelRegistry{}, "missing"); err == nil {
+		t.Fatal("expected an empty registry to be rejected")
 	}
 }
 
 func TestResolveFallsBackToDefault(t *testing.T) {
-	catalog, err := config.NewCatalog(config.ModelConfig{
+	registry, err := config.NewModelRegistry(config.ModelConfig{
 		ID: "default", Model: "default", Protocol: "gemini",
 	}, nil)
 	if err != nil {
-		t.Fatalf("NewCatalog: %v", err)
+		t.Fatalf("NewModelRegistry: %v", err)
 	}
-	info, err := Resolve(catalog, "unknown")
+	info, err := Resolve(registry, "unknown")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -29,13 +29,13 @@ func TestResolveFallsBackToDefault(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	catalog, err := config.NewCatalog(config.ModelConfig{
+	registry, err := config.NewModelRegistry(config.ModelConfig{
 		ID: "one", Model: "one", Protocol: "gemini",
 	}, []config.ModelConfig{{ID: "two", Model: "two", Protocol: "gemini"}})
 	if err != nil {
-		t.Fatalf("NewCatalog: %v", err)
+		t.Fatalf("NewModelRegistry: %v", err)
 	}
-	infos, err := List(catalog)
+	infos, err := List(registry)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -43,8 +43,8 @@ func TestList(t *testing.T) {
 		t.Fatalf("infos = %+v", infos)
 	}
 }
-func TestListEmptyCatalog(t *testing.T) {
-	if _, err := List(config.Catalog{}); err == nil {
-		t.Fatal("expected an empty catalog to be rejected")
+func TestListEmptyModelRegistry(t *testing.T) {
+	if _, err := List(config.ModelRegistry{}); err == nil {
+		t.Fatal("expected an empty registry to be rejected")
 	}
 }

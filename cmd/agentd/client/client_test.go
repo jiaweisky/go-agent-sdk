@@ -10,16 +10,25 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
 
-func testCatalog(t *testing.T) config.Catalog {
+func testModelRegistry(t *testing.T) config.ModelRegistry {
 	t.Helper()
-	catalog, err := config.NewCatalog(config.ModelConfig{
+	registry, err := config.NewModelRegistry(config.ModelConfig{
 		ID: "test-model", Model: "test-model", Protocol: "openai-responses",
 		Credentials: config.Credentials{APIKey: "test"},
 	}, nil)
 	if err != nil {
-		t.Fatalf("catalog: %v", err)
+		t.Fatalf("registry: %v", err)
 	}
-	return catalog
+	return registry
+}
+
+// TestNewRejectsEmptyModelRegistry guards the fail-fast check: a client without
+// models would otherwise only fail on the first session.
+func TestNewRejectsEmptyModelRegistry(t *testing.T) {
+	_, err := New(Params{Root: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "model registry") {
+		t.Fatalf("expected an empty model registry to be rejected, got %v", err)
+	}
 }
 
 // TestNewRegistersPeers exercises the real client assembly: a server's peers end
@@ -27,9 +36,9 @@ func testCatalog(t *testing.T) config.Catalog {
 // delegate to them with the task tool.
 func TestNewRegistersPeers(t *testing.T) {
 	client, err := New(Params{
-		Root:    t.TempDir(),
-		Model:   "test-model",
-		Catalog: testCatalog(t),
+		Root:          t.TempDir(),
+		Model:         "test-model",
+		ModelRegistry: testModelRegistry(t),
 		Peers: []config.A2APeer{{
 			Name:        "echo",
 			Endpoint:    "http://127.0.0.1:9099",
@@ -60,42 +69,13 @@ func TestNewRegistersPeers(t *testing.T) {
 // existing agent (here the built-in build agent) into an A2A backend.
 func TestNewRejectsPeerCollision(t *testing.T) {
 	_, err := New(Params{
-		Root:    t.TempDir(),
-		Model:   "test-model",
-		Catalog: testCatalog(t),
-		Peers:   []config.A2APeer{{Name: "build", Endpoint: "http://127.0.0.1:9099"}},
+		Root:          t.TempDir(),
+		Model:         "test-model",
+		ModelRegistry: testModelRegistry(t),
+		Peers:         []config.A2APeer{{Name: "build", Endpoint: "http://127.0.0.1:9099"}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("expected the colliding A2A peer to be rejected, got %v", err)
-	}
-}
-
-func TestPeerAgentConfig(t *testing.T) {
-	cfg := a2aPeerAgentConfig(config.A2APeer{
-		Name:        "echo",
-		Endpoint:    "http://127.0.0.1:9099",
-		Headers:     map[string]string{"Authorization": "Bearer x"},
-		Description: "echoes",
-	})
-	if cfg.Mode == nil || *cfg.Mode != schema.AgentModeSubagent {
-		t.Fatalf("default mode = %v, want subagent", cfg.Mode)
-	}
-	if cfg.Description != "echoes" {
-		t.Fatalf("description = %q", cfg.Description)
-	}
-	if cfg.Backend == nil || cfg.Backend.Type != schema.AgentBackendA2A || cfg.Backend.A2A == nil {
-		t.Fatalf("backend = %+v", cfg.Backend)
-	}
-	if cfg.Backend.A2A.Endpoint != "http://127.0.0.1:9099" {
-		t.Fatalf("endpoint = %q", cfg.Backend.A2A.Endpoint)
-	}
-	if cfg.Backend.A2A.Headers["Authorization"] != "Bearer x" {
-		t.Fatalf("headers = %v", cfg.Backend.A2A.Headers)
-	}
-
-	primary := a2aPeerAgentConfig(config.A2APeer{Name: "p", Endpoint: "http://a", Mode: schema.AgentModePrimary})
-	if primary.Mode == nil || *primary.Mode != schema.AgentModePrimary {
-		t.Fatalf("explicit mode = %v, want primary", primary.Mode)
 	}
 }
 

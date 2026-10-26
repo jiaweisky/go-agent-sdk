@@ -137,34 +137,34 @@ func TestServerProviderFileMapping(t *testing.T) {
 		ProviderID: "p", ProviderFileAPI: "a",
 		Media: &MediaConfig{Forms: map[string][]string{"file": {"file"}}},
 	}
-	catalog, err := NewCatalog(fileModel, nil)
+	registry, err := NewModelRegistry(fileModel, nil)
 	if err != nil {
-		t.Fatalf("catalog: %v", err)
+		t.Fatalf("registry: %v", err)
 	}
 	server := Server{Name: "s", Models: []string{"m"}}
-	if err := validateServerProviderFiles(server, catalog, profiles); err != nil {
+	if err := validateServerProviderFiles(server, registry, profiles); err != nil {
 		t.Fatalf("valid server rejected: %v", err)
 	}
 
 	missing := fileModel
 	missing.ProviderFileAPI = ""
-	catalog, err = NewCatalog(missing, nil)
+	registry, err = NewModelRegistry(missing, nil)
 	if err != nil {
-		t.Fatalf("catalog: %v", err)
+		t.Fatalf("registry: %v", err)
 	}
-	if err := validateServerProviderFiles(server, catalog, profiles); err == nil {
+	if err := validateServerProviderFiles(server, registry, profiles); err == nil {
 		t.Fatal("a file-capable model without providerFileAPI must be rejected")
 	}
 
 	second := fileModel
 	second.ID = "m2"
 	second.ProviderFileAPI = "b"
-	catalog, err = NewCatalog(fileModel, []ModelConfig{second})
+	registry, err = NewModelRegistry(fileModel, []ModelConfig{second})
 	if err != nil {
-		t.Fatalf("catalog: %v", err)
+		t.Fatalf("registry: %v", err)
 	}
 	server.Models = []string{"m", "m2"}
-	if err := validateServerProviderFiles(server, catalog, profiles); err == nil {
+	if err := validateServerProviderFiles(server, registry, profiles); err == nil {
 		t.Fatal("one providerID mapped to two profiles must be rejected")
 	}
 }

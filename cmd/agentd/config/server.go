@@ -16,8 +16,8 @@ type Server struct {
 	Isolation *IsolationConfig `yaml:"isolation"`
 	// Sandbox selects the command-execution seam for this server's tools.
 	Sandbox *SandboxConfig `yaml:"sandbox"`
-	// Models is the subset of the global catalog this server exposes; empty
-	// means the whole catalog.
+	// Models is the subset of the global registry this server exposes; empty
+	// means the whole registry.
 	Models       []string `yaml:"models"`
 	DefaultModel string   `yaml:"defaultModel"`
 	Agents       []string `yaml:"agents"`

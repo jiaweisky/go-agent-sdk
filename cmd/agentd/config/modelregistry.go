@@ -19,9 +19,9 @@ type MediaConfig struct {
 	Forms map[string][]string `yaml:"forms"`
 }
 
-// ModelConfig is one per-model catalog entry.
+// ModelConfig is one per-model registry entry.
 type ModelConfig struct {
-	// ID keys the catalog and names the model in agent configs. It is never
+	// ID keys the registry and names the model in agent configs. It is never
 	// sent to the provider.
 	ID string `yaml:"id"`
 	// Model is the wire model name sent to the provider; it is required and
@@ -82,7 +82,7 @@ func (m ModelConfig) Endpoint() string {
 	return ""
 }
 
-// Validate checks one catalog entry's identity, credential and media
+// Validate checks one registry entry's identity, credential and media
 // declaration.
 func (m ModelConfig) Validate() error {
 	if m.ID == "" {
@@ -118,95 +118,96 @@ func (m ModelConfig) Validate() error {
 	return nil
 }
 
-// Catalog resolves model metadata and credentials per model id. The first
-// entry is the default; an unknown id falls back to it.
-type Catalog struct {
+// ModelRegistry is the validated set of configured models. It resolves model
+// metadata by id and provider credentials by provider id; the first entry is the
+// default.
+type ModelRegistry struct {
 	entries    map[string]ModelConfig
 	order      []string
 	byProvider map[schema.ProviderID]schema.Credential
 	defaultID  string
 }
 
-// NewCatalog builds a catalog from a default entry plus additional models.
-func NewCatalog(defaultEntry ModelConfig, models []ModelConfig) (Catalog, error) {
-	catalog := Catalog{
+// NewModelRegistry builds a registry from a default entry plus additional models.
+func NewModelRegistry(defaultEntry ModelConfig, models []ModelConfig) (ModelRegistry, error) {
+	registry := ModelRegistry{
 		entries:    make(map[string]ModelConfig),
 		byProvider: make(map[schema.ProviderID]schema.Credential),
 	}
 	for _, entry := range append([]ModelConfig{defaultEntry}, models...) {
 		if err := entry.Validate(); err != nil {
-			return Catalog{}, err
+			return ModelRegistry{}, err
 		}
-		if _, dup := catalog.entries[entry.ID]; dup {
-			return Catalog{}, fmt.Errorf("duplicate model id %q", entry.ID)
+		if _, dup := registry.entries[entry.ID]; dup {
+			return ModelRegistry{}, fmt.Errorf("duplicate model id %q", entry.ID)
 		}
-		catalog.entries[entry.ID] = entry
-		catalog.order = append(catalog.order, entry.ID)
-		catalog.recordCredential(entry.ProviderKey(), toSchemaCredential(entry.Credentials))
+		registry.entries[entry.ID] = entry
+		registry.order = append(registry.order, entry.ID)
+		registry.recordCredential(entry.ProviderKey(), toSchemaCredential(entry.Credentials))
 	}
-	if len(catalog.order) == 0 {
-		return Catalog{}, fmt.Errorf("catalog requires at least one model")
+	if len(registry.order) == 0 {
+		return ModelRegistry{}, fmt.Errorf("model registry requires at least one model")
 	}
-	catalog.defaultID = catalog.order[0]
-	return catalog, nil
+	registry.defaultID = registry.order[0]
+	return registry, nil
 }
 
 // recordCredential keeps the first non-empty credential seen for a provider, so
 // a later entry sharing the provider cannot blank it.
-func (c *Catalog) recordCredential(provider schema.ProviderID, credential schema.Credential) {
-	existing, seen := c.byProvider[provider]
+func (r *ModelRegistry) recordCredential(provider schema.ProviderID, credential schema.Credential) {
+	existing, seen := r.byProvider[provider]
 	if !seen || (credentialEmpty(existing) && !credentialEmpty(credential)) {
-		c.byProvider[provider] = credential
+		r.byProvider[provider] = credential
 	}
 }
 
-// DefaultID is the catalog's default model id.
-func (c Catalog) DefaultID() string { return c.defaultID }
+// DefaultID is the registry's default model id.
+func (r ModelRegistry) DefaultID() string { return r.defaultID }
 
-// IDs returns the catalog's model ids in registration order.
-func (c Catalog) IDs() []string { return append([]string(nil), c.order...) }
+// IDs returns the registry's model ids in registration order.
+func (r ModelRegistry) IDs() []string { return append([]string(nil), r.order...) }
 
 // Entry returns a model entry and whether the id exists.
-func (c Catalog) Entry(id string) (ModelConfig, bool) {
-	entry, ok := c.entries[id]
+func (r ModelRegistry) Entry(id string) (ModelConfig, bool) {
+	entry, ok := r.entries[id]
 	return entry, ok
 }
 
-// DefaultEntry returns the catalog's default model entry.
-func (c Catalog) DefaultEntry() (ModelConfig, bool) {
-	entry, ok := c.entries[c.defaultID]
+// DefaultEntry returns the registry's default model entry.
+func (r ModelRegistry) DefaultEntry() (ModelConfig, bool) {
+	entry, ok := r.entries[r.defaultID]
 	return entry, ok
 }
 
 // Credentials returns the credential for a provider id.
-func (c Catalog) Credentials(providerID schema.ProviderID) (schema.Credential, error) {
-	if credential, ok := c.byProvider[providerID]; ok {
+func (r ModelRegistry) Credentials(providerID schema.ProviderID) (schema.Credential, error) {
+	if credential, ok := r.byProvider[providerID]; ok {
 		return credential, nil
 	}
 	return schema.Credential{}, fmt.Errorf("unknown provider: %s", providerID)
 }
 
-// Subset returns a catalog restricted to the given ids (registration order
+// Subset returns a registry restricted to the given ids (registration order
 // preserved, duplicates dropped), with defaultID as its default. An empty ids
-// returns the whole catalog; a defaultID not present is an error.
-func (c Catalog) Subset(ids []string, defaultID string) (Catalog, error) {
+// returns the whole registry; a defaultID not present is an error.
+func (r ModelRegistry) Subset(ids []string, defaultID string) (ModelRegistry, error) {
 	if defaultID != "" {
-		if _, ok := c.entries[defaultID]; !ok {
-			return Catalog{}, fmt.Errorf("default model %q is not in the catalog", defaultID)
+		if _, ok := r.entries[defaultID]; !ok {
+			return ModelRegistry{}, fmt.Errorf("default model %q is not in the model registry", defaultID)
 		}
 	}
 	if len(ids) == 0 {
-		out := c
+		out := r
 		if defaultID != "" {
 			out.defaultID = defaultID
 		}
 		return out, nil
 	}
-	out := Catalog{entries: make(map[string]ModelConfig, len(ids)), byProvider: c.byProvider}
+	out := ModelRegistry{entries: make(map[string]ModelConfig, len(ids)), byProvider: r.byProvider}
 	for _, id := range ids {
-		entry, ok := c.entries[id]
+		entry, ok := r.entries[id]
 		if !ok {
-			return Catalog{}, fmt.Errorf("unknown model id %q", id)
+			return ModelRegistry{}, fmt.Errorf("unknown model id %q", id)
 		}
 		if _, dup := out.entries[id]; dup {
 			continue
@@ -217,7 +218,7 @@ func (c Catalog) Subset(ids []string, defaultID string) (Catalog, error) {
 	out.defaultID = out.order[0]
 	if defaultID != "" {
 		if _, ok := out.entries[defaultID]; !ok {
-			return Catalog{}, fmt.Errorf("default model %q is not in the server's models", defaultID)
+			return ModelRegistry{}, fmt.Errorf("default model %q is not in the server's models", defaultID)
 		}
 		out.defaultID = defaultID
 	}

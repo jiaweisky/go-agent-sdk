@@ -126,6 +126,7 @@ func prepareCopy(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Isolate
 	if p.WorkingDirectory == "" {
 		return IsolatedProject{}, errors.New("isolation mode copy requires a working directory")
 	}
+
 	view, err := viewPath(p, iso)
 	if err != nil {
 		return IsolatedProject{}, err
@@ -139,6 +140,7 @@ func prepareCopy(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Isolate
 	if err := os.MkdirAll(filepath.Dir(view), 0o755); err != nil {
 		return IsolatedProject{}, err
 	}
+
 	if err := ctx.Err(); err != nil {
 		return IsolatedProject{}, err
 	}
@@ -150,6 +152,7 @@ func prepareCopy(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Isolate
 		_ = os.RemoveAll(view)
 		return IsolatedProject{}, err
 	}
+
 	return IsolatedProject{
 		Spec: p,
 		View: view,
@@ -164,6 +167,7 @@ func prepareWorktree(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Iso
 	if p.WorkingDirectory == "" {
 		return IsolatedProject{}, errors.New("isolation mode worktree requires a working directory")
 	}
+
 	view, err := viewPath(p, iso)
 	if err != nil {
 		return IsolatedProject{}, err
@@ -174,6 +178,7 @@ func prepareWorktree(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Iso
 	if err := os.MkdirAll(filepath.Dir(view), 0o755); err != nil {
 		return IsolatedProject{}, err
 	}
+
 	// Detached worktree at the requested base ref, or the current HEAD.
 	args := []string{"-C", p.WorkingDirectory, "worktree", "add", "--detach", view}
 	if ref := strings.TrimSpace(iso.BaseRef); ref != "" {
@@ -184,6 +189,7 @@ func prepareWorktree(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Iso
 		_ = os.RemoveAll(view)
 		return IsolatedProject{}, fmt.Errorf("git worktree add: %w: %s", err, strings.TrimSpace(string(out)))
 	}
+
 	return IsolatedProject{
 		Spec: p,
 		View: view,
@@ -207,6 +213,7 @@ func prepareOverlay(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Isol
 	if p.WorkingDirectory == "" {
 		return IsolatedProject{}, errors.New("isolation mode overlay requires a working directory")
 	}
+
 	view, err := viewPath(p, iso)
 	if err != nil {
 		return IsolatedProject{}, err
@@ -220,10 +227,12 @@ func prepareOverlay(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Isol
 	if err := os.MkdirAll(view, 0o755); err != nil {
 		return IsolatedProject{}, err
 	}
+
 	if err := cowCopy(ctx, p.WorkingDirectory, view, iso.CowMode); err != nil {
 		_ = os.RemoveAll(view)
 		return IsolatedProject{}, fmt.Errorf("create copy-on-write view: %w", err)
 	}
+
 	return IsolatedProject{
 		Spec: p,
 		View: view,
@@ -241,6 +250,7 @@ func cowCopy(ctx context.Context, src, dst, mode string) error {
 	if !explicit {
 		mode = defaultCowMode()
 	}
+
 	flags, available := cowFlags(mode)
 	if !available {
 		if explicit {
@@ -254,6 +264,7 @@ func cowCopy(ctx context.Context, src, dst, mode string) error {
 		}
 		return ctx.Err()
 	}
+
 	// `cp <flags> src/. dst` copies the contents of src into the existing dst.
 	// Note: build the trailing "/." by hand; filepath.Join would clean it away.
 	contents := src + string(filepath.Separator) + "."
@@ -313,6 +324,7 @@ func viewPath(p ProjectSpec, iso IsolationSpec) (string, error) {
 	if iso.BaseDir == "" {
 		return "", fmt.Errorf("isolation mode %s requires a base directory", iso.Mode)
 	}
+
 	id := strings.TrimSpace(p.ProjectID)
 	if id == "" {
 		return "", errors.New("isolation requires a project id")
@@ -321,6 +333,7 @@ func viewPath(p ProjectSpec, iso IsolationSpec) (string, error) {
 	if component == "" {
 		return "", fmt.Errorf("isolation project id %q is not usable as a path element", p.ProjectID)
 	}
+
 	base, err := filepath.Abs(iso.BaseDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve isolation base directory: %w", err)
@@ -340,11 +353,13 @@ func pathWithin(root, path string) bool {
 	if err != nil {
 		return false
 	}
+
 	canonRoot := canonicalPath(absRoot)
 	canonPath := canonicalPath(absPath)
 	if lexicalWithin(canonRoot, canonPath) {
 		return true
 	}
+
 	rootInfo, err := os.Stat(canonRoot)
 	if err != nil {
 		return false
@@ -370,6 +385,7 @@ func canonicalPath(path string) string {
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		return resolved
 	}
+
 	dir, rest := abs, ""
 	for {
 		parent := filepath.Dir(dir)

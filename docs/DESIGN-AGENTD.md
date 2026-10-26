@@ -14,6 +14,7 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-26 | Renamed the Go model set type `config.Catalog` to `config.ModelRegistry` (`NewModelRegistry`, `Config.ModelRegistry()`, file `cmd/agentd/config/modelregistry.go`), and the `Params` field to `ModelRegistry`; the user-facing `models:` block is now described as the **model registry**. No config or wire change. |
 | 2026-10-25 | **Breaking:** provider-aware media uploads. Removed the flat `mediaUpload` block and top-level `storage`; added reusable `providerFileAPIs`, per-model `providerID` + `providerFileAPI`, and server `media.delivery` + `media.uploads.urlHost`. `prefer` is now `inline`/`url`/`providerFile`; `media.upload` is now `media.delivery.allowUploads`. `/api/config` reports the new shape; `schemaVersion` is now `6`. |
 | 2026-10-23 | Renamed `mediaUpload.expiresIn` / `expiresAfter` to `expiresInSeconds` / `expiresAfterSeconds`; `/api/config` reports the new names; `schemaVersion` is now `5`. |
 | 2026-10-23 | Moved sandbox policy translation to `cmd/agentd/sandboxpolicy`, shared sandbox mode values to `cmd/agentd/sandboxmode`, and model metadata adaptation to `cmd/agentd/modelinfo`; `config` no longer imports `cmd/agentd/sandbox` or `pkg/agent`. |

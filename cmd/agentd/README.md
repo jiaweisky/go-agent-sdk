@@ -15,7 +15,7 @@ client per configured **server**, each over HTTP/SSE and/or A2A.
   `apiKey: "${KEY}"`; `$$` only escapes a literal dollar sign.
 
 ```yaml
-models:                              # the model catalog, defined once
+models:                              # the model registry, defined once
   - id: deepseek-chat
     model: deepseek-chat             # wire model name (required)
     protocol: openai-compatible-chat

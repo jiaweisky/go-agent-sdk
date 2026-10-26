@@ -75,17 +75,17 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, tls *config.T
 
 // serveAll runs one serve per listener under one context and signal; a failed
 // listener cancels the others so startup fails fast.
-func serveAll(ctx context.Context, targets []serveTarget) error {
+func serveAll(ctx context.Context, serveTargets []serveTarget) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errs := make(chan error, len(targets))
-	for _, target := range targets {
+	errs := make(chan error, len(serveTargets))
+	for _, target := range serveTargets {
 		go func(target serveTarget) {
 			errs <- serve(ctx, target.srv, target.ln, target.tls, target.closeStreams)
 		}(target)
 	}
 	var first error
-	for range targets {
+	for range serveTargets {
 		if err := <-errs; err != nil && first == nil {
 			first = err
 			cancel()
@@ -132,20 +132,24 @@ type mediaUploaderFunc func(schema.ProviderID) schema.MediaUploader
 // and serves until ctx is canceled. Every client created is closed on return, so
 // a mid-build failure leaks nothing.
 func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) error {
-	global, err := cfg.Catalog()
+	registry, err := cfg.ModelRegistry()
 	if err != nil {
 		return err
 	}
 
-	var clients []*agent.Client
-	var teardowns []func(context.Context) error
+	var runtimes []builtRuntime
 	defer func() {
-		for _, client := range clients {
-			_ = client.Close()
+		for _, rt := range runtimes {
+			if rt.client != nil {
+				_ = rt.client.Close()
+			}
 		}
-		for i := len(teardowns) - 1; i >= 0; i-- {
+		for i := len(runtimes) - 1; i >= 0; i-- {
+			if runtimes[i].teardown == nil {
+				continue
+			}
 			teardownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-			_ = teardowns[i](teardownCtx)
+			_ = runtimes[i].teardown(teardownCtx)
 			cancel()
 		}
 	}()
@@ -153,34 +157,31 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 	runner := isolation.DefaultRunner()
 	baseDirs := isolationBaseDirs(cfg.Servers)
 
-	var built []*builtServer
+	var builtServers []*builtServer
 	for _, s := range cfg.Servers {
-		runtime, err := buildRuntime(ctx, s, cfg.Models, cfg.ProviderFileAPIs, global, baseDirs, runner)
-		if runtime.teardown != nil {
-			teardowns = append(teardowns, runtime.teardown)
-		}
+		rt, err := buildRuntime(ctx, s, cfg.Models, cfg.ProviderFileAPIs, registry, baseDirs, runner)
+		runtimes = append(runtimes, rt)
 		if err != nil {
 			return err
 		}
-		clients = append(clients, runtime.client)
-		built = append(built, runtime.server)
+		builtServers = append(builtServers, rt.server)
 	}
 
-	targets, err := bindServeTargets(built, introspect)
+	serveTargets, err := bindServeTargets(builtServers, introspect)
 	if err != nil {
 		return err
 	}
-	defer func() { closeServeTargets(targets) }()
+	defer func() { closeServeTargets(serveTargets) }()
 
 	if cfg.Control != nil {
-		target, closeManager, err := bindControlTarget(ctx, global, cfg.Control, cfg.Models, cfg.ProviderFileAPIs)
+		target, closeManager, err := bindControlTarget(ctx, registry, cfg.Control, cfg.Models, cfg.ProviderFileAPIs)
 		if err != nil {
 			return err
 		}
 		defer closeManager()
-		targets = append(targets, target)
+		serveTargets = append(serveTargets, target)
 	}
-	return serveAll(ctx, targets)
+	return serveAll(ctx, serveTargets)
 }
 
 // builtRuntime is one fully prepared server and the resources it owns.
@@ -195,10 +196,10 @@ type builtRuntime struct {
 // teardown so the caller can release the view.
 func buildRuntime(
 	ctx context.Context, s config.Server, models []config.ModelConfig,
-	profiles map[string]*config.ProviderFileAPI, catalog config.Catalog,
+	profiles map[string]*config.ProviderFileAPI, registry config.ModelRegistry,
 	baseDirs []string, runner isolation.Runner,
 ) (builtRuntime, error) {
-	serverCatalog, err := catalog.Subset(s.Models, s.DefaultModel)
+	serverRegistry, err := registry.Subset(s.Models, s.DefaultModel)
 	if err != nil {
 		return builtRuntime{}, fmt.Errorf("server %q: %w", s.Name, err)
 	}
@@ -217,12 +218,12 @@ func buildRuntime(
 	}
 	fileHeaders := mediaFileHeadersFor(s, models, profiles)
 
-	client, err := buildClient(s, serverCatalog, uploader, fileHeaders, isolationExcludes(source, baseDirs))
+	client, err := buildClient(ctx, s, serverRegistry, uploader, fileHeaders, isolationExcludes(source, baseDirs))
 	if err != nil {
 		return runtime, fmt.Errorf("server %q: %w", s.Name, err)
 	}
 
-	server, err := buildServer(ctx, s, client, serverCatalog, uploader)
+	server, err := buildServer(ctx, s, client, serverRegistry, uploader)
 	if err != nil {
 		_ = client.Close()
 		return runtime, fmt.Errorf("server %q: %w", s.Name, err)
@@ -235,27 +236,27 @@ func buildRuntime(
 
 // bindServeTargets binds every configured listener up front so a port conflict
 // fails startup before serving. Already-bound listeners are closed on failure.
-func bindServeTargets(built []*builtServer, introspect *introspectDoc) ([]serveTarget, error) {
-	byListen, order := groupByListen(built)
-	var targets []serveTarget
+func bindServeTargets(builtServers []*builtServer, introspect *introspectDoc) ([]serveTarget, error) {
+	byListen, order := groupByListen(builtServers)
+	var serveTargets []serveTarget
 	for _, listen := range order {
 		entries := byListen[listen]
 
 		ln, err := net.Listen("tcp", listen)
 		if err != nil {
-			closeServeTargets(targets)
+			closeServeTargets(serveTargets)
 			return nil, fmt.Errorf("listen %s: %w", listen, err)
 		}
 		fmt.Fprintf(os.Stderr, "agentd: listening on %s (%d server(s))\n", ln.Addr(), len(entries))
 		logDiscoveryEndpoints(entries, ln.Addr())
-		targets = append(targets, serveTarget{
+		serveTargets = append(serveTargets, serveTarget{
 			srv:          &http.Server{Handler: newRouter(entries, introspect, ln.Addr()), ReadHeaderTimeout: 10 * time.Second},
 			ln:           ln,
 			tls:          entries[0].cfg.TLS,
 			closeStreams: combineClose(entries),
 		})
 	}
-	return targets, nil
+	return serveTargets, nil
 }
 
 // logDiscoveryEndpoints reports the cards served by one listener.
@@ -276,10 +277,10 @@ func logDiscoveryEndpoints(entries []*builtServer, addr net.Addr) {
 
 // bindControlTarget binds the optional control API and returns its cleanup.
 func bindControlTarget(
-	ctx context.Context, catalog config.Catalog, control *config.ControlConfig,
+	ctx context.Context, registry config.ModelRegistry, control *config.ControlConfig,
 	models []config.ModelConfig, profiles map[string]*config.ProviderFileAPI,
 ) (serveTarget, func(), error) {
-	manager := newProjectManager(ctx, catalog, control, models, profiles)
+	manager := newProjectManager(ctx, registry, control, models, profiles)
 	ln, err := net.Listen("tcp", control.Listen)
 	if err != nil {
 		manager.Close()
@@ -296,19 +297,19 @@ func bindControlTarget(
 }
 
 // closeServeTargets closes every listener that has been bound.
-func closeServeTargets(targets []serveTarget) {
-	for _, target := range targets {
+func closeServeTargets(serveTargets []serveTarget) {
+	for _, target := range serveTargets {
 		_ = target.ln.Close()
 	}
 }
 
 // groupByListen groups entries by their normalized listen address, returning the
 // addresses in first-seen order (deterministic startup).
-func groupByListen(built []*builtServer) (map[string][]*builtServer, []string) {
+func groupByListen(builtServers []*builtServer) (map[string][]*builtServer, []string) {
 	byListen := map[string][]*builtServer{}
 	order := []string{}
 
-	for _, b := range built {
+	for _, b := range builtServers {
 		listen := config.NormalizeListenAddress(b.cfg.Listen)
 		if _, ok := byListen[listen]; !ok {
 			order = append(order, listen)
@@ -318,13 +319,13 @@ func groupByListen(built []*builtServer) (map[string][]*builtServer, []string) {
 	return byListen, order
 }
 
-// defaultModelFor is a server's default model id, falling back to the catalog's
+// defaultModelFor is a server's default model id, falling back to the registry's
 // first entry.
-func defaultModelFor(s config.Server, catalog config.Catalog) string {
+func defaultModelFor(s config.Server, registry config.ModelRegistry) string {
 	if s.DefaultModel != "" {
 		return s.DefaultModel
 	}
-	return catalog.DefaultID()
+	return registry.DefaultID()
 }
 
 // a2aQuestions is an A2A server's question policy: "decline" by default, since a
@@ -432,9 +433,9 @@ func cowMode(cow *config.CowConfig) config.CowMode {
 	return cow.Mode
 }
 
-// buildClient assembles one server's agent client from its catalog subset.
+// buildClient assembles one server's agent client from its registry subset.
 func buildClient(
-	s config.Server, catalog config.Catalog, uploader mediaUploaderFunc,
+	ctx context.Context, s config.Server, registry config.ModelRegistry, uploader mediaUploaderFunc,
 	fileHeaders map[schema.ProviderID]map[string]string, excludes []string,
 ) (*agent.Client, error) {
 	mcpServers, err := agentdclient.MCPConfigs(s.MCP)
@@ -467,14 +468,12 @@ func buildClient(
 		return nil, fmt.Errorf("server %q: media.uploads.urlHost: %w", s.Name, err)
 	}
 
-	return agentdclient.New(agentdclient.Params{
+	return agentdclient.NewContext(ctx, agentdclient.Params{
 		Root:             s.Root,
 		WorkingDirectory: s.WorkingDirectory,
 		ConfigDirs:       s.ConfigDirs,
-		Model:            defaultModelFor(s, catalog),
-		// Protocol is left empty: the model's wire protocol comes from the
-		// catalog's ModelInfo, not from the server.
-		Catalog:          catalog,
+		Model:            defaultModelFor(s, registry),
+		ModelRegistry:    registry,
 		MediaUploader:    uploader,
 		MediaFileHeaders: fileHeaders,
 		Media:            media.DeliveryPolicy(delivery, s.Root),
@@ -623,9 +622,9 @@ func resolveSandbox(s config.Server) (core.AppProcess, sandbox.Policy, error) {
 // buildServer builds one server's transport adapter, dispatching on its kind.
 func buildServer(
 	ctx context.Context, s config.Server, client *agent.Client,
-	catalog config.Catalog, uploader mediaUploaderFunc,
+	registry config.ModelRegistry, uploader mediaUploaderFunc,
 ) (*builtServer, error) {
-	infos, err := agentdclient.ModelInfos(catalog)
+	infos, err := agentdclient.ModelInfos(registry)
 	if err != nil {
 		return nil, err
 	}
@@ -638,14 +637,14 @@ func buildServer(
 	switch s.Kind {
 	case config.KindHTTP:
 		handler, closeStreams, err := buildHTTPHandler(
-			ctx, s, client, infos, uploader, keepAlive, defaultModelFor(s, catalog),
+			ctx, s, client, infos, uploader, keepAlive, defaultModelFor(s, registry),
 		)
 		if err != nil {
 			return nil, err
 		}
 		return &builtServer{cfg: s, handler: handler, closeStreams: closeStreams}, nil
 	case config.KindA2A:
-		srv, err := buildA2AServer(s, client, infos, defaultModelFor(s, catalog), keepAlive)
+		srv, err := buildA2AServer(s, client, infos, defaultModelFor(s, registry), keepAlive)
 		if err != nil {
 			return nil, err
 		}

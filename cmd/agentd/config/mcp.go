@@ -80,11 +80,16 @@ func ValidateMCPConfigs(servers []MCPServer) ([]MCPEntry, error) {
 		return nil, nil
 	}
 	entries := make([]MCPEntry, len(servers))
+	seen := make(map[string]bool, len(servers))
 	for i, server := range servers {
 		timeout, err := server.validateAndParse()
 		if err != nil {
 			return nil, err
 		}
+		if seen[server.Name] {
+			return nil, fmt.Errorf("mcp %s: duplicate name", server.Name)
+		}
+		seen[server.Name] = true
 		entries[i] = MCPEntry{Server: server, Timeout: timeout}
 	}
 	return entries, nil

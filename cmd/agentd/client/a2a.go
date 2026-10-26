@@ -66,7 +66,35 @@ func ExposeAgents(
 	return exposed, nil
 }
 
-// ModelModes maps each catalog model id to the A2A input MIME modes its
+// applyCard copies a card override into an AgentExpose.
+func applyCard(expose *schema.AgentExpose, card config.CardConfig) {
+	expose.Name = card.Name
+	expose.Description = card.Description
+	expose.Version = card.Version
+	expose.DocumentationURL = card.DocumentationURL
+	expose.IconURL = card.IconURL
+	if card.Provider != nil {
+		expose.Provider = &schema.AgentProvider{
+			Organization: card.Provider.Organization,
+			URL:          card.Provider.URL,
+		}
+	}
+
+	expose.Skills = make([]schema.AgentSkill, 0, len(card.Skills))
+	for _, skill := range card.Skills {
+		expose.Skills = append(expose.Skills, schema.AgentSkill{
+			ID:          skill.ID,
+			Name:        skill.Name,
+			Description: skill.Description,
+			Tags:        slices.Clone(skill.Tags),
+			Examples:    slices.Clone(skill.Examples),
+			InputModes:  slices.Clone(skill.InputModes),
+			OutputModes: slices.Clone(skill.OutputModes),
+		})
+	}
+}
+
+// ModelModes maps each registry model id to the A2A input MIME modes its
 // modalities imply.
 func ModelModes(models []schema.ModelInfo) map[string][]string {
 	out := make(map[string][]string, len(models))
@@ -98,30 +126,36 @@ func modalityMIMEs(modalities []string) []string {
 	return modes
 }
 
-// applyCard copies a card override into an AgentExpose.
-func applyCard(expose *schema.AgentExpose, card config.CardConfig) {
-	expose.Name = card.Name
-	expose.Description = card.Description
-	expose.Version = card.Version
-	expose.DocumentationURL = card.DocumentationURL
-	expose.IconURL = card.IconURL
-	if card.Provider != nil {
-		expose.Provider = &schema.AgentProvider{
-			Organization: card.Provider.Organization,
-			URL:          card.Provider.URL,
+// registerA2APeers registers each configured A2A peer as an agent with an A2A
+// backend. A peer whose name collides with an existing agent (a built-in or a
+// ConfigDirs agent) is rejected rather than silently rewriting that agent's
+// backend.
+func registerA2APeers(client *agent.Client, peers []config.A2APeer) error {
+	for _, peer := range peers {
+		if client.Agents().Get(schema.AgentID(peer.Name)) != nil {
+			return fmt.Errorf("peer %s: an agent with that name already exists", peer.Name)
+		}
+		if err := client.RegisterAgent(peer.Name, a2aPeerAgentConfig(peer)); err != nil {
+			return fmt.Errorf("peer %s: %w", peer.Name, err)
 		}
 	}
+	return nil
+}
 
-	expose.Skills = make([]schema.AgentSkill, 0, len(card.Skills))
-	for _, skill := range card.Skills {
-		expose.Skills = append(expose.Skills, schema.AgentSkill{
-			ID:          skill.ID,
-			Name:        skill.Name,
-			Description: skill.Description,
-			Tags:        slices.Clone(skill.Tags),
-			Examples:    slices.Clone(skill.Examples),
-			InputModes:  slices.Clone(skill.InputModes),
-			OutputModes: slices.Clone(skill.OutputModes),
-		})
+// a2aPeerAgentConfig maps a configured peer to the agent config that registers
+// it with an A2A backend.
+func a2aPeerAgentConfig(peer config.A2APeer) agent.AgentConfig {
+	mode := peer.ModeOrDefault()
+	return agent.AgentConfig{
+		Description: peer.Description,
+		Mode:        &mode,
+		Backend: &schema.AgentBackend{
+			Type: schema.AgentBackendA2A,
+			A2A: &schema.AgentA2ABackend{
+				Endpoint: peer.Endpoint,
+				CardURL:  peer.CardURL,
+				Headers:  peer.Headers,
+			},
+		},
 	}
 }

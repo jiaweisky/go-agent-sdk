@@ -7,7 +7,7 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/cmd/agentd/modelinfo"
 )
 
-func TestCatalogResolvesPerModel(t *testing.T) {
+func TestModelRegistryResolvesPerModel(t *testing.T) {
 	def := config.ModelConfig{
 		ID: "deepseek-flash", Model: "deepseek-flash", Protocol: "openai-compatible-chat",
 		ModelBaseURL: "https://api.deepseek.com", ProviderID: "deepseek",
@@ -20,24 +20,24 @@ func TestCatalogResolvesPerModel(t *testing.T) {
 		Media:       &config.MediaConfig{Input: []string{"text", "image", "audio", "video"}, Forms: map[string][]string{"image": {"inline", "file"}, "audio": {"inline", "file"}, "video": {"inline", "file"}}},
 		Credentials: config.Credentials{APIKey: "goog"},
 	}}
-	catalog, err := config.NewCatalog(def, models)
+	registry, err := config.NewModelRegistry(def, models)
 	if err != nil {
-		t.Fatalf("NewCatalog: %v", err)
+		t.Fatalf("NewModelRegistry: %v", err)
 	}
-	if catalog.DefaultID() != "deepseek-flash" {
-		t.Fatalf("defaultID = %q", catalog.DefaultID())
+	if registry.DefaultID() != "deepseek-flash" {
+		t.Fatalf("defaultID = %q", registry.DefaultID())
 	}
 
-	info, err := modelinfo.Resolve(catalog, "gemini-2.5-flash")
+	info, err := modelinfo.Resolve(registry, "gemini-2.5-flash")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if info.ProviderID != "google" {
 		t.Fatalf("providerID = %q, want google", info.ProviderID)
 	}
-	// The catalog id is surfaced as the model id; the wire name lives in API.ID.
+	// The registry id is surfaced as the model id; the wire name lives in API.ID.
 	if info.ID != "gemini-2.5-flash" {
-		t.Fatalf("id = %q, want the catalog id", info.ID)
+		t.Fatalf("id = %q, want the registry id", info.ID)
 	}
 	if info.API.ID == nil || *info.API.ID != "gemini-2.5-flash" {
 		t.Fatalf("api.id = %v, want the wire model name", info.API.ID)
@@ -50,7 +50,7 @@ func TestCatalogResolvesPerModel(t *testing.T) {
 	}
 
 	// An unknown id falls back to the default entry.
-	unknown, err := modelinfo.Resolve(catalog, "something-else")
+	unknown, err := modelinfo.Resolve(registry, "something-else")
 	if err != nil {
 		t.Fatalf("unknown Resolve: %v", err)
 	}
@@ -58,43 +58,43 @@ func TestCatalogResolvesPerModel(t *testing.T) {
 		t.Fatalf("unknown = %+v", unknown)
 	}
 
-	if _, err := catalog.Credentials("google"); err != nil {
+	if _, err := registry.Credentials("google"); err != nil {
 		t.Fatalf("Credentials(google): %v", err)
 	}
-	if _, err := catalog.Credentials("nope"); err == nil {
+	if _, err := registry.Credentials("nope"); err == nil {
 		t.Fatal("expected an unknown-provider error")
 	}
 }
 
-func TestCatalogSeparatesIDFromWireModel(t *testing.T) {
-	// Two catalog entries can share one wire model name (e.g. the same model
-	// over different protocols); the catalog ids must stay distinct.
+func TestModelRegistrySeparatesIDFromWireModel(t *testing.T) {
+	// Two registry entries can share one wire model name (e.g. the same model
+	// over different protocols); the registry ids must stay distinct.
 	chat := config.ModelConfig{ID: "deepseek-flash", Model: "deepseek-flash", Protocol: "openai-compatible-chat", Credentials: config.Credentials{APIKey: "k"}}
 	anthropic := config.ModelConfig{ID: "deepseek-flash-anthropic", Model: "deepseek-flash", Protocol: "anthropic-messages", Credentials: config.Credentials{APIKey: "k"}}
-	catalog, err := config.NewCatalog(chat, []config.ModelConfig{anthropic})
+	registry, err := config.NewModelRegistry(chat, []config.ModelConfig{anthropic})
 	if err != nil {
-		t.Fatalf("NewCatalog: %v", err)
+		t.Fatalf("NewModelRegistry: %v", err)
 	}
-	info, err := modelinfo.Resolve(catalog, "deepseek-flash-anthropic")
+	info, err := modelinfo.Resolve(registry, "deepseek-flash-anthropic")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if info.ID != "deepseek-flash-anthropic" {
-		t.Fatalf("id = %q, want the catalog id", info.ID)
+		t.Fatalf("id = %q, want the registry id", info.ID)
 	}
 	if info.API.ID == nil || *info.API.ID != "deepseek-flash" {
 		t.Fatalf("api.id = %v, want the wire model name", info.API.ID)
 	}
 }
 
-func TestCatalogProviderIDDefaultsToProtocol(t *testing.T) {
-	catalog, err := config.NewCatalog(config.ModelConfig{
+func TestModelRegistryProviderIDDefaultsToProtocol(t *testing.T) {
+	registry, err := config.NewModelRegistry(config.ModelConfig{
 		ID: "m", Model: "m", Protocol: "gemini", Credentials: config.Credentials{APIKey: "k"},
 	}, nil)
 	if err != nil {
-		t.Fatalf("NewCatalog: %v", err)
+		t.Fatalf("NewModelRegistry: %v", err)
 	}
-	info, err := modelinfo.Resolve(catalog, "m")
+	info, err := modelinfo.Resolve(registry, "m")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -103,14 +103,14 @@ func TestCatalogProviderIDDefaultsToProtocol(t *testing.T) {
 	}
 }
 
-func TestNewCatalogErrors(t *testing.T) {
-	if _, err := config.NewCatalog(config.ModelConfig{Protocol: "gemini"}, nil); err == nil {
+func TestNewModelRegistryErrors(t *testing.T) {
+	if _, err := config.NewModelRegistry(config.ModelConfig{Protocol: "gemini"}, nil); err == nil {
 		t.Fatal("expected a missing-id error")
 	}
-	if _, err := config.NewCatalog(config.ModelConfig{ID: "a", Protocol: "gemini"}, nil); err == nil {
+	if _, err := config.NewModelRegistry(config.ModelConfig{ID: "a", Protocol: "gemini"}, nil); err == nil {
 		t.Fatal("expected a missing-model error")
 	}
-	if _, err := config.NewCatalog(config.ModelConfig{ID: "a", Model: "a", Protocol: "gemini"}, []config.ModelConfig{{ID: "a", Model: "a", Protocol: "gemini"}}); err == nil {
+	if _, err := config.NewModelRegistry(config.ModelConfig{ID: "a", Model: "a", Protocol: "gemini"}, []config.ModelConfig{{ID: "a", Model: "a", Protocol: "gemini"}}); err == nil {
 		t.Fatal("expected a duplicate-id error")
 	}
 }
@@ -145,11 +145,11 @@ func TestModelInfoCarriesHeaders(t *testing.T) {
 		ID: "claude", Model: "claude-3", Protocol: "anthropic-messages",
 		Headers: map[string]string{"anthropic-beta": "files-api-2025-04-14"},
 	}
-	catalog, err := config.NewCatalog(entry, nil)
+	registry, err := config.NewModelRegistry(entry, nil)
 	if err != nil {
-		t.Fatalf("NewCatalog: %v", err)
+		t.Fatalf("NewModelRegistry: %v", err)
 	}
-	info, err := modelinfo.Resolve(catalog, "claude")
+	info, err := modelinfo.Resolve(registry, "claude")
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
