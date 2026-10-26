@@ -15,8 +15,8 @@ func (i *IsolationConfig) Validate(workingDirectory string) error {
 		if i.BaseDir == "" {
 			return fmt.Errorf("isolation.baseDir is required for mode %s", i.Mode)
 		}
-	case IsolationOverlay:
-		if err := i.validateOverlay(); err != nil {
+	case IsolationCow:
+		if err := i.validateCow(); err != nil {
 			return err
 		}
 	case IsolationContainer, IsolationRemote:
@@ -25,7 +25,7 @@ func (i *IsolationConfig) Validate(workingDirectory string) error {
 				"such an instance runs its own agentd and is provisioned by the host",
 			i.Mode)
 	default:
-		return fmt.Errorf("isolation.mode must be none, copy, worktree or overlay, got %q", i.Mode)
+		return fmt.Errorf("isolation.mode must be none, copy, worktree or cow, got %q", i.Mode)
 	}
 	if workingDirectory == "" {
 		return fmt.Errorf("isolation mode %s requires workingDirectory", i.Mode)
@@ -33,10 +33,10 @@ func (i *IsolationConfig) Validate(workingDirectory string) error {
 	return nil
 }
 
-// validateOverlay checks the fields overlay mode requires.
-func (i *IsolationConfig) validateOverlay() error {
+// validateCow checks the fields cow mode requires.
+func (i *IsolationConfig) validateCow() error {
 	if i.BaseDir == "" {
-		return fmt.Errorf("isolation.baseDir is required for mode %s", IsolationOverlay)
+		return fmt.Errorf("isolation.baseDir is required for mode %s", IsolationCow)
 	}
 	if i.Cow != nil && !i.Cow.Mode.Valid() {
 		return fmt.Errorf("isolation.cow.mode must be auto, reflink or clonefile, got %q", i.Cow.Mode)

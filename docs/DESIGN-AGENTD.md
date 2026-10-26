@@ -588,7 +588,7 @@ func run(ctx context.Context, cfg config) error {
    server is invisible to another — this is correct (different front-ends) and must be
    documented.
 2. **Sharing "the same project" across servers = one isolated view per server.** Give each
-   server its own working copy derived from the same base (`worktree` / `overlay` / `copy`;
+   server its own working copy derived from the same base (`worktree` / `cow` / `copy`;
    see `DESIGN-IM-BRIDGE.md` §2.9(4)/§3.7 in the Tether repository).
    - **Allowed**: one **read-only** project directory shared by several servers (multiple
      readers are safe).

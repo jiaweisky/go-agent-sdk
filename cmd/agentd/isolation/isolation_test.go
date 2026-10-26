@@ -99,9 +99,9 @@ func TestViewPathIsAbsolute(t *testing.T) {
 	}
 }
 
-func TestOverlayRequiresWorkingDirectory(t *testing.T) {
-	if _, err := Prepare(context.Background(), ProjectSpec{ProjectID: "x"}, IsolationSpec{Mode: ModeOverlay}); err == nil {
-		t.Fatal("expected overlay without a working directory to be rejected")
+func TestCowRequiresWorkingDirectory(t *testing.T) {
+	if _, err := Prepare(context.Background(), ProjectSpec{ProjectID: "x"}, IsolationSpec{Mode: ModeCow}); err == nil {
+		t.Fatal("expected cow without a working directory to be rejected")
 	}
 }
 
@@ -114,7 +114,7 @@ func TestContainerIsExternalMode(t *testing.T) {
 	}
 }
 
-func TestOverlayModeIsolatesAndTearsDown(t *testing.T) {
+func TestCowModeIsolatesAndTearsDown(t *testing.T) {
 	if _, err := exec.LookPath("cp"); err != nil {
 		t.Skip("cp is not available")
 	}
@@ -124,7 +124,7 @@ func TestOverlayModeIsolatesAndTearsDown(t *testing.T) {
 
 	project, err := Prepare(context.Background(), ProjectSpec{
 		ProjectID: "grp", WorkingDirectory: src,
-	}, IsolationSpec{Mode: ModeOverlay, BaseDir: base})
+	}, IsolationSpec{Mode: ModeCow, BaseDir: base})
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestOverlayModeIsolatesAndTearsDown(t *testing.T) {
 	}
 }
 
-func TestOverlayExplicitUnsupportedCowErrors(t *testing.T) {
+func TestCowExplicitUnsupportedCowErrors(t *testing.T) {
 	// Pick the mechanism that is NOT native to this platform.
 	mode := CowReflink
 	if runtime.GOOS == "linux" {
@@ -152,7 +152,7 @@ func TestOverlayExplicitUnsupportedCowErrors(t *testing.T) {
 	}
 	_, err := Prepare(context.Background(), ProjectSpec{
 		ProjectID: "grp", WorkingDirectory: t.TempDir(),
-	}, IsolationSpec{Mode: ModeOverlay, BaseDir: t.TempDir(), CowMode: mode})
+	}, IsolationSpec{Mode: ModeCow, BaseDir: t.TempDir(), CowMode: mode})
 	if err == nil {
 		t.Fatalf("expected explicit unsupported cow mode %q to be rejected", mode)
 	}

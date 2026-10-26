@@ -24,8 +24,8 @@ func TestValidateIsolation(t *testing.T) {
 		{"copy ok", isolationConfig("copy", "/views"), false},
 		{"copy needs baseDir", isolationConfig("copy", ""), true},
 		{"worktree ok", isolationConfig("worktree", "/views"), false},
-		{"overlay ok", isolationConfig("overlay", "/views"), false},
-		{"overlay needs baseDir", isolationConfig("overlay", ""), true},
+		{"cow ok", isolationConfig("cow", "/views"), false},
+		{"cow needs baseDir", isolationConfig("cow", ""), true},
 		{"container is external", isolationConfig("container", "/views"), true},
 		{"unknown mode", isolationConfig("huh", "/views"), true},
 	}
@@ -51,7 +51,7 @@ func TestValidateIsolationRequiresWorkingDirectory(t *testing.T) {
 }
 
 func TestValidateIsolationCowMode(t *testing.T) {
-	cfg := isolationConfig("overlay", "/views")
+	cfg := isolationConfig("cow", "/views")
 	cfg.Servers[0].Isolation.Cow = &CowConfig{Mode: "clonefile"}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("clonefile should be accepted: %v", err)

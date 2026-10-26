@@ -281,7 +281,7 @@ servers:
 
 # Optional control API: create and destroy isolated project instances at runtime.
 # The host (e.g. an IM bridge) uses it to lease one instance per project/group.
-# Local isolation modes (none/copy/worktree/overlay) are served in-process, each
+# Local isolation modes (none/copy/worktree/cow) are served in-process, each
 # on its own listener under `projectListen`; container/remote instances run in a
 # separate process and are provisioned by the host instead.
 # control:

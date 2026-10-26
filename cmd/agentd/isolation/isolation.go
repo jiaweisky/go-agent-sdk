@@ -2,7 +2,7 @@
 //
 // A Client is bound to one working directory, so serving several projects from
 // one agentd requires giving each server its own view of the source project.
-// This package materializes that view (a no-op, a copy, a copy-on-write overlay,
+// This package materializes that view (a no-op, a copy, a copy-on-write view,
 // or a git worktree) and returns how to tear it down. Container/remote
 // provisioning is out of scope: those run in a separate process and are driven by
 // the host.
@@ -27,15 +27,15 @@ const (
 	ModeCopy = "copy"
 	// ModeWorktree creates a git worktree as the per-project view.
 	ModeWorktree = "worktree"
-	// ModeOverlay creates a copy-on-write overlay over the read-only source.
-	ModeOverlay = "overlay"
+	// ModeCow creates a copy-on-write view of the source.
+	ModeCow = "cow"
 	// ModeContainer runs the instance in a container; provisioned by the host.
 	ModeContainer = "container"
 	// ModeRemote runs the instance on a remote host; provisioned by the host.
 	ModeRemote = "remote"
 )
 
-// Copy-on-write mechanisms for overlay mode.
+// Copy-on-write mechanisms for cow mode.
 const (
 	// CowAuto picks the platform default: reflink on Linux, clonefile on macOS.
 	CowAuto = "auto"
@@ -71,7 +71,7 @@ type IsolationSpec struct {
 	BaseDir string
 	// BaseRef is the commit-ish a worktree is created at; empty means HEAD.
 	BaseRef string
-	// CowMode selects the overlay copy-on-write mechanism (auto | reflink |
+	// CowMode selects the copy-on-write mechanism (auto | reflink |
 	// clonefile); empty means auto.
 	CowMode string
 }
@@ -112,8 +112,8 @@ func (localRunner) Prepare(
 		return prepareCopy(ctx, p, iso)
 	case ModeWorktree:
 		return prepareWorktree(ctx, p, iso)
-	case ModeOverlay:
-		return prepareOverlay(ctx, p, iso)
+	case ModeCow:
+		return prepareCow(ctx, p, iso)
 	case ModeContainer, ModeRemote:
 		return IsolatedProject{}, fmt.Errorf("%w: %s", ErrExternalMode, iso.Mode)
 	default:
@@ -206,12 +206,12 @@ func prepareWorktree(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Iso
 	}, nil
 }
 
-// prepareOverlay materializes a copy-on-write view of the source project. It
+// prepareCow materializes a copy-on-write view of the source project. It
 // shares on-disk blocks with the source until the view is written, costing far
 // less than a full copy while keeping the two independent.
-func prepareOverlay(ctx context.Context, p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
+func prepareCow(ctx context.Context, p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
 	if p.WorkingDirectory == "" {
-		return IsolatedProject{}, errors.New("isolation mode overlay requires a working directory")
+		return IsolatedProject{}, errors.New("isolation mode cow requires a working directory")
 	}
 
 	view, err := viewPath(p, iso)
@@ -219,7 +219,7 @@ func prepareOverlay(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Isol
 		return IsolatedProject{}, err
 	}
 	if pathWithin(p.WorkingDirectory, view) {
-		return IsolatedProject{}, fmt.Errorf("overlay view %s must be outside the working directory %s", view, p.WorkingDirectory)
+		return IsolatedProject{}, fmt.Errorf("cow view %s must be outside the working directory %s", view, p.WorkingDirectory)
 	}
 	if err := ensureViewAbsent(view); err != nil {
 		return IsolatedProject{}, err

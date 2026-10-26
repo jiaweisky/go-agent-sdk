@@ -36,7 +36,7 @@ type controlInstance struct {
 }
 
 // projectManager creates and destroys isolated project instances at runtime.
-// Local isolation modes (none/copy/worktree/overlay) are served in-process, each
+// Local isolation modes (none/copy/worktree/cow) are served in-process, each
 // on its own listener; container/remote modes are rejected because they run in a
 // separate process provisioned by the host.
 type projectManager struct {

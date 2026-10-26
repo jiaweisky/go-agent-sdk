@@ -77,7 +77,7 @@ host decides read-only-share vs writable-isolate and holds the leases.
 | `Root` | SDK-managed state directory (`{Root}/data`, `/cache`, `/state`, `/tmp`). Two servers must never share one. |
 | `WorkingDirectory` | The project/worktree the agent reads and writes. |
 | Sandbox | An OS-enforced restriction applied to an executed command (filesystem view, network, privileges, resources). |
-| Isolated view | A per-conversation materialization of the project (worktree/overlay/copy/container) with its own `WorkingDirectory`. |
+| Isolated view | A per-conversation materialization of the project (worktree/cow/copy/container) with its own `WorkingDirectory`. |
 | Runner | The transport-agnostic command-layer component that prepares an isolated view and serves it. |
 | Host | The process embedding/operating agentd (e.g. Tether) or its orchestrator/supervisor. |
 
@@ -290,10 +290,10 @@ type ProjectSpec struct {
 
 // IsolationSpec describes how to materialize the working directory.
 type IsolationSpec struct {
-    Mode    string // none | copy | worktree | overlay
+    Mode    string // none | copy | worktree | cow
     BaseDir string // where views are created (required for every mode except none)
     BaseRef string // worktree base commit-ish; empty means HEAD
-    CowMode string // overlay CoW: auto | reflink | clonefile
+    CowMode string // cow: auto | reflink | clonefile
 }
 
 // IsolatedProject is a prepared view plus how to tear it down.
@@ -310,7 +310,7 @@ type Runner interface {
 ```
 
 `container`/`remote` are **external** (host-provisioned, §15); `bwrap` is a **sandbox wrapper**
-(§8), not an isolation mode — the local runner accepts only `none | copy | worktree | overlay`.
+(§8), not an isolation mode — the local runner accepts only `none | copy | worktree | cow`.
 
 `Prepare` is pure filesystem/process setup and is the transport-agnostic part;
 the actual `Serve` (building the `Client` and starting an `http` or `a2a`
@@ -322,7 +322,7 @@ therefore does not know about transports, and a host can substitute the
 `ClientOptions` assembly, so `run.go` only needs to pass the prepared `View` as
 `WorkingDirectory`.
 
-**Local vs external modes.** `none`, `copy`, `worktree`, `overlay` and `bwrap` all materialize a
+**Local vs external modes.** `none`, `copy`, `worktree`, `cow` and `bwrap` all materialize a
 `View` that *this* process serves (one per `servers[]` entry). `container` and `remote` do
 **not**: they run an *external* agentd (in a container/VM/another host) whose listener is not
 this process's, so they are provisioned by the host supervisor, which returns a `server_base`
@@ -335,17 +335,17 @@ simply not the component that starts it.
 |---|---|---|
 | `none` | use `WorkingDirectory` as-is | read-only sharing; the degenerate/current case |
 | `worktree` | `git worktree add <view> [<commit>\|im/<id>]` | shares the object store; git repos only |
-| `overlay` | overlayfs / `cp --reflink` / `clonefile` | independent CoW view over the source |
+| `cow` | `cp --reflink` / `clonefile`, fallback to copy | independent copy-on-write view over the source |
 | `copy` | `rsync`/copy | universal, linear disk cost |
 | `bwrap` | namespaces (+ optional CoW view) | filesystem/process/network isolation without a container |
 | `container` | Docker/Podman/K8s; run agentd inside | strongest: fs + process + network + resources |
 
-Only `none`/`copy`/`worktree`/`overlay` are agentd **isolation modes**; `bwrap` is a sandbox
+Only `none`/`copy`/`worktree`/`cow` are agentd **isolation modes**; `bwrap` is a sandbox
 wrapper (§8), and `container`/`remote` are external — host-provisioned and rejected by the local
-runner (§11, §15).
+runner (§11, §15). The former `overlay` name is rejected; use `cow`.
 
 Selection is a deployment decision, but the recommended default for a writable agent is
-**`overlay` (or `worktree` in a git repo), optionally wrapped in `bwrap`/a container** — one
+**`cow` (or `worktree` in a git repo), optionally wrapped in `bwrap`/a container** — one
 isolated view per conversation, not "shared directory + separate fs/network sandboxes".
 
 Each view is served by its **own** `Client` (own `Root` and `WorkingDirectory`); a single
@@ -377,7 +377,7 @@ servers:
     root: /var/lib/agentd/group-a
     workingDirectory: /var/lib/agentd/group-a/view   # the prepared view
     isolation:
-      mode: overlay
+      mode: cow
       baseDir: /var/lib/agentd/views
       cow:
         mode: auto            # auto | reflink | clonefile
@@ -413,7 +413,7 @@ deliberate opt-out, never a silent downgrade. `agentd` logs when a sandbox block
 
 `container`/`remote` are **not** config fields: such an instance runs its own agentd (in a
 container/VM/remote host) and is provisioned by the host supervisor (§15), so agentd only
-holds the local modes `none | copy | worktree | overlay`.
+holds the local modes `none | copy | worktree | cow`.
 
 Validation (fail-fast, like the rest of `config.Validate`):
 - `mode != none` requires `baseDir`.
@@ -469,9 +469,9 @@ for each server s in cfg.Servers:
 
 - `isolation.mode: none` makes `Prepare` a no-op returning `WorkingDirectory` — zero behavior
   change for existing single-directory deployments.
-- Only the local modes (`none`/`worktree`/`overlay`/`copy`/`bwrap`) run through this loop;
+- Only the local modes (`none`/`worktree`/`cow`/`copy`/`bwrap`) run through this loop;
   `container`/`remote` are provisioned as separate processes by the host (see §15), not here.
-- `Teardown` (worktree remove / overlay unmount) runs on graceful shutdown; container teardown
+- `Teardown` (worktree remove / cow view removal) runs on graceful shutdown; container teardown
   is the host's.
 - The `sandbox.wrapper` value is translated to an `agent.ClientOptions.Process` wrapper and
   passed through `client.New`.
@@ -500,7 +500,7 @@ provisioning **at runtime**. Two options:
    set, guards the API; a non-loopback `control.listen` **requires** it, and `control.projectListen`
    must be loopback (dynamic instances are served unauthenticated). `control.maxLeases` caps the
    live instance count (0 = unlimited). **Local modes only**
-   (none/copy/worktree/overlay): `container`/`remote` are still rejected as external — a
+   (none/copy/worktree/cow): `container`/`remote` are still rejected as external — a
    same-process agentd does not orchestrate containers.
 
 Either way, the **single-owner rule** holds: a writable `(project, transport)` is leased to
@@ -536,7 +536,7 @@ exclusive with `isolation` — a read-only lease shares the source directory.
 
 - **Create**: runner `Prepare` (copy/mount/clone into `baseDir`) → `run.go` builds the `Client`
   for the view and starts the transport → host records the lease.
-- **Reclaim**: host releases on idle TTL; `Teardown` removes the worktree/overlay/container.
+- **Reclaim**: host releases on idle TTL; `Teardown` removes the worktree/cow/container.
 - **Quotas**: cap concurrent leases (disk/memory); one view + one `Root` per instance. The opt-in control API caps the **instance count** via `control.maxLeases` (0 = unlimited); disk/memory quotas remain the host/lease layer's.
 - **Ownership**: one writer per project; multiple readers allowed.
 - **Isolation of state**: each instance has its own `Root`; the view path is also excluded from
@@ -614,7 +614,7 @@ orchestration remain open.
 |---|---|---|
 | S0 ✅ | `ClientOptions.Process` wired into builtins + runtime git; seam test | — |
 | S1 ✅ | (wrappers still optional) | `Runner` (`none`/`copy`/`worktree`) + `isolation` config/validation + `run.go` integration |
-| S2 ✅ | `FileWriteGuard` wired into write/edit/apply_patch | `overlay` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.wrapper` wiring |
+| S2 ✅ | `FileWriteGuard` wired into write/edit/apply_patch | `cow` (reflink/clonefile) + `baseRef`; teardown on shutdown; `sandbox.wrapper` wiring |
 | S3 ◐ | — | **control API implemented for local modes**; `container`/`remote` remain host-provisioned |
 | S4 ✅ | `bwrap` (Linux) + `seatbelt` (macOS) shipped; `appcontainer` (Windows, best-effort) | whole-process `bwrap`/`seatbelt`/`appcontainer` wrapping shipped (top-level `wrap`, §8.1) |
 

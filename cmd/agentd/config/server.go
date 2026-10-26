@@ -134,8 +134,8 @@ const (
 	// IsolationWorktree creates a git worktree, starting from BaseRef, as the
 	// instance view.
 	IsolationWorktree IsolationMode = "worktree"
-	// IsolationOverlay creates a copy-on-write view of the source.
-	IsolationOverlay IsolationMode = "overlay"
+	// IsolationCow creates a copy-on-write view of the source.
+	IsolationCow IsolationMode = "cow"
 	// IsolationContainer runs the instance in a container; the host provisions
 	// it, not the local runner.
 	IsolationContainer IsolationMode = "container"
@@ -147,14 +147,14 @@ const (
 // Valid reports whether m is a supported isolation mode.
 func (m IsolationMode) Valid() bool {
 	switch m {
-	case "", IsolationNone, IsolationCopy, IsolationWorktree, IsolationOverlay,
+	case "", IsolationNone, IsolationCopy, IsolationWorktree, IsolationCow,
 		IsolationContainer, IsolationRemote:
 		return true
 	}
 	return false
 }
 
-// CowMode selects the overlay copy-on-write mechanism.
+// CowMode selects the copy-on-write mechanism.
 type CowMode string
 
 const (
@@ -172,7 +172,7 @@ func (m CowMode) Valid() bool {
 	return m == "" || m == CowAuto || m == CowReflink || m == CowClonefile
 }
 
-// CowConfig selects the overlay copy-on-write mechanism.
+// CowConfig selects the copy-on-write mechanism.
 type CowConfig struct {
 	// Mode is CowAuto, CowReflink or CowClonefile.
 	Mode CowMode `yaml:"mode" json:"mode"`
@@ -180,14 +180,14 @@ type CowConfig struct {
 
 // IsolationConfig derives a per-server view of the working directory.
 type IsolationConfig struct {
-	// Mode is a local mode (none, copy, worktree or overlay); container and
+	// Mode is a local mode (none, copy, worktree or cow); container and
 	// remote are external and rejected by the local runner.
 	Mode IsolationMode `yaml:"mode" json:"mode"`
 	// BaseDir is where views are created (required by every mode but none).
 	BaseDir string `yaml:"baseDir" json:"baseDir"`
 	// BaseRef is the commit-ish a worktree starts from; empty means HEAD.
 	BaseRef string `yaml:"baseRef" json:"baseRef"`
-	// Cow selects the overlay copy-on-write mechanism.
+	// Cow selects the copy-on-write mechanism.
 	Cow *CowConfig `yaml:"cow" json:"cow"`
 }
 
