@@ -34,7 +34,7 @@ type Options struct {
 	// one. It is marked in GET /api/model (Default) and applied on create.
 	DefaultModel string
 	// MediaUploader resolves a provider's uploader for POST
-	// /api/session/{id}/file, letting HTTP callers obtain a file reference
+	// /api/session/{id}/file, letting HTTP callers obtain a file reference.
 	// Nil disables the endpoint.
 	MediaUploader func(providerID schema.ProviderID) schema.MediaUploader
 	// CORS adds browser origins to the default allow-list.
@@ -95,9 +95,15 @@ type sessionEntry struct {
 // New binds a Server to one Client. It switches the client to hold mode so
 // permission/question prompts surface over HTTP.
 //
+// A client must not be shared by multiple Servers: hold mode belongs to the
+// client, and Close does not restore a previous mode.
+//
 // The server's lifetime is derived from ctx: cancelling ctx (or calling Close)
 // cancels the SSE streams and stops the background workers.
 func New(ctx context.Context, client *agent.Client, opts Options) (*Server, error) {
+	if ctx == nil {
+		return nil, errors.New("server: context is required")
+	}
 	if client == nil {
 		return nil, errors.New("server: client is required")
 	}
@@ -221,7 +227,7 @@ func (s *Server) Handler() http.Handler {
 }
 
 // Close cancels SSE streams and signals workers to stop. It does not close the
-// client; the host owns it.
+// client or restore its hold mode; keep one server per client.
 func (s *Server) Close() error {
 	s.closeOnce.Do(func() {
 		s.cancel()
@@ -263,11 +269,26 @@ func (s *Server) defaultAgent() string {
 // requireSession verifies the path session exists, writing the error response
 // and returning false otherwise.
 func (s *Server) requireSession(w http.ResponseWriter, r *http.Request) bool {
-	if _, err := s.client.GetSession(r.Context(), r.PathValue("sessionID")); err != nil {
+	info, err := s.client.GetSession(r.Context(), r.PathValue("sessionID"))
+	if err != nil {
 		s.writeSDKError(w, err)
 		return false
 	}
+	if name, disallowed := s.disallowedSessionAgent(info); disallowed {
+		writeError(w, http.StatusForbidden, "forbidden", "agent not allowed: "+name)
+		return false
+	}
 	return true
+}
+
+// disallowedSessionAgent returns a session's agent when it is outside the
+// server's allow-list. A session without a persisted agent is allowed.
+func (s *Server) disallowedSessionAgent(info schema.SessionInfo) (string, bool) {
+	if info.Agent == nil {
+		return "", false
+	}
+	name := string(*info.Agent)
+	return name, !s.allowed(name)
 }
 
 // requireAgent validates that name is a registered, allowed agent. It writes
@@ -287,16 +308,20 @@ func (s *Server) requireAgent(w http.ResponseWriter, name string) bool {
 // attach returns the shared handle for a session, resuming it once if needed.
 // The inbound ruleset is merged over the session's stored rules.
 func (s *Server) attach(ctx context.Context, sessionID string) (*agent.Session, error) {
-	e := s.entry(sessionID)
-	e.mu.Lock()
+	e := s.lockedEntry(sessionID)
 	defer e.mu.Unlock()
 	if e.handle != nil {
 		return e.handle, nil
 	}
+
 	info, err := s.client.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	if name, disallowed := s.disallowedSessionAgent(info); disallowed {
+		return nil, fmt.Errorf("%w: %s", errSessionAgentNotAllowed, name)
+	}
+
 	rules := s.inbound
 	if info.Permission != nil {
 		rules = core.PermissionMerge(*info.Permission, s.inbound)
@@ -305,6 +330,7 @@ func (s *Server) attach(ctx context.Context, sessionID string) (*agent.Session, 
 	if err != nil {
 		return nil, err
 	}
+
 	e.handle = handle
 	return handle, nil
 }
@@ -323,16 +349,17 @@ func (s *Server) questionOverride() agent.QuestionHandlerFunc {
 // withHandle runs fn against the session's handle, keeping the handle alive for
 // the duration.
 func (s *Server) withHandle(ctx context.Context, sessionID string, fn func(*agent.Session) error) error {
-	e := s.entry(sessionID)
-	e.mu.Lock()
+	e := s.lockedEntry(sessionID)
 	e.refs++
 	e.mu.Unlock()
+
 	defer func() {
 		e.mu.Lock()
 		e.refs--
 		e.mu.Unlock()
 		s.maybeEvict(sessionID)
 	}()
+
 	handle, err := s.attach(ctx, sessionID)
 	if err != nil {
 		return err
@@ -340,32 +367,64 @@ func (s *Server) withHandle(ctx context.Context, sessionID string, fn func(*agen
 	return fn(handle)
 }
 
-func (s *Server) entry(id string) *sessionEntry {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e := s.entries[id]
-	if e == nil {
-		e = &sessionEntry{}
-		s.entries[id] = e
+// lockedEntry returns the current entry for id with e.mu held. It retries when
+// the entry is removed between the map lookup and taking the entry lock, so a
+// caller never attaches to an evicted entry.
+func (s *Server) lockedEntry(id string) *sessionEntry {
+	for {
+		s.mu.Lock()
+		e := s.entries[id]
+		if e == nil {
+			e = &sessionEntry{}
+			s.entries[id] = e
+		}
+		s.mu.Unlock()
+
+		e.mu.Lock()
+		s.mu.Lock()
+		current := s.entries[id] == e
+		s.mu.Unlock()
+		if current {
+			return e
+		}
+		e.mu.Unlock()
 	}
-	return e
 }
 
-// maybeEvict closes and drops a session's handle when it is idle and unused.
-func (s *Server) maybeEvict(id string) {
+// lookupEntry returns the current entry for id without creating one.
+func (s *Server) lookupEntry(id string) *sessionEntry {
 	s.mu.Lock()
-	e := s.entries[id]
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	return s.entries[id]
+}
+
+// maybeEvict closes and drops an idle session entry. The map is checked again
+// after locking the entry so a removed/replaced entry is never closed twice.
+func (s *Server) maybeEvict(id string) {
+	e := s.lookupEntry(id)
 	if e == nil {
 		return
 	}
+
 	e.mu.Lock()
-	if e.worker == nil && e.refs == 0 && e.handle != nil {
-		_ = e.handle.Close()
-		e.handle = nil
-		s.mu.Lock()
-		delete(s.entries, id)
-		s.mu.Unlock()
+	if e.worker != nil || e.refs != 0 {
+		e.mu.Unlock()
+		return
 	}
+
+	s.mu.Lock()
+	if s.entries[id] != e {
+		s.mu.Unlock()
+		e.mu.Unlock()
+		return
+	}
+	handle := e.handle
+	e.handle = nil
+	delete(s.entries, id)
+	s.mu.Unlock()
 	e.mu.Unlock()
+
+	if handle != nil {
+		_ = handle.Close()
+	}
 }

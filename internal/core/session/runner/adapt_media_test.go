@@ -98,10 +98,10 @@ func TestAttachmentFeasibleRoleGate(t *testing.T) {
 		Sources: []protocols.MediaSource{protocols.MediaSourceInline},
 		Roles:   []string{"user"},
 	}}
-	if mediaFeasibilityReason(entry.Media, nil, nil, "user", "image/png", protocols.MediaSourceInline) != "" {
+	if mediaFeasibilityReason(entry.Media, nil, nil, nil, "user", "image/png", protocols.MediaSourceInline) != "" {
 		t.Fatal("a user part should be feasible")
 	}
-	if mediaFeasibilityReason(entry.Media, nil, nil, "tool", "image/png", protocols.MediaSourceInline) == "" {
+	if mediaFeasibilityReason(entry.Media, nil, nil, nil, "tool", "image/png", protocols.MediaSourceInline) == "" {
 		t.Fatal("a tool part should be rejected when only the user role is allowed")
 	}
 }
@@ -162,13 +162,19 @@ func dataURL(mime string, data []byte) string {
 // delivery policy and no model-source restriction.
 func policyAdapter(policy *core.MediaPolicy, uploader schema.MediaUploader) mediaAdapter {
 	entry, _ := protocols.LookupProtocol("gemini")
+	var uploadCaps schema.MediaCapabilities
+	if reporter, ok := uploader.(schema.MediaCapabilityReporter); ok {
+		uploadCaps = reporter.MediaCapabilities()
+	}
 	return mediaAdapter{
-		runner:   &LLMRunner{OnError: func(error) {}},
-		entry:    entry,
-		provider: "gemini",
-		input:    []string{"text", "image"},
-		uploader: uploader,
-		policy:   policy,
+		runner:     &LLMRunner{OnError: func(error) {}},
+		entry:      entry,
+		provider:   "gemini",
+		input:      []string{"text", "image"},
+		uploader:   uploader,
+		uploadCaps: uploadCaps,
+		storeCaps:  schema.StoreCapabilities{Fetchable: true},
+		policy:     policy,
 	}
 }
 
@@ -455,11 +461,64 @@ func TestMediaModalityUsesFileTaxonomy(t *testing.T) {
 func TestMediaFeasibilityFormsUseFileModality(t *testing.T) {
 	support := protocols.ProtocolMediaSupport{MIMEs: map[string]struct{}{"application/pdf": {}}}
 	forms := map[string][]llmschema.MediaSource{"file": {llmschema.MediaSourceInline}}
-	if got := mediaFeasibilityReason(support, []string{"text", "pdf"}, forms, "user", "application/pdf", llmschema.MediaSourceInline); got != "" {
+	if got := mediaFeasibilityReason(support, []string{"text", "pdf"}, forms, nil, "user", "application/pdf", llmschema.MediaSourceInline); got != "" {
 		t.Fatalf("pdf with a file form = %q, want feasible", got)
 	}
 	other := map[string][]llmschema.MediaSource{"image": {llmschema.MediaSourceInline}}
-	if got := mediaFeasibilityReason(support, []string{"text", "pdf"}, other, "user", "application/pdf", llmschema.MediaSourceInline); got != string(schema.AttachmentOmitUnsupportedSource) {
+	if got := mediaFeasibilityReason(support, []string{"text", "pdf"}, other, nil, "user", "application/pdf", llmschema.MediaSourceInline); got != string(schema.AttachmentOmitUnsupportedSource) {
 		t.Fatalf("pdf with an image-only form = %q, want unsupported_source", got)
+	}
+}
+
+type cappedUploader struct {
+	fakeUploader
+	caps schema.MediaCapabilities
+}
+
+func (c *cappedUploader) MediaCapabilities() schema.MediaCapabilities { return c.caps }
+
+type cappedStore struct {
+	fakeStore
+	caps schema.StoreCapabilities
+}
+
+func (c *cappedStore) StoreCapabilities() schema.StoreCapabilities { return c.caps }
+
+func TestPolicyHonorsProviderCapabilities(t *testing.T) {
+	uploader := &cappedUploader{
+		fakeUploader: fakeUploader{ref: schema.Reference{Source: "file", Value: "file-9"}},
+		caps:         schema.MediaCapabilities{MIMEs: []string{"application/pdf"}},
+	}
+	adapter := policyAdapter(&core.MediaPolicy{Upload: true, Prefer: []core.MediaPolicySource{core.MediaPolicySourceFile}}, uploader)
+	if _, _ = adapter.adapt(context.Background(), "ses_1", adaptFile(dataURL("image/png", []byte{1, 2, 3}))); uploader.called != 0 {
+		t.Fatal("a provider MIME mismatch must skip the upload")
+	}
+
+	uploader.caps = schema.MediaCapabilities{MIMEs: []string{"image/png"}, MaxBytes: 2}
+	if _, _ = adapter.adapt(context.Background(), "ses_1", adaptFile(dataURL("image/png", []byte{1, 2, 3}))); uploader.called != 0 {
+		t.Fatal("a provider size limit must skip the upload")
+	}
+}
+
+func TestPolicyHonorsStoreCapabilities(t *testing.T) {
+	store := &cappedStore{
+		fakeStore: fakeStore{ref: schema.Reference{Source: "url", Value: "https://cdn/a.png"}},
+		caps:      schema.StoreCapabilities{Fetchable: false},
+	}
+	adapter := policyAdapter(&core.MediaPolicy{Upload: true, Prefer: []core.MediaPolicySource{core.MediaPolicySourceURL}}, nil)
+	adapter.store = store
+	adapter.storeCaps = store.caps
+	if _, _ = adapter.adapt(context.Background(), "ses_1", adaptFile(dataURL("image/png", []byte{1, 2, 3}))); store.called != 0 {
+		t.Fatal("a non-fetchable store must not be used for url delivery")
+	}
+}
+
+func TestMediaFeasibilityModelMIMEs(t *testing.T) {
+	support := protocols.ProtocolMediaSupport{MIMEs: map[string]struct{}{"image/png": {}, "application/pdf": {}}}
+	if got := mediaFeasibilityReason(support, nil, nil, []string{"image/png"}, "user", "application/pdf", llmschema.MediaSourceInline); got != string(schema.AttachmentOmitUnsupportedType) {
+		t.Fatalf("model MIME narrowing = %q, want unsupported_type", got)
+	}
+	if got := mediaFeasibilityReason(support, nil, nil, []string{"image/png"}, "user", "image/png", llmschema.MediaSourceInline); got != "" {
+		t.Fatalf("allowed model MIME = %q, want feasible", got)
 	}
 }

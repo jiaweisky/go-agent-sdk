@@ -14,6 +14,7 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-25 | **Breaking:** provider-aware media uploads. Removed the flat `mediaUpload` block and top-level `storage`; added reusable `providerFileAPIs`, per-model `providerID` + `providerFileAPI`, and server `media.delivery` + `media.uploads.urlHost`. `prefer` is now `inline`/`url`/`providerFile`; `media.upload` is now `media.delivery.allowUploads`. `/api/config` reports the new shape; `schemaVersion` is now `6`. |
 | 2026-10-23 | Renamed `mediaUpload.expiresIn` / `expiresAfter` to `expiresInSeconds` / `expiresAfterSeconds`; `/api/config` reports the new names; `schemaVersion` is now `5`. |
 | 2026-10-23 | Moved sandbox policy translation to `cmd/agentd/sandboxpolicy`, shared sandbox mode values to `cmd/agentd/sandboxmode`, and model metadata adaptation to `cmd/agentd/modelinfo`; `config` no longer imports `cmd/agentd/sandbox` or `pkg/agent`. |
 | 2026-10-23 | Split runtime assembly out of `cmd/agentd/config`: client construction and MCP/reference/A2A-peer conversion moved to `cmd/agentd/client`; the media uploader, transcoder and delivery-policy conversion to `cmd/agentd/media`; media-store backends to `cmd/agentd/storage`. `config` now holds the DTOs, their `Validate()` methods and cross-block validation. |
@@ -156,6 +157,8 @@ models:                              # GLOBAL catalog: id -> ModelConfig (define
   - id: deepseek-chat
     model: deepseek-chat                    # wire model name (required)
     protocol: deepseek-chat                   # OpenAI-compatible chat + DeepSeek's `file` block
+    providerID: deepseek                     # REQUIRED when providerFileAPI is set
+    providerFileAPI: deepseek                # explicit Files API profile; no inference
     modelBaseURL: https://api.deepseek.com   # optional; the route default when omitted
     credentials: { apiKey: ${DEEPSEEK_API_KEY} }   # provider secret (or aws: { ... }); ${VAR} supported
     inputModalities: [text, image]           # → /api/model "input"
@@ -166,9 +169,31 @@ models:                              # GLOBAL catalog: id -> ModelConfig (define
   - id: gpt-4o
     model: gpt-4o
     protocol: openai-responses
+    providerID: openai
+    providerFileAPI: openai
     credentials: { apiKey: sk-... }
     inputModalities: [text, image]
     contextLimit: 128000
+
+providerFileAPIs:                    # reusable provider Files API profiles
+  deepseek:
+    kind: multipart-json
+    url: https://api.deepseek.com/files
+    auth: { headers: { Authorization: "Bearer ${DEEPSEEK_API_KEY}" } }
+    fields: { purpose: user_data }
+    idField: id
+    expiry: { style: expires_after, seconds: 86400 }
+    mime: { allowed: [image/jpeg, image/png, image/gif, image/webp] }
+    limits: { maxBytes: 67108864, timeout: 10m }
+  openai:
+    kind: multipart-json
+    url: https://api.openai.com/v1/files
+    auth: { headers: { Authorization: "Bearer ${OPENAI_API_KEY}" } }
+    fields: { purpose: user_data }
+    idField: id
+    expiry: { style: none }
+    mime: { allowed: [application/pdf, text/plain, image/jpeg, image/png] }
+    limits: { maxBytes: 52428800, timeout: 2m }
 
 servers:
   - name: http
@@ -182,7 +207,9 @@ servers:
     agents: [ build ]                   # reachable allow-list
     peers:                              # remote A2A agents this server can delegate to (`task`) or run as primary
       - { name: echo, endpoint: http://127.0.0.1:9099, description: "Echoes input.", mode: subagent, headers: { Authorization: "Bearer ${PEER_TOKEN}" } }
-    mediaUpload: { ... }                # optional
+    media:                              # optional; delivery policy + URL host
+      delivery: { prefer: [providerFile, inline], allowUploads: true }
+      uploads: { urlHost: { ... } }
     dropErroredTurns: true              # default true
     auth: { type: bearer, token: sk-... }   # secret in the file
     allowInsecure: false                # opt out of the non-loopback-without-auth guard
@@ -203,20 +230,22 @@ servers:
     baseURL: https://agents.example.com
     agents: [ build ]                   # exposed agents
     inboundMedia: spool                 # spool | inline (fallback; see `media:`)
-    media:                              # inbound media delivery policy (operator-owned, {M16})
-      inlineLimitBytes: 262144          # or per-modality: { default: 262144, video: 2097152 }
-      prefer: [file, inline]            # order of wire forms: inline | url | file
-      upload: true                      # allow hosting: url via `storage`, file via the provider's `mediaUpload`
-      downsample: true                  # images in-SDK; audio/video via ffmpeg (on PATH; soft-fail)
-      maxBytes: 52428800                # or per-modality: { default: ..., image: ..., video: ... }
+    media:                              # inbound delivery policy + upload destinations
+      delivery:                         # operator-owned, {M16}
+        inlineLimitBytes: 262144        # or per-modality: { default: 262144, video: 2097152 }
+        prefer: [providerFile, inline]  # order: inline | url | providerFile
+        allowUploads: true              # enables url hosting and provider Files API
+        downsample: true                # images in-SDK; audio/video via ffmpeg (on PATH; soft-fail)
+        maxBytes: 52428800              # or per-modality: { default: ..., image: ..., video: ... }
+      uploads:
+        urlHost:                        # provider-independent URL store ({M17})
+          backend: http                 # http | local | s3 | cos
+          url: https://store/x/         # http PUT base
+          auth: bearer                  # none | basic | bearer (upload)
+          token: ${STORE_TOKEN}
+          presignSecret: ${NGINX_SECURE_LINK}   # optional nginx secure_link signature
+          # s3: S3-compatible; cos: native Tencent COS — see agentd.example.yaml
     maxBodyBytes: 134217728             # HTTP request-body cap (0 = 128 MiB default; 413 above)
-    # Hosting configured separately ({M17}); `storage` serves the model edge (url) only:
-    # storage:     { backend: http|local|s3|cos, url: https://store/x/, auth: none|basic|bearer, username?, password?, token?, header?, value?, presignSecret?, ... }
-    #              # `http` credential (auth basic/bearer, or a custom header/value) authenticates the Put; `presignSecret` signs the returned read url (nginx secure_link)
-    #              # `s3` is S3-compatible (AWS S3 / MinIO, and COS via its S3 endpoint); the native `cos` backend
-    #              # drives Tencent COS over its own REST API: { cos: { region, bucket, secretID, secretKey, sessionToken? } }
-    #              # omit the s3/cos credentials (or set http auth none) for an anonymous/public origin or bucket
-    # mediaUpload: { url: https://api.deepseek.com/files, fields: {purpose: user_data}, idField: id, expiresAfterSeconds: 86400 }  # provider Files API → file_id; expiresAfterSeconds → provider expires_after
     cards: { build: { name: ..., description: ... } }   # REQUIRED per exposed agent (name + description)
     auth: { type: bearer, token: sk-... }   # A2A is bearer-only, like HTTP
     dropErroredTurns: true
@@ -260,8 +289,8 @@ full `ModelConfig`; a server only selects **ids**:
 | Field | Applies to | Notes |
 |---|---|---|
 | `name` / `kind` / `listen` / `root` / `workingDirectory` / `configDirs` / `models` / `defaultModel` / `host` / `pathPrefix` | both | bind + routing + models |
-| `mediaUpload` / `inboundPermissions` / `keepAlive` / `dropErroredTurns` / `tls` / `allowInsecure` | both | `dropErroredTurns` defaults **true** |
-| `media` + `storage` + `mediaUpload` + `maxBodyBytes` | both | inbound media delivery + model-edge hosting (`DESIGN-MEDIA` {M16}/{M17}); `prefer` ∈ `inline`/`url`/`file`, where `url` is produced by the **provider-independent `storage`** store (`http` PUT base / `local` shared dir / `s3` / native `cos` object store → url) and `file` by the **provider-bound `mediaUpload`** (Files API → file_id). `media` keys: `inlineLimitBytes` / `prefer` / `upload` / `downsample` / `spool` / `maxBytes` (the two size keys are per-modality: a number or `{default, image, audio, video, file}`); `maxBodyBytes` caps an HTTP request body; `storage` keys: `backend` (`http`/`local`/`s3`/`cos`), `auth` (`none`/`basic`/`bearer`) / `username` / `password` / `token` / `header`+`value` (custom), `presignSecret` (nginx secure_link) + `presignTTL`, or `s3`/`cos` credentials (omit → anonymous/public bucket). A2A file exchange is not part of the SDK. Unset = inline-first (unchanged) |
+| `inboundPermissions` / `keepAlive` / `dropErroredTurns` / `tls` / `allowInsecure` | both | `dropErroredTurns` defaults **true** |
+| `media` + `maxBodyBytes` | both | `media.delivery` is the inbound policy (`DESIGN-MEDIA` {M16}): `inlineLimitBytes`, `prefer` ∈ `inline`/`url`/`providerFile`, `allowUploads`, `downsample`, `spool`, `maxBytes` (size keys are per-modality: a number or `{default, image, audio, video, file}`). `media.uploads.urlHost` is the provider-independent URL store ({M17}): `backend` (`http`/`local`/`s3`/`cos`), `auth` (`none`/`basic`/`bearer`), `token`/`header`+`value`, `presignSecret`/`presignTTL`, or `s3`/`cos` credentials. The provider Files API is declared by top-level `providerFileAPIs.<name>` and selected per model with `models[].providerFileAPI` (requires an explicit `models[].providerID`). `maxBodyBytes` caps an HTTP request body. Unset = inline-first fallback. |
 | `questions` | both | the `question` tool policy: `park` or `decline`; default **`decline`** for a2a (an A2A client polls task state and cannot answer), **`park`** for http |
 | `auth` | both | bearer only: `auth: {type: bearer, token: ...}` (required for non-loopback binds) |
 | `agents` | both | http = reachable allow-list; a2a = exposed agents |
@@ -481,16 +510,17 @@ runtime info without the config file — useful across machines.
 - **Redaction (fail-closed whitelist)**: the response is a dedicated DTO; unlisted fields are
   omitted. Secrets are **never** returned — `models[].credentials.apiKey`/`aws.*`,
   `servers[].auth.token`, `servers[].tls`, `servers[].mcp[]` internals,
-  `servers[].mediaUpload.header|value|fields`,
-  `servers[].storage.password|token|value|presignSecret`, `servers[].storage.s3.accessKey|secretKey`,
-  `servers[].storage.cos.secretID|secretKey|sessionToken`, `control.auth.*` become
-  `{"configured": bool, "redacted": true}` (or `{"configured": false}`). Credential-bearing
-  URLs (`references[].repository`, `mediaUpload.url`, `storage.url|serveBaseURL`)
-  have their userinfo stripped, so an `https://user:token@host/...` cannot leak its secret.
+  `servers[].media.uploads.urlHost.password|token|value|presignSecret`,
+  `...urlHost.s3.accessKey|secretKey`, `...urlHost.cos.secretID|secretKey|sessionToken`,
+  `control.auth.*` become `{"configured": bool, "redacted": true}` (or
+  `{"configured": false}`). `providerFileAPIs.*.auth.headers|fields|modelHeaders`
+  return header/field **names only**; their values are never returned. Credential-bearing URLs (`references[].repository`,
+  `providerFileAPIs.*.url`, `media.uploads.urlHost.url|serveBaseURL`) have their
+  userinfo stripped, so an `https://user:token@host/...` cannot leak its secret.
 - **Source**: `sources[]` reports the config `file` path.
 - **Errors**: `401` (missing/invalid credential), `400` (bad `section`), `405` (non-GET),
   `404` (no origin-root server), matching the `/api/*` envelope `{error, message}`.
-- **Stability**: `schemaVersion` (currently `5`); the endpoints are experimental — fields are
+- **Stability**: `schemaVersion` (currently `6`); the endpoints are experimental — fields are
   only added, a removal bumps the version. Read-only (no PATCH) and no hot reload: the config
   is loaded at startup (`--check` validates it); restart to change it.
 
@@ -643,7 +673,7 @@ Open questions: **none** — the design is settled and implemented.
 
 | # | Principle | Check |
 |---|---|---|
-| 1 | Completeness | The per-server field set matches the §5 **fields-by-kind** table (shared / http-only / a2a-only) and is the **union** of both old commands — nothing dropped (incl. `allowInsecure`, `dropErroredTurns`, `mediaUpload`, `configDirs`, `baseURL`). |
+| 1 | Completeness | The per-server field set matches the §5 **fields-by-kind** table (shared / http-only / a2a-only) and is the **union** of both old commands — nothing dropped (incl. `allowInsecure`, `dropErroredTurns`, `providerFileAPIs`, `media`, `configDirs`, `baseURL`). |
 | 2 | Error branches | Every §5 validation rule fails fast; a bind failure rolls back started listeners and closes their clients; TLS/credential load errors surface; `client.Close` on all paths; empty `models`, duplicate `default`, unknown model ids. |
 | 3 | Duplication | No duplicated `buildClient`; one serve/shutdown/rollback/CLI path; nothing copy-pasted from the two old commands. |
 | 4 | Naming | `BuildClient(catalog, server)`, `buildHandler`, `newRouter`, `groupByListen` / `sortedListens`, `serveTarget`, `serveServer` — consistent with the repo. |

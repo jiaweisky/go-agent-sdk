@@ -174,12 +174,6 @@ func validateServerComponents(s Server) error {
 	if err := s.Media.Validate(); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
-	if err := s.MediaUpload.Validate(); err != nil {
-		return fmt.Errorf("server %q: %w", s.Name, err)
-	}
-	if err := s.Storage.Validate(); err != nil {
-		return fmt.Errorf("server %q: %w", s.Name, err)
-	}
 
 	if err := ValidateReferences(s.References); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)

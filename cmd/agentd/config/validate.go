@@ -6,11 +6,18 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
 // Validate reports configuration that cannot produce a running set of servers.
 func (c Config) Validate() error {
+	if err := validateProviderFileAPIs(c.ProviderFileAPIs); err != nil {
+		return err
+	}
+	if err := validateModelProviderFileAPIs(c.Models, c.ProviderFileAPIs); err != nil {
+		return err
+	}
 	catalog, err := c.Catalog()
 	if errors.Is(err, errModelsRequired) {
 		return err
@@ -22,7 +29,7 @@ func (c Config) Validate() error {
 	if len(c.Servers) == 0 {
 		return errors.New("at least one server is required")
 	}
-	if err := validateServers(c.Servers, catalog); err != nil {
+	if err := validateServers(c.Servers, catalog, c.ProviderFileAPIs); err != nil {
 		return err
 	}
 
@@ -43,7 +50,7 @@ func (c Config) Validate() error {
 }
 
 // validateServers validates every server and rejects duplicate names.
-func validateServers(servers []Server, catalog Catalog) error {
+func validateServers(servers []Server, catalog Catalog, profiles map[string]*ProviderFileAPI) error {
 	names := make(map[string]bool, len(servers))
 	for _, s := range servers {
 		if err := validateServerName(s, names); err != nil {
@@ -52,8 +59,81 @@ func validateServers(servers []Server, catalog Catalog) error {
 		if err := s.Validate(catalog); err != nil {
 			return err
 		}
+		if err := validateServerProviderFiles(s, catalog, profiles); err != nil {
+			return err
+		}
+		if err := validateServerDeliverySources(s); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// validateServerProviderFiles enforces the runtime providerID -> profile map.
+func validateServerProviderFiles(s Server, catalog Catalog, profiles map[string]*ProviderFileAPI) error {
+	ids := s.Models
+	if len(ids) == 0 {
+		ids = catalog.IDs()
+	}
+	byProvider := map[string]string{}
+	for _, id := range ids {
+		entry, ok := catalog.Entry(id)
+		if !ok {
+			continue
+		}
+		if entry.ProviderFileAPI == "" {
+			if modelFileCapable(entry) {
+				return fmt.Errorf("server %q: model %q declares a file source but has no providerFileAPI", s.Name, entry.ID)
+			}
+			continue
+		}
+		if entry.ProviderID == "" {
+			return fmt.Errorf("server %q: model %q uses providerFileAPI %q but has no providerID", s.Name, entry.ID, entry.ProviderFileAPI)
+		}
+		if _, ok := profiles[entry.ProviderFileAPI]; !ok {
+			return fmt.Errorf("server %q: model %q references unknown providerFileAPI %q", s.Name, entry.ID, entry.ProviderFileAPI)
+		}
+		if prev, ok := byProvider[entry.ProviderID]; ok && prev != entry.ProviderFileAPI {
+			return fmt.Errorf("server %q: providerID %q is used with providerFileAPI %q and %q; assign a distinct providerID", s.Name, entry.ProviderID, prev, entry.ProviderFileAPI)
+		}
+		byProvider[entry.ProviderID] = entry.ProviderFileAPI
+	}
+	return nil
+}
+
+// validateServerDeliverySources rejects a preferred source that cannot run and
+// has no fallback. Missing optional sources are otherwise reported at startup.
+func validateServerDeliverySources(s Server) error {
+	if s.Media == nil || s.Media.Delivery == nil {
+		return nil
+	}
+	d := s.Media.Delivery
+	if len(d.Prefer) != 1 {
+		return nil
+	}
+	switch d.Prefer[0] {
+	case "providerFile":
+		if d.Spool == nil {
+			return fmt.Errorf("server %q: media.delivery.prefer is file-only but there is no inline/url fallback or spool", s.Name)
+		}
+	case "url":
+		if !d.AllowUploads || !urlHostFetchable(s.Media.Uploads) {
+			return fmt.Errorf("server %q: media.delivery.prefer is url-only but media.uploads.urlHost is not provider-fetchable", s.Name)
+		}
+	}
+	return nil
+}
+
+func modelFileCapable(m ModelConfig) bool {
+	if m.Media == nil {
+		return false
+	}
+	for _, forms := range m.Media.Forms {
+		if slices.Contains(forms, "file") {
+			return true
+		}
+	}
+	return false
 }
 
 // validateServerName checks one server's name and records it for duplicate

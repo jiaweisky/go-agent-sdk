@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"slices"
 
 	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
@@ -16,15 +17,20 @@ func ExposeAgents(
 	client *agent.Client,
 	names []string,
 	cards map[string]config.CardConfig,
-	modes map[string][]string,
+	inputModes map[string][]string,
 	defaultModel string,
 ) ([]schema.AgentInfo, error) {
-	exposed := make([]schema.AgentInfo, 0, len(names))
+	type plan struct {
+		name   string
+		expose *schema.AgentExpose
+	}
+	plans := make([]plan, 0, len(names))
 	for _, name := range names {
 		info := client.Agents().Get(schema.AgentID(name))
 		if info == nil {
 			return nil, fmt.Errorf("unknown agent %q", name)
 		}
+
 		expose := &schema.AgentExpose{}
 		if override, ok := cards[name]; ok {
 			if err := config.ValidateCardSkills(name, override.Skills); err != nil {
@@ -32,21 +38,30 @@ func ExposeAgents(
 			}
 			applyCard(expose, override)
 		}
-		// Advertise the agent's model media modes on the card when the card
-		// config did not set them.
+
+		// CardConfig has no inputModes override, so derive them from the model.
 		if len(expose.InputModes) == 0 {
 			modelID := defaultModel
 			if info.Model != nil {
 				modelID = string(info.Model.ID)
 			}
-			if agentModes := modes[modelID]; len(agentModes) > 0 {
+			if agentModes := inputModes[modelID]; len(agentModes) > 0 {
 				expose.InputModes = agentModes
 			}
 		}
-		if err := client.RegisterAgent(name, agent.AgentConfig{Expose: expose}); err != nil {
-			return nil, fmt.Errorf("expose agent %q: %w", name, err)
+		plans = append(plans, plan{name: name, expose: expose})
+	}
+
+	exposed := make([]schema.AgentInfo, 0, len(plans))
+	for _, p := range plans {
+		if err := client.RegisterAgent(p.name, agent.AgentConfig{Expose: p.expose}); err != nil {
+			return nil, fmt.Errorf("expose agent %q: %w", p.name, err)
 		}
-		exposed = append(exposed, *client.Agents().Get(schema.AgentID(name)))
+		info := client.Agents().Get(schema.AgentID(p.name))
+		if info == nil {
+			return nil, fmt.Errorf("expose agent %q: agent disappeared after registration", p.name)
+		}
+		exposed = append(exposed, *info)
 	}
 	return exposed, nil
 }
@@ -61,7 +76,8 @@ func ModelModes(models []schema.ModelInfo) map[string][]string {
 	return out
 }
 
-// modalityMIMEs maps declared modalities to A2A input MIME modes.
+// modalityMIMEs maps declared modalities to A2A input MIME modes. The result
+// always includes the text/plain and application/json baseline.
 func modalityMIMEs(modalities []string) []string {
 	if len(modalities) == 0 {
 		return nil
@@ -95,16 +111,17 @@ func applyCard(expose *schema.AgentExpose, card config.CardConfig) {
 			URL:          card.Provider.URL,
 		}
 	}
+
 	expose.Skills = make([]schema.AgentSkill, 0, len(card.Skills))
 	for _, skill := range card.Skills {
 		expose.Skills = append(expose.Skills, schema.AgentSkill{
 			ID:          skill.ID,
 			Name:        skill.Name,
 			Description: skill.Description,
-			Tags:        skill.Tags,
-			Examples:    skill.Examples,
-			InputModes:  skill.InputModes,
-			OutputModes: skill.OutputModes,
+			Tags:        slices.Clone(skill.Tags),
+			Examples:    slices.Clone(skill.Examples),
+			InputModes:  slices.Clone(skill.InputModes),
+			OutputModes: slices.Clone(skill.OutputModes),
 		})
 	}
 }

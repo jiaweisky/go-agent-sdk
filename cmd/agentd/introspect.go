@@ -67,7 +67,7 @@ func publicPath(patterns []string, path string) bool {
 }
 
 // configSchemaVersion versions the /api/config document; bump on a breaking change.
-const configSchemaVersion = 5
+const configSchemaVersion = 6
 
 // secret reports whether a sensitive value is configured without revealing it.
 type secret struct {
@@ -109,10 +109,11 @@ type configResponse struct {
 
 // configDocument mirrors config.Config with sensitive fields redacted.
 type configDocument struct {
-	Models  []modelView  `json:"models"`
-	Servers []serverView `json:"servers"`
-	Control *controlView `json:"control"`
-	Wrap    *wrapView    `json:"wrap"`
+	Models           []modelView                     `json:"models"`
+	ProviderFileAPIs map[string]*providerFileAPIView `json:"providerFileAPIs,omitempty"`
+	Servers          []serverView                    `json:"servers"`
+	Control          *controlView                    `json:"control"`
+	Wrap             *wrapView                       `json:"wrap"`
 }
 
 // sourceView reports where the effective configuration came from.
@@ -125,10 +126,12 @@ type modelView struct {
 	ID              string          `json:"id"`
 	Model           string          `json:"model"`
 	ProviderID      string          `json:"providerID,omitempty"`
+	ProviderFileAPI string          `json:"providerFileAPI,omitempty"`
 	Protocol        string          `json:"protocol"`
 	ModelBaseURL    string          `json:"modelBaseURL,omitempty"`
 	InputModalities []string        `json:"inputModalities,omitempty"`
 	Media           *mediaView      `json:"media,omitempty"`
+	InputMIMEs      []string        `json:"inputMIMEs,omitempty"`
 	Headers         []string        `json:"headers,omitempty"` // header names only; values are not returned
 	Credentials     credentialsView `json:"credentials"`
 	ContextLimit    int             `json:"contextLimit"`
@@ -168,9 +171,7 @@ type serverView struct {
 	Host               string               `json:"host,omitempty"`
 	PathPrefix         string               `json:"pathPrefix,omitempty"`
 	Default            bool                 `json:"default,omitempty"`
-	MediaUpload        *mediaUploadView     `json:"mediaUpload,omitempty"`
-	Media              *mediaDeliveryView   `json:"media,omitempty"`
-	Storage            *storageView         `json:"storage,omitempty"`
+	Media              *serverMediaView     `json:"media,omitempty"`
 	MCP                []mcpView            `json:"mcp,omitempty"`
 	References         []referenceView      `json:"references,omitempty"`
 	InboundPermissions []permissionRuleView `json:"inboundPermissions,omitempty"`
@@ -197,11 +198,10 @@ type serverView struct {
 }
 
 type isolationView struct {
-	Mode         string   `json:"mode"`
-	BaseDir      string   `json:"baseDir,omitempty"`
-	BaseReadOnly bool     `json:"baseReadOnly,omitempty"`
-	BaseRef      string   `json:"baseRef,omitempty"`
-	Cow          *cowView `json:"cow,omitempty"`
+	Mode    string   `json:"mode"`
+	BaseDir string   `json:"baseDir,omitempty"`
+	BaseRef string   `json:"baseRef,omitempty"`
+	Cow     *cowView `json:"cow,omitempty"`
 }
 
 type cowView struct {
@@ -216,20 +216,33 @@ type sandboxView struct {
 	config.SandboxPolicy
 }
 
-type mediaUploadView struct {
-	URL                 string `json:"url,omitempty"`
-	IDField             string `json:"idField,omitempty"`
-	ExpiresInSeconds    int    `json:"expiresInSeconds,omitempty"`
-	ExpiresAfterSeconds int    `json:"expiresAfterSeconds,omitempty"`
-	Header              secret `json:"header"`
-	Value               secret `json:"value"`
-	Fields              secret `json:"fields"`
+type providerFileAPIView struct {
+	Kind          string   `json:"kind"`
+	URL           string   `json:"url,omitempty"`
+	IDField       string   `json:"idField,omitempty"`
+	HeaderNames   []string `json:"headerNames,omitempty"`
+	FieldNames    []string `json:"fieldNames,omitempty"`
+	ExpiryStyle   string   `json:"expiryStyle,omitempty"`
+	ExpirySeconds int      `json:"expirySeconds,omitempty"`
+	MIME          []string `json:"mime,omitempty"`
+	MaxBytes      int64    `json:"maxBytes,omitempty"`
+	Timeout       string   `json:"timeout,omitempty"`
+	ModelHeaders  []string `json:"modelHeaders,omitempty"`
+}
+
+type serverMediaView struct {
+	Delivery *mediaDeliveryView `json:"delivery,omitempty"`
+	Uploads  *mediaUploadsView  `json:"uploads,omitempty"`
+}
+
+type mediaUploadsView struct {
+	URLHost *storageView `json:"urlHost,omitempty"`
 }
 
 type mediaDeliveryView struct {
 	InlineLimitBytes *mediaSizeLimitView `json:"inlineLimitBytes,omitempty"`
 	Prefer           []string            `json:"prefer,omitempty"`
-	Upload           bool                `json:"upload,omitempty"`
+	AllowUploads     bool                `json:"allowUploads,omitempty"`
 	Downsample       bool                `json:"downsample,omitempty"`
 	SpoolDir         string              `json:"spoolDir,omitempty"`
 	MaxBytes         *mediaSizeLimitView `json:"maxBytes,omitempty"`
@@ -364,8 +377,9 @@ type wrapView struct {
 // buildConfigDocument renders the redacted, optionally filtered document.
 func buildConfigDocument(cfg config.Config, section, server string) configDocument {
 	doc := configDocument{
-		Models:  modelViews(cfg.Models),
-		Servers: serverViews(cfg.Servers, server),
+		Models:           modelViews(cfg.Models),
+		ProviderFileAPIs: providerFileAPIViews(cfg.ProviderFileAPIs),
+		Servers:          serverViews(cfg.Servers, server),
 	}
 	if cfg.Control != nil {
 		doc.Control = &controlView{
@@ -395,6 +409,17 @@ func buildConfigDocument(cfg config.Config, section, server string) configDocume
 	return doc
 }
 
+func providerFileAPIViews(profiles map[string]*config.ProviderFileAPI) map[string]*providerFileAPIView {
+	if len(profiles) == 0 {
+		return nil
+	}
+	views := make(map[string]*providerFileAPIView, len(profiles))
+	for name, profile := range profiles {
+		views[name] = providerFileAPIViewOf(profile)
+	}
+	return views
+}
+
 func modelViews(models []config.ModelConfig) []modelView {
 	views := make([]modelView, 0, len(models))
 	for _, m := range models {
@@ -408,9 +433,11 @@ func modelViewOf(m config.ModelConfig) modelView {
 		ID:              m.ID,
 		Model:           m.Model,
 		ProviderID:      m.ProviderID,
+		ProviderFileAPI: m.ProviderFileAPI,
 		Protocol:        m.Protocol,
 		ModelBaseURL:    m.ModelBaseURL,
 		InputModalities: m.InputModalities,
+		InputMIMEs:      m.InputMIMEs,
 		ContextLimit:    m.ContextLimit,
 		OutputLimit:     m.OutputLimit,
 		Credentials:     credentialsView{APIKey: redact(m.Credentials.APIKey)},
@@ -470,9 +497,7 @@ func serverViewOf(s config.Server) serverView {
 		TLS:                 tlsView(s.TLS),
 		Isolation:           isolationViewOf(s.Isolation),
 		Sandbox:             sandboxViewOf(s.Sandbox),
-		MediaUpload:         mediaUploadViewOf(s.MediaUpload),
-		Media:               mediaDeliveryViewOf(s.Media),
-		Storage:             storageViewOf(s.Storage),
+		Media:               serverMediaViewOf(s.Media),
 		MCP:                 mcpViews(s.MCP),
 		References:          referenceViews(s.References),
 		InboundPermissions:  permissionRuleViews(s.InboundPermissions),
@@ -569,7 +594,7 @@ func isolationViewOf(iso *config.IsolationConfig) *isolationView {
 	if iso == nil {
 		return nil
 	}
-	v := &isolationView{Mode: string(iso.Mode), BaseDir: iso.BaseDir, BaseReadOnly: iso.BaseReadOnly, BaseRef: iso.BaseRef}
+	v := &isolationView{Mode: string(iso.Mode), BaseDir: iso.BaseDir, BaseRef: iso.BaseRef}
 	if iso.Cow != nil {
 		v.Cow = &cowView{Mode: string(iso.Cow.Mode)}
 	}
@@ -587,19 +612,44 @@ func sandboxViewOf(sb *config.SandboxConfig) *sandboxView {
 	}
 }
 
-func mediaUploadViewOf(up *config.MediaUploadConfig) *mediaUploadView {
-	if up == nil {
+func providerFileAPIViewOf(p *config.ProviderFileAPI) *providerFileAPIView {
+	if p == nil {
 		return nil
 	}
-	return &mediaUploadView{
-		URL:                 sanitizeURL(up.URL),
-		IDField:             up.IDField,
-		ExpiresInSeconds:    up.ExpiresInSeconds,
-		ExpiresAfterSeconds: up.ExpiresAfterSeconds,
-		Header:              redact(up.Header),
-		Value:               redact(up.Value),
-		Fields:              redactSet(len(up.Fields) > 0),
+	v := &providerFileAPIView{
+		Kind:          p.Kind,
+		URL:           sanitizeURL(p.URL),
+		IDField:       p.IDField,
+		ExpiryStyle:   p.Expiry.Style,
+		ExpirySeconds: p.Expiry.Seconds,
+		MIME:          append([]string(nil), p.MIME.Allowed...),
+		MaxBytes:      p.Limits.MaxBytes,
+		Timeout:       p.Limits.Timeout,
 	}
+	for name := range p.Auth.Headers {
+		v.HeaderNames = append(v.HeaderNames, name)
+	}
+	for name := range p.Fields {
+		v.FieldNames = append(v.FieldNames, name)
+	}
+	for name := range p.ModelHeaders {
+		v.ModelHeaders = append(v.ModelHeaders, name)
+	}
+	sort.Strings(v.HeaderNames)
+	sort.Strings(v.FieldNames)
+	sort.Strings(v.ModelHeaders)
+	return v
+}
+
+func serverMediaViewOf(m *config.ServerMediaConfig) *serverMediaView {
+	if m == nil {
+		return nil
+	}
+	v := &serverMediaView{Delivery: mediaDeliveryViewOf(m.Delivery)}
+	if m.Uploads != nil {
+		v.Uploads = &mediaUploadsView{URLHost: storageViewOf(m.Uploads.URLHost)}
+	}
+	return v
 }
 
 func mediaDeliveryViewOf(m *config.MediaDeliveryConfig) *mediaDeliveryView {
@@ -609,7 +659,7 @@ func mediaDeliveryViewOf(m *config.MediaDeliveryConfig) *mediaDeliveryView {
 	view := &mediaDeliveryView{
 		InlineLimitBytes: mediaSizeLimitViewOf(m.InlineLimitBytes),
 		Prefer:           m.Prefer,
-		Upload:           m.Upload,
+		AllowUploads:     m.AllowUploads,
 		Downsample:       m.Downsample,
 		MaxBytes:         mediaSizeLimitViewOf(m.MaxBytes),
 	}

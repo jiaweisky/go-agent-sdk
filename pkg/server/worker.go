@@ -15,8 +15,7 @@ type worker struct {
 
 // enqueue appends a prompt to the session's worker, starting it if idle.
 func (s *Server) enqueue(sessionID string, msg agent.MessageOptions) {
-	e := s.entry(sessionID)
-	e.mu.Lock()
+	e := s.lockedEntry(sessionID)
 	if e.worker == nil {
 		w := &worker{s: s, id: sessionID, queue: []agent.MessageOptions{msg}}
 		e.worker = w
@@ -29,8 +28,7 @@ func (s *Server) enqueue(sessionID string, msg agent.MessageOptions) {
 
 func (w *worker) run() {
 	for {
-		e := w.s.entry(w.id)
-		e.mu.Lock()
+		e := w.s.lockedEntry(w.id)
 		if len(w.queue) == 0 {
 			if e.worker == w {
 				e.worker = nil

@@ -38,6 +38,12 @@ type ProtocolMediaSupport struct {
 	// includes url (e.g. OpenAI Responses documents: input_file takes a file_id or
 	// inline data, not a url).
 	NoURLSource map[string]struct{}
+	// NoInlineSource lists MIME types that reject an inline source even though
+	// Sources includes inline (e.g. OpenAI Chat documents: file_id only).
+	NoInlineSource map[string]struct{}
+	// SourceMIMEs optionally narrows a source to specific MIME types. A missing
+	// source entry means the source is not additionally narrowed.
+	SourceMIMEs map[MediaSource]map[string]struct{}
 	Roles       []string
 }
 
@@ -58,8 +64,18 @@ func (s ProtocolMediaSupport) AllowsSourceFor(mime string, source MediaSource) b
 	if !s.AllowsSource(source) {
 		return false
 	}
-	if source == MediaSourceURL {
+	if narrowed, ok := s.SourceMIMEs[source]; ok {
+		if _, allowed := narrowed[strings.ToLower(mime)]; !allowed {
+			return false
+		}
+	}
+	switch source {
+	case MediaSourceURL:
 		if _, blocked := s.NoURLSource[strings.ToLower(mime)]; blocked {
+			return false
+		}
+	case MediaSourceInline:
+		if _, blocked := s.NoInlineSource[strings.ToLower(mime)]; blocked {
 			return false
 		}
 	}
@@ -97,7 +113,14 @@ var registry = map[schema.ProtocolID]ProtocolEntry{
 	},
 	schema.ProtocolID(OpenAIChatHTTPRoute.ID): {
 		Route: OpenAIChatHTTPRoute, Scheme: AuthBearer,
-		Media: ProtocolMediaSupport{MIMEs: openAIChatProfile.MIMEs(), Sources: []MediaSource{MediaSourceInline, MediaSourceURL}},
+		// PDF documents take a Files API file_id; images/audio stay inline or url.
+		Media: ProtocolMediaSupport{
+			MIMEs:          openAIChatProfile.MIMEs(),
+			Sources:        []MediaSource{MediaSourceInline, MediaSourceURL, MediaSourceFile},
+			NoInlineSource: openaiChatDocumentMIMESet,
+			NoURLSource:    openaiChatDocumentMIMESet,
+			SourceMIMEs:    map[MediaSource]map[string]struct{}{MediaSourceFile: openaiChatDocumentMIMESet},
+		},
 	},
 	schema.ProtocolID(OpenAICompatibleChatHTTPRoute.ID): {
 		Route: OpenAICompatibleChatHTTPRoute, Scheme: AuthBearer,

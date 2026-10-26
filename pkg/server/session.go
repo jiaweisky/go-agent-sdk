@@ -363,7 +363,10 @@ func (s *Server) waitForWorker(id string, deadline time.Time) bool {
 
 // workerBusy reports whether a session has a prompt worker draining its queue.
 func (s *Server) workerBusy(id string) bool {
-	e := s.entry(id)
+	e := s.lookupEntry(id)
+	if e == nil {
+		return false
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.worker != nil
@@ -484,7 +487,10 @@ func (s *Server) mutate(w http.ResponseWriter, r *http.Request, fn func(*agent.S
 func (s *Server) drainWorker(id string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for {
-		e := s.entry(id)
+		e := s.lookupEntry(id)
+		if e == nil {
+			return
+		}
 		e.mu.Lock()
 		busy := e.worker != nil
 		e.mu.Unlock()

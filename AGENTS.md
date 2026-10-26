@@ -11,6 +11,7 @@
 - **`docs/DESIGN-A2A.md`** — A2A protocol support
 - **`docs/DESIGN-HTTP.md`** — HTTP/SSE server API
 - **`docs/DESIGN-MEDIA.md`** — media delivery and hosting
+- **`docs/DESIGN-MEDIA-PROVIDERS.md`** — proposed provider-aware media uploads and capability matrix
 - **`docs/DESIGN-ISOLATION.md`** — per-project isolation
 - **`docs/PORTING-STRATEGY.md`** and **`docs/PORTING-REFERENCE.md`** — **historical**: the opencode TypeScript/Effect → Go porting phase is complete. These documents are retained for provenance and for understanding past decisions; they are not active implementation plans.
 

@@ -167,10 +167,14 @@ func runnerModelCapabilities(model schema.ModelInfo) *llmschema.ModelCapabilitie
 			forms[modality] = list
 		}
 	}
-	if len(caps.Input) == 0 && len(caps.Output) == 0 && len(forms) == 0 {
+	var mimes []string
+	if caps.Media != nil {
+		mimes = caps.Media.MIMEs
+	}
+	if len(caps.Input) == 0 && len(caps.Output) == 0 && len(forms) == 0 && len(mimes) == 0 {
 		return nil
 	}
-	return &llmschema.ModelCapabilities{Input: caps.Input, Output: caps.Output, Forms: forms}
+	return &llmschema.ModelCapabilities{Input: caps.Input, Output: caps.Output, Forms: forms, MIMEs: mimes}
 }
 
 // runnerProtocolAuth applies the credential using the protocol's auth scheme.

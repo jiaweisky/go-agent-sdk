@@ -20,6 +20,7 @@ type Config struct {
 	OutputLimit  int
 	Inputs       []string
 	Forms        map[string][]string
+	MIMEs        []string
 	Headers      map[string]string
 }
 
@@ -39,8 +40,8 @@ func New(c Config) (schema.ModelInfo, error) {
 	if len(c.Inputs) > 0 {
 		info.Capabilities.Input = c.Inputs
 	}
-	if len(c.Forms) > 0 {
-		info.Capabilities.Media = &schema.ModelMediaCapability{Forms: c.Forms}
+	if len(c.Forms) > 0 || len(c.MIMEs) > 0 {
+		info.Capabilities.Media = &schema.ModelMediaCapability{Forms: c.Forms, MIMEs: c.MIMEs}
 	}
 	for name, value := range c.Headers {
 		info.Request.Headers[name] = value
@@ -64,6 +65,7 @@ func FromConfig(entry config.ModelConfig) (schema.ModelInfo, error) {
 		OutputLimit:  entry.OutputLimit,
 		Inputs:       entry.EffectiveInputs(),
 		Forms:        forms,
+		MIMEs:        entry.InputMIMEs,
 		Headers:      entry.Headers,
 	})
 }

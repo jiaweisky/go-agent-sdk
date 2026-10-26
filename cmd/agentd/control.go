@@ -42,6 +42,8 @@ type controlInstance struct {
 type projectManager struct {
 	ctx           context.Context
 	catalog       config.Catalog
+	models        []config.ModelConfig
+	profiles      map[string]*config.ProviderFileAPI
 	projectListen string
 	maxLeases     int
 	runner        isolation.Runner
@@ -52,7 +54,7 @@ type projectManager struct {
 	reserved  map[string]bool   // ids being built (claimed before the slow build)
 }
 
-func newProjectManager(ctx context.Context, catalog config.Catalog, control *config.ControlConfig) *projectManager {
+func newProjectManager(ctx context.Context, catalog config.Catalog, control *config.ControlConfig, models []config.ModelConfig, profiles map[string]*config.ProviderFileAPI) *projectManager {
 	projectListen := control.ProjectListen
 	if projectListen == "" {
 		projectListen = "127.0.0.1:0"
@@ -60,6 +62,8 @@ func newProjectManager(ctx context.Context, catalog config.Catalog, control *con
 	return &projectManager{
 		ctx:           ctx,
 		catalog:       catalog,
+		models:        models,
+		profiles:      profiles,
 		projectListen: projectListen,
 		maxLeases:     control.MaxLeases,
 		runner:        isolation.DefaultRunner(),
@@ -147,19 +151,21 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 	if err != nil {
 		return nil, err
 	}
+	source := server.WorkingDirectory
 	project, err := m.runner.Prepare(m.ctx, projectSpec(server), isolationSpec(server))
 	if err != nil {
 		return nil, err
 	}
 	server.WorkingDirectory = project.View
 
-	uploader, err := mediaUploader(server)
+	uploader, err := mediaUploaderFor(server, m.models, m.profiles)
 	if err != nil {
 		m.teardown(project)
 		return nil, fmt.Errorf("project %q: %w", req.Name, err)
 	}
+	fileHeaders := mediaFileHeadersFor(server, m.models, m.profiles)
 	baseDirs := append(m.activeBaseDirs(), isolationBaseDirs([]config.Server{server})...)
-	client, err := buildClient(server, catalog, uploader, isolationExcludes(server.WorkingDirectory, baseDirs))
+	client, err := buildClient(server, catalog, uploader, fileHeaders, isolationExcludes(source, baseDirs))
 	if err != nil {
 		m.teardown(project)
 		return nil, err

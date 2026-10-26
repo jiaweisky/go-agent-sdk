@@ -84,6 +84,10 @@ type ClientOptions struct {
 	// so it fits the policy's inline limit. Nil leaves it undecoded (soft-fail);
 	// images are always shrunk in process.
 	MediaTranscode func(core.MediaTranscodeRequest) (core.MediaTranscodeResult, bool)
+	// MediaFileHeaders supplies extra model-request headers per provider when a
+	// request carries a provider file reference (for example Anthropic's Files
+	// API beta header). A model's own headers win on a duplicate key.
+	MediaFileHeaders map[schema.ProviderID]map[string]string
 	// LLM overrides the default LLM client (route.LLMClient). When nil, a client
 	// is built from ModelInfo/Protocol over the default HTTP transport.
 	LLM route.LLMClient

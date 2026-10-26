@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jiaweisky/go-agent-sdk/pkg/llm/protocols"
 	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
@@ -26,8 +27,11 @@ type ModelConfig struct {
 	// Model is the wire model name sent to the provider; it is required and
 	// never falls back to ID.
 	Model string `yaml:"model"`
-	// ProviderID keys credentials; empty means Protocol.
+	// ProviderID keys credentials and the media-provider runtime map. It must be
+	// set when ProviderFileAPI is set.
 	ProviderID string `yaml:"providerID"`
+	// ProviderFileAPI references a providerFileAPIs entry for file uploads.
+	ProviderFileAPI string `yaml:"providerFileAPI"`
 	// Protocol selects the wire route (e.g. openai-compatible-chat).
 	Protocol string `yaml:"protocol"`
 	// ModelBaseURL overrides the route's default endpoint.
@@ -36,6 +40,8 @@ type ModelConfig struct {
 	InputModalities []string `yaml:"inputModalities"`
 	// Media declares modalities and accepted sources.
 	Media *MediaConfig `yaml:"media"`
+	// InputMIMEs optionally narrows the model's accepted media types.
+	InputMIMEs []string `yaml:"inputMIMEs"`
 	// Credentials is the model's provider credential.
 	Credentials Credentials `yaml:"credentials"`
 	// Headers are extra request headers sent with every model request (e.g. the
@@ -102,6 +108,11 @@ func (m ModelConfig) Validate() error {
 	if m.Media != nil {
 		if err := ValidateMediaForms(m.Media.Forms); err != nil {
 			return err
+		}
+	}
+	for _, mime := range m.InputMIMEs {
+		if mime != strings.TrimSpace(mime) || !strings.Contains(mime, "/") || mime != strings.ToLower(mime) {
+			return fmt.Errorf("model %q: inputMIMEs entry %q must be a lower-case MIME type without spaces", m.ID, mime)
 		}
 	}
 	return nil

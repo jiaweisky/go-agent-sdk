@@ -24,6 +24,9 @@ const (
 	// OpenAIFileBlock is DeepSeek's `file` block carrying a Files API file_id
 	// (`{"type":"file","file_id":…}`) on the OpenAI-compatible chat wire.
 	OpenAIFileBlock BlockKind = "openai_file"
+	// OpenAIFileDocument is OpenAI Chat's document `file` block
+	// (`{"type":"file","file":{"file_id":…}}`), currently PDF only.
+	OpenAIFileDocument BlockKind = "openai_file_document"
 )
 
 // MediaEncodingProfile is the ordered set of block kinds a wire may emit. The
@@ -72,6 +75,8 @@ func (k BlockKind) modality() string {
 		return "video"
 	case OpenAIFileBlock:
 		return "image"
+	case OpenAIFileDocument:
+		return "file"
 	default:
 		return ""
 	}
@@ -82,7 +87,7 @@ func (k BlockKind) source() MediaSource {
 	switch k {
 	case ImageURL, AudioURLHTTP, VideoURLHTTP:
 		return MediaSourceURL
-	case OpenAIFileBlock:
+	case OpenAIFileBlock, OpenAIFileDocument:
 		return MediaSourceFile
 	default:
 		return MediaSourceInline
@@ -102,6 +107,8 @@ func (k BlockKind) mimes() []string {
 		return videoMIMEs
 	case OpenAIFileBlock:
 		return imageMIMEs
+	case OpenAIFileDocument:
+		return []string{"application/pdf"}
 	default:
 		return nil
 	}
@@ -127,7 +134,11 @@ func (k BlockKind) accepts(mime string) bool {
 }
 
 // openAIChatProfile: OpenAI proper — images (inline + url) + input_audio (no video).
-var openAIChatProfile = MediaEncodingProfile{ImageInlineDataURL, ImageURL, InputAudioBase64}
+var openAIChatProfile = MediaEncodingProfile{ImageInlineDataURL, ImageURL, OpenAIFileDocument, InputAudioBase64}
+
+// openaiChatDocumentMIMESet is the only MIME set OpenAI Chat accepts from a
+// provider file reference (documents are file_id-only).
+var openaiChatDocumentMIMESet = mediaMIMESet([]string{"application/pdf"})
 
 // openAICompatibleProfile: vLLM extensions — images (inline + url) + audio
 // (input_audio + audio_url) + video_url. No `file` block (vLLM has no file_id).

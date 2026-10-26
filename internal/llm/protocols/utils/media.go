@@ -106,10 +106,27 @@ func MediaModality(mime string) string {
 		return "video"
 	case strings.HasPrefix(m, "text/"):
 		return "text"
-	case m == "application/pdf":
+	case m == "application/pdf", isDocumentMIME(m):
 		return "pdf"
 	default:
 		return m
+	}
+}
+
+// isDocumentMIME reports the non-text document types the model catalog groups
+// under its "pdf" document modality (PDF, JSON and Office formats).
+func isDocumentMIME(mime string) bool {
+	switch mime {
+	case "application/json",
+		"application/msword",
+		"application/vnd.ms-excel",
+		"application/vnd.ms-powerpoint",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation":
+		return true
+	default:
+		return false
 	}
 }
 

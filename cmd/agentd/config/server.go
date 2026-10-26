@@ -36,12 +36,10 @@ type Server struct {
 	Default bool `yaml:"default"`
 
 	// Client-level options shared by both kinds.
-	MediaUpload        *MediaUploadConfig   `yaml:"mediaUpload"`
-	Media              *MediaDeliveryConfig `yaml:"media"`
-	Storage            *StorageConfig       `yaml:"storage"`
-	MCP                []MCPServer          `yaml:"mcp"`
-	References         []Reference          `yaml:"references"`
-	InboundPermissions []PermissionRule     `yaml:"inboundPermissions"`
+	Media              *ServerMediaConfig `yaml:"media"`
+	MCP                []MCPServer        `yaml:"mcp"`
+	References         []Reference        `yaml:"references"`
+	InboundPermissions []PermissionRule   `yaml:"inboundPermissions"`
 	// Questions selects the question tool's policy: QuestionsPark or
 	// QuestionsDecline. The default depends on the kind: QuestionsDecline for
 	// a2a (a remote A2A client only polls task state, so a parked question never
@@ -120,8 +118,7 @@ const (
 	// IsolationWorktree creates a git worktree, starting from BaseRef, as the
 	// instance view.
 	IsolationWorktree IsolationMode = "worktree"
-	// IsolationOverlay creates a copy-on-write overlay over the read-only
-	// source.
+	// IsolationOverlay creates a copy-on-write view of the source.
 	IsolationOverlay IsolationMode = "overlay"
 	// IsolationContainer runs the instance in a container; the host provisions
 	// it, not the local runner.
@@ -159,24 +156,23 @@ func (m CowMode) Valid() bool {
 	return m == "" || m == CowAuto || m == CowReflink || m == CowClonefile
 }
 
-// IsolationConfig derives a per-server view of the working directory.
-type IsolationConfig struct {
-	// Mode is IsolationNone, IsolationCopy, IsolationWorktree or IsolationOverlay.
-	Mode IsolationMode `yaml:"mode" json:"mode"`
-	// BaseDir is where views are created (required by every mode but none).
-	BaseDir string `yaml:"baseDir" json:"baseDir"`
-	// BaseReadOnly treats the source as read-only (required by overlay).
-	BaseReadOnly bool `yaml:"baseReadOnly" json:"baseReadOnly"`
-	// BaseRef is the commit-ish a worktree starts from; empty means HEAD.
-	BaseRef string `yaml:"baseRef" json:"baseRef"`
-	// Cow selects the overlay copy-on-write mechanism.
-	Cow *CowConfig `yaml:"cow" json:"cow"`
-}
-
 // CowConfig selects the overlay copy-on-write mechanism.
 type CowConfig struct {
 	// Mode is CowAuto, CowReflink or CowClonefile.
 	Mode CowMode `yaml:"mode" json:"mode"`
+}
+
+// IsolationConfig derives a per-server view of the working directory.
+type IsolationConfig struct {
+	// Mode is a local mode (none, copy, worktree or overlay); container and
+	// remote are external and rejected by the local runner.
+	Mode IsolationMode `yaml:"mode" json:"mode"`
+	// BaseDir is where views are created (required by every mode but none).
+	BaseDir string `yaml:"baseDir" json:"baseDir"`
+	// BaseRef is the commit-ish a worktree starts from; empty means HEAD.
+	BaseRef string `yaml:"baseRef" json:"baseRef"`
+	// Cow selects the overlay copy-on-write mechanism.
+	Cow *CowConfig `yaml:"cow" json:"cow"`
 }
 
 // SandboxConfig selects the command-execution seam and its policy.

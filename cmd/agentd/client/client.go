@@ -29,9 +29,11 @@ type Params struct {
 	MediaUploader  func(schema.ProviderID) schema.MediaUploader
 	Media          *core.MediaPolicy
 	MediaTranscode func(core.MediaTranscodeRequest) (core.MediaTranscodeResult, bool)
-	Store          schema.MediaStore
-	MCP            []agent.MCPConfig
-	References     map[string]core.ReferenceSource
+	// MediaFileHeaders carries provider file-reference headers per provider.
+	MediaFileHeaders map[schema.ProviderID]map[string]string
+	Store            schema.MediaStore
+	MCP              []agent.MCPConfig
+	References       map[string]core.ReferenceSource
 	// Peers are remote A2A agents registered as agents after the client starts.
 	Peers            []config.A2APeer
 	SubagentDepth    int
@@ -65,6 +67,7 @@ func New(p Params) (*agent.Client, error) {
 		MediaPolicy:      p.Media,
 		MediaStore:       p.Store,
 		MediaTranscode:   p.MediaTranscode,
+		MediaFileHeaders: p.MediaFileHeaders,
 		MCP:              p.MCP,
 		References:       p.References,
 		DropErroredTurns: p.DropErroredTurns,

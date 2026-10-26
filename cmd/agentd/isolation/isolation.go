@@ -19,17 +19,6 @@ import (
 	"strings"
 )
 
-// Transport is the wire protocol an instance serves. It is recorded here so a
-// prepared project can be associated with the adapter that will serve it.
-type Transport string
-
-const (
-	// TransportHTTP serves the HTTP/SSE API.
-	TransportHTTP Transport = "http"
-	// TransportA2A serves the A2A JSON-RPC API.
-	TransportA2A Transport = "a2a"
-)
-
 // Isolation modes.
 const (
 	// ModeNone shares the working directory directly.
@@ -46,11 +35,6 @@ const (
 	ModeRemote = "remote"
 )
 
-// ErrExternalMode reports a mode that runs in a separate process (a container,
-// VM or remote host). Such an instance is provisioned by the host supervisor,
-// not by the local runner.
-var ErrExternalMode = errors.New("isolation mode is provisioned by the host, not the local runner")
-
 // Copy-on-write mechanisms for overlay mode.
 const (
 	// CowAuto picks the platform default: reflink on Linux, clonefile on macOS.
@@ -60,6 +44,11 @@ const (
 	// CowClonefile uses APFS clonefile (macOS).
 	CowClonefile = "clonefile"
 )
+
+// ErrExternalMode reports a mode that runs in a separate process (a container,
+// VM or remote host). Such an instance is provisioned by the host supervisor,
+// not by the local runner.
+var ErrExternalMode = errors.New("isolation mode is provisioned by the host, not the local runner")
 
 // ProjectSpec is the source project an instance should serve.
 type ProjectSpec struct {
@@ -80,9 +69,6 @@ type IsolationSpec struct {
 	// BaseDir is the parent directory for created views (required by every mode
 	// but none).
 	BaseDir string
-	// BaseReadOnly requests that the source be treated read-only. Required by
-	// overlay and ignored by the other modes.
-	BaseReadOnly bool
 	// BaseRef is the commit-ish a worktree is created at; empty means HEAD.
 	BaseRef string
 	// CowMode selects the overlay copy-on-write mechanism (auto | reflink |
@@ -113,6 +99,7 @@ func Prepare(ctx context.Context, p ProjectSpec, iso IsolationSpec) (IsolatedPro
 	return DefaultRunner().Prepare(ctx, p, iso)
 }
 
+// localRunner materializes views on the local filesystem.
 type localRunner struct{}
 
 func (localRunner) Prepare(
@@ -122,11 +109,11 @@ func (localRunner) Prepare(
 	case "", ModeNone:
 		return IsolatedProject{Spec: p, View: p.WorkingDirectory}, nil
 	case ModeCopy:
-		return prepareCopy(p, iso)
+		return prepareCopy(ctx, p, iso)
 	case ModeWorktree:
 		return prepareWorktree(ctx, p, iso)
 	case ModeOverlay:
-		return prepareOverlay(p, iso)
+		return prepareOverlay(ctx, p, iso)
 	case ModeContainer, ModeRemote:
 		return IsolatedProject{}, fmt.Errorf("%w: %s", ErrExternalMode, iso.Mode)
 	default:
@@ -134,7 +121,8 @@ func (localRunner) Prepare(
 	}
 }
 
-func prepareCopy(p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
+// prepareCopy copies the source into a new per-project view.
+func prepareCopy(ctx context.Context, p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
 	if p.WorkingDirectory == "" {
 		return IsolatedProject{}, errors.New("isolation mode copy requires a working directory")
 	}
@@ -142,15 +130,25 @@ func prepareCopy(p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
 	if err != nil {
 		return IsolatedProject{}, err
 	}
+	if pathWithin(p.WorkingDirectory, view) {
+		return IsolatedProject{}, fmt.Errorf("copy view %s must be outside the working directory %s", view, p.WorkingDirectory)
+	}
 	if err := ensureViewAbsent(view); err != nil {
 		return IsolatedProject{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(view), 0o755); err != nil {
 		return IsolatedProject{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return IsolatedProject{}, err
+	}
 	if err := os.CopyFS(view, os.DirFS(p.WorkingDirectory)); err != nil {
 		_ = os.RemoveAll(view)
 		return IsolatedProject{}, fmt.Errorf("copy project: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = os.RemoveAll(view)
+		return IsolatedProject{}, err
 	}
 	return IsolatedProject{
 		Spec: p,
@@ -161,6 +159,7 @@ func prepareCopy(p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
 	}, nil
 }
 
+// prepareWorktree creates a detached git worktree as the per-project view.
 func prepareWorktree(ctx context.Context, p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
 	if p.WorkingDirectory == "" {
 		return IsolatedProject{}, errors.New("isolation mode worktree requires a working directory")
@@ -188,8 +187,8 @@ func prepareWorktree(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Iso
 	return IsolatedProject{
 		Spec: p,
 		View: view,
-		Teardown: func(context.Context) error {
-			remove := exec.Command("git", "-C", p.WorkingDirectory, "worktree", "remove", "--force", view)
+		Teardown: func(ctx context.Context) error {
+			remove := exec.CommandContext(ctx, "git", "-C", p.WorkingDirectory, "worktree", "remove", "--force", view)
 			if out, err := remove.CombinedOutput(); err != nil {
 				// Fall back to a plain delete so a stale worktree cannot wedge
 				// shutdown.
@@ -204,16 +203,16 @@ func prepareWorktree(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Iso
 // prepareOverlay materializes a copy-on-write view of the source project. It
 // shares on-disk blocks with the source until the view is written, costing far
 // less than a full copy while keeping the two independent.
-func prepareOverlay(p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
+func prepareOverlay(ctx context.Context, p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
 	if p.WorkingDirectory == "" {
 		return IsolatedProject{}, errors.New("isolation mode overlay requires a working directory")
-	}
-	if !iso.BaseReadOnly {
-		return IsolatedProject{}, errors.New("isolation mode overlay requires a read-only base")
 	}
 	view, err := viewPath(p, iso)
 	if err != nil {
 		return IsolatedProject{}, err
+	}
+	if pathWithin(p.WorkingDirectory, view) {
+		return IsolatedProject{}, fmt.Errorf("overlay view %s must be outside the working directory %s", view, p.WorkingDirectory)
 	}
 	if err := ensureViewAbsent(view); err != nil {
 		return IsolatedProject{}, err
@@ -221,7 +220,7 @@ func prepareOverlay(p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
 	if err := os.MkdirAll(view, 0o755); err != nil {
 		return IsolatedProject{}, err
 	}
-	if err := cowCopy(p.WorkingDirectory, view, iso.CowMode); err != nil {
+	if err := cowCopy(ctx, p.WorkingDirectory, view, iso.CowMode); err != nil {
 		_ = os.RemoveAll(view)
 		return IsolatedProject{}, fmt.Errorf("create copy-on-write view: %w", err)
 	}
@@ -237,7 +236,7 @@ func prepareOverlay(p ProjectSpec, iso IsolationSpec) (IsolatedProject, error) {
 // cowCopy copies src into the existing directory dst using the best available
 // copy-on-write mechanism for the platform. It falls back to a plain copy when
 // no CoW tool exists and the mode was not requested explicitly.
-func cowCopy(src, dst, mode string) error {
+func cowCopy(ctx context.Context, src, dst, mode string) error {
 	explicit := mode != "" && mode != CowAuto
 	if !explicit {
 		mode = defaultCowMode()
@@ -247,19 +246,27 @@ func cowCopy(src, dst, mode string) error {
 		if explicit {
 			return fmt.Errorf("copy-on-write mode %q is not available on %s", mode, runtime.GOOS)
 		}
-		return os.CopyFS(dst, os.DirFS(src))
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
+			return err
+		}
+		return ctx.Err()
 	}
 	// `cp <flags> src/. dst` copies the contents of src into the existing dst.
 	// Note: build the trailing "/." by hand; filepath.Join would clean it away.
 	contents := src + string(filepath.Separator) + "."
 	args := append(flags, contents, dst)
-	cmd := exec.Command("cp", args...)
+	cmd := exec.CommandContext(ctx, "cp", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("cp (%s): %w: %s", mode, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
+// defaultCowMode is the platform's preferred copy-on-write mechanism, or "" when
+// the platform has none.
 func defaultCowMode() string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -295,6 +302,13 @@ func ensureViewAbsent(view string) error {
 	return nil
 }
 
+// SanitizeComponent makes an identifier safe to use as a single path element.
+func SanitizeComponent(value string) string {
+	replaced := strings.NewReplacer("/", "_", "\\", "_", ":", "_", "..", "_").Replace(value)
+	return strings.Trim(replaced, " .")
+}
+
+// viewPath is the absolute view directory for a project and isolation spec.
 func viewPath(p ProjectSpec, iso IsolationSpec) (string, error) {
 	if iso.BaseDir == "" {
 		return "", fmt.Errorf("isolation mode %s requires a base directory", iso.Mode)
@@ -307,11 +321,75 @@ func viewPath(p ProjectSpec, iso IsolationSpec) (string, error) {
 	if component == "" {
 		return "", fmt.Errorf("isolation project id %q is not usable as a path element", p.ProjectID)
 	}
-	return filepath.Join(iso.BaseDir, component), nil
+	base, err := filepath.Abs(iso.BaseDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve isolation base directory: %w", err)
+	}
+	return filepath.Join(base, component), nil
 }
 
-// SanitizeComponent makes an identifier safe to use as a single path element.
-func SanitizeComponent(value string) string {
-	replaced := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(value)
-	return strings.Trim(replaced, " .")
+// pathWithin reports whether path is root or lies inside it. Symlinks and
+// case-insensitive filesystem aliases are resolved by comparing the existing
+// ancestor chain, not just the lexical paths.
+func pathWithin(root, path string) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	canonRoot := canonicalPath(absRoot)
+	canonPath := canonicalPath(absPath)
+	if lexicalWithin(canonRoot, canonPath) {
+		return true
+	}
+	rootInfo, err := os.Stat(canonRoot)
+	if err != nil {
+		return false
+	}
+	for p := canonPath; ; p = filepath.Dir(p) {
+		if info, err := os.Stat(p); err == nil && os.SameFile(rootInfo, info) {
+			return true
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return false
+		}
+	}
+}
+
+// canonicalPath resolves the existing part of path, keeping any missing suffix.
+func canonicalPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	abs = filepath.Clean(abs)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	dir, rest := abs, ""
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return abs
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+	}
+}
+
+// lexicalWithin reports whether path is root or lies inside it without
+// resolving filesystem aliases.
+func lexicalWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }

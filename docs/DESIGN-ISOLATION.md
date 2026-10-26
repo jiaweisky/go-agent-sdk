@@ -290,11 +290,10 @@ type ProjectSpec struct {
 
 // IsolationSpec describes how to materialize the working directory.
 type IsolationSpec struct {
-    Mode         string // none | copy | worktree | overlay
-    BaseDir      string // where views are created (required for every mode except none)
-    BaseReadOnly bool   // treat the source as read-only; required by overlay
-    BaseRef      string // worktree base commit-ish; empty means HEAD
-    CowMode      string // overlay CoW: auto | reflink | clonefile
+    Mode    string // none | copy | worktree | overlay
+    BaseDir string // where views are created (required for every mode except none)
+    BaseRef string // worktree base commit-ish; empty means HEAD
+    CowMode string // overlay CoW: auto | reflink | clonefile
 }
 
 // IsolatedProject is a prepared view plus how to tear it down.
@@ -336,7 +335,7 @@ simply not the component that starts it.
 |---|---|---|
 | `none` | use `WorkingDirectory` as-is | read-only sharing; the degenerate/current case |
 | `worktree` | `git worktree add <view> [<commit>\|im/<id>]` | shares the object store; git repos only |
-| `overlay` | overlayfs / `cp --reflink` / `clonefile` | "shared read-only base + CoW writable layer"; `BaseReadOnly` required |
+| `overlay` | overlayfs / `cp --reflink` / `clonefile` | independent CoW view over the source |
 | `copy` | `rsync`/copy | universal, linear disk cost |
 | `bwrap` | namespaces (+ optional CoW view) | filesystem/process/network isolation without a container |
 | `container` | Docker/Podman/K8s; run agentd inside | strongest: fs + process + network + resources |
@@ -380,7 +379,6 @@ servers:
     isolation:
       mode: overlay
       baseDir: /var/lib/agentd/views
-      baseReadOnly: true
       cow:
         mode: auto            # auto | reflink | clonefile
     sandbox:
@@ -418,7 +416,7 @@ container/VM/remote host) and is provisioned by the host supervisor (§15), so a
 holds the local modes `none | copy | worktree | overlay`.
 
 Validation (fail-fast, like the rest of `config.Validate`):
-- `mode != none` requires `baseDir`; `mode == overlay` also requires `baseReadOnly: true`.
+- `mode != none` requires `baseDir`.
 - `mode == worktree` requires a git working directory (enforced when the view is prepared).
 - `sandbox.wrapper` is required when `sandbox` is set and must be `none`, `bwrap`,
   `seatbelt` or `appcontainer`; `sandbox.failurePolicy` is `fail-closed` (default) or
@@ -600,8 +598,8 @@ stronger than wrapping command-by-command, and it simultaneously provides projec
 - **Failure policy**: `fail-open` falls back to pass-through (logged); `fail-closed` errors.
 - **Runner**: `Prepare` for each mode produces an independent view; two views of the same base
   do not observe each other's writes; `Teardown` removes the view.
-- **Config**: each new field's invalid values fail validation (missing `baseDir`, overlay
-  without `baseReadOnly`, unknown runtime/process).
+- **Config**: each new field's invalid values fail validation (missing `baseDir`, unknown
+  runtime/process).
 - **Integration**: two `servers[]` entries sharing a base but with distinct views do not cross
   sessions. A shared read-only directory is allowed; a shared **writable** directory is rejected
   at the **lease layer**, not by static config — like Kubernetes `ReadWriteOnce` vs

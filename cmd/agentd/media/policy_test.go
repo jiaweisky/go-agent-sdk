@@ -18,7 +18,7 @@ func TestDeliveryPolicyExpandsRoot(t *testing.T) {
 	cfg := &config.MediaDeliveryConfig{
 		InlineLimitBytes: config.MediaSizeLimit{Default: 262144},
 		Prefer:           []string{"file", "inline"},
-		Upload:           true,
+		AllowUploads:     true,
 		Downsample:       true,
 		Spool:            &config.MediaSpoolConfig{Dir: "{Root}/data/spool"},
 		MaxBytes:         config.MediaSizeLimit{Default: 52428800},

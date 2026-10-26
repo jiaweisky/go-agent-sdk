@@ -2,7 +2,20 @@ package main
 
 import (
 	"testing"
+
+	config "github.com/jiaweisky/go-agent-sdk/cmd/agentd/config"
 )
+
+func TestGroupByListenNormalizes(t *testing.T) {
+	built := []*builtServer{
+		{cfg: config.Server{Listen: "127.0.0.1:08080"}},
+		{cfg: config.Server{Listen: "127.0.0.1:8080"}},
+	}
+	byListen, order := groupByListen(built)
+	if len(order) != 1 || len(byListen[order[0]]) != 2 {
+		t.Fatalf("groups = %v, want one listener with two entries", order)
+	}
+}
 
 func TestIsolationExcludes(t *testing.T) {
 	// A base directory inside the source is excluded (relative glob).

@@ -675,6 +675,7 @@ func (r *runtime) buildRunner(opts *ClientOptions, git core.Git, global core.Glo
 		MediaStore:        opts.MediaStore,
 		MediaPolicy:       opts.MediaPolicy,
 		MediaTranscode:    opts.MediaTranscode,
+		MediaFileHeaders:  opts.MediaFileHeaders,
 		OnMediaDecision:   opts.OnMediaDecision,
 		Agents:            r.agentSelector,
 		Tools:             hookedRegistry{inner: r.dispatcher, hooksFor: r.hooksFor},

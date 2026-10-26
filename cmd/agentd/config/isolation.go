@@ -38,9 +38,6 @@ func (i *IsolationConfig) validateOverlay() error {
 	if i.BaseDir == "" {
 		return fmt.Errorf("isolation.baseDir is required for mode %s", IsolationOverlay)
 	}
-	if !i.BaseReadOnly {
-		return fmt.Errorf("isolation.baseReadOnly is required for mode %s", IsolationOverlay)
-	}
 	if i.Cow != nil && !i.Cow.Mode.Valid() {
 		return fmt.Errorf("isolation.cow.mode must be auto, reflink or clonefile, got %q", i.Cow.Mode)
 	}

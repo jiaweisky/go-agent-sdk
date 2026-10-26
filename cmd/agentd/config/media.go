@@ -3,8 +3,13 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
+	"sort"
+	"strings"
+	"time"
 
+	"golang.org/x/net/http/httpguts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,7 +24,8 @@ type MediaSizeLimit struct {
 	File    int64 `yaml:"file"`
 }
 
-// UnmarshalYAML accepts a scalar (all modalities) or a map (per modality).
+// UnmarshalYAML accepts a scalar (all modalities) or a map (per modality) and
+// rejects unknown map keys, which a plain Node.Decode would silently ignore.
 func (m *MediaSizeLimit) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind == yaml.ScalarNode {
 		var value int64
@@ -29,12 +35,37 @@ func (m *MediaSizeLimit) UnmarshalYAML(node *yaml.Node) error {
 		*m = MediaSizeLimit{Default: value}
 		return nil
 	}
-	type raw MediaSizeLimit
-	var decoded raw
-	if err := node.Decode(&decoded); err != nil {
-		return err
+	if node.Kind != yaml.MappingNode {
+		return errors.New("media size limit must be a number or a mapping")
 	}
-	*m = MediaSizeLimit(decoded)
+	var out MediaSizeLimit
+	seen := make(map[string]struct{}, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i], node.Content[i+1]
+		if _, dup := seen[key.Value]; dup {
+			return fmt.Errorf("media size limit: duplicate key %q", key.Value)
+		}
+		seen[key.Value] = struct{}{}
+		var limit int64
+		if err := value.Decode(&limit); err != nil {
+			return fmt.Errorf("media size limit %q: %w", key.Value, err)
+		}
+		switch key.Value {
+		case "default":
+			out.Default = limit
+		case "image":
+			out.Image = limit
+		case "audio":
+			out.Audio = limit
+		case "video":
+			out.Video = limit
+		case "file":
+			out.File = limit
+		default:
+			return fmt.Errorf("media size limit: unknown key %q", key.Value)
+		}
+	}
+	*m = out
 	return nil
 }
 
@@ -66,23 +97,46 @@ type MediaSpoolConfig struct {
 	Dir string `yaml:"dir"`
 }
 
-// MediaDeliveryConfig is the operator-owned inbound media delivery policy (the
-// SDK's media: block). For each inbound attachment it decides how the bytes
-// reach the model: inline (a native part, under inlineLimitBytes), as a url
-// from the media store, as a provider file reference from mediaUpload, or
-// spooled to disk; media above maxBytes is skipped. Prefer sets the attempt
-// order, Upload enables the url/file sources, and Downsample shrinks an
-// oversized payload first. This is delivery policy, not capability:
-// models[].media declares what the model accepts.
+// ServerMediaConfig is a server's media policy: how bytes reach the model and
+// where they may be uploaded.
+type ServerMediaConfig struct {
+	Delivery *MediaDeliveryConfig `yaml:"delivery"`
+	Uploads  *MediaUploadsConfig  `yaml:"uploads"`
+}
+
+// MediaUploadsConfig groups the upload destinations.
+type MediaUploadsConfig struct {
+	// URLHost is the provider-independent bytes→URL store.
+	URLHost *StorageConfig `yaml:"urlHost"`
+}
+
+// Validate checks the nested media policy.
+func (m *ServerMediaConfig) Validate() error {
+	if m == nil {
+		return nil
+	}
+	if err := m.Delivery.Validate(); err != nil {
+		return err
+	}
+	if m.Uploads != nil {
+		if err := m.Uploads.URLHost.Validate(); err != nil {
+			return fmt.Errorf("media.uploads.urlHost: %w", err)
+		}
+	}
+	return nil
+}
+
+// MediaDeliveryConfig is the operator-owned inbound delivery policy. For each
+// inbound attachment it decides whether bytes stay inline, are hosted as a URL,
+// are uploaded to a provider Files API as a file_id, or are spooled to disk.
 type MediaDeliveryConfig struct {
 	// InlineLimitBytes is the per-modality size budget (raw bytes).
 	InlineLimitBytes MediaSizeLimit `yaml:"inlineLimitBytes"`
-	// Prefer is the source order the policy attempts (file, url, inline); empty
-	// means [file, inline].
+	// Prefer is the source order (providerFile, url, inline); empty means
+	// [providerFile, inline].
 	Prefer []string `yaml:"prefer"`
-	// Upload allows adapting byte-backed media to a non-inline reference: a url
-	// via the media store (storage) or a provider file reference via mediaUpload.
-	Upload bool `yaml:"upload"`
+	// AllowUploads enables non-inline hosting (url or provider file).
+	AllowUploads bool `yaml:"allowUploads"`
 	// Downsample shrinks a byte-backed payload over InlineLimitBytes before a
 	// source is chosen (independent of prefer).
 	Downsample bool `yaml:"downsample"`
@@ -94,7 +148,7 @@ type MediaDeliveryConfig struct {
 }
 
 // Validate rejects a malformed media delivery policy at load: a negative size
-// limit, an unknown prefer source, or a spool without a dir.
+// limit, an unknown prefer source, a duplicate source, or a spool without a dir.
 func (m *MediaDeliveryConfig) Validate() error {
 	if m == nil {
 		return nil
@@ -105,56 +159,187 @@ func (m *MediaDeliveryConfig) Validate() error {
 	if err := m.MaxBytes.validate("maxBytes"); err != nil {
 		return err
 	}
+	seen := map[string]bool{}
 	for _, source := range m.Prefer {
 		switch source {
-		case "file", "url", "inline":
+		case "providerFile", "url", "inline":
 		default:
-			return fmt.Errorf("media: unknown prefer source %q (file, url, inline)", source)
+			return fmt.Errorf("media.delivery.prefer: unknown source %q (providerFile, url, inline)", source)
 		}
+		if seen[source] {
+			return fmt.Errorf("media.delivery.prefer: duplicate source %q", source)
+		}
+		seen[source] = true
 	}
 	if m.Spool != nil && m.Spool.Dir == "" {
-		return errors.New("media: spool requires a dir")
+		return errors.New("media.delivery.spool requires a dir")
 	}
 	return nil
 }
 
-// MediaUploadConfig configures a generic provider Files API uploader: a
-// multipart POST with a "file" part (plus any extra fields) whose JSON response
-// names the stored file. Provider lifecycle (list/delete/expiry) stays with the
-// host.
-type MediaUploadConfig struct {
-	URL     string            `yaml:"url"`
-	Header  string            `yaml:"header"`
-	Value   string            `yaml:"value"`
-	Fields  map[string]string `yaml:"fields"`
-	IDField string            `yaml:"idField"`
-	// ExpiresInSeconds, when > 0, bounds the SDK's local reference cache.
-	ExpiresInSeconds int `yaml:"expiresInSeconds"`
-	// ExpiresAfterSeconds, when > 0, is the provider file lifetime in seconds: it
-	// is sent as the Files API `expires_after[anchor]=created_at` +
-	// `expires_after[seconds]=N` (DeepSeek/OpenAI convention), so the provider
-	// reclaims the file. It also bounds the local cache when ExpiresInSeconds is
-	// unset. A value of 0 leaves the file permanent (the host owns cleanup).
-	ExpiresAfterSeconds int `yaml:"expiresAfterSeconds"`
+// ProviderFileAPI is one reusable provider Files API configuration.
+type ProviderFileAPI struct {
+	// Kind is the upload transport shape. Only multipart-json is implemented.
+	Kind string           `yaml:"kind"`
+	URL  string           `yaml:"url"`
+	Auth ProviderFileAuth `yaml:"auth"`
+	// Fields are static multipart fields (for example purpose=user_data).
+	Fields map[string]string `yaml:"fields"`
+	// IDField is the JSON response key holding the file id; empty means "id".
+	IDField string             `yaml:"idField"`
+	Expiry  ProviderFileExpiry `yaml:"expiry"`
+	MIME    ProviderFileMIME   `yaml:"mime"`
+	Limits  ProviderFileLimits `yaml:"limits"`
+	// ModelHeaders are applied to model requests that carry a file reference.
+	ModelHeaders map[string]string `yaml:"modelHeaders"`
 }
 
-// Validate rejects a malformed uploader configuration.
-func (c *MediaUploadConfig) Validate() error {
-	if c == nil {
-		return nil
+// ProviderFileAuth carries the upload request headers.
+type ProviderFileAuth struct {
+	Headers map[string]string `yaml:"headers"`
+}
+
+// ProviderFileExpiry selects the provider-side expiry field.
+type ProviderFileExpiry struct {
+	// Style is none, expires_after or expires_in_seconds.
+	Style   string `yaml:"style"`
+	Seconds int    `yaml:"seconds"`
+}
+
+// ProviderFileMIME is the provider Files API allow-list.
+type ProviderFileMIME struct {
+	Allowed []string `yaml:"allowed"`
+}
+
+// ProviderFileLimits bounds one upload.
+type ProviderFileLimits struct {
+	MaxBytes int64  `yaml:"maxBytes"`
+	Timeout  string `yaml:"timeout"`
+}
+
+// validateProviderFileAPIs checks every named profile.
+func validateProviderFileAPIs(profiles map[string]*ProviderFileAPI) error {
+	for name, profile := range profiles {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("providerFileAPIs: profile name must not be empty")
+		}
+		if err := profile.Validate(name); err != nil {
+			return err
+		}
 	}
-	if c.URL == "" {
-		return errors.New("mediaUpload.url is required")
+	return nil
+}
+
+// validateModelProviderFileAPIs checks model references before the catalog is
+// built.
+func validateModelProviderFileAPIs(models []ModelConfig, profiles map[string]*ProviderFileAPI) error {
+	for _, m := range models {
+		if m.ProviderFileAPI == "" {
+			continue
+		}
+		if m.ProviderID == "" {
+			return fmt.Errorf("model %q: providerFileAPI %q requires an explicit providerID", m.ID, m.ProviderFileAPI)
+		}
+		if _, ok := profiles[m.ProviderFileAPI]; !ok {
+			return fmt.Errorf("model %q: unknown providerFileAPI %q; known profiles: %s", m.ID, m.ProviderFileAPI, profileNames(profiles))
+		}
 	}
-	if (c.Header == "") != (c.Value == "") {
-		return errors.New("mediaUpload.header and value must be set together")
+	return nil
+}
+
+func validateProviderHeaderName(profile, group, header, value string) error {
+	if !httpguts.ValidHeaderFieldName(header) {
+		return fmt.Errorf("providerFileAPIs.%s.%s: %q is not a valid header name", profile, group, header)
 	}
-	if c.ExpiresInSeconds < 0 {
-		return errors.New("mediaUpload.expiresInSeconds must not be negative")
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("providerFileAPIs.%s.%s.%s must not be empty", profile, group, header)
 	}
-	if c.ExpiresAfterSeconds < 0 {
-		return errors.New("mediaUpload.expiresAfterSeconds must not be negative")
+	return nil
+}
+
+func profileNames(profiles map[string]*ProviderFileAPI) string {
+	names := make([]string, 0, len(profiles))
+	for name := range profiles {
+		names = append(names, name)
 	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// TimeoutDuration parses Limits.Timeout; an empty value means the client default.
+func (l ProviderFileLimits) TimeoutDuration() (time.Duration, error) {
+	if l.Timeout == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(l.Timeout)
+	if err != nil {
+		return 0, fmt.Errorf("media provider files timeout: %w", err)
+	}
+	if d <= 0 {
+		return 0, errors.New("media provider files timeout must be positive")
+	}
+	return d, nil
+}
+
+// Validate rejects a malformed provider Files API profile.
+func (p *ProviderFileAPI) Validate(name string) error {
+	if p == nil {
+		return fmt.Errorf("providerFileAPIs.%s: profile is nil", name)
+	}
+
+	if p.Kind != "multipart-json" {
+		return fmt.Errorf("providerFileAPIs.%s.kind must be multipart-json, got %q", name, p.Kind)
+	}
+
+	parsed, err := url.Parse(p.URL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("providerFileAPIs.%s.url must be an absolute http(s) URL", name)
+	}
+
+	for header, value := range p.Auth.Headers {
+		if err := validateProviderHeaderName(name, "auth.headers", header, value); err != nil {
+			return err
+		}
+	}
+	if len(p.Auth.Headers) == 0 {
+		return fmt.Errorf("providerFileAPIs.%s.auth.headers is required", name)
+	}
+
+	for header, value := range p.ModelHeaders {
+		if err := validateProviderHeaderName(name, "modelHeaders", header, value); err != nil {
+			return err
+		}
+	}
+
+	switch p.Expiry.Style {
+	case "none":
+		if p.Expiry.Seconds != 0 {
+			return fmt.Errorf("providerFileAPIs.%s.expiry.seconds requires expires_after or expires_in_seconds", name)
+		}
+	case "expires_after", "expires_in_seconds":
+		if p.Expiry.Seconds <= 0 {
+			return fmt.Errorf("providerFileAPIs.%s.expiry.seconds must be positive", name)
+		}
+	default:
+		return fmt.Errorf("providerFileAPIs.%s.expiry.style must be none, expires_after or expires_in_seconds, got %q", name, p.Expiry.Style)
+	}
+
+	if len(p.MIME.Allowed) == 0 {
+		return fmt.Errorf("providerFileAPIs.%s.mime.allowed must not be empty", name)
+	}
+	for _, mime := range p.MIME.Allowed {
+		if mime != strings.TrimSpace(mime) || !strings.Contains(mime, "/") || mime != strings.ToLower(mime) {
+			return fmt.Errorf("providerFileAPIs.%s.mime.allowed entry %q must be a lower-case MIME type without spaces", name, mime)
+		}
+	}
+
+	if p.Limits.MaxBytes <= 0 {
+		return fmt.Errorf("providerFileAPIs.%s.limits.maxBytes must be positive", name)
+	}
+	if _, err := p.Limits.TimeoutDuration(); err != nil {
+		return fmt.Errorf("providerFileAPIs.%s.limits: %w", name, err)
+	}
+
 	return nil
 }
 

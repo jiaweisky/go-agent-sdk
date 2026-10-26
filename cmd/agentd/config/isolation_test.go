@@ -2,14 +2,14 @@ package config
 
 import "testing"
 
-func isolationConfig(mode IsolationMode, baseDir string, readOnly bool) Config {
+func isolationConfig(mode IsolationMode, baseDir string) Config {
 	return Config{
 		Models: []ModelConfig{testModel()},
 		Servers: []Server{{
 			Name: "a", Kind: "http", Listen: "127.0.0.1:1", Root: "/a",
 			Agents:           []string{"build"},
 			WorkingDirectory: "/src",
-			Isolation:        &IsolationConfig{Mode: mode, BaseDir: baseDir, BaseReadOnly: readOnly},
+			Isolation:        &IsolationConfig{Mode: mode, BaseDir: baseDir},
 		}},
 	}
 }
@@ -20,14 +20,14 @@ func TestValidateIsolation(t *testing.T) {
 		cfg     Config
 		wantErr bool
 	}{
-		{"none", isolationConfig("none", "", false), false},
-		{"copy ok", isolationConfig("copy", "/views", false), false},
-		{"copy needs baseDir", isolationConfig("copy", "", false), true},
-		{"worktree ok", isolationConfig("worktree", "/views", false), false},
-		{"overlay needs readOnly", isolationConfig("overlay", "/views", false), true},
-		{"overlay ok", isolationConfig("overlay", "/views", true), false},
-		{"container is external", isolationConfig("container", "/views", false), true},
-		{"unknown mode", isolationConfig("huh", "/views", false), true},
+		{"none", isolationConfig("none", ""), false},
+		{"copy ok", isolationConfig("copy", "/views"), false},
+		{"copy needs baseDir", isolationConfig("copy", ""), true},
+		{"worktree ok", isolationConfig("worktree", "/views"), false},
+		{"overlay ok", isolationConfig("overlay", "/views"), false},
+		{"overlay needs baseDir", isolationConfig("overlay", ""), true},
+		{"container is external", isolationConfig("container", "/views"), true},
+		{"unknown mode", isolationConfig("huh", "/views"), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -43,7 +43,7 @@ func TestValidateIsolation(t *testing.T) {
 }
 
 func TestValidateIsolationRequiresWorkingDirectory(t *testing.T) {
-	cfg := isolationConfig("copy", "/views", false)
+	cfg := isolationConfig("copy", "/views")
 	cfg.Servers[0].WorkingDirectory = ""
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected isolation without a working directory to be rejected")
@@ -51,7 +51,7 @@ func TestValidateIsolationRequiresWorkingDirectory(t *testing.T) {
 }
 
 func TestValidateIsolationCowMode(t *testing.T) {
-	cfg := isolationConfig("overlay", "/views", true)
+	cfg := isolationConfig("overlay", "/views")
 	cfg.Servers[0].Isolation.Cow = &CowConfig{Mode: "clonefile"}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("clonefile should be accepted: %v", err)

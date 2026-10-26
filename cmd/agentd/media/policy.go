@@ -16,6 +16,9 @@ func DeliveryPolicy(cfg *config.MediaDeliveryConfig, root string) *core.MediaPol
 	}
 	prefer := make([]core.MediaPolicySource, 0, len(cfg.Prefer))
 	for _, name := range cfg.Prefer {
+		if name == "providerFile" {
+			name = "file"
+		}
 		prefer = append(prefer, core.MediaPolicySource(name))
 	}
 	var spool *core.MediaSpoolPolicy
@@ -25,7 +28,7 @@ func DeliveryPolicy(cfg *config.MediaDeliveryConfig, root string) *core.MediaPol
 	return &core.MediaPolicy{
 		InlineLimitBytes: sizeLimits(cfg.InlineLimitBytes),
 		Prefer:           prefer,
-		Upload:           cfg.Upload,
+		Upload:           cfg.AllowUploads,
 		Downsample:       cfg.Downsample,
 		Spool:            spool,
 		MaxBytes:         sizeLimits(cfg.MaxBytes),

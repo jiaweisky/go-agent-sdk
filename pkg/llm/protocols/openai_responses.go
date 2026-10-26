@@ -297,8 +297,20 @@ func openaiResponsesLowerUserContent(part schema.ContentPart) (any, error) {
 }
 
 // openaiResponsesDocumentMIMEs are the media types Responses carries in an
-// `input_file` block (pdf documents).
-var openaiResponsesDocumentMIMEs = []string{"application/pdf"}
+// `input_file` block (documents).
+var openaiResponsesDocumentMIMEs = []string{
+	"application/pdf",
+	"text/plain",
+	"text/markdown",
+	"text/csv",
+	"application/json",
+	"application/msword",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	"application/vnd.ms-powerpoint",
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+	"application/vnd.ms-excel",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
 // openaiResponsesMediaMIMEs is every media type an OpenAI Responses message
 // carries (images + documents).

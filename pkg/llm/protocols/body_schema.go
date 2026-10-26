@@ -59,6 +59,12 @@ var openaiChatUserContentSchema = jsonschema.Union(
 		jsonschema.Required("type", jsonschema.Literal("file")),
 		jsonschema.Required("file_id", jsonschema.String()),
 	),
+	jsonschema.Object(
+		jsonschema.Required("type", jsonschema.Literal("file")),
+		jsonschema.Required("file", jsonschema.Object(
+			jsonschema.Required("file_id", jsonschema.String()),
+		)),
+	),
 )
 
 var openaiChatMessageSchema = jsonschema.Union(

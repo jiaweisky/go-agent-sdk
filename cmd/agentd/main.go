@@ -41,6 +41,12 @@ func runMain(args []string) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	for _, line := range config.MediaSummary(cfg) {
+		fmt.Fprintln(os.Stderr, line)
+	}
+	for _, warning := range config.MediaWarnings(cfg) {
+		fmt.Fprintf(os.Stderr, "agentd: warning: %s\n", warning)
+	}
 
 	// -check validates the configuration and exits without serving.
 	if fl.check {

@@ -97,3 +97,25 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+func TestExposeAgentsValidatesBeforeRegistering(t *testing.T) {
+	client, err := New(Params{
+		Root:    t.TempDir(),
+		Model:   "test-model",
+		Catalog: testCatalog(t),
+	})
+	if err != nil {
+		t.Fatalf("build client: %v", err)
+	}
+	defer client.Close()
+
+	_, err = ExposeAgents(client, []string{"build", "no-such-agent"}, map[string]config.CardConfig{
+		"build": {Name: "Build", Description: "builds things"},
+	}, nil, "test-model")
+	if err == nil {
+		t.Fatal("expected an unknown agent to be rejected")
+	}
+	if info := client.Agents().Get("build"); info == nil || info.Expose != nil {
+		t.Fatalf("build was mutated before the whole list validated: %+v", info)
+	}
+}

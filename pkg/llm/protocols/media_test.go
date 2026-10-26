@@ -15,7 +15,7 @@ func TestMediaAllowedNarrowsByProtocolThenModel(t *testing.T) {
 		allowed bool
 	}{
 		{"protocol and model allow an image", OpenAIChatHTTPRoute.Protocol, nil, "image/png", true},
-		{"protocol rejects a document", OpenAIChatHTTPRoute.Protocol, nil, "application/pdf", false},
+		{"openai-chat carries a pdf document", OpenAIChatHTTPRoute.Protocol, nil, "application/pdf", true},
 		{"bedrock carries a document", BedrockConverseProtocol.ID, nil, "application/pdf", true},
 		{"gemini carries a document", GeminiHTTPRoute.Protocol, nil, "application/pdf", true},
 		{"anthropic carries a document", AnthropicMessagesHTTPRoute.Protocol, nil, "application/pdf", true},
@@ -23,6 +23,7 @@ func TestMediaAllowedNarrowsByProtocolThenModel(t *testing.T) {
 		{"vision model allows an image", OpenAIChatHTTPRoute.Protocol, []string{"text", "image"}, "image/png", true},
 		{"gemini carries audio", GeminiHTTPRoute.Protocol, nil, "audio/wav", true},
 		{"anthropic carries jpeg", AnthropicMessagesHTTPRoute.Protocol, nil, "image/jpeg", true},
+		{"openai-responses docx under the pdf modality", OpenAIResponsesHTTPRoute.Protocol, []string{"text", "pdf"}, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", true},
 		{"unknown protocol allows nothing", schema.ProtocolID("nope"), nil, "image/png", false},
 	}
 	for _, tc := range cases {
@@ -151,5 +152,41 @@ func TestResponsesDocumentURLSourceRejected(t *testing.T) {
 	}
 	if !entry.Media.AllowsSourceFor("application/pdf", MediaSourceFile) {
 		t.Fatal("a pdf file source is allowed for OpenAI Responses")
+	}
+}
+
+func TestDocumentMIMEExpansion(t *testing.T) {
+	chat, _ := LookupProtocol(schema.ProtocolID(OpenAIChatHTTPRoute.ID))
+	if !chat.Media.AllowsMIME("application/pdf") || chat.Media.AllowsMIME("text/plain") {
+		t.Fatalf("openai-chat document MIMEs = %v", chat.Media.MIMEs)
+	}
+	responses, _ := LookupProtocol(schema.ProtocolID(OpenAIResponsesHTTPRoute.ID))
+	for _, mime := range []string{"application/pdf", "text/plain", "text/markdown", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"} {
+		if !responses.Media.AllowsMIME(mime) {
+			t.Fatalf("openai-responses should carry %s", mime)
+		}
+		if responses.Media.AllowsSourceFor(mime, MediaSourceURL) {
+			t.Fatalf("openai-responses %s must reject url", mime)
+		}
+	}
+	anthropic, _ := LookupProtocol(schema.ProtocolID(AnthropicMessagesHTTPRoute.ID))
+	if !anthropic.Media.AllowsMIME("text/plain") {
+		t.Fatal("anthropic should carry text/plain")
+	}
+	deepseek, _ := LookupProtocol(schema.ProtocolID(DeepSeekChatHTTPRoute.ID))
+	if deepseek.Media.AllowsMIME("application/pdf") {
+		t.Fatal("deepseek file API must stay image-only")
+	}
+}
+
+func TestAnthropicTextDocumentLowering(t *testing.T) {
+	doc, err := anthropicMessagesLowerMedia(schema.MediaPart{
+		Type: "media", MediaType: "text/plain", Source: schema.MediaSourceFile, Data: "file-id-1",
+	})
+	if err != nil {
+		t.Fatalf("text document: %v", err)
+	}
+	if doc.Type != "document" || doc.Source.Type != "file" || doc.Source.FileID != "file-id-1" {
+		t.Fatalf("text document block = %+v", doc)
 	}
 }

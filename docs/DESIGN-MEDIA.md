@@ -23,6 +23,7 @@
 
 | Date | Change |
 |---|---|
+| 2026-10-25 | **Breaking agentd media config:** provider Files API uploads are now declared by reusable top-level `providerFileAPIs` profiles and selected per model with `models[].providerFileAPI` (plus explicit `providerID`). The flat `mediaUpload` block and top-level `storage` are gone; server hosting is `media.uploads.urlHost`, and delivery policy is `media.delivery` with `prefer` ∈ `inline`/`url`/`providerFile` and `allowUploads`. MIME/capability limits now flow from the provider profile and store to the planner. See `DESIGN-MEDIA-PROVIDERS.md`. |
 | 2026-10-22 | **Removed `media.fetchURL`.** URL sources are capability-driven: if the provider/model can carry a `url` block it is passed as-is; otherwise the URL stays in the text note so the model can use tools. There is no media-policy gate on URL usage. |
 | 2026-10-22 | **Removed A2A file exchange from the SDK.** The A2A server/client no longer advertise or parse a storage extension, expose a signed-slot endpoint, upload to a peer's target, or resolve `FileWithUri` through `MediaStore`. A2A carries inline `FilePart`s and opaque `FileWithUri`s; large-file transfer is left to the host/tools. `MediaStore`/`MediaUploader` remain for the **model edge** only. §4.13 is historical. |
 | 2026-10-21 | **Storage exchange reworked (breaking)**: the card's storage extension drops the `modes` list and the server-relay ingest endpoint (the PUT/GET relay handlers are removed — file bytes never flow through the server process). Params are self-describing: `ingest.upload` carries `auth` — `"none"` (direct write: PUT `base` + sha256 `keyRule` key, reference `referenceBase` + key) or `"signed"` (POST `request.url` with name/mime/size, receive a presigned `uploadUrl` + `reference` + `expires`). `extensions/storage.md` in the harbor repo documents the shared shape; a2a clients parse `upload` instead of `modes`. |
@@ -732,7 +733,7 @@ ClientOptions.MediaUploader func(providerID schema.ProviderID) MediaUploader
   store, or a new Files API — each is one `MediaStore`/`MediaUploader` implementation.
 - **Lifecycle belongs to the host**; the SDK never deletes provider-side. A host reclaims a
   reference by its own means (provider `expires_after`, an object-store lifecycle rule, a presigned
-  url TTL). agentd's `mediaUpload.expiresAfterSeconds` (seconds) requests a provider file lifetime —
+  url TTL). agentd's `providerFileAPIs.<name>.expiry` requests a provider file lifetime —
   it is sent as the Files API `expires_after[anchor]=created_at` + `expires_after[seconds]=N`
   (DeepSeek/OpenAI convention) — and unset leaves the file permanent. The `Reference.ExpiresAt`
   the host reports bounds only the SDK's content-hash upload cache.
@@ -945,7 +946,8 @@ the operator hits the same wall. So the policy belongs to the operator, applied 
 - **Operator** — configures the policy (below), once, per server.
 - **SDK** — the pipeline: planner / adapt / upload / downsample / spool.
 
-**Config** (SDK `ClientOptions`; agentd maps `servers[].media`). This is the *delivery policy* —
+**Config** (SDK `ClientOptions`; agentd maps `servers[].media.delivery`, spells the
+provider-bound source as `providerFile`, and spells `upload` as `allowUploads`). This is the *delivery policy* —
 distinct from the *capability* block `models[].media` (`input` / `sources`), which declares what
 the model accepts:
 
@@ -1063,7 +1065,7 @@ The gate itself is refactored from three scattered checks into one planner
 | P9 | {M6b}/{M6c}: the subagent delivery path (read-tool media, or task-tool attachments). |
 | P10 | {M15} consumer surfaces (§4.11): SDK `AttachmentOmitted` event + `core/tool.FileContent`; agentserve `GET /api/model`; a2aserve model-derived card modes + omission mapping + outbound `Source`. |
 | P11 | {M16} operator delivery policy (§4.12): `core.MediaPolicy` on `ClientOptions` + agentd `servers[].media` (source selection `prefer` / `inlineLimitBytes` / `upload` / `maxBytes`, image downsample, spool last resort); omits with typed `too_large`/capability reasons. |
-| P12 | {M17} reference hosting (§4.10 Axis 3): **two hosts** — provider-independent `MediaStore` (object storage → url) and provider-bound `MediaUploader(providerID)` (Files API → file ref), both returning `Reference{Source, Value, ExpiresAt}`; **per-modality capability** (Axis 1); `url` allowed in `prefer` (url→store, file→uploader); agentd `storage` + per-provider `mediaUpload`; honor `ExpiresAt` for cache eviction. |
+| P12 | {M17} reference hosting (§4.10 Axis 3): **two hosts** — provider-independent `MediaStore` (object storage → url) and provider-bound `MediaUploader(providerID)` (Files API → file ref), both returning `Reference{Source, Value, ExpiresAt}`; **per-modality capability** (Axis 1); `url` allowed in `prefer` (url→store, file→uploader); agentd `media.uploads.urlHost` + per-model `providerFileAPI` profiles; honor `ExpiresAt` for cache eviction. |
 | P13 | {M18} A2A file exchange — **removed from the SDK**. A2A carries inline `FilePart`s and opaque `FileWithUri`s only; storage is model-edge only. |
 
 Phases are **implementation order, not scope**: every phase is required for the

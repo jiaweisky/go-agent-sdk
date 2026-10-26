@@ -35,6 +35,9 @@ type ModelCapabilities struct {
 // "unconstrained", not "text only", and a nil capability means "no gate".
 type ModelMediaCapability struct {
 	Forms map[string][]string `json:"forms,omitempty"`
+	// MIMEs optionally narrows the accepted MIME types; empty means the
+	// protocol/provider limits only.
+	MIMEs []string `json:"mimes,omitempty"`
 }
 
 // ModelCostTier is one pricing tier.

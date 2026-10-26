@@ -267,10 +267,9 @@ func anthropicMessagesLowerServerToolCall(part schema.ToolCallPart) anthropicMes
 }
 
 // anthropicMessagesDocumentMIMEs are the media types Anthropic carries in a
-// `document` block rather than an `image` block. Only pdf is lowered: it may be
-// inline bytes, a url, or a provider file reference (by id). Plain text is not
-// lowered.
-var anthropicMessagesDocumentMIMEs = []string{"application/pdf"}
+// `document` block rather than an `image` block. It may be inline bytes, a url,
+// or a provider file reference (by id).
+var anthropicMessagesDocumentMIMEs = []string{"application/pdf", "text/plain"}
 
 // anthropicMessagesMediaMIMEs is every media type an Anthropic message carries
 // (images + documents).

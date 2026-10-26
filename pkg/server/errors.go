@@ -14,6 +14,9 @@ import (
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
 )
 
+// errSessionAgentNotAllowed is mapped to HTTP 403 by writeSDKError.
+var errSessionAgentNotAllowed = errors.New("session agent is not allowed")
+
 // apiError is the uniform JSON error envelope returned by every failure.
 type apiError struct {
 	Error     string `json:"error"`
@@ -48,6 +51,8 @@ func (s *Server) writeSDKError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, agent.ErrUnknownAgent):
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+	case errors.Is(err, errSessionAgentNotAllowed):
+		writeError(w, http.StatusForbidden, "forbidden", err.Error())
 	case errors.Is(err, agent.ErrSessionBusy):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 	case errors.Is(err, coresession.ErrStopped), errors.Is(err, core.ErrSnapshotUnavailable):

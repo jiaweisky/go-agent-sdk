@@ -40,7 +40,7 @@ func testControlRequest(t *testing.T) config.ProjectRequest {
 }
 
 func TestManagerStartServeStop(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 	t.Cleanup(manager.Close)
 
 	instance, err := manager.Start(testControlRequest(t))
@@ -69,7 +69,7 @@ func TestManagerStartServeStop(t *testing.T) {
 }
 
 func TestManagerHonorsIsolation(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 	t.Cleanup(manager.Close)
 
 	req := testControlRequest(t)
@@ -92,7 +92,7 @@ func TestManagerHonorsIsolation(t *testing.T) {
 }
 
 func TestManagerRejectsExternalMode(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 	t.Cleanup(manager.Close)
 	req := testControlRequest(t)
 	req.Isolation = &config.IsolationConfig{Mode: "container"}
@@ -102,7 +102,7 @@ func TestManagerRejectsExternalMode(t *testing.T) {
 }
 
 func TestManagerSharesReadOnlyAndRefusesWriter(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 	t.Cleanup(manager.Close)
 
 	// Two read-only acquires of the same project name share one instance.
@@ -145,7 +145,7 @@ func TestManagerSharesReadOnlyAndRefusesWriter(t *testing.T) {
 }
 
 func TestManagerCloseTearsDownSharedInstance(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 
 	first := testControlRequest(t)
 	first.Readonly = true
@@ -171,7 +171,7 @@ func TestManagerCloseTearsDownSharedInstance(t *testing.T) {
 }
 
 func TestManagerWiresSandbox(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 	t.Cleanup(manager.Close)
 	defer manager.Close() // release agent.db before t.TempDir cleanup (see TestManagerRefusesReaderWhileWriter)
 
@@ -206,7 +206,7 @@ func unavailableWrapper() config.Wrapper {
 }
 
 func TestManagerRefusesReaderWhileWriter(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 	t.Cleanup(manager.Close)
 	// Close before the test returns: t.TempDir removal runs during cleanup,
 	// and Windows cannot delete agent.db while the instance still holds it.
@@ -223,7 +223,7 @@ func TestManagerRefusesReaderWhileWriter(t *testing.T) {
 }
 
 func TestManagerRejectsDuplicateNameAndRoot(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 	t.Cleanup(manager.Close)
 	defer manager.Close() // release agent.db before t.TempDir cleanup (see above)
 
@@ -250,7 +250,7 @@ func TestManagerRejectsDuplicateNameAndRoot(t *testing.T) {
 }
 
 func TestManagerEnforcesLeaseCap(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{MaxLeases: 1})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{MaxLeases: 1}, nil, nil)
 	t.Cleanup(manager.Close)
 	defer manager.Close() // release agent.db before t.TempDir cleanup (see above)
 
@@ -266,7 +266,7 @@ func TestManagerEnforcesLeaseCap(t *testing.T) {
 }
 
 func TestControlHandlerCRUDAndAuth(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 	t.Cleanup(manager.Close)
 	server := httptest.NewServer(newControlHandler(manager, &config.AuthConfig{Type: "bearer", Token: "s3cret"}))
 	defer server.Close()
@@ -301,7 +301,7 @@ func TestControlHandlerCRUDAndAuth(t *testing.T) {
 }
 
 func TestControlHandlerDeleteSlashedID(t *testing.T) {
-	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{})
+	manager := newProjectManager(context.Background(), testCatalog(t), &config.ControlConfig{}, nil, nil)
 	t.Cleanup(manager.Close)
 	server := httptest.NewServer(newControlHandler(manager, nil))
 	defer server.Close()

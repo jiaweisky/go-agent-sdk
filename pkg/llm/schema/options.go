@@ -67,6 +67,9 @@ type ModelCapabilities struct {
 	// Forms, keyed by modality ("image"|"audio"|"video"|"file"), are the wire
 	// sources the model accepts; empty means the protocol decides.
 	Forms map[string][]MediaSource `json:"forms,omitempty"`
+	// MIMEs optionally narrows the accepted media types; empty means the
+	// protocol/provider limits only.
+	MIMEs []string `json:"mimes,omitempty"`
 }
 
 // ModelCompatibility records the schema shapes a model requires.

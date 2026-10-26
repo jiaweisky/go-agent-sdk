@@ -24,6 +24,8 @@ import (
 	a2aserver "github.com/jiaweisky/go-agent-sdk/pkg/a2a/server"
 	agent "github.com/jiaweisky/go-agent-sdk/pkg/agent"
 	"github.com/jiaweisky/go-agent-sdk/pkg/core"
+	"github.com/jiaweisky/go-agent-sdk/pkg/llm/protocols"
+	llmschema "github.com/jiaweisky/go-agent-sdk/pkg/llm/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/schema"
 	"github.com/jiaweisky/go-agent-sdk/pkg/server"
 )
@@ -71,6 +73,38 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, tls *config.T
 	}
 }
 
+// serveAll runs one serve per listener under one context and signal; a failed
+// listener cancels the others so startup fails fast.
+func serveAll(ctx context.Context, targets []serveTarget) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make(chan error, len(targets))
+	for _, target := range targets {
+		go func(target serveTarget) {
+			errs <- serve(ctx, target.srv, target.ln, target.tls, target.closeStreams)
+		}(target)
+	}
+	var first error
+	for range targets {
+		if err := <-errs; err != nil && first == nil {
+			first = err
+			cancel()
+		}
+	}
+	return first
+}
+
+// combineClose runs every entry's closeStreams hook.
+func combineClose(entries []*builtServer) func() {
+	return func() {
+		for _, e := range entries {
+			if e.closeStreams != nil {
+				e.closeStreams()
+			}
+		}
+	}
+}
+
 // builtServer is one served instance: its transport handler plus the hooks the
 // router and shutdown need.
 type builtServer struct {
@@ -90,6 +124,10 @@ type serveTarget struct {
 	closeStreams func()
 }
 
+// mediaUploaderFunc adapts the configured uploader to the SDK's per-provider
+// uploader signature.
+type mediaUploaderFunc func(schema.ProviderID) schema.MediaUploader
+
 // run builds one client per configured server, groups the servers by listener,
 // and serves until ctx is canceled. Every client created is closed on return, so
 // a mid-build failure leaks nothing.
@@ -98,6 +136,7 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 	if err != nil {
 		return err
 	}
+
 	var clients []*agent.Client
 	var teardowns []func(context.Context) error
 	defer func() {
@@ -105,15 +144,18 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 			_ = client.Close()
 		}
 		for i := len(teardowns) - 1; i >= 0; i-- {
-			_ = teardowns[i](context.Background())
+			teardownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			_ = teardowns[i](teardownCtx)
+			cancel()
 		}
 	}()
 
 	runner := isolation.DefaultRunner()
 	baseDirs := isolationBaseDirs(cfg.Servers)
+
 	var built []*builtServer
 	for _, s := range cfg.Servers {
-		runtime, err := buildRuntime(ctx, s, global, baseDirs, runner)
+		runtime, err := buildRuntime(ctx, s, cfg.Models, cfg.ProviderFileAPIs, global, baseDirs, runner)
 		if runtime.teardown != nil {
 			teardowns = append(teardowns, runtime.teardown)
 		}
@@ -129,8 +171,9 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 		return err
 	}
 	defer func() { closeServeTargets(targets) }()
+
 	if cfg.Control != nil {
-		target, closeManager, err := bindControlTarget(ctx, global, cfg.Control)
+		target, closeManager, err := bindControlTarget(ctx, global, cfg.Control, cfg.Models, cfg.ProviderFileAPIs)
 		if err != nil {
 			return err
 		}
@@ -151,32 +194,40 @@ type builtRuntime struct {
 // failure it closes anything it already created and still returns the project
 // teardown so the caller can release the view.
 func buildRuntime(
-	ctx context.Context, s config.Server, catalog config.Catalog,
+	ctx context.Context, s config.Server, models []config.ModelConfig,
+	profiles map[string]*config.ProviderFileAPI, catalog config.Catalog,
 	baseDirs []string, runner isolation.Runner,
 ) (builtRuntime, error) {
 	serverCatalog, err := catalog.Subset(s.Models, s.DefaultModel)
 	if err != nil {
 		return builtRuntime{}, fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
+	source := s.WorkingDirectory
 	project, err := runner.Prepare(ctx, projectSpec(s), isolationSpec(s))
 	if err != nil {
 		return builtRuntime{}, fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	runtime := builtRuntime{teardown: project.Teardown}
 	s.WorkingDirectory = project.View
-	uploader, err := mediaUploader(s)
+	uploader, err := mediaUploaderFor(s, models, profiles)
 	if err != nil {
 		return runtime, fmt.Errorf("server %q: %w", s.Name, err)
 	}
-	client, err := buildClient(s, serverCatalog, uploader, isolationExcludes(s.WorkingDirectory, baseDirs))
+	fileHeaders := mediaFileHeadersFor(s, models, profiles)
+
+	client, err := buildClient(s, serverCatalog, uploader, fileHeaders, isolationExcludes(source, baseDirs))
 	if err != nil {
 		return runtime, fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	server, err := buildServer(ctx, s, client, serverCatalog, uploader)
 	if err != nil {
 		_ = client.Close()
 		return runtime, fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	runtime.client = client
 	runtime.server = server
 	return runtime, nil
@@ -189,6 +240,7 @@ func bindServeTargets(built []*builtServer, introspect *introspectDoc) ([]serveT
 	var targets []serveTarget
 	for _, listen := range order {
 		entries := byListen[listen]
+
 		ln, err := net.Listen("tcp", listen)
 		if err != nil {
 			closeServeTargets(targets)
@@ -213,6 +265,7 @@ func logDiscoveryEndpoints(entries []*builtServer, addr net.Addr) {
 		fmt.Fprintf(os.Stderr, "agentd: a2a discovery: %s/.well-known/agent-card.json (default card)\n", base)
 		fmt.Fprintf(os.Stderr, "agentd: a2a discovery: %s/.well-known/agents.json (all cards, codebuddy)\n", base)
 	}
+
 	for _, e := range entries {
 		base := publicBaseURL(e.cfg, addr)
 		for _, path := range e.cardPaths {
@@ -224,8 +277,9 @@ func logDiscoveryEndpoints(entries []*builtServer, addr net.Addr) {
 // bindControlTarget binds the optional control API and returns its cleanup.
 func bindControlTarget(
 	ctx context.Context, catalog config.Catalog, control *config.ControlConfig,
+	models []config.ModelConfig, profiles map[string]*config.ProviderFileAPI,
 ) (serveTarget, func(), error) {
-	manager := newProjectManager(ctx, catalog, control)
+	manager := newProjectManager(ctx, catalog, control, models, profiles)
 	ln, err := net.Listen("tcp", control.Listen)
 	if err != nil {
 		manager.Close()
@@ -248,16 +302,18 @@ func closeServeTargets(targets []serveTarget) {
 	}
 }
 
-// groupByListen groups entries by their listen address, returning the addresses
-// in first-seen order (deterministic startup).
+// groupByListen groups entries by their normalized listen address, returning the
+// addresses in first-seen order (deterministic startup).
 func groupByListen(built []*builtServer) (map[string][]*builtServer, []string) {
 	byListen := map[string][]*builtServer{}
 	order := []string{}
+
 	for _, b := range built {
-		if _, ok := byListen[b.cfg.Listen]; !ok {
-			order = append(order, b.cfg.Listen)
+		listen := config.NormalizeListenAddress(b.cfg.Listen)
+		if _, ok := byListen[listen]; !ok {
+			order = append(order, listen)
 		}
-		byListen[b.cfg.Listen] = append(byListen[b.cfg.Listen], b)
+		byListen[listen] = append(byListen[listen], b)
 	}
 	return byListen, order
 }
@@ -361,11 +417,10 @@ func isolationSpec(s config.Server) isolation.IsolationSpec {
 		return isolation.IsolationSpec{}
 	}
 	return isolation.IsolationSpec{
-		Mode:         string(s.Isolation.Mode),
-		BaseDir:      s.Isolation.BaseDir,
-		BaseReadOnly: s.Isolation.BaseReadOnly,
-		BaseRef:      s.Isolation.BaseRef,
-		CowMode:      string(cowMode(s.Isolation.Cow)),
+		Mode:    string(s.Isolation.Mode),
+		BaseDir: s.Isolation.BaseDir,
+		BaseRef: s.Isolation.BaseRef,
+		CowMode: string(cowMode(s.Isolation.Cow)),
 	}
 }
 
@@ -379,25 +434,39 @@ func cowMode(cow *config.CowConfig) config.CowMode {
 
 // buildClient assembles one server's agent client from its catalog subset.
 func buildClient(
-	s config.Server, catalog config.Catalog, uploader mediaUploaderFunc, excludes []string,
+	s config.Server, catalog config.Catalog, uploader mediaUploaderFunc,
+	fileHeaders map[schema.ProviderID]map[string]string, excludes []string,
 ) (*agent.Client, error) {
 	mcpServers, err := agentdclient.MCPConfigs(s.MCP)
 	if err != nil {
 		return nil, err
 	}
+
 	references, err := agentdclient.ReferenceSources(s.References)
 	if err != nil {
 		return nil, err
 	}
+
 	process, policy, err := resolveSandbox(s)
 	if err != nil {
 		return nil, err
 	}
+
 	readGuard, writeGuard := sandboxGuards(s, policy)
-	store, err := storage.New(s.Storage)
-	if err != nil {
-		return nil, fmt.Errorf("server %q: storage: %w", s.Name, err)
+
+	var urlHost *config.StorageConfig
+	var delivery *config.MediaDeliveryConfig
+	if s.Media != nil {
+		delivery = s.Media.Delivery
+		if s.Media.Uploads != nil {
+			urlHost = s.Media.Uploads.URLHost
+		}
 	}
+	store, err := storage.New(urlHost)
+	if err != nil {
+		return nil, fmt.Errorf("server %q: media.uploads.urlHost: %w", s.Name, err)
+	}
+
 	return agentdclient.New(agentdclient.Params{
 		Root:             s.Root,
 		WorkingDirectory: s.WorkingDirectory,
@@ -407,7 +476,8 @@ func buildClient(
 		// catalog's ModelInfo, not from the server.
 		Catalog:          catalog,
 		MediaUploader:    uploader,
-		Media:            media.DeliveryPolicy(s.Media, s.Root),
+		MediaFileHeaders: fileHeaders,
+		Media:            media.DeliveryPolicy(delivery, s.Root),
 		MediaTranscode:   media.FFmpegTranscoder(),
 		Store:            store,
 		MCP:              mcpServers,
@@ -423,31 +493,21 @@ func buildClient(
 	})
 }
 
-// sandboxGuards builds the in-process file guards the policy requires. The same
-// guard enforces reads and writes, so both paths share one policy.
-func sandboxGuards(s config.Server, policy sandbox.Policy) (core.FileReadGuard, core.FileWriteGuard) {
-	if s.Sandbox == nil || !s.Sandbox.Enabled() {
-		return nil, nil
-	}
-	guard := sandbox.NewPathGuard(policy)
-	var readGuard core.FileReadGuard
-	var writeGuard core.FileWriteGuard
-	if policy.ReadMode == sandbox.FSModeAllow {
-		readGuard = guard
-	}
-	if policy.WriteMode == sandbox.FSModeAllow {
-		writeGuard = guard
-	}
-	return readGuard, writeGuard
-}
-
 // isolationBaseDirs collects the configured isolation base directories.
 func isolationBaseDirs(servers []config.Server) []string {
 	var dirs []string
+	seen := map[string]struct{}{}
+
 	for _, s := range servers {
-		if base := baseDirOf(s.Isolation); base != "" {
-			dirs = append(dirs, base)
+		base := baseDirOf(s.Isolation)
+		if base == "" {
+			continue
 		}
+		if _, ok := seen[base]; ok {
+			continue
+		}
+		seen[base] = struct{}{}
+		dirs = append(dirs, base)
 	}
 	return dirs
 }
@@ -498,6 +558,25 @@ func insidePath(root, path string) (string, bool) {
 	return rel, true
 }
 
+// sandboxGuards builds the in-process file guards the policy requires. The same
+// guard enforces reads and writes, so both paths share one policy.
+func sandboxGuards(s config.Server, policy sandbox.Policy) (core.FileReadGuard, core.FileWriteGuard) {
+	if s.Sandbox == nil || !s.Sandbox.Enabled() {
+		return nil, nil
+	}
+	guard := sandbox.NewPathGuard(policy)
+
+	var readGuard core.FileReadGuard
+	var writeGuard core.FileWriteGuard
+	if policy.ReadMode == sandbox.FSModeAllow {
+		readGuard = guard
+	}
+	if policy.WriteMode == sandbox.FSModeAllow {
+		writeGuard = guard
+	}
+	return readGuard, writeGuard
+}
+
 // resolveSandbox returns the server's command-execution seam and its resolved
 // policy. No sandbox (or "none") yields a nil process, the SDK default; an
 // explicitly disabled sandbox is reported so it is never a silent opt-out. When
@@ -511,12 +590,14 @@ func resolveSandbox(s config.Server) (core.AppProcess, sandbox.Policy, error) {
 		// this root, so no live instance shares the directory.
 		_ = os.RemoveAll(policy.TempRoot)
 	}
+
 	if s.Sandbox == nil {
 		fmt.Fprintf(os.Stderr,
 			"agentd: server %q: sandbox not configured; commands run unsandboxed "+
 				"(permission and workspace policy still apply)\n", s.Name)
 		return nil, policy, nil
 	}
+
 	if !s.Sandbox.Enabled() {
 		fmt.Fprintf(os.Stderr,
 			"agentd: server %q: sandbox disabled (wrapper %q, profile %q); "+
@@ -524,10 +605,12 @@ func resolveSandbox(s config.Server) (core.AppProcess, sandbox.Policy, error) {
 			s.Name, s.Sandbox.Wrapper, s.Sandbox.Profile)
 		return nil, policy, nil
 	}
+
 	process, err := sandbox.Resolve(string(s.Sandbox.Wrapper), policy)
 	if err == nil {
 		return process, policy, nil
 	}
+
 	if s.Sandbox.FailurePolicy == config.FailurePolicyFailOpen {
 		fmt.Fprintf(os.Stderr,
 			"agentd: server %q: sandbox %q unavailable (%v); continuing without the process wrapper "+
@@ -546,10 +629,12 @@ func buildServer(
 	if err != nil {
 		return nil, err
 	}
+
 	keepAlive, err := config.KeepAliveDuration(s.KeepAlive)
 	if err != nil {
 		return nil, err
 	}
+
 	switch s.Kind {
 	case config.KindHTTP:
 		handler, closeStreams, err := buildHTTPHandler(
@@ -570,6 +655,7 @@ func buildServer(
 	}
 }
 
+// buildHTTPHandler builds one HTTP/SSE transport and its stream-close hook.
 func buildHTTPHandler(
 	ctx context.Context, s config.Server, client *agent.Client, infos []schema.ModelInfo,
 	uploader mediaUploaderFunc, keepAlive time.Duration, defaultModel string,
@@ -578,6 +664,7 @@ func buildHTTPHandler(
 	if err != nil {
 		return nil, nil, err
 	}
+
 	srv, err := server.New(ctx, client, server.Options{
 		Auth:                httpAuth(s),
 		Agents:              s.Agents,
@@ -600,6 +687,7 @@ func buildHTTPHandler(
 	return srv.Handler(), func() { _ = srv.Close() }, nil
 }
 
+// buildA2AServer builds one A2A transport with its exposed agents and security.
 func buildA2AServer(
 	s config.Server, client *agent.Client, infos []schema.ModelInfo,
 	defaultModel string, keepAlive time.Duration,
@@ -608,6 +696,7 @@ func buildA2AServer(
 	if err != nil {
 		return nil, err
 	}
+
 	factoryOpts := []agent.A2AFactoryOption{}
 	if permissions := config.PermissionRuleset(s.InboundPermissions); len(permissions) > 0 {
 		factoryOpts = append(factoryOpts, agent.WithInboundPermissions(permissions))
@@ -616,10 +705,12 @@ func buildA2AServer(
 		factoryOpts = append(factoryOpts, agent.WithInboundMedia(string(s.InboundMedia)))
 	}
 	factoryOpts = append(factoryOpts, agent.WithInboundQuestions(a2aQuestions(s)))
+
 	var security *a2aserver.Security
 	if s.Auth != nil {
 		security = &a2aserver.Security{Bearer: s.Auth.Token}
 	}
+
 	return a2aserver.New(a2aserver.Options{
 		Factory:      agent.NewA2AFactory(client, factoryOpts...),
 		Turns:        client.TurnStore(),
@@ -631,51 +722,154 @@ func buildA2AServer(
 	})
 }
 
-// serveAll runs one serve per listener under one context and signal; a failed
-// listener cancels the others so startup fails fast.
-func serveAll(ctx context.Context, targets []serveTarget) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	errs := make(chan error, len(targets))
-	for _, target := range targets {
-		go func(target serveTarget) {
-			errs <- serve(ctx, target.srv, target.ln, target.tls, target.closeStreams)
-		}(target)
+// mediaUploaderFor builds the per-server providerID -> uploader map from the
+// explicit model references. A model without a reference is absent.
+func mediaUploaderFor(
+	s config.Server, models []config.ModelConfig,
+	profiles map[string]*config.ProviderFileAPI,
+) (mediaUploaderFunc, error) {
+	byID := make(map[string]config.ModelConfig, len(models))
+	for _, m := range models {
+		byID[m.ID] = m
 	}
-	var first error
-	for range targets {
-		if err := <-errs; err != nil && first == nil {
-			first = err
-			cancel()
+
+	ids := s.Models
+	if len(ids) == 0 {
+		ids = make([]string, 0, len(models))
+		for _, m := range models {
+			ids = append(ids, m.ID)
 		}
 	}
-	return first
-}
 
-// combineClose runs every entry's closeStreams hook.
-func combineClose(entries []*builtServer) func() {
-	return func() {
-		for _, e := range entries {
-			if e.closeStreams != nil {
-				e.closeStreams()
-			}
+	uploaders := map[schema.ProviderID]schema.MediaUploader{}
+	profilesByProvider := map[schema.ProviderID]string{}
+	for _, id := range ids {
+		entry, ok := byID[id]
+		if !ok || entry.ProviderFileAPI == "" {
+			continue
 		}
-	}
-}
+		if entry.ProviderID == "" {
+			return nil, fmt.Errorf("model %q uses providerFileAPI %q but has no providerID", entry.ID, entry.ProviderFileAPI)
+		}
 
-// mediaUploaderFunc adapts the configured uploader to the SDK's per-provider
-// uploader signature.
-type mediaUploaderFunc func(schema.ProviderID) schema.MediaUploader
+		profile := profiles[entry.ProviderFileAPI]
+		if profile == nil {
+			return nil, fmt.Errorf("model %q references unknown providerFileAPI %q", entry.ID, entry.ProviderFileAPI)
+		}
 
-func mediaUploader(s config.Server) (mediaUploaderFunc, error) {
-	uploader, err := media.NewUploader(s.MediaUpload)
-	if err != nil {
-		return nil, err
+		provider := schema.ProviderID(entry.ProviderID)
+		if prev, ok := profilesByProvider[provider]; ok && prev != entry.ProviderFileAPI {
+			return nil, fmt.Errorf("providerID %q is used with providerFileAPI %q and %q; assign a distinct providerID", entry.ProviderID, prev, entry.ProviderFileAPI)
+		}
+		if !providerFileUsable(entry, profile) {
+			continue
+		}
+
+		uploader, err := media.NewUploader(entry.ProviderFileAPI, profile)
+		if err != nil {
+			return nil, err
+		}
+		profilesByProvider[provider] = entry.ProviderFileAPI
+		uploaders[provider] = uploader
 	}
-	if uploader == nil {
+
+	if len(uploaders) == 0 {
 		return nil, nil
 	}
-	return func(schema.ProviderID) schema.MediaUploader { return uploader }, nil
+	return func(provider schema.ProviderID) schema.MediaUploader { return uploaders[provider] }, nil
+}
+
+// providerFileUsable reports whether this model can actually consume a
+// provider file reference: the protocol carries the source, the model declares
+// it (when forms are present), and the profile shares a file MIME with the
+// protocol/model.
+func providerFileUsable(entry config.ModelConfig, profile *config.ProviderFileAPI) bool {
+	if entry.Media != nil && len(entry.Media.Forms) > 0 {
+		hasFile := false
+		for _, forms := range entry.Media.Forms {
+			for _, form := range forms {
+				if form == string(protocols.MediaSourceFile) {
+					hasFile = true
+					break
+				}
+			}
+		}
+		if !hasFile {
+			return false
+		}
+	}
+
+	protocol, ok := protocols.LookupProtocol(llmschema.ProtocolID(entry.Protocol))
+	if !ok || !protocol.Media.AllowsSource(protocols.MediaSourceFile) {
+		return false
+	}
+
+	allowed := profile.MIME.Allowed
+	if sourceSet, ok := protocol.Media.SourceMIMEs[protocols.MediaSourceFile]; ok && len(sourceSet) > 0 {
+		filtered := allowed[:0:0]
+		for _, mime := range allowed {
+			if _, ok := sourceSet[mime]; ok {
+				filtered = append(filtered, mime)
+			}
+		}
+		allowed = filtered
+	}
+
+	if len(entry.InputMIMEs) > 0 {
+		filtered := allowed[:0:0]
+		for _, mime := range allowed {
+			for _, modelMIME := range entry.InputMIMEs {
+				if mime == modelMIME {
+					filtered = append(filtered, mime)
+					break
+				}
+			}
+		}
+		allowed = filtered
+	}
+
+	return len(allowed) > 0
+}
+
+// mediaFileHeadersFor maps each selected providerID to its profile's model
+// headers. The headers are applied only when a request carries a file reference.
+func mediaFileHeadersFor(s config.Server, models []config.ModelConfig, profiles map[string]*config.ProviderFileAPI) map[schema.ProviderID]map[string]string {
+	byID := make(map[string]config.ModelConfig, len(models))
+	for _, m := range models {
+		byID[m.ID] = m
+	}
+
+	ids := s.Models
+	if len(ids) == 0 {
+		ids = make([]string, 0, len(models))
+		for _, m := range models {
+			ids = append(ids, m.ID)
+		}
+	}
+
+	headers := map[schema.ProviderID]map[string]string{}
+	for _, id := range ids {
+		entry, ok := byID[id]
+		if !ok || entry.ProviderFileAPI == "" || entry.ProviderID == "" {
+			continue
+		}
+		profile := profiles[entry.ProviderFileAPI]
+		if profile == nil || len(profile.ModelHeaders) == 0 {
+			continue
+		}
+		provider := schema.ProviderID(entry.ProviderID)
+		if headers[provider] == nil {
+			headers[provider] = map[string]string{}
+		}
+		for name, value := range profile.ModelHeaders {
+			headers[provider][name] = value
+		}
+	}
+
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
 }
 
 // httpInboundPermissions extends the operator's inbound ruleset with an
@@ -685,8 +879,8 @@ func mediaUploader(s config.Server) (mediaUploaderFunc, error) {
 func httpInboundPermissions(s config.Server) schema.PermissionRuleset {
 	perms := config.PermissionRuleset(s.InboundPermissions)
 	spoolDir := ""
-	if s.Media != nil && s.Media.Spool != nil && s.Media.Spool.Dir != "" {
-		spoolDir = strings.ReplaceAll(s.Media.Spool.Dir, "{Root}", s.Root)
+	if s.Media != nil && s.Media.Delivery != nil && s.Media.Delivery.Spool != nil && s.Media.Delivery.Spool.Dir != "" {
+		spoolDir = strings.ReplaceAll(s.Media.Delivery.Spool.Dir, "{Root}", s.Root)
 	}
 	if spoolDir == "" {
 		return perms

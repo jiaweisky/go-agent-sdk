@@ -47,11 +47,13 @@ func TestConfigRedactsSecrets(t *testing.T) {
 			{Name: "root", Kind: "http", Listen: "127.0.0.1:8787", Root: "/tmp/r", Agents: []string{"build"}},
 			{
 				Name: "sec", Kind: "http", Listen: "127.0.0.1:8788", Root: "/tmp/s", Agents: []string{"build"},
-				Host:        "sec.example.com",
-				Auth:        &config.AuthConfig{Type: "bearer", Token: "bearer-leak"},
-				TLS:         &config.TLS{CertFile: "/etc/cert.pem", KeyFile: "/etc/key.pem"},
-				MCP:         []config.MCPServer{{Name: "mcp1", URL: "https://mcp.example", Headers: map[string]string{"Authorization": "token-leak"}}},
-				MediaUpload: &config.MediaUploadConfig{URL: "https://up.example", Header: "X-Auth", Value: "upload-leak", Fields: map[string]string{"k": "v"}},
+				Host: "sec.example.com",
+				Auth: &config.AuthConfig{Type: "bearer", Token: "bearer-leak"},
+				TLS:  &config.TLS{CertFile: "/etc/cert.pem", KeyFile: "/etc/key.pem"},
+				MCP:  []config.MCPServer{{Name: "mcp1", URL: "https://mcp.example", Headers: map[string]string{"Authorization": "token-leak"}}},
+				Media: &config.ServerMediaConfig{Uploads: &config.MediaUploadsConfig{
+					URLHost: &config.StorageConfig{Backend: "http", URL: "https://up.example"},
+				}},
 				InboundPermissions: []config.PermissionRule{
 					{Action: "bash", Resource: "*", Effect: "ask"},
 				},
@@ -74,7 +76,7 @@ func TestConfigRedactsSecrets(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`"schemaVersion":5`,
+		`"schemaVersion":6`,
 		`"apiKey":{"configured":true,"redacted":true}`,
 		`"type":"bearer"`,
 		`"token":{"configured":true,"redacted":true}`,
@@ -143,12 +145,21 @@ func TestConfigSectionAndServerFilters(t *testing.T) {
 }
 
 func TestConfigSanitizesCredentialURLs(t *testing.T) {
-	cfg := config.Config{Servers: []config.Server{{
-		Name: "http", Kind: "http", Agents: []string{"build"},
-		References:  []config.Reference{{Name: "r", Type: "git", Repository: "https://user:git-token-leak@github.com/o/r.git"}},
-		MediaUpload: &config.MediaUploadConfig{URL: "https://user:up-token-leak@up.example/api"},
-		Storage:     &config.StorageConfig{Backend: "s3", S3: &config.S3Config{Endpoint: "https://user:s3-token-leak@cos.example"}},
-	}}}
+	cfg := config.Config{
+		ProviderFileAPIs: map[string]*config.ProviderFileAPI{
+			"p": {Kind: "multipart-json", URL: "https://user:up-token-leak@up.example/api",
+				Auth:   config.ProviderFileAuth{Headers: map[string]string{"Authorization": "x"}},
+				MIME:   config.ProviderFileMIME{Allowed: []string{"application/pdf"}},
+				Limits: config.ProviderFileLimits{MaxBytes: 1}},
+		},
+		Servers: []config.Server{{
+			Name: "http", Kind: "http", Agents: []string{"build"},
+			References: []config.Reference{{Name: "r", Type: "git", Repository: "https://user:git-token-leak@github.com/o/r.git"}},
+			Media: &config.ServerMediaConfig{Uploads: &config.MediaUploadsConfig{
+				URLHost: &config.StorageConfig{Backend: "s3", S3: &config.S3Config{Endpoint: "https://user:s3-token-leak@cos.example"}},
+			}},
+		}},
+	}
 	code, body := introspectGet(t, introspectTestHandler(cfg), "/api/config", "")
 	if code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, body)
@@ -177,14 +188,15 @@ func TestConfigExposesMediaStorageAndBody(t *testing.T) {
 		Models: []config.ModelConfig{{ID: "m", Model: "m", Protocol: "openai-compatible-chat"}},
 		Servers: []config.Server{{
 			Name: "a", Kind: "http", Agents: []string{"build"},
-			Media: &config.MediaDeliveryConfig{
-				InlineLimitBytes: config.MediaSizeLimit{Default: 1024, Image: 2048},
-				Upload:           true,
-			},
-			MediaUpload: &config.MediaUploadConfig{URL: "https://user:tok@up.example/api", ExpiresInSeconds: 60, ExpiresAfterSeconds: 120},
-			Storage: &config.StorageConfig{
-				Backend: "http", URL: "https://user:tok@store.example/", Auth: "bearer", Token: "s3cret",
-				PresignSecret: "ps",
+			Media: &config.ServerMediaConfig{
+				Delivery: &config.MediaDeliveryConfig{
+					InlineLimitBytes: config.MediaSizeLimit{Default: 1024, Image: 2048},
+					AllowUploads:     true,
+				},
+				Uploads: &config.MediaUploadsConfig{URLHost: &config.StorageConfig{
+					Backend: "http", URL: "https://user:tok@store.example/", Auth: "bearer", Token: "s3cret",
+					PresignSecret: "ps",
+				}},
 			},
 			MaxBodyBytes: 1 << 21,
 		}},
@@ -195,9 +207,8 @@ func TestConfigExposesMediaStorageAndBody(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"inlineLimitBytes":{"default":1024,"image":2048}`,
-		`"expiresInSeconds":60`,
-		`"expiresAfterSeconds":120`,
-		`"storage":{"backend":"http","url":"https://store.example/"`,
+		`"allowUploads":true`,
+		`"uploads":{"urlHost":{"backend":"http","url":"https://store.example/"`,
 		`"presignSecret":{"configured":true,"redacted":true}`,
 		`"maxBodyBytes":2097152`,
 	} {

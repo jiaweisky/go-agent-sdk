@@ -23,6 +23,8 @@ models:
   - id: deepseek-flash                        # OpenAI Chat Completions
     model: deepseek-flash
     protocol: deepseek-chat
+    providerID: deepseek
+    providerFileAPI: deepseek
     modelBaseURL: https://api.deepseek.com     # + /chat/completions
     credentials:
       apiKey: ${DEEPSEEK_API_KEY:-replace-me}
@@ -33,6 +35,8 @@ models:
   - id: deepseek-flash-responses              # OpenAI Responses API
     model: deepseek-flash
     protocol: openai-responses
+    providerID: deepseek
+    providerFileAPI: deepseek
     modelBaseURL: https://api.deepseek.com     # + /responses
     credentials:
       apiKey: ${DEEPSEEK_API_KEY:-replace-me}
@@ -43,12 +47,108 @@ models:
   - id: deepseek-flash-anthropic              # Anthropic Messages API
     model: deepseek-flash
     protocol: anthropic-messages
+    providerID: deepseek-anthropic
+    providerFileAPI: deepseek-anthropic-files
     modelBaseURL: https://api.deepseek.com/anthropic  # + /messages
     credentials:
       apiKey: ${DEEPSEEK_API_KEY:-replace-me}
     inputModalities: [text, image]
     contextLimit: 1000000
     outputLimit: 384000
+
+# Reusable provider Files API profiles. A model opts in with
+# `models[].providerFileAPI`; nothing is inferred from the protocol or URL.
+# `openai` and `anthropic` profiles follow the same shape (see
+# docs/DESIGN-MEDIA-PROVIDERS.md §4.5.3).
+providerFileAPIs:
+  deepseek:
+    kind: multipart-json
+    url: https://api.deepseek.com/files
+    auth:
+      headers:
+        Authorization: "Bearer ${DEEPSEEK_API_KEY:-replace-me}"
+    fields:
+      purpose: user_data
+    idField: id
+    expiry:
+      style: expires_after
+      seconds: 86400
+    mime:
+      allowed: [image/jpeg, image/png, image/gif, image/webp]
+    limits:
+      maxBytes: 67108864
+      timeout: 10m
+
+  # OpenAI Files API contract (use a distinct name for a proxy).
+  openai:
+    kind: multipart-json
+    url: https://api.openai.com/v1/files
+    auth:
+      headers:
+        Authorization: "Bearer ${OPENAI_API_KEY:-replace-me}"
+    fields:
+      purpose: user_data
+    idField: id
+    expiry:
+      style: none
+    mime:
+      allowed:
+        - application/pdf
+        - text/plain
+        - text/markdown
+        - text/csv
+        - application/json
+        - application/msword
+        - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+        - application/vnd.ms-powerpoint
+        - application/vnd.openxmlformats-officedocument.presentationml.presentation
+        - application/vnd.ms-excel
+        - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+        - image/jpeg
+        - image/png
+        - image/gif
+        - image/webp
+    limits:
+      maxBytes: 52428800
+      timeout: 2m
+
+  # DeepSeek's optional Anthropic-compatible Files API.
+  deepseek-anthropic-files:
+    kind: multipart-json
+    url: https://api.deepseek.com/anthropic/v1/files
+    auth:
+      headers:
+        x-api-key: "${DEEPSEEK_API_KEY:-replace-me}"
+        anthropic-beta: "files-api-2025-04-14"
+    modelHeaders:
+      anthropic-beta: "files-api-2025-04-14"
+    idField: id
+    expiry:
+      style: expires_in_seconds
+      seconds: 86400
+    mime:
+      allowed: [image/jpeg, image/png, image/gif, image/webp]
+    limits:
+      maxBytes: 67108864
+      timeout: 10m
+
+  # Anthropic Files API.
+  anthropic:
+    kind: multipart-json
+    url: https://api.anthropic.com/v1/files
+    auth:
+      headers:
+        x-api-key: "${ANTHROPIC_API_KEY:-replace-me}"
+        anthropic-version: "2023-06-01"
+    idField: id
+    expiry:
+      style: expires_in_seconds
+      seconds: 86400
+    mime:
+      allowed: [application/pdf, text/plain, image/jpeg, image/png, image/gif, image/webp]
+    limits:
+      maxBytes: 524288000
+      timeout: 10m
 
 servers:
   - name: http
@@ -88,30 +188,31 @@ servers:
     #     reportToModel: true        # append "[sandbox] blocked ..." to command output
     # Each command also gets a private temp under {Root}/data/sandbox-tmp, so it
     # cannot see files or sockets another process left in the shared host temp.
-    # Inbound media delivery policy (operator-owned; see docs/DESIGN-MEDIA.md §4.12).
+    # Inbound media delivery policy (operator-owned).
     # Unset keeps the caller-declared behavior (inline-first, with a file fallback).
-    # media:
-    #   inlineLimitBytes: 262144              # size budget: over this cannot be inlined
-    #   prefer: [file, inline]                # first feasible source (url = hosted or caller URL)
-    #   upload: true                          # large media -> provider Files API (needs mediaUpload + model sources incl. file)
-    #   downsample: true                      # over budget -> shrink first, whatever source is picked next
-    #   spool: { dir: "{Root}/data/spool" }   # last resort: on disk, under the state root
-    #   maxBytes: 52428800                    # hard skip above this
-    # Provider-independent media store ({M17}); serves the model edge (url).
-    # Backends: http | local | s3 | cos. Credentials authenticate the upload;
-    # omit them for an anonymous/public origin or bucket. `s3` is S3-compatible
-    # (AWS S3 / MinIO, and COS via its S3 endpoint); the native `cos` backend
-    # drives Tencent COS over its own REST API (SHA1-signed):
-    # storage:
-    #   backend: http                         # http | local | s3 | cos
-    #   url: https://store.example/x/
-    #   auth: bearer                          # none | basic | bearer (upload)
-    #   token: ${STORE_TOKEN:-replace-me}                 # basic → username/password; or a custom header/value
-    #   presignSecret: ${NGINX_SECURE_LINK:-replace-me}   # optional: sign returned urls (nginx secure_link)
-    # storage:
-    #   backend: cos                          # http | local | s3 | cos
-    #   cos: { region: ap-guangzhou, bucket: my-bucket-1250000000,
-    #          secretID: ${COS_SECRET_ID:-replace-me}, secretKey: ${COS_SECRET_KEY:-replace-me} }
+    media:
+      delivery:
+        inlineLimitBytes: 262144              # size budget: over this cannot be inlined
+        prefer: [providerFile, inline]        # first feasible source; url is hosted or caller URL
+        allowUploads: true                    # provider Files API and/or url hosting
+        downsample: true                      # over budget -> shrink first, whatever source is picked next
+        spool: { dir: "{Root}/data/spool" }   # last resort: on disk, under the state root
+        maxBytes: 52428800                    # hard skip above this
+      uploads:
+        # Provider-independent URL host ({M17}); serves the model edge (url).
+        # Backends: http | local | s3 | cos. Credentials authenticate the upload;
+        # omit them for an anonymous/public origin or bucket. `s3` is S3-compatible
+        # (AWS S3 / MinIO, and COS via its S3 endpoint); the native `cos` backend
+        # drives Tencent COS over its own REST API (SHA1-signed).
+        urlHost:
+          backend: http                         # http | local | s3 | cos
+          url: https://store.example/x/
+          auth: bearer                          # none | basic | bearer (upload)
+          token: ${STORE_TOKEN:-replace-me}                 # basic → username/password; or a custom header/value
+          presignSecret: ${NGINX_SECURE_LINK:-replace-me}   # optional: sign returned urls (nginx secure_link)
+          # backend: cos                          # http | local | s3 | cos
+          # cos: { region: ap-guangzhou, bucket: my-bucket-1250000000,
+          #        secretID: ${COS_SECRET_ID:-replace-me}, secretKey: ${COS_SECRET_KEY:-replace-me} }
     auth:
       type: bearer
       token: ${AGENTD_TOKEN:-replace-me}

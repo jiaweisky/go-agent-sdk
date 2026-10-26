@@ -45,6 +45,10 @@ type openaiChatUserContent struct {
 	AudioURL   *openaiChatAudioURL   `json:"audio_url,omitempty"`
 	VideoURL   *openaiChatVideoURL   `json:"video_url,omitempty"`
 	FileID     *string               `json:"file_id,omitempty"`
+	File       *openaiChatFile       `json:"file,omitempty"`
+}
+type openaiChatFile struct {
+	FileID *string `json:"file_id,omitempty"`
 }
 type openaiChatImageURL struct {
 	URL    string `json:"url"`
@@ -211,14 +215,19 @@ func openaiChatLowerMedia(part schema.MediaPart, profile MediaEncodingProfile) (
 			return &openaiChatUserContent{Type: "video_url", VideoURL: &openaiChatVideoURL{URL: url}}, nil
 		}
 	}
-	// A provider file reference (DeepSeek's `file` block) is carried by id, not
-	// bytes, so it skips payload validation.
-	if source == schema.MediaSourceFile && kind == OpenAIFileBlock {
+	// A provider file reference is carried by id, not bytes, so it skips payload
+	// validation. DeepSeek uses a top-level `file_id`; OpenAI Chat nests it.
+	if source == schema.MediaSourceFile {
 		id, _ := part.Data.(string)
 		if strings.TrimSpace(id) == "" {
 			return nil, InvalidRequest("OpenAI Chat file id is empty")
 		}
-		return &openaiChatUserContent{Type: "file", FileID: &id}, nil
+		switch kind {
+		case OpenAIFileBlock:
+			return &openaiChatUserContent{Type: "file", FileID: &id}, nil
+		case OpenAIFileDocument:
+			return &openaiChatUserContent{Type: "file", File: &openaiChatFile{FileID: &id}}, nil
+		}
 	}
 	media, err := utils.ValidateMedia("OpenAI Chat", part, kind.mimeSet())
 	if err != nil {

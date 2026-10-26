@@ -66,6 +66,39 @@ func TestCopyRequiresBaseDir(t *testing.T) {
 	}
 }
 
+func TestCopyRejectsViewInsideSource(t *testing.T) {
+	src := t.TempDir()
+	_, err := Prepare(context.Background(), ProjectSpec{
+		ProjectID: "grp", WorkingDirectory: src,
+	}, IsolationSpec{Mode: ModeCopy, BaseDir: filepath.Join(src, "views")})
+	if err == nil {
+		t.Fatal("expected a view inside the source to be rejected")
+	}
+}
+
+func TestPathWithinResolvesSymlinks(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	if !pathWithin(root, filepath.Join(link, "view")) {
+		t.Fatal("a view reached through a symlinked source must count as inside")
+	}
+}
+
+func TestViewPathIsAbsolute(t *testing.T) {
+	view, err := viewPath(ProjectSpec{ProjectID: "grp"}, IsolationSpec{
+		Mode: ModeCopy, BaseDir: "relative-views",
+	})
+	if err != nil {
+		t.Fatalf("viewPath: %v", err)
+	}
+	if !filepath.IsAbs(view) {
+		t.Fatalf("view path %q is not absolute", view)
+	}
+}
+
 func TestOverlayRequiresWorkingDirectory(t *testing.T) {
 	if _, err := Prepare(context.Background(), ProjectSpec{ProjectID: "x"}, IsolationSpec{Mode: ModeOverlay}); err == nil {
 		t.Fatal("expected overlay without a working directory to be rejected")
@@ -91,7 +124,7 @@ func TestOverlayModeIsolatesAndTearsDown(t *testing.T) {
 
 	project, err := Prepare(context.Background(), ProjectSpec{
 		ProjectID: "grp", WorkingDirectory: src,
-	}, IsolationSpec{Mode: ModeOverlay, BaseDir: base, BaseReadOnly: true})
+	}, IsolationSpec{Mode: ModeOverlay, BaseDir: base})
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -111,15 +144,6 @@ func TestOverlayModeIsolatesAndTearsDown(t *testing.T) {
 	}
 }
 
-func TestOverlayRequiresReadOnlyBase(t *testing.T) {
-	_, err := Prepare(context.Background(), ProjectSpec{
-		ProjectID: "grp", WorkingDirectory: t.TempDir(),
-	}, IsolationSpec{Mode: ModeOverlay, BaseDir: t.TempDir()})
-	if err == nil {
-		t.Fatal("expected overlay without a read-only base to be rejected")
-	}
-}
-
 func TestOverlayExplicitUnsupportedCowErrors(t *testing.T) {
 	// Pick the mechanism that is NOT native to this platform.
 	mode := CowReflink
@@ -128,7 +152,7 @@ func TestOverlayExplicitUnsupportedCowErrors(t *testing.T) {
 	}
 	_, err := Prepare(context.Background(), ProjectSpec{
 		ProjectID: "grp", WorkingDirectory: t.TempDir(),
-	}, IsolationSpec{Mode: ModeOverlay, BaseDir: t.TempDir(), BaseReadOnly: true, CowMode: mode})
+	}, IsolationSpec{Mode: ModeOverlay, BaseDir: t.TempDir(), CowMode: mode})
 	if err == nil {
 		t.Fatalf("expected explicit unsupported cow mode %q to be rejected", mode)
 	}

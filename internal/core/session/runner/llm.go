@@ -101,6 +101,9 @@ type LLMRunner struct {
 	// MediaTranscode, when set, shrinks media the SDK cannot encode itself
 	// (audio/video) to fit an inline limit. Nil leaves it undecoded (soft-fail).
 	MediaTranscode func(core.MediaTranscodeRequest) (core.MediaTranscodeResult, bool)
+	// MediaFileHeaders supplies per-provider model-request headers when a
+	// request carries a provider file reference. A model's own headers win.
+	MediaFileHeaders map[schema.ProviderID]map[string]string
 	// OnMediaDecision reports each omit/upload for host metrics. Nil reports
 	// nothing.
 	OnMediaDecision   func(schema.MediaDecision)
@@ -851,6 +854,7 @@ func (r *LLMRunner) prepareTurnAttempt(
 		policy,
 		isLastStep,
 		toolMaterialization,
+		r.mediaFileHeadersFor(model, contextMessages),
 	)
 	if turnID, ok := r.currentTurn(sessionID); ok {
 		request.Metadata[RequestMetaTurnID] = string(turnID)
@@ -1047,12 +1051,18 @@ func buildTurnRequest(
 	policy mediaPolicy,
 	isLastStep bool,
 	toolMaterialization *tool.Materialization,
+	fileHeaders map[string]string,
 ) *llmschema.LLMRequest {
 	promptCacheKey := string(sessionID)
 	if sessionIDShape.MatchString(string(sessionID)) {
 		promptCacheKey = string(sessionID)[4:]
 	}
 	headers := sessionHeaders(sessionID, stored)
+	for name, value := range fileHeaders {
+		if _, exists := headers[name]; !exists {
+			headers[name] = value
+		}
+	}
 	systemParts := make([]llmschema.SystemPart, 0, 2)
 	if agent.Info != nil && agent.Info.System != nil && *agent.Info.System != "" {
 		systemParts = append(systemParts, llmschema.NewSystemPart(*agent.Info.System))
@@ -1156,14 +1166,16 @@ func mediaPolicyForModel(model route.Model, agent core.AgentSelection, mp *core.
 	}
 	var input []string
 	var forms map[string][]llmschema.MediaSource
+	var mimes []string
 	if caps := model.GetCapabilities(); caps != nil {
 		input = caps.Input
 		forms = caps.Forms
+		mimes = caps.MIMEs
 	}
 	routeName := model.Route.ID
 	return mediaPolicy{reason: func(role, mime, source, data string) string {
 		src := llmschema.MediaSource(source)
-		if reason := mediaFeasibilityReason(entry.Media, input, forms, role, mime, src); reason != "" {
+		if reason := mediaFeasibilityReason(entry.Media, input, forms, mimes, role, mime, src); reason != "" {
 			return reason
 		}
 		if reason := policyGateReason(mp, src, mediaModality(strings.ToLower(mime)), data); reason != "" {
@@ -1226,9 +1238,12 @@ func policyGateReason(mp *core.MediaPolicy, src llmschema.MediaSource, modality,
 // constraints, and the protocol's role constraint, but not the payload. It is
 // the single feasibility predicate shared by the turn planner and the
 // inline-to-file adaptation loop.
-func mediaFeasibilityReason(support protocols.ProtocolMediaSupport, modelInput []string, modelForms map[string][]llmschema.MediaSource, role, mime string, source llmschema.MediaSource) string {
+func mediaFeasibilityReason(support protocols.ProtocolMediaSupport, modelInput []string, modelForms map[string][]llmschema.MediaSource, modelMIMEs []string, role, mime string, source llmschema.MediaSource) string {
 	lower := strings.ToLower(mime)
 	if !support.AllowsMIME(lower) {
+		return string(schema.AttachmentOmitUnsupportedType)
+	}
+	if len(modelMIMEs) > 0 && !slices.ContainsFunc(modelMIMEs, func(m string) bool { return strings.EqualFold(m, lower) }) {
 		return string(schema.AttachmentOmitUnsupportedType)
 	}
 	// The model's input modalities use the text|image|audio|video|pdf taxonomy …
@@ -1249,6 +1264,80 @@ func mediaFeasibilityReason(support protocols.ProtocolMediaSupport, modelInput [
 		return string(schema.AttachmentOmitUnsupportedRole)
 	}
 	return ""
+}
+
+// mediaFileHeadersFor returns the provider file-reference headers for a request,
+// but only when the context actually carries a provider file reference. A
+// model's own request headers win on a duplicate key.
+func (r *LLMRunner) mediaFileHeadersFor(model route.Model, messages []schema.SessionMessage) map[string]string {
+	configured := r.MediaFileHeaders[schema.ProviderID(model.ProviderID())]
+	if len(configured) == 0 || !messagesUseFileRef(messages) {
+		return nil
+	}
+	headers := make(map[string]string, len(configured))
+	for name, value := range configured {
+		if _, exists := model.Route.Defaults.Headers[name]; exists {
+			continue
+		}
+		headers[name] = value
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
+}
+
+func messagesUseFileRef(messages []schema.SessionMessage) bool {
+	for _, message := range messages {
+		switch value := message.(type) {
+		case schema.SessionMessageUser:
+			if filesUseFileRef(value.Files) {
+				return true
+			}
+		case schema.SessionMessageAssistant:
+			for _, content := range value.Content {
+				if toolUsesFileRef(content) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func toolUsesFileRef(content schema.SessionMessageAssistantContent) bool {
+	tool, ok := content.(schema.SessionMessageAssistantTool)
+	if !ok {
+		return false
+	}
+	switch state := tool.State.(type) {
+	case schema.SessionMessageToolStateRunning:
+		return toolContentUsesFileRef(state.Content)
+	case schema.SessionMessageToolStateCompleted:
+		return filesUseFileRef(state.Attachments) || toolContentUsesFileRef(state.Content)
+	case schema.SessionMessageToolStateError:
+		return toolContentUsesFileRef(state.Content)
+	default:
+		return false
+	}
+}
+
+func toolContentUsesFileRef(content schema.ToolContents) bool {
+	for _, item := range content {
+		if file, ok := item.(schema.ToolFileContent); ok && file.FileID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func filesUseFileRef(files []schema.PromptFileAttachment) bool {
+	for _, file := range files {
+		if file.FileID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // adaptMedia adapts a turn's inbound attachments: the operator delivery policy
@@ -1291,35 +1380,51 @@ func (r *LLMRunner) mediaAdapterFor(model route.Model, policy *core.MediaPolicy)
 	}
 	var input []string
 	var forms map[string][]llmschema.MediaSource
+	var mimes []string
 	if caps := model.GetCapabilities(); caps != nil {
 		input = caps.Input
 		forms = caps.Forms
+		mimes = caps.MIMEs
+	}
+	var uploadCaps schema.MediaCapabilities
+	if reporter, ok := uploader.(schema.MediaCapabilityReporter); ok {
+		uploadCaps = reporter.MediaCapabilities()
+	}
+	storeCaps := schema.StoreCapabilities{Fetchable: true}
+	if reporter, ok := r.MediaStore.(schema.MediaStoreCapabilityReporter); ok {
+		storeCaps = reporter.StoreCapabilities()
 	}
 	return mediaAdapter{
-		runner:    r,
-		entry:     entry,
-		provider:  provider,
-		input:     input,
-		forms:     forms,
-		uploader:  uploader,
-		store:     r.MediaStore,
-		policy:    policy,
-		transcode: r.MediaTranscode,
+		runner:     r,
+		entry:      entry,
+		provider:   provider,
+		input:      input,
+		forms:      forms,
+		mimes:      mimes,
+		uploader:   uploader,
+		uploadCaps: uploadCaps,
+		store:      r.MediaStore,
+		storeCaps:  storeCaps,
+		policy:     policy,
+		transcode:  r.MediaTranscode,
 	}, true
 }
 
 // mediaAdapter carries the per-turn invariants the inbound media adaptation
 // needs, so each attachment is handled without re-deriving them.
 type mediaAdapter struct {
-	runner    *LLMRunner
-	entry     protocols.ProtocolEntry
-	provider  schema.ProviderID
-	input     []string
-	forms     map[string][]llmschema.MediaSource
-	uploader  schema.MediaUploader
-	store     schema.MediaStore
-	policy    *core.MediaPolicy
-	transcode func(core.MediaTranscodeRequest) (core.MediaTranscodeResult, bool)
+	runner     *LLMRunner
+	entry      protocols.ProtocolEntry
+	provider   schema.ProviderID
+	input      []string
+	forms      map[string][]llmschema.MediaSource
+	mimes      []string
+	uploader   schema.MediaUploader
+	uploadCaps schema.MediaCapabilities
+	store      schema.MediaStore
+	storeCaps  schema.StoreCapabilities
+	policy     *core.MediaPolicy
+	transcode  func(core.MediaTranscodeRequest) (core.MediaTranscodeResult, bool)
 }
 
 // adaptUserMessage adapts a user message's byte-backed attachments to the
@@ -1383,7 +1488,7 @@ func (a mediaAdapter) adaptFallback(ctx context.Context, sessionID schema.Sessio
 	if a.modelAllowsSource(file.Mime, llmschema.MediaSourceInline) {
 		return file
 	}
-	if !a.modelAllowsSource(file.Mime, llmschema.MediaSourceFile) {
+	if !a.modelAllowsSource(file.Mime, llmschema.MediaSourceFile) || !a.mediaAllowed(a.uploadCaps, file.Mime, data) {
 		return file
 	}
 	uploaded, _ := a.upload(ctx, sessionID, file, data)
@@ -1413,13 +1518,13 @@ func (a mediaAdapter) adaptPolicy(ctx context.Context, sessionID schema.SessionI
 	for _, prefer := range a.policy.PreferredSources() {
 		switch prefer {
 		case core.MediaPolicySourceURL:
-			if a.urlHostable(file) {
+			if a.urlHostable(file, data) {
 				if hosted, ok := a.hostURL(ctx, sessionID, file, data); ok {
 					return hosted, ""
 				}
 			}
 		case core.MediaPolicySourceFile:
-			if a.uploadable(file) {
+			if a.uploadable(file, data) {
 				if uploaded, ok := a.upload(ctx, sessionID, file, data); ok {
 					return &uploaded, ""
 				}
@@ -1434,12 +1539,6 @@ func (a mediaAdapter) adaptPolicy(ctx context.Context, sessionID schema.SessionI
 		return a.spool(sessionID, file, data)
 	}
 	return &file, ""
-}
-
-// urlHostable reports whether the policy may host the payload as a url: upload
-// enabled, a store present, and the url source feasible for the model.
-func (a mediaAdapter) urlHostable(file schema.PromptFileAttachment) bool {
-	return a.policy.Upload && a.store != nil && a.modelAllowsSource(file.Mime, llmschema.MediaSourceURL)
 }
 
 // hostURL uploads the payload to the provider-independent store and rewrites the
@@ -1462,14 +1561,32 @@ func (a mediaAdapter) hostURL(ctx context.Context, sessionID schema.SessionID, f
 // modelAllowsSource reports whether the model and protocol can carry a MIME
 // from a source in the user role.
 func (a mediaAdapter) modelAllowsSource(mime string, source llmschema.MediaSource) bool {
-	return mediaFeasibilityReason(a.entry.Media, a.input, a.forms, "user", mime, source) == ""
+	return mediaFeasibilityReason(a.entry.Media, a.input, a.forms, a.mimes, "user", mime, source) == ""
 }
 
 // uploadable reports whether the policy may adapt the attachment to a provider
-// file reference: upload enabled, an uploader present, and the file source
-// feasible for the model.
-func (a mediaAdapter) uploadable(file schema.PromptFileAttachment) bool {
-	return a.policy.Upload && a.uploader != nil && a.modelAllowsSource(file.Mime, llmschema.MediaSourceFile)
+// file reference: upload enabled, an uploader present, the file source feasible
+// for the model, and the provider's media limits satisfied.
+func (a mediaAdapter) uploadable(file schema.PromptFileAttachment, data []byte) bool {
+	return a.policy.Upload && a.uploader != nil &&
+		a.mediaAllowed(a.uploadCaps, file.Mime, data) &&
+		a.modelAllowsSource(file.Mime, llmschema.MediaSourceFile)
+}
+
+// urlHostable reports whether the policy may host the payload as a url: upload
+// enabled, a fetchable store present, the url source feasible for the model,
+// and the store's limits satisfied.
+func (a mediaAdapter) urlHostable(file schema.PromptFileAttachment, data []byte) bool {
+	return a.policy.Upload && a.store != nil && a.storeCaps.Fetchable &&
+		a.mediaAllowed(schema.MediaCapabilities{MIMEs: a.storeCaps.MIMEs, MaxBytes: a.storeCaps.MaxBytes}, file.Mime, data) &&
+		a.modelAllowsSource(file.Mime, llmschema.MediaSourceURL)
+}
+
+func (a mediaAdapter) mediaAllowed(caps schema.MediaCapabilities, mime string, data []byte) bool {
+	if len(caps.MIMEs) > 0 && !slices.ContainsFunc(caps.MIMEs, func(m string) bool { return strings.EqualFold(m, mime) }) {
+		return false
+	}
+	return caps.MaxBytes <= 0 || int64(len(data)) <= caps.MaxBytes
 }
 
 // modality maps a MIME to the policy's modality key.
@@ -1510,7 +1627,7 @@ func (a mediaAdapter) inlineFits(data []byte, mime string) bool {
 // Uploads are deduplicated by content hash; a cached ref is reused until it
 // expires.
 func (a mediaAdapter) upload(ctx context.Context, sessionID schema.SessionID, file schema.PromptFileAttachment, data []byte) (schema.PromptFileAttachment, bool) {
-	if a.uploader == nil {
+	if a.uploader == nil || !a.mediaAllowed(a.uploadCaps, file.Mime, data) {
 		return file, false
 	}
 	key := mediaCacheKey(a.provider, file.Mime, data)

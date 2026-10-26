@@ -17,6 +17,7 @@ func TestOpenAIChatMediaProfiles(t *testing.T) {
 		{"image inline", openAIChatProfile, media(schema.MediaSourceInline, "image/png", ""), "image_url", false},
 		{"image url", openAIChatProfile, media(schema.MediaSourceURL, "image/png", "https://x/a.png"), "image_url", false},
 		{"openai audio inline", openAIChatProfile, media(schema.MediaSourceInline, "audio/wav", ""), "input_audio", false},
+		{"openai pdf file", openAIChatProfile, media(schema.MediaSourceFile, "application/pdf", ""), "file", false},
 		{"openai video unsupported", openAIChatProfile, media(schema.MediaSourceInline, "video/mp4", ""), "", true},
 		{"vllm audio inline", openAICompatibleProfile, media(schema.MediaSourceInline, "audio/wav", ""), "input_audio", false},
 		{"vllm audio url", openAICompatibleProfile, media(schema.MediaSourceURL, "audio/wav", "https://x/a.wav"), "audio_url", false},
@@ -51,9 +52,12 @@ func TestOpenAIChatMediaProfiles(t *testing.T) {
 // media builds a MediaPart; data is a URL string for url sources, else bytes.
 func media(source schema.MediaSource, mime string, url string) schema.MediaPart {
 	part := schema.MediaPart{Type: "media", MediaType: mime, Source: source}
-	if source == schema.MediaSourceURL {
+	switch source {
+	case schema.MediaSourceURL:
 		part.Data = url
-	} else {
+	case schema.MediaSourceFile:
+		part.Data = "file-id-123"
+	default:
 		part.Data = []byte{0, 1, 2, 3}
 	}
 	return part
@@ -109,5 +113,18 @@ func TestDescriptorMIMEsMatchProfiles(t *testing.T) {
 	}
 	if !compatible.Media.AllowsMIME("video/mp4") || !compatible.Media.AllowsMIME("audio/wav") {
 		t.Fatal("openai-compatible-chat descriptor should carry audio and video")
+	}
+}
+
+func TestOpenAIChatFileDocumentShape(t *testing.T) {
+	content, err := openaiChatLowerMedia(media(schema.MediaSourceFile, "application/pdf", ""), openAIChatProfile)
+	if err != nil {
+		t.Fatalf("lower pdf: %v", err)
+	}
+	if content.Type != "file" || content.File == nil || content.File.FileID == nil || *content.File.FileID != "file-id-123" {
+		t.Fatalf("pdf file content = %+v", content)
+	}
+	if content.FileID != nil {
+		t.Fatalf("OpenAI Chat document must nest file_id, got top-level %q", *content.FileID)
 	}
 }

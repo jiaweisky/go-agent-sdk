@@ -7,8 +7,11 @@ import "errors"
 // decoding, so it may reference environment variables explicitly (`$VAR` /
 // `${VAR}` / `${VAR:-default}`); none are read implicitly.
 type Config struct {
-	Models  []ModelConfig `yaml:"models"`
-	Servers []Server      `yaml:"servers"`
+	Models []ModelConfig `yaml:"models"`
+	// ProviderFileAPIs are reusable provider Files API configurations referenced
+	// by models[].providerFileAPI.
+	ProviderFileAPIs map[string]*ProviderFileAPI `yaml:"providerFileAPIs"`
+	Servers          []Server                    `yaml:"servers"`
 	// Control, when set, exposes a control API that creates and destroys
 	// isolated project instances at runtime.
 	Control *ControlConfig `yaml:"control"`

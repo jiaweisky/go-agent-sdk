@@ -23,6 +23,11 @@ func IsLoopback(listen string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// NormalizeListenAddress removes case, IP-literal and numeric-port formatting
+// that do not change the bound address. It does not unify wildcard hosts
+// (":8080" vs "0.0.0.0:8080") or resolve DNS aliases.
+func NormalizeListenAddress(listen string) string { return normalizeListenAddress(listen) }
+
 // normalizeListenAddress removes case, IP-literal and numeric-port formatting
 // that do not change the bound address. It does not resolve DNS aliases.
 func normalizeListenAddress(listen string) string {

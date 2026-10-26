@@ -1593,3 +1593,65 @@ func TestRequestTooLargeExplainsLimit(t *testing.T) {
 		t.Fatalf("message = %q, want the limit", body.Message)
 	}
 }
+
+func TestAgentAllowListAppliesToExistingSessions(t *testing.T) {
+	client := newTestClient(t)
+	handle, err := client.CreateSession(context.Background(), &agent.SessionConfig{Agent: "build"})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	id := string(handle.ID())
+	_ = handle.Close()
+
+	srv, err := New(context.Background(), client, Options{Agents: []string{"plan"}})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/api/session/" + id + "/prompt", `{"prompt":"hi"}`},
+		{http.MethodPost, "/api/session/" + id + "/title", `{"title":"blocked"}`},
+	} {
+		resp := doJSON(t, tc.method, ts.URL+tc.path, tc.body, nil)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s %s status = %d, want 403", tc.method, tc.path, resp.StatusCode)
+		}
+	}
+}
+
+func TestFailedAttachDoesNotLeakSessionEntry(t *testing.T) {
+	srv, err := New(context.Background(), newTestClient(t), Options{})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/session/ses_missing/title", strings.NewReader(`{"title":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+
+	srv.mu.Lock()
+	n := len(srv.entries)
+	srv.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("entries = %d, want 0 after a failed attach", n)
+	}
+}
+
+func TestNewRejectsNilContext(t *testing.T) {
+	if _, err := New(nil, newTestClient(t), Options{}); err == nil {
+		t.Fatal("nil context should be rejected")
+	}
+}

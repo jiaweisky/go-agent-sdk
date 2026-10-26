@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -141,5 +142,24 @@ func TestLoadAllowsLeadingDocumentMarker(t *testing.T) {
 	var cfg Config
 	if err := Load(writeTempConfig(t, "---\nmodels: []\n"), &cfg); err != nil {
 		t.Fatalf("load: %v", err)
+	}
+}
+
+func TestLoadRejectsLegacyMediaUpload(t *testing.T) {
+	path := writeTempConfig(t, `
+models:
+  - id: m
+    model: m
+    protocol: openai-compatible-chat
+servers:
+  - name: s
+    kind: http
+    root: /tmp/s
+    mediaUpload: { url: https://up.example }
+`)
+	var cfg Config
+	err := Load(path, &cfg)
+	if err == nil || !strings.Contains(err.Error(), "mediaUpload") {
+		t.Fatalf("legacy mediaUpload should be rejected, got %v", err)
 	}
 }

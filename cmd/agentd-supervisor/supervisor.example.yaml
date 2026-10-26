@@ -20,7 +20,6 @@ project:                                  # template cloned for each acquired pr
   isolation:                              # ignored for read-only conversations (shared source)
     mode: worktree                        # none | copy | worktree | overlay
     baseDir: /var/lib/agentd/views
-    baseReadOnly: true
   # sandbox:                              # optional command sandbox for the instance's tools
   #   wrapper: seatbelt                   # none (default) | bwrap | seatbelt | appcontainer
   #   failurePolicy: fail-closed          # fail-closed (default) | fail-open
