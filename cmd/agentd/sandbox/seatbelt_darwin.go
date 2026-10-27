@@ -61,14 +61,18 @@ func seatbeltProcessProfile(policy Policy) string {
 func writeSeatbeltProfile(dirs []string, policy Policy, perCommand bool) string {
 	var profile strings.Builder
 	profile.WriteString("(version 1)(allow default)")
+
 	if perCommand && policy.NetworkMode == NetworkNoEgress {
 		profile.WriteString(seatbeltNetworkDeny())
 	}
+
 	profile.WriteString(seatbeltWriteRules(dirs, policy))
 	profile.WriteString(seatbeltReadRules(dirs, policy))
+
 	if perCommand && policy.DenyProcessInfo {
 		profile.WriteString(seatbeltProcessInfoDeny())
 	}
+
 	return profile.String()
 }
 
@@ -91,8 +95,10 @@ func seatbeltWriteRules(dirs []string, policy Policy) string {
 	if policy.WriteMode != FSModeAllow {
 		return ""
 	}
+
 	roots := append(append([]string{}, dirs...), policy.WriteRoots()...)
 	roots = append(roots, policy.SocketPaths()...)
+
 	return "(deny file-write*)(allow file-write* " + seatbeltClauses(dedupe(roots)) + ")" +
 		seatbeltDenies("file-write*", policy.DeniedWrite())
 }
@@ -104,10 +110,12 @@ func seatbeltReadRules(dirs []string, policy Policy) string {
 		// read: off means no read confinement; no credential masks either.
 		return ""
 	}
+
 	// Deny broad regions (home, /etc), then re-allow the project and any
 	// explicitly allowed paths. System run-time paths are never denied.
 	roots := append(append([]string{}, dirs...), policy.ReallowReadRoots()...)
 	roots = append(roots, policy.SocketPaths()...)
+
 	return seatbeltDenies("file-read*", policy.DenyReadRegions()) +
 		"(allow file-read* " + seatbeltClauses(dedupe(roots)) + ")" +
 		seatbeltDenies("file-read*", policy.DeniedRead())
@@ -116,33 +124,42 @@ func seatbeltReadRules(dirs []string, policy Policy) string {
 // seatbeltClauses renders a list of paths as `(subpath "...")` clauses.
 func seatbeltClauses(paths []string) string {
 	var b strings.Builder
+
 	for _, path := range paths {
 		if path == "" {
 			continue
 		}
+
 		if resolved, err := filepath.EvalSymlinks(path); err == nil {
 			path = resolved
 		}
+
 		fmt.Fprintf(&b, "(subpath %q)", path)
 	}
+
 	return b.String()
 }
 
 // seatbeltDenies renders deny rules: globs become regexes, literals subpaths.
 func seatbeltDenies(kind string, patterns []string) string {
 	var b strings.Builder
+
 	for _, pattern := range patterns {
 		if pattern == "" {
 			continue
 		}
+
 		if strings.ContainsAny(pattern, "*?[") {
 			fmt.Fprintf(&b, "(deny %s (regex %q))", kind, globRegex(pattern))
 			continue
 		}
+
 		if resolved, err := filepath.EvalSymlinks(pattern); err == nil {
 			pattern = resolved
 		}
+
 		fmt.Fprintf(&b, "(deny %s (subpath %q))", kind, pattern)
 	}
+
 	return b.String()
 }

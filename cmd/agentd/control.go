@@ -59,6 +59,7 @@ func newProjectManager(ctx context.Context, registry config.ModelRegistry, contr
 	if projectListen == "" {
 		projectListen = "127.0.0.1:0"
 	}
+
 	return &projectManager{
 		ctx:           ctx,
 		registry:      registry,
@@ -81,20 +82,25 @@ func (m *projectManager) Start(req config.ProjectRequest) (*controlInstance, err
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
+
 	root, err := filepath.Abs(req.Root)
 	if err != nil {
 		return nil, fmt.Errorf("root: %w", err)
 	}
+
 	shared, err := m.reserve(req, root)
 	if err != nil || shared != nil {
 		return shared, err
 	}
+
 	instance, err := m.prepare(req, root)
 	if err != nil {
 		m.release(req.Name, root)
 		return nil, err
 	}
+
 	m.register(req.Name, instance)
+
 	return instance, nil
 }
 
@@ -105,24 +111,31 @@ func (m *projectManager) Start(req config.ProjectRequest) (*controlInstance, err
 func (m *projectManager) reserve(req config.ProjectRequest, root string) (*controlInstance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	if existing := m.instances[req.Name]; existing != nil {
 		if req.Readonly && existing.readonly {
 			existing.readers++
 			return existing, nil
 		}
+
 		return nil, fmt.Errorf("project %q already exists", req.Name)
 	}
+
 	if m.reserved[req.Name] {
 		return nil, fmt.Errorf("project %q is being created", req.Name)
 	}
+
 	if owner, taken := m.roots[root]; taken {
 		return nil, fmt.Errorf("root %q is already in use by project %q", root, owner)
 	}
+
 	if m.maxLeases > 0 && len(m.instances)+len(m.reserved) >= m.maxLeases {
 		return nil, fmt.Errorf("lease limit reached (%d)", m.maxLeases)
 	}
+
 	m.reserved[req.Name] = true
 	m.roots[root] = req.Name
+
 	return nil, nil
 }
 
@@ -147,11 +160,14 @@ func (m *projectManager) register(name string, instance *controlInstance) {
 // nothing.
 func (m *projectManager) prepare(req config.ProjectRequest, root string) (*controlInstance, error) {
 	server := req.ToServer(root)
+
 	registry, err := m.registry.Subset(server.Models, server.DefaultModel)
 	if err != nil {
 		return nil, err
 	}
+
 	source := server.WorkingDirectory
+
 	project, err := m.runner.Prepare(m.ctx, projectSpec(server), isolationSpec(server))
 	if err != nil {
 		return nil, err
@@ -163,24 +179,29 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 		m.teardown(project)
 		return nil, fmt.Errorf("project %q: %w", req.Name, err)
 	}
+
 	fileHeaders := mediaFileHeadersFor(server, m.models, m.profiles)
 	baseDirs := append(m.activeBaseDirs(), isolationBaseDirs([]config.Server{server})...)
+
 	client, err := buildClient(m.ctx, server, registry, uploader, fileHeaders, isolationExcludes(source, baseDirs))
 	if err != nil {
 		m.teardown(project)
 		return nil, err
 	}
+
 	ctx, cancel := context.WithCancel(m.ctx)
 	builtSrv, err := buildServer(ctx, server, client, registry, uploader)
 	if err != nil {
 		m.abandon(project, client, cancel)
 		return nil, err
 	}
+
 	ln, err := net.Listen("tcp", m.projectListen)
 	if err != nil {
 		m.abandon(project, client, cancel)
 		return nil, fmt.Errorf("bind project listener: %w", err)
 	}
+
 	srv := &http.Server{Handler: newRouter([]*builtServer{builtSrv}, nil, nil), ReadHeaderTimeout: 10 * time.Second}
 	instance := &controlInstance{
 		id:               req.Name,
@@ -196,10 +217,12 @@ func (m *projectManager) prepare(req config.ProjectRequest, root string) (*contr
 		client:           client,
 		teardown:         project.Teardown,
 	}
+
 	go func() {
 		_ = serve(ctx, srv, ln, nil, builtSrv.closeStreams)
 		close(instance.done)
 	}()
+
 	return instance, nil
 }
 
@@ -214,26 +237,32 @@ func (m *projectManager) Stop(id string) bool {
 // shared read-only instance is always torn down).
 func (m *projectManager) stop(id string, force bool) bool {
 	m.mu.Lock()
+
 	instance, ok := m.instances[id]
 	if !ok {
 		m.mu.Unlock()
 		return false
 	}
+
 	if !force && instance.readonly && instance.readers > 1 {
 		instance.readers--
 		m.mu.Unlock()
 		return true
 	}
+
 	delete(m.instances, id)
 	delete(m.roots, instance.root)
 	m.mu.Unlock()
+
 	instance.cancel()
 	select {
 	case <-instance.done:
 	case <-time.After(shutdownTimeout):
 	}
+
 	_ = instance.client.Close()
 	m.teardown(isolation.IsolatedProject{Teardown: instance.teardown})
+
 	return true
 }
 
@@ -241,10 +270,12 @@ func (m *projectManager) stop(id string, force bool) bool {
 func (m *projectManager) List() []*controlInstance {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	out := make([]*controlInstance, 0, len(m.instances))
 	for _, instance := range m.instances {
 		out = append(out, instance)
 	}
+
 	return out
 }
 
@@ -253,12 +284,14 @@ func (m *projectManager) List() []*controlInstance {
 func (m *projectManager) activeBaseDirs() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	var dirs []string
 	for _, instance := range m.instances {
 		if instance.baseDir != "" {
 			dirs = append(dirs, instance.baseDir)
 		}
 	}
+
 	return dirs
 }
 
@@ -281,6 +314,7 @@ func (m *projectManager) teardown(project isolation.IsolatedProject) {
 	if project.Teardown == nil {
 		return
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	_ = project.Teardown(ctx)
@@ -294,10 +328,12 @@ type controlHandler struct {
 
 func newControlHandler(manager *projectManager, auth *config.AuthConfig) http.Handler {
 	handler := &controlHandler{manager: manager, auth: auth}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/projects", handler.list)
 	mux.HandleFunc("POST /admin/projects", handler.create)
 	mux.HandleFunc("DELETE /admin/projects/{id...}", handler.delete)
+
 	return mux
 }
 
@@ -305,9 +341,11 @@ func (h *controlHandler) authorized(r *http.Request) bool {
 	if h.auth == nil {
 		return true
 	}
+
 	if h.auth.Token == "" {
 		return false
 	}
+
 	return constEq(bearerToken(r), h.auth.Token)
 }
 
@@ -316,6 +354,7 @@ func (h *controlHandler) list(w http.ResponseWriter, r *http.Request) {
 		writeControlError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+
 	type item struct {
 		ProjectID        string `json:"project_id"`
 		Kind             string `json:"kind"`
@@ -323,6 +362,7 @@ func (h *controlHandler) list(w http.ResponseWriter, r *http.Request) {
 		WorkingDirectory string `json:"working_directory"`
 		Readonly         bool   `json:"readonly"`
 	}
+
 	instances := h.manager.List()
 	items := make([]item, 0, len(instances))
 	for _, instance := range instances {
@@ -334,6 +374,7 @@ func (h *controlHandler) list(w http.ResponseWriter, r *http.Request) {
 			Readonly:         instance.readonly,
 		})
 	}
+
 	writeJSONStatus(w, http.StatusOK, map[string]any{"data": items})
 }
 
@@ -342,16 +383,19 @@ func (h *controlHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeControlError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+
 	var req config.ProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeControlError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+
 	instance, err := h.manager.Start(req)
 	if err != nil {
 		writeControlError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"data": map[string]any{
 		"project_id":        instance.id,
 		"kind":              instance.kind,
@@ -367,10 +411,12 @@ func (h *controlHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeControlError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+
 	if !h.manager.Stop(r.PathValue("id")) {
 		writeControlError(w, http.StatusNotFound, "no such project")
 		return
 	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -64,6 +64,7 @@ func NewContext(ctx context.Context, p Params) (*agent.Client, error) {
 	if err := config.ValidateA2APeers(p.Peers); err != nil {
 		return nil, err
 	}
+
 	if len(p.ModelRegistry.IDs()) == 0 {
 		return nil, fmt.Errorf("model registry has no models")
 	}
@@ -92,6 +93,7 @@ func NewContext(ctx context.Context, p Params) (*agent.Client, error) {
 	if p.SubagentDepth > 0 {
 		opts.SubagentDepth = p.SubagentDepth
 	}
+
 	if p.TitleAuto {
 		auto := true
 		opts.Title = &agent.TitleConfig{Auto: &auto}
@@ -106,6 +108,7 @@ func NewContext(ctx context.Context, p Params) (*agent.Client, error) {
 		_ = client.Close()
 		return nil, err
 	}
+
 	return client, nil
 }
 
@@ -116,6 +119,7 @@ func MCPConfigs(servers []config.MCPServer) ([]agent.MCPConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -137,6 +141,7 @@ func MCPConfigs(servers []config.MCPServer) ([]agent.MCPConfig, error) {
 			},
 		})
 	}
+
 	return result, nil
 }
 

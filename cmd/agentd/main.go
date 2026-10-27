@@ -38,12 +38,15 @@ func runMain(args []string) error {
 	if err := config.Load(fl.config, &cfg); err != nil {
 		return err
 	}
+
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+
 	for _, line := range config.MediaSummary(cfg) {
 		fmt.Fprintln(os.Stderr, line)
 	}
+
 	for _, warning := range config.MediaWarnings(cfg) {
 		fmt.Fprintf(os.Stderr, "agentd: warning: %s\n", warning)
 	}
@@ -62,5 +65,6 @@ func runMain(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
 	return run(ctx, cfg, &introspectDoc{config: cfg, path: fl.config, version: version})
 }

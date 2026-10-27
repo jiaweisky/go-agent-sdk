@@ -131,12 +131,15 @@ func prepareCopy(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Isolate
 	if err != nil {
 		return IsolatedProject{}, err
 	}
+
 	if pathWithin(p.WorkingDirectory, view) {
 		return IsolatedProject{}, fmt.Errorf("copy view %s must be outside the working directory %s", view, p.WorkingDirectory)
 	}
+
 	if err := ensureViewAbsent(view); err != nil {
 		return IsolatedProject{}, err
 	}
+
 	if err := os.MkdirAll(filepath.Dir(view), 0o755); err != nil {
 		return IsolatedProject{}, err
 	}
@@ -144,10 +147,12 @@ func prepareCopy(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Isolate
 	if err := ctx.Err(); err != nil {
 		return IsolatedProject{}, err
 	}
+
 	if err := os.CopyFS(view, os.DirFS(p.WorkingDirectory)); err != nil {
 		_ = os.RemoveAll(view)
 		return IsolatedProject{}, fmt.Errorf("copy project: %w", err)
 	}
+
 	if err := ctx.Err(); err != nil {
 		_ = os.RemoveAll(view)
 		return IsolatedProject{}, err
@@ -172,9 +177,11 @@ func prepareWorktree(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Iso
 	if err != nil {
 		return IsolatedProject{}, err
 	}
+
 	if err := ensureViewAbsent(view); err != nil {
 		return IsolatedProject{}, err
 	}
+
 	if err := os.MkdirAll(filepath.Dir(view), 0o755); err != nil {
 		return IsolatedProject{}, err
 	}
@@ -184,6 +191,7 @@ func prepareWorktree(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Iso
 	if ref := strings.TrimSpace(iso.BaseRef); ref != "" {
 		args = append(args, ref)
 	}
+
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(view)
@@ -218,12 +226,15 @@ func prepareCow(ctx context.Context, p ProjectSpec, iso IsolationSpec) (Isolated
 	if err != nil {
 		return IsolatedProject{}, err
 	}
+
 	if pathWithin(p.WorkingDirectory, view) {
 		return IsolatedProject{}, fmt.Errorf("cow view %s must be outside the working directory %s", view, p.WorkingDirectory)
 	}
+
 	if err := ensureViewAbsent(view); err != nil {
 		return IsolatedProject{}, err
 	}
+
 	if err := os.MkdirAll(view, 0o755); err != nil {
 		return IsolatedProject{}, err
 	}
@@ -256,12 +267,15 @@ func cowCopy(ctx context.Context, src, dst, mode string) error {
 		if explicit {
 			return fmt.Errorf("copy-on-write mode %q is not available on %s", mode, runtime.GOOS)
 		}
+
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
 		if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
 			return err
 		}
+
 		return ctx.Err()
 	}
 
@@ -269,10 +283,12 @@ func cowCopy(ctx context.Context, src, dst, mode string) error {
 	// Note: build the trailing "/." by hand; filepath.Join would clean it away.
 	contents := src + string(filepath.Separator) + "."
 	args := append(flags, contents, dst)
+
 	cmd := exec.CommandContext(ctx, "cp", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("cp (%s): %w: %s", mode, err, strings.TrimSpace(string(out)))
 	}
+
 	return nil
 }
 
@@ -310,6 +326,7 @@ func ensureViewAbsent(view string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+
 	return nil
 }
 
@@ -329,6 +346,7 @@ func viewPath(p ProjectSpec, iso IsolationSpec) (string, error) {
 	if id == "" {
 		return "", errors.New("isolation requires a project id")
 	}
+
 	component := SanitizeComponent(id)
 	if component == "" {
 		return "", fmt.Errorf("isolation project id %q is not usable as a path element", p.ProjectID)
@@ -338,6 +356,7 @@ func viewPath(p ProjectSpec, iso IsolationSpec) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve isolation base directory: %w", err)
 	}
+
 	return filepath.Join(base, component), nil
 }
 
@@ -349,6 +368,7 @@ func pathWithin(root, path string) bool {
 	if err != nil {
 		return false
 	}
+
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return false
@@ -364,10 +384,12 @@ func pathWithin(root, path string) bool {
 	if err != nil {
 		return false
 	}
+
 	for p := canonPath; ; p = filepath.Dir(p) {
 		if info, err := os.Stat(p); err == nil && os.SameFile(rootInfo, info) {
 			return true
 		}
+
 		parent := filepath.Dir(p)
 		if parent == p {
 			return false
@@ -381,6 +403,7 @@ func canonicalPath(path string) string {
 	if err != nil {
 		abs = path
 	}
+
 	abs = filepath.Clean(abs)
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		return resolved
@@ -392,8 +415,10 @@ func canonicalPath(path string) string {
 		if parent == dir {
 			return abs
 		}
+
 		rest = filepath.Join(filepath.Base(dir), rest)
 		dir = parent
+
 		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 			return filepath.Join(resolved, rest)
 		}
@@ -407,5 +432,6 @@ func lexicalWithin(root, path string) bool {
 	if err != nil {
 		return false
 	}
+
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }

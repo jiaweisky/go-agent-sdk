@@ -18,16 +18,20 @@ import (
 // resolved AgentExpose, inheriting the public card's model-derived fields.
 func a2aExtendedCards(cards map[string]config.CardConfig, exposed []schema.AgentInfo) map[schema.AgentID]schema.AgentExpose {
 	out := map[schema.AgentID]schema.AgentExpose{}
+
 	for _, info := range exposed {
 		if info.Expose == nil {
 			continue
 		}
+
 		card, ok := cards[string(info.ID)]
 		if !ok || card.Extended == nil {
 			continue
 		}
+
 		out[info.ID] = agentdclient.ExtendedExposeFrom(*info.Expose, card)
 	}
+
 	return out
 }
 
@@ -36,10 +40,12 @@ func a2aPushOptions(p *config.PushNotificationsConfig) (*a2aserver.PushNotificat
 	if !p.IsEnabled() {
 		return nil, nil
 	}
+
 	timeout, err := config.ParseOptionalDuration(p.Timeout)
 	if err != nil {
 		return nil, fmt.Errorf("pushNotifications.timeout: %w", err)
 	}
+
 	return &a2aserver.PushNotificationsConfig{
 		Timeout:              timeout,
 		AllowPrivateNetworks: p.AllowPrivateNetworks,
@@ -52,10 +58,12 @@ func a2aSigningOptions(s *config.SigningConfig) (*a2aserver.SigningConfig, error
 	if s == nil {
 		return nil, nil
 	}
+
 	key, err := loadSigningKey(s.KeyFile)
 	if err != nil {
 		return nil, err
 	}
+
 	return &a2aserver.SigningConfig{
 		PrivateKey: key,
 		KeyID:      s.KeyID,
@@ -70,10 +78,12 @@ func loadSigningKey(path string) (crypto.Signer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read signing key: %w", err)
 	}
+
 	block, _ := pem.Decode(data)
 	if block == nil {
 		return nil, errors.New("signing key is not PEM encoded")
 	}
+
 	var key any
 	switch block.Type {
 	case "RSA PRIVATE KEY":
@@ -83,13 +93,16 @@ func loadSigningKey(path string) (crypto.Signer, error) {
 	default:
 		key, err = x509.ParsePKCS8PrivateKey(block.Bytes)
 	}
+
 	if err != nil {
 		return nil, fmt.Errorf("parse signing key: %w", err)
 	}
+
 	signer, ok := key.(crypto.Signer)
 	if !ok {
 		return nil, errors.New("signing key does not implement crypto.Signer")
 	}
+
 	return signer, nil
 }
 
@@ -98,9 +111,11 @@ func a2aTransports(transports []config.A2ATransport) []a2aserver.Transport {
 	if len(transports) == 0 {
 		return nil
 	}
+
 	out := make([]a2aserver.Transport, 0, len(transports))
 	for _, transport := range transports {
 		out = append(out, a2aserver.Transport(transport))
 	}
+
 	return out
 }

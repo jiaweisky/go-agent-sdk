@@ -72,6 +72,7 @@ func (p A2APeer) validateMode() error {
 // rejects duplicate names.
 func ValidateA2APeers(peers []A2APeer) error {
 	seen := make(map[string]bool, len(peers))
+
 	for _, peer := range peers {
 		if err := validateA2APeerName(peer.Name, seen); err != nil {
 			return err
@@ -80,6 +81,7 @@ func ValidateA2APeers(peers []A2APeer) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -89,9 +91,12 @@ func validateA2APeerName(name string, seen map[string]bool) error {
 	if name == "" {
 		return errors.New("peers: each A2A peer requires a name")
 	}
+
 	if seen[name] {
 		return fmt.Errorf("peer %q: duplicate name", name)
 	}
+
 	seen[name] = true
+
 	return nil
 }

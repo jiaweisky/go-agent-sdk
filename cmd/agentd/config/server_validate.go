@@ -16,9 +16,11 @@ func (s Server) Validate(registry ModelRegistry) error {
 	if err := validateServerCommon(s, registry); err != nil {
 		return err
 	}
+
 	if s.Kind == KindHTTP {
 		return validateHTTPFields(s)
 	}
+
 	return validateA2AFields(s)
 }
 
@@ -29,12 +31,15 @@ func (s Server) validateRoutingFields() error {
 	if err := s.validateHostField(); err != nil {
 		return err
 	}
+
 	if err := s.validatePathPrefixField(); err != nil {
 		return err
 	}
+
 	if s.TLS != nil && (s.TLS.CertFile == "" || s.TLS.KeyFile == "") {
 		return fmt.Errorf("server %q: tls requires both certFile and keyFile", s.Name)
 	}
+
 	return nil
 }
 
@@ -43,14 +48,17 @@ func (s Server) validateHostField() error {
 	if s.Host == "" {
 		return nil
 	}
+
 	if NormalizeHost(s.Host) == "" {
 		return fmt.Errorf("server %q: host must not be empty", s.Name)
 	}
+
 	if invalidHostPort(s.Host) ||
 		strings.ContainsAny(s.Host, `/\?#,@`) ||
 		containsSpaceOrControl(s.Host) {
 		return fmt.Errorf("server %q: host %q is invalid", s.Name, s.Host)
 	}
+
 	return nil
 }
 
@@ -60,19 +68,24 @@ func (s Server) validatePathPrefixField() error {
 	if prefix == "" {
 		return nil
 	}
+
 	if !strings.HasPrefix(prefix, "/") {
 		return fmt.Errorf("server %q: pathPrefix must start with /", s.Name)
 	}
+
 	normalized := NormalizePathPrefix(prefix)
 	if normalized == "/" {
 		return fmt.Errorf("server %q: pathPrefix must not be /; omit it to serve the listener root", s.Name)
 	}
+
 	if strings.ContainsAny(prefix, `?#\%`) || containsSpaceOrControl(prefix) {
 		return fmt.Errorf("server %q: pathPrefix %q is invalid", s.Name, prefix)
 	}
+
 	if path.Clean(normalized) != normalized {
 		return fmt.Errorf("server %q: pathPrefix %q is not a clean path", s.Name, prefix)
 	}
+
 	return nil
 }
 
@@ -114,9 +127,11 @@ func validateServerShape(s Server) error {
 	case s.MaxBodyBytes < 0:
 		return fmt.Errorf("server %q: maxBodyBytes must not be negative, got %d", s.Name, s.MaxBodyBytes)
 	}
+
 	if _, _, err := net.SplitHostPort(s.Listen); err != nil {
 		return fmt.Errorf("server %q: listen: %w", s.Name, err)
 	}
+
 	return s.validateRoutingFields()
 }
 
@@ -126,17 +141,22 @@ func invalidHostPort(host string) bool {
 	if !strings.Contains(host, ":") {
 		return false
 	}
+
 	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
 		return net.ParseIP(host[1:len(host)-1]) == nil
 	}
+
 	if net.ParseIP(host) != nil {
 		return false
 	}
+
 	_, port, err := net.SplitHostPort(host)
 	if err != nil {
 		return true
 	}
+
 	_, err = strconv.Atoi(port)
+
 	return err != nil
 }
 
@@ -148,6 +168,7 @@ func containsSpaceOrControl(value string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -164,9 +185,11 @@ func validateServerComponents(s Server) error {
 	if err := ValidateMCP(s.MCP); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	if err := s.Sandbox.Validate(); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	if err := ValidateA2APeers(s.Peers); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
@@ -178,6 +201,7 @@ func validateServerComponents(s Server) error {
 	if err := ValidateReferences(s.References); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	return nil
 }
 
@@ -186,15 +210,19 @@ func validateServerPolicy(s Server) error {
 	if err := validateServerAuth(s); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	if _, err := KeepAliveDuration(s.KeepAlive); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	if !s.Questions.Valid() {
 		return fmt.Errorf("server %q: questions must be park or decline, got %q", s.Name, s.Questions)
 	}
+
 	if err := s.Isolation.Validate(s.WorkingDirectory); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	return nil
 }
 
@@ -204,12 +232,15 @@ func validateHTTPFields(s Server) error {
 		s.PushNotifications != nil || s.Signing != nil || len(s.Transports) > 0 {
 		return fmt.Errorf("server %q: baseURL, cards, inboundMedia, pushNotifications, signing, transports and default are a2a-only", s.Name)
 	}
+
 	if s.InteractionFallback != "" && s.InteractionFallback != "reject" && s.InteractionFallback != "allow" {
 		return fmt.Errorf("server %q: interactionFallback must be reject or allow", s.Name)
 	}
+
 	if _, err := InteractionTimeout(s.InteractionTimeout); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	return nil
 }
 
@@ -227,21 +258,27 @@ func validateA2AFields(s Server) error {
 			"server %q: interactionTimeout, interactionFallback, "+
 				"subscriberCapacity, publicRoutes and cors are http-only", s.Name)
 	}
+
 	if s.Host != "" && s.PathPrefix != "" {
 		return fmt.Errorf("server %q: an a2a server cannot combine host and pathPrefix (the card endpoint would be ambiguous)", s.Name)
 	}
+
 	if !s.InboundMedia.Valid() {
 		return fmt.Errorf("server %q: inboundMedia must be spool or inline, got %q", s.Name, s.InboundMedia)
 	}
+
 	if err := s.PushNotifications.Validate(); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	if err := s.Signing.Validate(); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	if err := validateTransports(s.Transports); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	return validateAgentCards(s)
 }
 
@@ -251,21 +288,26 @@ func validateA2AFields(s Server) error {
 // derived from the agent's internal definition; skills stay optional.
 func validateAgentCards(s Server) error {
 	seenAgents := make(map[string]bool, len(s.Agents))
+
 	for _, agent := range s.Agents {
 		if seenAgents[agent] {
 			return fmt.Errorf("server %q: duplicate agent %q", s.Name, agent)
 		}
 		seenAgents[agent] = true
 	}
+
 	if err := validateCards(s.Cards); err != nil {
 		return fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	if err := validateCardPaths(s); err != nil {
 		return err
 	}
+
 	if err := validateCardOwners(s); err != nil {
 		return err
 	}
+
 	return validateExposedAgentCards(s)
 }
 
@@ -276,6 +318,7 @@ func validateCardOwners(s Server) error {
 			return fmt.Errorf("server %q: card for %q, which is not an exposed agent", s.Name, agent)
 		}
 	}
+
 	return nil
 }
 
@@ -287,13 +330,16 @@ func validateExposedAgentCards(s Server) error {
 		if !ok {
 			return fmt.Errorf("server %q: agent %q requires a card with a name and description", s.Name, agent)
 		}
+
 		if card.Name == "" {
 			return fmt.Errorf("server %q: agent %q card requires a name", s.Name, agent)
 		}
+
 		if card.Description == "" {
 			return fmt.Errorf("server %q: agent %q card requires a description", s.Name, agent)
 		}
 	}
+
 	return nil
 }
 
@@ -302,8 +348,10 @@ func validateServerAuth(s Server) error {
 	if err := s.Auth.Validate(); err != nil {
 		return err
 	}
+
 	if !IsLoopback(s.Listen) && !s.AllowInsecure && s.Auth == nil {
 		return errors.New("refusing to bind a non-loopback address without auth; set auth, bind loopback, or allowInsecure")
 	}
+
 	return nil
 }

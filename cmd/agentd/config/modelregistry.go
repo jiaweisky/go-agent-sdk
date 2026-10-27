@@ -90,9 +90,11 @@ func (m ModelConfig) Validate() error {
 	if m.ID == "" {
 		return fmt.Errorf("model entry requires an id")
 	}
+
 	if m.Model == "" {
 		return fmt.Errorf("model %q requires a model (the wire model name sent to the provider)", m.ID)
 	}
+
 	if m.Protocol == "" {
 		return fmt.Errorf("model %q requires a protocol", m.ID)
 	}
@@ -110,6 +112,7 @@ func (m ModelConfig) Validate() error {
 	if err := ValidateInputModalities(m.EffectiveInputs()); err != nil {
 		return err
 	}
+
 	if m.Media != nil {
 		if err := ValidateMediaForms(m.Media.Forms); err != nil {
 			return err
@@ -121,6 +124,7 @@ func (m ModelConfig) Validate() error {
 			return fmt.Errorf("model %q: inputMIMEs entry %q must be a lower-case MIME type without spaces", m.ID, mime)
 		}
 	}
+
 	return nil
 }
 
@@ -145,9 +149,11 @@ func NewModelRegistry(defaultEntry ModelConfig, models []ModelConfig) (ModelRegi
 		if err := entry.Validate(); err != nil {
 			return ModelRegistry{}, err
 		}
+
 		if _, dup := registry.entries[entry.ID]; dup {
 			return ModelRegistry{}, fmt.Errorf("duplicate model id %q", entry.ID)
 		}
+
 		registry.entries[entry.ID] = entry
 		registry.order = append(registry.order, entry.ID)
 		registry.recordCredential(entry.ProviderKey(), toSchemaCredential(entry.Credentials))
@@ -221,9 +227,11 @@ func (r ModelRegistry) Subset(ids []string, defaultID string) (ModelRegistry, er
 		if !ok {
 			return ModelRegistry{}, fmt.Errorf("unknown model id %q", id)
 		}
+
 		if _, dup := out.entries[id]; dup {
 			continue
 		}
+
 		out.entries[id] = entry
 		out.order = append(out.order, id)
 	}
@@ -233,8 +241,10 @@ func (r ModelRegistry) Subset(ids []string, defaultID string) (ModelRegistry, er
 		if _, ok := out.entries[defaultID]; !ok {
 			return ModelRegistry{}, fmt.Errorf("default model %q is not in the server's models", defaultID)
 		}
+
 		out.defaultID = defaultID
 	}
+
 	return out, nil
 }
 

@@ -15,7 +15,9 @@ func init() {
 	Register("bwrap", func(policy Policy) core.AppProcess {
 		return newSandboxed(bwrapLaunch, policy)
 	})
+
 	RegisterProcess("bwrap", bwrapProcess)
+
 	RegisterAvailable("bwrap", func() error {
 		_, err := exec.LookPath("bwrap")
 		return err
@@ -47,16 +49,20 @@ func bwrapArgs(dirs []string, policy Policy, perCommand bool, command string, ar
 	if perCommand && policy.NetworkMode == NetworkNoEgress {
 		argv = append(argv, "--unshare-net")
 	}
+
 	if perCommand && policy.DenyProcessInfo {
 		argv = append(argv, "--unshare-pid")
 	}
+
 	argv = append(argv, "--")
 
 	if perCommand && policy.ViolationMode == ViolationPrecise {
 		// Trace the sandboxed command's failed syscalls for precise denials.
 		argv = append(argv, "strace", "-f", "-qq", "-e", "trace=openat,connect", "--")
 	}
+
 	argv = append(argv, command)
+
 	return append(argv, args...)
 }
 
@@ -72,6 +78,7 @@ func bwrapDenyCandidates(paths []string) []string {
 		}
 		literal = append(literal, path)
 	}
+
 	var out []string
 	for _, path := range bwrapBinds(literal) {
 		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
@@ -79,6 +86,7 @@ func bwrapDenyCandidates(paths []string) []string {
 		}
 		out = append(out, path)
 	}
+
 	return out
 }
 
@@ -89,18 +97,22 @@ func bwrapReadDenyArgs(policy Policy) []string {
 		// read: off means no read confinement; no credential masks either.
 		return nil
 	}
+
 	var argv []string
 	for _, path := range bwrapDenyCandidates(policy.DeniedRead()) {
 		info, err := os.Stat(path)
 		if err != nil {
 			continue
 		}
+
 		if info.IsDir() {
 			argv = append(argv, "--tmpfs", path)
 			continue
 		}
+
 		argv = append(argv, "--ro-bind", "/dev/null", path)
 	}
+
 	return argv
 }
 
@@ -110,6 +122,7 @@ func bwrapReadArgs(dirs []string, policy Policy) []string {
 	if policy.ReadMode != FSModeAllow {
 		return []string{"--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"}
 	}
+
 	// A fresh root: only the allow-listed paths exist beyond /dev /proc /tmp.
 	argv := []string{"--tmpfs", "/"}
 	for _, root := range bwrapBinds(bwrapReadRoots(dirs, policy)) {
@@ -117,6 +130,7 @@ func bwrapReadArgs(dirs []string, policy Policy) []string {
 	}
 
 	argv = append(argv, "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp")
+
 	return argv
 }
 
@@ -132,6 +146,7 @@ func bwrapReadRoots(dirs []string, policy Policy) []string {
 		// per-run temp only that directory is exposed.
 		paths = append(paths, legacyTempReadRoots()...)
 	}
+
 	return append(paths, platformReadRoots()...)
 }
 
@@ -151,8 +166,10 @@ func bwrapWriteArgs(dirs []string, policy Policy) []string {
 		if policy.WriteMode == FSModeOff && policy.ReadMode != FSModeAllow {
 			return []string{"--bind", "/", "/"}
 		}
+
 		return nil
 	}
+
 	paths := append(bwrapRootPaths(dirs, policy), policy.AllowWrite...)
 
 	// The sockets are bound in their canonical form and as configured: the
@@ -162,11 +179,14 @@ func bwrapWriteArgs(dirs []string, policy Policy) []string {
 	if policy.SocketMode == SocketAllowlist {
 		sockets = append(sockets, policy.SocketAllow...)
 	}
+
 	binds := bwrapBinds(paths, sockets)
+
 	var argv []string
 	for _, root := range binds {
 		argv = append(argv, "--bind", root, root)
 	}
+
 	return append(argv, bwrapDenyWriteArgs(binds, policy)...)
 }
 
@@ -181,12 +201,15 @@ func bwrapDenyWriteArgs(bound []string, policy Policy) []string {
 		if !bwrapUnderAny(path, bound) {
 			continue
 		}
+
 		if _, err := os.Stat(path); err == nil {
 			argv = append(argv, "--ro-bind", path, path)
 			continue
 		}
+
 		argv = append(argv, "--tmpfs", path)
 	}
+
 	return argv
 }
 
@@ -197,6 +220,7 @@ func bwrapUnderAny(path string, roots []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -213,21 +237,26 @@ func bwrapBinds(pathGroups ...[]string) []string {
 		if path == "" {
 			return
 		}
+
 		path = filepath.Clean(path)
 		if !contains(out, path) {
 			out = append(out, path)
 		}
 	}
+
 	for _, group := range pathGroups {
 		for _, path := range group {
 			if path == "" {
 				continue // an empty path would Clean/EvalSymlinks to "."
 			}
+
 			if resolved, err := filepath.EvalSymlinks(path); err == nil {
 				add(resolved)
 			}
+
 			add(path)
 		}
 	}
+
 	return out
 }

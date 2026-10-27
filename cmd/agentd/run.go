@@ -53,12 +53,15 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, tls *config.T
 		if beforeShutdown != nil {
 			beforeShutdown()
 		}
+
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
+
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			_ = srv.Close()
 			return err
 		}
+
 		return nil
 	case err := <-serveErr:
 		// The listener failed (e.g. the address is in use): release the server
@@ -66,9 +69,11 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, tls *config.T
 		if beforeShutdown != nil {
 			beforeShutdown()
 		}
+
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+
 		return err
 	}
 }
@@ -78,12 +83,14 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, tls *config.T
 func serveAll(ctx context.Context, serveTargets []serveTarget) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
 	errs := make(chan error, len(serveTargets))
 	for _, target := range serveTargets {
 		go func(target serveTarget) {
 			errs <- serve(ctx, target.srv, target.ln, target.tls, target.closeStreams)
 		}(target)
 	}
+
 	var first error
 	for range serveTargets {
 		if err := <-errs; err != nil && first == nil {
@@ -91,6 +98,7 @@ func serveAll(ctx context.Context, serveTargets []serveTarget) error {
 			cancel()
 		}
 	}
+
 	return first
 }
 
@@ -144,10 +152,12 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 				_ = rt.client.Close()
 			}
 		}
+
 		for i := len(runtimes) - 1; i >= 0; i-- {
 			if runtimes[i].teardown == nil {
 				continue
 			}
+
 			teardownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			_ = runtimes[i].teardown(teardownCtx)
 			cancel()
@@ -164,6 +174,7 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 		if err != nil {
 			return err
 		}
+
 		builtServers = append(builtServers, rt.server)
 	}
 
@@ -179,8 +190,10 @@ func run(ctx context.Context, cfg config.Config, introspect *introspectDoc) erro
 			return err
 		}
 		defer closeManager()
+
 		serveTargets = append(serveTargets, target)
 	}
+
 	return serveAll(ctx, serveTargets)
 }
 
@@ -212,10 +225,12 @@ func buildRuntime(
 
 	runtime := builtRuntime{teardown: project.Teardown}
 	s.WorkingDirectory = project.View
+
 	uploader, err := mediaUploaderFor(s, models, profiles)
 	if err != nil {
 		return runtime, fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	fileHeaders := mediaFileHeadersFor(s, models, profiles)
 
 	client, err := buildClient(ctx, s, serverRegistry, uploader, fileHeaders, isolationExcludes(source, baseDirs))
@@ -231,6 +246,7 @@ func buildRuntime(
 
 	runtime.client = client
 	runtime.server = server
+
 	return runtime, nil
 }
 
@@ -238,6 +254,7 @@ func buildRuntime(
 // fails startup before serving. Already-bound listeners are closed on failure.
 func bindServeTargets(builtServers []*builtServer, introspect *introspectDoc) ([]serveTarget, error) {
 	byListen, order := groupByListen(builtServers)
+
 	var serveTargets []serveTarget
 	for _, listen := range order {
 		entries := byListen[listen]
@@ -247,8 +264,10 @@ func bindServeTargets(builtServers []*builtServer, introspect *introspectDoc) ([
 			closeServeTargets(serveTargets)
 			return nil, fmt.Errorf("listen %s: %w", listen, err)
 		}
+
 		fmt.Fprintf(os.Stderr, "agentd: listening on %s (%d server(s))\n", ln.Addr(), len(entries))
 		logDiscoveryEndpoints(entries, ln.Addr())
+
 		serveTargets = append(serveTargets, serveTarget{
 			srv:          &http.Server{Handler: newRouter(entries, introspect, ln.Addr()), ReadHeaderTimeout: 10 * time.Second},
 			ln:           ln,
@@ -256,6 +275,7 @@ func bindServeTargets(builtServers []*builtServer, introspect *introspectDoc) ([
 			closeStreams: combineClose(entries),
 		})
 	}
+
 	return serveTargets, nil
 }
 
@@ -281,12 +301,15 @@ func bindControlTarget(
 	models []config.ModelConfig, profiles map[string]*config.ProviderFileAPI,
 ) (serveTarget, func(), error) {
 	manager := newProjectManager(ctx, registry, control, models, profiles)
+
 	ln, err := net.Listen("tcp", control.Listen)
 	if err != nil {
 		manager.Close()
 		return serveTarget{}, nil, fmt.Errorf("control listen %s: %w", control.Listen, err)
 	}
+
 	fmt.Fprintf(os.Stderr, "agentd: control API on %s\n", ln.Addr())
+
 	return serveTarget{
 		srv: &http.Server{
 			Handler:           newControlHandler(manager, control.Auth),
@@ -314,8 +337,10 @@ func groupByListen(builtServers []*builtServer) (map[string][]*builtServer, []st
 		if _, ok := byListen[listen]; !ok {
 			order = append(order, listen)
 		}
+
 		byListen[listen] = append(byListen[listen], b)
 	}
+
 	return byListen, order
 }
 
@@ -325,6 +350,7 @@ func defaultModelFor(s config.Server, registry config.ModelRegistry) string {
 	if s.DefaultModel != "" {
 		return s.DefaultModel
 	}
+
 	return registry.DefaultID()
 }
 
@@ -334,6 +360,7 @@ func a2aQuestions(s config.Server) string {
 	if s.Questions != "" {
 		return string(s.Questions)
 	}
+
 	return string(config.QuestionsDecline)
 }
 
@@ -343,6 +370,7 @@ func httpQuestions(s config.Server) string {
 	if s.Questions != "" {
 		return string(s.Questions)
 	}
+
 	return string(config.QuestionsPark)
 }
 
@@ -352,18 +380,22 @@ func publicBaseURL(s config.Server, addr net.Addr) string {
 	if s.BaseURL != "" {
 		return strings.TrimRight(s.BaseURL, "/")
 	}
+
 	scheme := "http"
 	if s.TLS != nil {
 		scheme = "https"
 	}
+
 	host := s.Host
 	if host == "" {
 		host = addr.String()
 	}
+
 	base := scheme + "://" + host
 	if s.PathPrefix != "" {
 		base += config.NormalizePathPrefix(s.PathPrefix)
 	}
+
 	return base
 }
 
@@ -375,10 +407,12 @@ func defaultA2AEntry(entries []*builtServer) *builtServer {
 		if e.cfg.Kind != config.KindA2A {
 			continue
 		}
+
 		if def == nil || e.cfg.Default {
 			def = e
 		}
 	}
+
 	return def
 }
 
@@ -390,14 +424,17 @@ func discoveryBaseURL(s config.Server, addr net.Addr) string {
 			return u.Scheme + "://" + u.Host
 		}
 	}
+
 	scheme := "http"
 	if s.TLS != nil {
 		scheme = "https"
 	}
+
 	host := s.Host
 	if host == "" {
 		host = addr.String()
 	}
+
 	return scheme + "://" + host
 }
 
@@ -417,6 +454,7 @@ func isolationSpec(s config.Server) isolation.IsolationSpec {
 	if s.Isolation == nil {
 		return isolation.IsolationSpec{}
 	}
+
 	return isolation.IsolationSpec{
 		Mode:    string(s.Isolation.Mode),
 		BaseDir: s.Isolation.BaseDir,
@@ -463,6 +501,7 @@ func buildClient(
 			urlHost = s.Media.Uploads.URLHost
 		}
 	}
+
 	store, err := storage.New(urlHost)
 	if err != nil {
 		return nil, fmt.Errorf("server %q: media.uploads.urlHost: %w", s.Name, err)
@@ -502,12 +541,15 @@ func isolationBaseDirs(servers []config.Server) []string {
 		if base == "" {
 			continue
 		}
+
 		if _, ok := seen[base]; ok {
 			continue
 		}
+
 		seen[base] = struct{}{}
 		dirs = append(dirs, base)
 	}
+
 	return dirs
 }
 
@@ -524,11 +566,13 @@ func baseDirOf(iso *config.IsolationConfig) string {
 // does not read an isolation view back as project content.
 func isolationExcludes(source string, baseDirs []string) []string {
 	var excludes []string
+
 	for _, base := range baseDirs {
 		if rel, ok := insidePath(source, base); ok {
 			excludes = append(excludes, rel+"/**")
 		}
 	}
+
 	return excludes
 }
 
@@ -538,22 +582,27 @@ func insidePath(root, path string) (string, bool) {
 	if root == "" || path == "" {
 		return "", false
 	}
+
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return "", false
 	}
+
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return "", false
 	}
+
 	rel, err := filepath.Rel(absRoot, absPath)
 	if err != nil {
 		return "", false
 	}
+
 	rel = filepath.ToSlash(rel)
 	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
 		return "", false
 	}
+
 	return rel, true
 }
 
@@ -563,16 +612,20 @@ func sandboxGuards(s config.Server, policy sandbox.Policy) (core.FileReadGuard, 
 	if s.Sandbox == nil || !s.Sandbox.Enabled() {
 		return nil, nil
 	}
+
 	guard := sandbox.NewPathGuard(policy)
 
 	var readGuard core.FileReadGuard
 	var writeGuard core.FileWriteGuard
+
 	if policy.ReadMode == sandbox.FSModeAllow {
 		readGuard = guard
 	}
+
 	if policy.WriteMode == sandbox.FSModeAllow {
 		writeGuard = guard
 	}
+
 	return readGuard, writeGuard
 }
 
@@ -616,6 +669,7 @@ func resolveSandbox(s config.Server) (core.AppProcess, sandbox.Policy, error) {
 				"(in-process file guards still apply)\n", s.Name, s.Sandbox.Wrapper, err)
 		return nil, policy, nil
 	}
+
 	return nil, policy, err
 }
 
@@ -642,12 +696,14 @@ func buildServer(
 		if err != nil {
 			return nil, err
 		}
+
 		return &builtServer{cfg: s, handler: handler, closeStreams: closeStreams}, nil
 	case config.KindA2A:
 		srv, err := buildA2AServer(s, client, infos, defaultModelFor(s, registry), keepAlive)
 		if err != nil {
 			return nil, err
 		}
+
 		return &builtServer{cfg: s, handler: srv.Handler(), cards: srv.Cards, cardPaths: srv.CardPaths()}, nil
 	default:
 		return nil, fmt.Errorf("unknown kind %q", s.Kind)
@@ -683,6 +739,7 @@ func buildHTTPHandler(
 	if err != nil {
 		return nil, nil, err
 	}
+
 	return srv.Handler(), func() { _ = srv.Close() }, nil
 }
 
@@ -700,9 +757,11 @@ func buildA2AServer(
 	if permissions := config.PermissionRuleset(s.InboundPermissions); len(permissions) > 0 {
 		factoryOpts = append(factoryOpts, agent.WithInboundPermissions(permissions))
 	}
+
 	if s.InboundMedia != "" {
 		factoryOpts = append(factoryOpts, agent.WithInboundMedia(string(s.InboundMedia)))
 	}
+
 	factoryOpts = append(factoryOpts, agent.WithInboundQuestions(a2aQuestions(s)))
 
 	var security *a2aserver.Security
@@ -714,6 +773,7 @@ func buildA2AServer(
 	if err != nil {
 		return nil, fmt.Errorf("server %q: %w", s.Name, err)
 	}
+
 	signing, err := a2aSigningOptions(s.Signing)
 	if err != nil {
 		return nil, fmt.Errorf("server %q: %w", s.Name, err)
@@ -764,6 +824,7 @@ func mediaUploaderFor(
 		if !ok || entry.ProviderFileAPI == "" {
 			continue
 		}
+
 		if entry.ProviderID == "" {
 			return nil, fmt.Errorf("model %q uses providerFileAPI %q but has no providerID", entry.ID, entry.ProviderFileAPI)
 		}
@@ -777,6 +838,7 @@ func mediaUploaderFor(
 		if prev, ok := profilesByProvider[provider]; ok && prev != entry.ProviderFileAPI {
 			return nil, fmt.Errorf("providerID %q is used with providerFileAPI %q and %q; assign a distinct providerID", entry.ProviderID, prev, entry.ProviderFileAPI)
 		}
+
 		if !providerFileUsable(entry, profile) {
 			continue
 		}
@@ -785,6 +847,7 @@ func mediaUploaderFor(
 		if err != nil {
 			return nil, err
 		}
+
 		profilesByProvider[provider] = entry.ProviderFileAPI
 		uploaders[provider] = uploader
 	}
@@ -792,6 +855,7 @@ func mediaUploaderFor(
 	if len(uploaders) == 0 {
 		return nil, nil
 	}
+
 	return func(provider schema.ProviderID) schema.MediaUploader { return uploaders[provider] }, nil
 }
 
@@ -810,6 +874,7 @@ func providerFileUsable(entry config.ModelConfig, profile *config.ProviderFileAP
 				}
 			}
 		}
+
 		if !hasFile {
 			return false
 		}
@@ -823,16 +888,19 @@ func providerFileUsable(entry config.ModelConfig, profile *config.ProviderFileAP
 	allowed := profile.MIME.Allowed
 	if sourceSet, ok := protocol.Media.SourceMIMEs[protocols.MediaSourceFile]; ok && len(sourceSet) > 0 {
 		filtered := allowed[:0:0]
+
 		for _, mime := range allowed {
 			if _, ok := sourceSet[mime]; ok {
 				filtered = append(filtered, mime)
 			}
 		}
+
 		allowed = filtered
 	}
 
 	if len(entry.InputMIMEs) > 0 {
 		filtered := allowed[:0:0]
+
 		for _, mime := range allowed {
 			for _, modelMIME := range entry.InputMIMEs {
 				if mime == modelMIME {
@@ -841,6 +909,7 @@ func providerFileUsable(entry config.ModelConfig, profile *config.ProviderFileAP
 				}
 			}
 		}
+
 		allowed = filtered
 	}
 
@@ -869,14 +938,17 @@ func mediaFileHeadersFor(s config.Server, models []config.ModelConfig, profiles 
 		if !ok || entry.ProviderFileAPI == "" || entry.ProviderID == "" {
 			continue
 		}
+
 		profile := profiles[entry.ProviderFileAPI]
 		if profile == nil || len(profile.ModelHeaders) == 0 {
 			continue
 		}
+
 		provider := schema.ProviderID(entry.ProviderID)
 		if headers[provider] == nil {
 			headers[provider] = map[string]string{}
 		}
+
 		for name, value := range profile.ModelHeaders {
 			headers[provider][name] = value
 		}
@@ -885,6 +957,7 @@ func mediaFileHeadersFor(s config.Server, models []config.ModelConfig, profiles 
 	if len(headers) == 0 {
 		return nil
 	}
+
 	return headers
 }
 
@@ -894,16 +967,20 @@ func mediaFileHeadersFor(s config.Server, models []config.ModelConfig, profiles 
 // the restrictive default is kept (the allow is appended to it).
 func httpInboundPermissions(s config.Server) schema.PermissionRuleset {
 	perms := config.PermissionRuleset(s.InboundPermissions)
+
 	spoolDir := ""
 	if s.Media != nil && s.Media.Delivery != nil && s.Media.Delivery.Spool != nil && s.Media.Delivery.Spool.Dir != "" {
 		spoolDir = strings.ReplaceAll(s.Media.Delivery.Spool.Dir, "{Root}", s.Root)
 	}
+
 	if spoolDir == "" {
 		return perms
 	}
+
 	if len(perms) == 0 {
 		perms = agent.DefaultInboundPermissions()
 	}
+
 	return append(perms, schema.PermissionRule{
 		Action: "external_directory", Resource: filepath.Join(spoolDir, "*"), Effect: schema.PermissionEffectAllow,
 	})

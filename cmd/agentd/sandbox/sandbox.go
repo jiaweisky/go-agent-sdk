@@ -40,12 +40,15 @@ func validateName(name string) {
 // command. It is intended for the wrapper's own init function.
 func RegisterAvailable(name string, probe func() error) {
 	validateName(name)
+
 	if probe == nil {
 		panic("sandbox: nil availability probe for " + name)
 	}
+
 	if _, dup := probes[name]; dup {
 		panic("sandbox: duplicate availability registration: " + name)
 	}
+
 	probes[name] = probe
 }
 
@@ -55,12 +58,15 @@ func RegisterAvailable(name string, probe func() error) {
 // surfaced at startup.
 func Register(name string, factory Factory) {
 	validateName(name)
+
 	if factory == nil {
 		panic("sandbox: nil factory for " + name)
 	}
+
 	if _, dup := registry[name]; dup {
 		panic("sandbox: duplicate registration: " + name)
 	}
+
 	registry[name] = factory
 }
 
@@ -72,6 +78,7 @@ func checkAvailable(name string) error {
 			return fmt.Errorf("sandbox %q is unavailable: %w", name, err)
 		}
 	}
+
 	return nil
 }
 
@@ -85,9 +92,11 @@ func validateViolationMode(mode string) error {
 		if runtime.GOOS != "linux" {
 			return fmt.Errorf("sandbox.violations.mode precise is only supported on linux")
 		}
+
 		if _, err := exec.LookPath("strace"); err != nil {
 			return fmt.Errorf("sandbox.violations.mode precise requires strace: %w", err)
 		}
+
 		return nil
 	default:
 		return fmt.Errorf("sandbox.violations.mode must be heuristic, precise or off, got %q", mode)
@@ -104,13 +113,16 @@ func Resolve(name string, policy Policy) (core.AppProcess, error) {
 	case "", "none":
 		return nil, nil
 	}
+
 	factory, ok := registry[name]
 	if !ok {
 		return nil, fmt.Errorf("sandbox wrapper %q is not available on %s", name, runtime.GOOS)
 	}
+
 	if err := checkAvailable(name); err != nil {
 		return nil, err
 	}
+
 	if err := validateViolationMode(policy.ViolationMode); err != nil {
 		return nil, err
 	}
@@ -119,11 +131,13 @@ func Resolve(name string, policy Policy) (core.AppProcess, error) {
 	if len(policy.ScrubEnv) > 0 {
 		process = scrubbedProcess{inner: process, patterns: policy.ScrubEnv}
 	}
+
 	if policy.ViolationMode != "" && policy.ViolationMode != ViolationOff {
 		process = reportingProcess{
 			inner: process, precise: policy.ViolationMode == ViolationPrecise,
 			reportToModel: policy.ReportToModel,
 		}
 	}
+
 	return process, nil
 }

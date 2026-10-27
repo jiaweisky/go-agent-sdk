@@ -17,5 +17,6 @@ func execReplace(command string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("whole-process sandbox %q not found: %w", command, err)
 	}
+
 	return syscall.Exec(path, append([]string{command}, args...), os.Environ())
 }

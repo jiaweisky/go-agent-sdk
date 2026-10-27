@@ -31,15 +31,19 @@ func (c CardConfig) validate(agentID string) error {
 	if err := validateSkills(agentID, c.Skills); err != nil {
 		return err
 	}
+
 	if err := validateProvider(agentID, c.Provider); err != nil {
 		return err
 	}
+
 	if err := validateModes(agentID, "defaultInputModes", c.DefaultInputModes); err != nil {
 		return err
 	}
+
 	if err := validateModes(agentID, "defaultOutputModes", c.DefaultOutputModes); err != nil {
 		return err
 	}
+
 	if err := validateCardPath(agentID, c.CardPath); err != nil {
 		return err
 	}
@@ -48,12 +52,15 @@ func (c CardConfig) validate(agentID string) error {
 		if err := validateSkills(agentID, c.Extended.Skills); err != nil {
 			return err
 		}
+
 		if err := validateProvider(agentID, c.Extended.Provider); err != nil {
 			return err
 		}
+
 		if err := validateModes(agentID, "extended.defaultInputModes", c.Extended.DefaultInputModes); err != nil {
 			return err
 		}
+
 		if err := validateModes(agentID, "extended.defaultOutputModes", c.Extended.DefaultOutputModes); err != nil {
 			return err
 		}
@@ -109,9 +116,11 @@ func (p *PushNotificationsConfig) Validate() error {
 	if p == nil || !p.Enabled {
 		return nil
 	}
+
 	if _, err := ParseOptionalDuration(p.Timeout); err != nil {
 		return fmt.Errorf("pushNotifications.timeout: %w", err)
 	}
+
 	return nil
 }
 
@@ -134,9 +143,11 @@ func (s *SigningConfig) Validate() error {
 	if s == nil {
 		return nil
 	}
+
 	if s.KeyFile == "" {
 		return errors.New("signing.keyFile is required")
 	}
+
 	return nil
 }
 
@@ -172,6 +183,7 @@ func validateSkills(agentID string, skills []SkillConfig) error {
 			return fmt.Errorf("agent %q: skills[%d] requires id, name, and description", agentID, i)
 		}
 	}
+
 	return nil
 }
 
@@ -182,6 +194,7 @@ func validateCards(cards map[string]CardConfig) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -190,13 +203,16 @@ func validateProvider(agentID string, provider *ProviderConfig) error {
 	if provider == nil {
 		return nil
 	}
+
 	if provider.Organization == "" || provider.URL == "" {
 		return fmt.Errorf("agent %q: provider requires organization and url", agentID)
 	}
+
 	parsed, err := url.Parse(provider.URL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return fmt.Errorf("agent %q: provider.url must be an absolute URL, got %q", agentID, provider.URL)
 	}
+
 	return nil
 }
 
@@ -206,11 +222,13 @@ func validateModes(agentID, field string, modes []string) error {
 		if mode == "" {
 			return fmt.Errorf("agent %q: %s contains an empty media type", agentID, field)
 		}
+
 		mediaType, _, err := mime.ParseMediaType(mode)
 		if err != nil || strings.Count(mediaType, "/") != 1 {
 			return fmt.Errorf("agent %q: %s contains invalid media type %q", agentID, field, mode)
 		}
 	}
+
 	return nil
 }
 
@@ -220,22 +238,28 @@ func validateCardPath(agentID, cardPath string) error {
 	if cardPath == "" {
 		return nil
 	}
+
 	if !strings.HasPrefix(cardPath, "/") {
 		return fmt.Errorf("agent %q: cardPath must start with /", agentID)
 	}
+
 	if cardPath == "/" || strings.HasSuffix(cardPath, "/") {
 		return fmt.Errorf("agent %q: cardPath must not be the root or end with /", agentID)
 	}
+
 	if path.Clean(cardPath) != cardPath {
 		return fmt.Errorf("agent %q: cardPath %q is not a clean path", agentID, cardPath)
 	}
+
 	if strings.ContainsAny(cardPath, "{}`?#%\\ \t\r\n") {
 		return fmt.Errorf("agent %q: cardPath %q contains unsupported characters", agentID, cardPath)
 	}
+
 	switch cardPath {
 	case "/.well-known/agent-card.json", "/.well-known/agents.json":
 		return fmt.Errorf("agent %q: cardPath %q is reserved", agentID, cardPath)
 	}
+
 	return nil
 }
 
@@ -256,6 +280,7 @@ func validateCardPaths(s Server) error {
 		"/.well-known/agent-card.json": "the origin-root default card",
 		"/.well-known/agents.json":     "the aggregate discovery endpoint",
 	}
+
 	for _, agent := range s.Agents {
 		seen[agentEndpointPath(agent)] = "agent " + agent + " endpoint"
 	}
@@ -273,11 +298,13 @@ func validateCardPaths(s Server) error {
 		if ok && card.CardPath != "" {
 			cardPath = card.CardPath
 		}
+
 		// Introspection is served before host/pathPrefix dispatch, so a root-mounted
 		// card path is shadowed regardless of whether the server is host-routed.
 		if s.PathPrefix == "" && (cardPath == "/api/config" || cardPath == "/api/info") {
 			return fmt.Errorf("server %q: agent %q cardPath %q collides with an introspection endpoint", s.Name, agent, cardPath)
 		}
+
 		if restEnabled {
 			for _, other := range s.Agents {
 				restPrefix := agentEndpointPath(other) + "rest"
@@ -286,11 +313,14 @@ func validateCardPaths(s Server) error {
 				}
 			}
 		}
+
 		if prev, dup := seen[cardPath]; dup {
 			return fmt.Errorf("server %q: agent %q cardPath %q collides with %s", s.Name, agent, cardPath, prev)
 		}
+
 		seen[cardPath] = "agent " + agent + " card"
 	}
+
 	return nil
 }
 
@@ -299,15 +329,19 @@ func validateTransports(transports []A2ATransport) error {
 	if len(transports) == 0 {
 		return nil
 	}
+
 	seen := make(map[A2ATransport]bool, len(transports))
 	for _, transport := range transports {
 		if !transport.Valid() {
 			return fmt.Errorf("transports: unknown transport %q (want jsonrpc or rest)", transport)
 		}
+
 		if seen[transport] {
 			return fmt.Errorf("transports: duplicate %q", transport)
 		}
+
 		seen[transport] = true
 	}
+
 	return nil
 }

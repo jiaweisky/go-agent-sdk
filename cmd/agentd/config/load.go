@@ -54,6 +54,7 @@ func Load[T any](path string, cfg *T) error {
 	} else if !errors.Is(err, io.EOF) {
 		return configError(path, err)
 	}
+
 	return nil
 }
 

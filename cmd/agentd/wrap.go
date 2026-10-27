@@ -25,9 +25,11 @@ func wrapProcess(cfg config.Config, configPath string) error {
 	if !w.Enabled() {
 		return nil
 	}
+
 	if os.Getenv(wrappedEnv) != "" {
 		return nil
 	}
+
 	launcher, err := sandbox.ResolveProcess(string(w.Wrapper))
 	if err != nil {
 		if w.FailurePolicy == config.FailurePolicyFailOpen {
@@ -36,6 +38,7 @@ func wrapProcess(cfg config.Config, configPath string) error {
 		}
 		return err
 	}
+
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -53,7 +56,9 @@ func wrapProcess(cfg config.Config, configPath string) error {
 	if err := os.Setenv(wrappedEnv, string(w.Wrapper)); err != nil {
 		return err
 	}
+
 	fmt.Fprintf(os.Stderr, "agentd: entering whole-process sandbox %q\n", w.Wrapper)
+
 	return launcher(policy, executable, os.Args[1:])
 }
 
@@ -67,9 +72,11 @@ func wrapRoots(cfg config.Config) []string {
 		if path == "" {
 			return
 		}
+
 		if abs, err := filepath.Abs(path); err == nil {
 			path = abs
 		}
+
 		if !slices.Contains(roots, path) {
 			roots = append(roots, path)
 		}
@@ -83,6 +90,7 @@ func wrapRoots(cfg config.Config) []string {
 			add(s.Isolation.BaseDir)
 		}
 	}
+
 	return roots
 }
 
@@ -104,6 +112,7 @@ func wrapConfigDirs(cfg config.Config) []string {
 	for _, s := range cfg.Servers {
 		dirs = append(dirs, s.ConfigDirs...)
 	}
+
 	return dirs
 }
 
@@ -114,6 +123,7 @@ func wrapConfigDirs(cfg config.Config) []string {
 // relative -config against a working directory the sandbox view does not carry.
 func wrapReadPaths(cfg config.Config, executable, configPath string, roots []string) []string {
 	paths := []string{executable}
+
 	if configPath != "" {
 		if abs, err := filepath.Abs(configPath); err == nil {
 			configPath = abs
@@ -126,5 +136,6 @@ func wrapReadPaths(cfg config.Config, executable, configPath string, roots []str
 			paths = append(paths, path)
 		}
 	}
+
 	return append(append(paths, roots...), wrapConfigDirs(cfg)...)
 }

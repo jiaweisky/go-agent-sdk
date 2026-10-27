@@ -15,9 +15,11 @@ func ReferenceSources(refs []config.Reference) (map[string]core.ReferenceSource,
 	if err := config.ValidateReferences(refs); err != nil {
 		return nil, err
 	}
+
 	if len(refs) == 0 {
 		return nil, nil
 	}
+
 	out := make(map[string]core.ReferenceSource, len(refs))
 	for _, ref := range refs {
 		switch ref.Type {
@@ -35,15 +37,18 @@ func ReferenceSources(refs []config.Reference) (map[string]core.ReferenceSource,
 				Description: optionalString(ref.Description),
 				Hidden:      ref.Hidden,
 			}
+
 			if ref.Branch != "" {
 				branch := ref.Branch
 				source.Branch = &branch
 			}
+
 			out[ref.Name] = source
 		default:
 			return nil, fmt.Errorf("reference %s: type must be local or git, got %q", ref.Name, ref.Type)
 		}
 	}
+
 	return out, nil
 }
 

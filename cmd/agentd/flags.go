@@ -15,6 +15,7 @@ func newFlags() *flags {
 	f.fs.StringVar(&f.config, "config", "agentd.yaml", "path to the YAML config file")
 	f.fs.BoolVar(&f.check, "check", false, "validate the config and exit")
 	f.fs.BoolVar(&f.version, "version", false, "print version and exit")
+
 	return f
 }
 

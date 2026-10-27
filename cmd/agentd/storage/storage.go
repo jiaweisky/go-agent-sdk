@@ -19,9 +19,11 @@ import (
 func objectName(media schema.MediaUpload) string {
 	sum := sha256.Sum256(media.Data)
 	name := hex.EncodeToString(sum[:8])
+
 	if media.Name != nil && *media.Name != "" {
 		name += "-" + path.Base(filepath.ToSlash(*media.Name))
 	}
+
 	return name
 }
 
@@ -31,9 +33,11 @@ func New(cfg *config.StorageConfig) (schema.MediaStore, error) {
 	if cfg == nil {
 		return nil, nil
 	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+
 	switch cfg.Backend {
 	case "", config.StorageHTTP:
 		return httpStore{config: cfg}, nil

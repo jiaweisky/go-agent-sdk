@@ -151,6 +151,7 @@ func (m IsolationMode) Valid() bool {
 		IsolationContainer, IsolationRemote:
 		return true
 	}
+
 	return false
 }
 

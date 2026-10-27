@@ -35,6 +35,7 @@ func PermissionRuleset(rules []PermissionRule) schema.PermissionRuleset {
 	if len(rules) == 0 {
 		return nil
 	}
+
 	result := make(schema.PermissionRuleset, 0, len(rules))
 	for _, rule := range rules {
 		result = append(result, schema.PermissionRule{
@@ -43,6 +44,7 @@ func PermissionRuleset(rules []PermissionRule) schema.PermissionRuleset {
 			Effect:   schema.PermissionEffect(rule.Effect),
 		})
 	}
+
 	return result
 }
 
@@ -57,5 +59,6 @@ func toSchemaCredential(creds Credentials) schema.Credential {
 			SessionToken:    creds.AWS.SessionToken,
 		}
 	}
+
 	return credential
 }

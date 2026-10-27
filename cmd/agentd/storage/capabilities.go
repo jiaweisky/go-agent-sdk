@@ -9,6 +9,7 @@ func (c httpStore) StoreCapabilities() schema.StoreCapabilities {
 	if c.config.PresignSecret != "" {
 		caps.TTL = c.ttl()
 	}
+
 	return caps
 }
 

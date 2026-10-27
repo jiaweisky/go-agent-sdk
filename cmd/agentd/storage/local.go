@@ -29,12 +29,15 @@ func (c localStore) Put(ctx context.Context, media schema.MediaUpload) (schema.R
 	if c.config.Root == "" {
 		return schema.Reference{}, errors.New("storage: root is required")
 	}
+
 	if err := os.MkdirAll(c.config.Root, 0o755); err != nil {
 		return schema.Reference{}, err
 	}
+
 	name := objectName(media)
 	if err := os.WriteFile(filepath.Join(c.config.Root, name), media.Data, 0o644); err != nil {
 		return schema.Reference{}, err
 	}
+
 	return schema.Reference{Source: "url", Value: c.base() + name}, nil
 }

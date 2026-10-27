@@ -72,6 +72,7 @@ func appContainerSID(name string) (*windows.SID, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var sid *windows.SID
 	r1, _, createErr := procCreateAppContainerProfile.Call(
 		uintptr(unsafe.Pointer(wide)), // name
@@ -80,9 +81,11 @@ func appContainerSID(name string) (*windows.SID, error) {
 		0, 0,                          // no capabilities
 		uintptr(unsafe.Pointer(&sid)),
 	)
+
 	if r1 == 0 {
 		return sid, nil
 	}
+
 	// The profile usually already exists; derive its SID instead.
 	r1, _, deriveErr := procDeriveAppContainerSidFromAppContainerName.Call(
 		uintptr(unsafe.Pointer(wide)),
@@ -91,6 +94,7 @@ func appContainerSID(name string) (*windows.SID, error) {
 	if r1 != 0 {
 		return nil, fmt.Errorf("derive AppContainer %q: %w (profile creation: %v)", name, deriveErr, createErr)
 	}
+
 	return sid, nil
 }
 
@@ -111,13 +115,17 @@ func grantTraverse(path string, sid *windows.SID) error {
 	if path == "" {
 		return nil
 	}
+
 	if _, ok := grantedTraverse.Load(path); ok {
 		return nil
 	}
+
 	if err := icacls(path, sid, "(X)"); err != nil {
 		return err
 	}
+
 	grantedTraverse.Store(path, struct{}{})
+
 	return nil
 }
 
@@ -127,11 +135,13 @@ func grantTempTraversal(policy Policy, sid *windows.SID) error {
 	if policy.TempRoot == "" {
 		return nil
 	}
+
 	for _, dir := range []string{policy.TempRoot, filepath.Dir(policy.TempRoot)} {
 		if err := grantTraverse(dir, sid); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -141,13 +151,17 @@ func grantRead(path string, sid *windows.SID) error {
 	if path == "" {
 		return nil
 	}
+
 	if _, ok := grantedReads.Load(path); ok {
 		return nil
 	}
+
 	if err := grantRights(path, sid, "(OI)(CI)RX", "(RX)"); err != nil {
 		return err
 	}
+
 	grantedReads.Store(path, struct{}{})
+
 	return nil
 }
 
@@ -157,13 +171,17 @@ func grantAccess(path string, sid *windows.SID) error {
 	if path == "" {
 		return nil
 	}
+
 	if _, ok := grantedDirs.Load(path); ok {
 		return nil
 	}
+
 	if err := grantRights(path, sid, "(OI)(CI)M", "(M)"); err != nil {
 		return err
 	}
+
 	grantedDirs.Store(path, struct{}{})
+
 	return nil
 }
 
@@ -174,6 +192,7 @@ func grantRights(path string, sid *windows.SID, dirRights, fileRights string) er
 	if info, err := os.Stat(path); err == nil && !info.IsDir() {
 		rights = fileRights
 	}
+
 	return icacls(path, sid, rights)
 }
 
@@ -183,6 +202,7 @@ func icacls(path string, sid *windows.SID, rights string) error {
 	if err != nil {
 		return fmt.Errorf("icacls %s: %w: %s", path, err, strings.TrimSpace(string(out)))
 	}
+
 	return nil
 }
 
@@ -194,16 +214,19 @@ func grantPolicyAccess(policy Policy, sid *windows.SID) error {
 			return err
 		}
 	}
+
 	for _, root := range policy.AllowRead {
 		if err := grantRead(root, sid); err != nil {
 			return err
 		}
 	}
+
 	for _, socket := range policy.SocketPaths() {
 		if err := grantAccess(socket, sid); err != nil {
 			return err
 		}
 	}
+
 	return grantTempTraversal(policy, sid)
 }
 
@@ -222,10 +245,12 @@ func execInAppContainer(policy Policy, command string, args []string) error {
 	if err := grantPolicyAccess(policy, sid); err != nil {
 		return err
 	}
+
 	// The binary itself must be readable and executable by the profile.
 	if err := icacls(command, sid, "(RX)"); err != nil {
 		return err
 	}
+
 	exemptLoopback(sid)
 
 	inherited, err := inheritStdHandles()
@@ -241,12 +266,14 @@ func execInAppContainer(policy Policy, command string, args []string) error {
 
 	startup := stdStartup(attributeList)
 	commandLine := windows.ComposeCommandLine(append([]string{command}, args...))
+
 	info, err := createProcess(commandLine, nil, nil, &startup.startupInfo)
 	if err != nil {
 		return err
 	}
 
 	os.Exit(waitProcess(info))
+
 	return nil
 }
 
@@ -256,6 +283,7 @@ func stdHandle(id uint32) windows.Handle {
 	if err != nil || handle == 0 || handle == windows.InvalidHandle {
 		return 0
 	}
+
 	return handle
 }
 
@@ -273,13 +301,16 @@ func inheritStdHandles() ([]windows.Handle, error) {
 		if handle == 0 {
 			continue
 		}
+
 		if err := windows.SetHandleInformation(handle, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
 			return nil, err
 		}
+
 		if !slices.Contains(handles, handle) {
 			handles = append(handles, handle)
 		}
 	}
+
 	return handles, nil
 }
 
@@ -287,6 +318,7 @@ func inheritStdHandles() ([]windows.Handle, error) {
 // standard handles.
 func stdStartup(attributeList *windows.ProcThreadAttributeListContainer) startupInfoEx {
 	var startup startupInfoEx
+
 	startup.startupInfo = windows.StartupInfo{
 		Cb:        uint32(unsafe.Sizeof(startup)),
 		Flags:     windows.STARTF_USESTDHANDLES,
@@ -294,7 +326,9 @@ func stdStartup(attributeList *windows.ProcThreadAttributeListContainer) startup
 		StdOutput: stdHandle(windows.STD_OUTPUT_HANDLE),
 		StdErr:    stdHandle(windows.STD_ERROR_HANDLE),
 	}
+
 	startup.attributeList = attributeList.List()
+
 	return startup
 }
 
@@ -305,6 +339,7 @@ func createProcess(commandLine string, environment, dir *uint16, startup *window
 	if err != nil {
 		return windows.ProcessInformation{}, err
 	}
+
 	var info windows.ProcessInformation
 	err = windows.CreateProcess(
 		nil, commandPtr, nil, nil, true,
@@ -314,6 +349,7 @@ func createProcess(commandLine string, environment, dir *uint16, startup *window
 	if err != nil {
 		return windows.ProcessInformation{}, err
 	}
+
 	return info, nil
 }
 
@@ -322,9 +358,11 @@ func createProcess(commandLine string, environment, dir *uint16, startup *window
 func waitProcess(info windows.ProcessInformation) int {
 	windows.CloseHandle(info.Thread)
 	_, _ = windows.WaitForSingleObject(info.Process, windows.INFINITE)
+
 	var exitCode uint32
 	_ = windows.GetExitCodeProcess(info.Process, &exitCode)
 	windows.CloseHandle(info.Process)
+
 	return int(exitCode)
 }
 
@@ -357,15 +395,18 @@ func newStdioPipes(mergeStderr bool) (*stdioPipes, error) {
 		var sa windows.SecurityAttributes
 		sa.Length = uint32(unsafe.Sizeof(sa))
 		sa.InheritHandle = 1
+
 		if err = windows.CreatePipe(&read, &write, &sa, 0); err != nil {
 			return 0, 0, err
 		}
+
 		// The parent must not let a read end leak into the child.
 		if err = windows.SetHandleInformation(read, windows.HANDLE_FLAG_INHERIT, 0); err != nil {
 			windows.CloseHandle(read)
 			windows.CloseHandle(write)
 			return 0, 0, err
 		}
+
 		return read, write, nil
 	}
 
@@ -374,23 +415,28 @@ func newStdioPipes(mergeStderr bool) (*stdioPipes, error) {
 		p.closeAll()
 		return nil, err
 	}
+
 	var err error
 	if p.parentStdoutRead, p.childStdout, err = pipe(); err != nil {
 		return fail(err)
 	}
+
 	if p.childStdin, p.parentStdinWrite, err = pipe(); err != nil {
 		return fail(err)
 	}
+
 	// Unlike the other read ends, the stdin read end IS handed to the child,
 	// so it must stay inheritable.
 	if err := windows.SetHandleInformation(p.childStdin, windows.HANDLE_FLAG_INHERIT, windows.HANDLE_FLAG_INHERIT); err != nil {
 		return fail(err)
 	}
+
 	if mergeStderr {
 		p.childStderr = p.childStdout
 	} else if p.parentStderrRead, p.childStderr, err = pipe(); err != nil {
 		return fail(err)
 	}
+
 	return p, nil
 }
 
@@ -402,6 +448,7 @@ func (p *stdioPipes) childHandles() []windows.Handle {
 	if p.childStderr != p.childStdout {
 		handles = append(handles, p.childStderr)
 	}
+
 	return handles
 }
 
@@ -419,9 +466,11 @@ func (p *stdioPipes) closeAll() {
 	all := []windows.Handle{
 		p.childStdin, p.childStdout, p.parentStdinWrite, p.parentStdoutRead,
 	}
+
 	if p.childStderr != p.childStdout {
 		all = append(all, p.childStderr, p.parentStderrRead)
 	}
+
 	for _, handle := range all {
 		if handle != 0 {
 			windows.CloseHandle(handle)
@@ -437,13 +486,16 @@ func networkSecurity(sid *windows.SID, allowNetwork bool) (securityCapabilities,
 	if !allowNetwork {
 		return security, nil
 	}
+
 	capability, err := windows.CreateWellKnownSid(windows.WinCapabilityInternetClientServerSid)
 	if err != nil {
 		return security, err
 	}
+
 	capabilities := []windows.SIDAndAttributes{{Sid: capability, Attributes: windows.SE_GROUP_ENABLED}}
 	security.capabilities = &capabilities[0]
 	security.capabilityCount = uint32(len(capabilities))
+
 	return security, nil
 }
 
@@ -458,10 +510,12 @@ func newChildAttributeList(
 	if len(inherited) > 0 {
 		attributeCount = 2
 	}
+
 	attributeList, err := windows.NewProcThreadAttributeList(attributeCount)
 	if err != nil {
 		return nil, err
 	}
+
 	if err := attributeList.Update(
 		procThreadAttributeSecurityCapabilities,
 		unsafe.Pointer(&security),
@@ -470,6 +524,7 @@ func newChildAttributeList(
 		attributeList.Delete()
 		return nil, err
 	}
+
 	if len(inherited) > 0 {
 		if err := attributeList.Update(
 			procThreadAttributeHandleList,
@@ -480,6 +535,7 @@ func newChildAttributeList(
 			return nil, err
 		}
 	}
+
 	return attributeList, nil
 }
 
@@ -490,6 +546,7 @@ func childAttributeList(sid *windows.SID, inherited []windows.Handle, allowNetwo
 	if err != nil {
 		return nil, err
 	}
+
 	return newChildAttributeList(security, inherited)
 }
 
@@ -519,6 +576,7 @@ func spawn(policy Policy, dir, commandLine string, env []uint16, stdin []byte, m
 	if allowNetwork {
 		exemptLoopback(sid)
 	}
+
 	attributeList, err := childAttributeList(sid, pipes.childHandles(), allowNetwork)
 	if err != nil {
 		return 0, nil, nil, err
@@ -530,12 +588,14 @@ func spawn(policy Policy, dir, commandLine string, env []uint16, stdin []byte, m
 	if err != nil {
 		return 0, nil, nil, err
 	}
+
 	info, err := createProcess(commandLine, &env[0], dirPtr, &startup.startupInfo)
 	if err != nil {
 		return 0, nil, nil, err
 	}
 
 	process, stdout, stderr = finishSpawn(info, pipes, stdin, mergeStderr)
+
 	return process, stdout, stderr, nil
 }
 
@@ -546,17 +606,21 @@ func prepareSpawn(policy Policy, dir string) (*windows.SID, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+
 	if dir == "" {
 		if dir, err = os.Getwd(); err != nil {
 			return nil, "", err
 		}
 	}
+
 	if err := grantAccess(dir, sid); err != nil {
 		return nil, "", err
 	}
+
 	if err := grantPolicyAccess(policy, sid); err != nil {
 		return nil, "", err
 	}
+
 	return sid, dir, nil
 }
 
@@ -596,6 +660,7 @@ func finishSpawn(info windows.ProcessInformation, pipes *stdioPipes, stdin []byt
 	if !mergeStderr {
 		stderr = os.NewFile(uintptr(pipes.parentStderrRead), "stderr")
 	}
+
 	return info.Process, os.NewFile(uintptr(pipes.parentStdoutRead), "stdout"), stderr
 }
 
@@ -610,14 +675,17 @@ func envBlock(env map[string]string, extend bool) []uint16 {
 		}
 		block = append(block, wide...)
 	}
+
 	if extend || env == nil {
 		for _, pair := range os.Environ() {
 			appendPair(pair)
 		}
 	}
+
 	for key, value := range env {
 		appendPair(key + "=" + value)
 	}
+
 	return append(block, 0)
 }
 
@@ -631,6 +699,7 @@ type waitResult struct {
 // elapses. Cancellation returns ctx.Err(); a timeout returns core.ErrTimedOut.
 func wait(ctx context.Context, process windows.Handle, timeout time.Duration) (uint32, error) {
 	stop := make(chan struct{})
+
 	var watcher sync.WaitGroup
 	if ctx != nil {
 		watcher.Add(1)
@@ -643,6 +712,7 @@ func wait(ctx context.Context, process windows.Handle, timeout time.Duration) (u
 			}
 		}()
 	}
+
 	// Join the watcher before the caller closes the process handle, so a late
 	// TerminateProcess cannot race with handle reuse.
 	defer func() {
@@ -654,19 +724,23 @@ func wait(ctx context.Context, process windows.Handle, timeout time.Duration) (u
 	if timeout > 0 {
 		millis = uint32(timeout / time.Millisecond)
 	}
+
 	event, err := windows.WaitForSingleObject(process, millis)
 	if err != nil {
 		return 0, err
 	}
+
 	if event == uint32(windows.WAIT_TIMEOUT) {
 		_ = windows.TerminateProcess(process, 1)
 		_, _ = windows.WaitForSingleObject(process, windows.INFINITE)
 		return 0, core.ErrTimedOut
 	}
+
 	var exitCode uint32
 	if err := windows.GetExitCodeProcess(process, &exitCode); err != nil {
 		return 0, err
 	}
+
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
@@ -675,6 +749,7 @@ func wait(ctx context.Context, process windows.Handle, timeout time.Duration) (u
 			return 0, err
 		}
 	}
+
 	return exitCode, nil
 }
 
@@ -682,10 +757,12 @@ func wait(ctx context.Context, process windows.Handle, timeout time.Duration) (u
 // output concurrently.
 func waitAsync(ctx context.Context, process windows.Handle, timeout time.Duration) <-chan waitResult {
 	waited := make(chan waitResult, 1)
+
 	go func() {
 		exitCode, err := wait(ctx, process, timeout)
 		waited <- waitResult{exitCode: exitCode, err: err}
 	}()
+
 	return waited
 }
 
@@ -714,10 +791,12 @@ func (p *appContainerProcess) Run(
 	defer cleanup()
 
 	options = withTempEnv(options, policy)
+
 	var opts core.RunOptions
 	if len(options) > 0 {
 		opts = options[0]
 	}
+
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
@@ -726,6 +805,7 @@ func (p *appContainerProcess) Run(
 
 	description := util.DescribeCommand(command, args)
 	commandLine := windows.ComposeCommandLine(append([]string{command}, args...))
+
 	process, stdout, stderr, err := spawn(policy, opts.Dir, commandLine, envBlock(opts.Env, opts.ExtendEnv), opts.Stdin, opts.CombineOutput)
 	if err != nil {
 		return nil, &core.AppProcessError{Command: description, Cause: err}
@@ -736,6 +816,7 @@ func (p *appContainerProcess) Run(
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); _, _ = io.Copy(&stdoutBuf, stdout) }()
+
 	if stderr != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); _, _ = io.Copy(&stderrBuf, stderr) }()
@@ -751,9 +832,11 @@ func (p *appContainerProcess) Run(
 	if errors.Is(waitErr, core.ErrTimedOut) {
 		return nil, &core.AppProcessError{Command: description, Cause: core.ErrTimedOut}
 	}
+
 	if waitErr != nil {
 		return nil, &core.AppProcessError{Command: description, Cause: waitErr}
 	}
+
 	return runResult(description, exitCode, opts, stdoutBuf.Bytes(), stderrBuf.Bytes()), nil
 }
 
@@ -776,10 +859,12 @@ func (p *appContainerProcess) RunStream(
 		defer cleanup()
 
 		options = withStreamTempEnv(options, policy)
+
 		var opts core.RunStreamOptions
 		if len(options) > 0 {
 			opts = options[0]
 		}
+
 		if opts.Timeout > 0 {
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
@@ -805,10 +890,12 @@ func (p *appContainerProcess) RunStream(
 		if stopped {
 			_ = windows.TerminateProcess(process, 1)
 		}
+
 		result := <-waited
 		if stderrDone != nil {
 			<-stderrDone
 		}
+
 		if stopped {
 			return
 		}
@@ -817,10 +904,12 @@ func (p *appContainerProcess) RunStream(
 			yield("", err)
 			return
 		}
+
 		stderrText := ""
 		if stderrBuf != nil {
 			stderrText = stderrBuf.String()
 		}
+
 		if err := streamExitError(description, result.exitCode, opts.OkExitCodes, stderrText); err != nil {
 			yield("", err)
 		}
@@ -832,6 +921,7 @@ func runResult(description string, exitCode uint32, opts core.RunOptions, stdout
 	if opts.CombineOutput {
 		merged := append(stdout, stderr...)
 		output, truncated := util.Truncate(merged, opts.MaxOutputBytes)
+
 		return &core.RunResult{
 			Command:         description,
 			ExitCode:        int(exitCode),
@@ -841,8 +931,10 @@ func runResult(description string, exitCode uint32, opts core.RunOptions, stdout
 			OutputTruncated: truncated,
 		}
 	}
+
 	out, stdoutTruncated := util.Truncate(stdout, opts.MaxOutputBytes)
 	errOut, stderrTruncated := util.Truncate(stderr, opts.MaxErrorBytes)
+
 	return &core.RunResult{
 		Command:         description,
 		ExitCode:        int(exitCode),
@@ -865,6 +957,7 @@ func newBoundedBuffer(max *int) *boundedBuffer {
 	if max != nil {
 		limit = *max
 	}
+
 	return &boundedBuffer{limit: limit}
 }
 
@@ -872,6 +965,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	if b.limit < 0 {
 		return b.buf.Write(p)
 	}
+
 	written := len(p)
 	if remaining := b.limit - b.buf.Len(); remaining > 0 {
 		if len(p) > remaining {
@@ -879,6 +973,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 		}
 		b.buf.Write(p)
 	}
+
 	return written, nil
 }
 
@@ -890,6 +985,7 @@ func streamStderr(stderr *os.File, max *int) (*boundedBuffer, <-chan struct{}) {
 	if stderr == nil {
 		return nil, nil
 	}
+
 	buf := newBoundedBuffer(max)
 	done := make(chan struct{})
 	go func() {
@@ -897,6 +993,7 @@ func streamStderr(stderr *os.File, max *int) (*boundedBuffer, <-chan struct{}) {
 		_, _ = io.Copy(buf, stderr)
 		_ = stderr.Close()
 	}()
+
 	return buf, done
 }
 
@@ -905,12 +1002,15 @@ func streamWaitError(description string, waitErr, readFailure error) error {
 	if errors.Is(waitErr, core.ErrTimedOut) {
 		return &core.AppProcessError{Command: description, Cause: core.ErrTimedOut}
 	}
+
 	if readFailure != nil {
 		return &core.AppProcessError{Command: description, Cause: readFailure}
 	}
+
 	if waitErr != nil {
 		return &core.AppProcessError{Command: description, Cause: waitErr}
 	}
+
 	return nil
 }
 
@@ -920,6 +1020,8 @@ func streamExitError(description string, exitCode uint32, okExitCodes []int, std
 	if len(okExitCodes) == 0 || slices.Contains(okExitCodes, int(exitCode)) {
 		return nil
 	}
+
 	code := int(exitCode)
+
 	return &core.AppProcessError{Command: description, ExitCode: &code, Stderr: &stderr}
 }

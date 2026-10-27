@@ -35,10 +35,12 @@ func (c *COSConfig) Validate() error {
 	case (c.SecretID == "") != (c.SecretKey == ""):
 		return fmt.Errorf("storage.cos.secretID and secretKey must be set together, or both empty for an anonymous bucket")
 	}
+
 	if c.PresignTTL != "" {
 		if err := validateNonNegativeDuration("storage.cos.presignTTL", c.PresignTTL); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }

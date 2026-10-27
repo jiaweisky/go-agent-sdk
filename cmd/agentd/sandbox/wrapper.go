@@ -36,8 +36,10 @@ func (s sandboxed) Run(
 		return nil, err
 	}
 	defer cleanup()
+
 	options = withTempEnv(options, policy)
 	name, argv := s.launch(runDir(options), policy, command, args)
+
 	return s.inner.Run(ctx, name, argv, options...)
 }
 
@@ -51,8 +53,10 @@ func (s sandboxed) RunStream(
 			return
 		}
 		defer cleanup()
+
 		options = withStreamTempEnv(options, policy)
 		name, argv := s.launch(streamDir(options), policy, command, args)
+
 		for line, err := range s.inner.RunStream(ctx, name, argv, options...) {
 			if !yield(line, err) {
 				return
@@ -68,14 +72,18 @@ func withPrivateTemp(policy Policy) (Policy, func(), error) {
 	if base == "" {
 		base = os.TempDir()
 	}
+
 	if err := os.MkdirAll(base, sandboxTempDirMode); err != nil {
 		return Policy{}, nil, err
 	}
+
 	temp, err := os.MkdirTemp(base, "run-")
 	if err != nil {
 		return Policy{}, nil, err
 	}
+
 	policy.PrivateTemp = temp
+
 	return policy, func() { _ = os.RemoveAll(temp) }, nil
 }
 
@@ -100,9 +108,11 @@ func withTempEnv(options []core.RunOptions, policy Policy) []core.RunOptions {
 	if len(out) == 0 {
 		out = []core.RunOptions{{}}
 	}
+
 	opts := out[0]
 	opts.Env, opts.ExtendEnv = tempEnv(opts.Env, opts.ExtendEnv, policy)
 	out[0] = opts
+
 	return out
 }
 
@@ -111,9 +121,11 @@ func withStreamTempEnv(options []core.RunStreamOptions, policy Policy) []core.Ru
 	if len(out) == 0 {
 		out = []core.RunStreamOptions{{}}
 	}
+
 	opts := out[0]
 	opts.Env, opts.ExtendEnv = tempEnv(opts.Env, opts.ExtendEnv, policy)
 	out[0] = opts
+
 	return out
 }
 
@@ -127,12 +139,15 @@ func tempEnv(env map[string]string, extend bool, policy Policy) (map[string]stri
 	for key, value := range env {
 		merged[key] = value
 	}
+
 	if env == nil && !extend {
 		extend = true
 	}
+
 	merged["TMPDIR"], merged["TMP"], merged["TEMP"] = policy.PrivateTemp, policy.PrivateTemp, policy.PrivateTemp
 	if policy.ViolationMode == ViolationHeuristic {
 		merged["LC_ALL"] = "C"
 	}
+
 	return merged, extend
 }

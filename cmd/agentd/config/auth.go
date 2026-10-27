@@ -33,11 +33,14 @@ func (a *AuthConfig) Validate() error {
 	if a == nil {
 		return nil
 	}
+
 	if !a.Type.Valid() {
 		return fmt.Errorf("auth.type must be %q, got %q", AuthBearer, a.Type)
 	}
+
 	if a.Token == "" {
 		return errors.New("auth.token is required for bearer")
 	}
+
 	return nil
 }

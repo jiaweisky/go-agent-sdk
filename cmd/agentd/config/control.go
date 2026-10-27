@@ -26,20 +26,25 @@ func (c *ControlConfig) Validate() error {
 	if c == nil {
 		return nil
 	}
+
 	if err := validateControlListen(c.Listen); err != nil {
 		return err
 	}
+
 	// The control API can copy arbitrary directories and spawn agents, so a
 	// non-loopback bind must be authenticated (same guard as a served endpoint).
 	if err := c.Auth.Validate(); err != nil {
 		return fmt.Errorf("control: %w", err)
 	}
+
 	if !IsLoopback(c.Listen) && c.Auth == nil {
 		return errors.New("control.listen on a non-loopback address requires control.auth")
 	}
+
 	if c.MaxLeases < 0 {
 		return errors.New("control.maxLeases must not be negative")
 	}
+
 	return validateProjectListen(c.ProjectListen)
 }
 
@@ -48,9 +53,11 @@ func validateControlListen(listen string) error {
 	if listen == "" {
 		return errors.New("control.listen is required")
 	}
+
 	if _, _, err := net.SplitHostPort(listen); err != nil {
 		return fmt.Errorf("control.listen: %w", err)
 	}
+
 	return nil
 }
 
@@ -61,11 +68,14 @@ func validateProjectListen(listen string) error {
 	if listen == "" {
 		return nil
 	}
+
 	if _, _, err := net.SplitHostPort(listen); err != nil {
 		return fmt.Errorf("control.projectListen: %w", err)
 	}
+
 	if !IsLoopback(listen) {
 		return errors.New("control.projectListen must be loopback; dynamic instances are unauthenticated")
 	}
+
 	return nil
 }

@@ -14,19 +14,23 @@ func MediaSummary(cfg Config) []string {
 	for name := range cfg.ProviderFileAPIs {
 		names = append(names, name)
 	}
+
 	sort.Strings(names)
+
 	lines := make([]string, 0, len(names))
 	for _, name := range names {
 		profile := cfg.ProviderFileAPIs[name]
 		if profile == nil {
 			continue
 		}
+
 		lines = append(lines, fmt.Sprintf(
 			"agentd: media upload: %s (%s, expiry=%s, mime=%s, maxBytes=%s)",
 			name, authSummary(profile.Auth.Headers), expirySummary(profile.Expiry),
 			mimeSummary(profile.MIME.Allowed), bytesSummary(profile.Limits.MaxBytes),
 		))
 	}
+
 	return lines
 }
 
@@ -35,7 +39,9 @@ func authSummary(headers map[string]string) string {
 	for name := range headers {
 		names = append(names, strings.ToLower(name))
 	}
+
 	sort.Strings(names)
+
 	has := func(name string) bool { return slices.Contains(names, name) }
 	switch {
 	case has("authorization"):
@@ -73,9 +79,11 @@ func bytesSummary(n int64) string {
 	if n <= 0 {
 		return "unlimited"
 	}
+
 	const mb = 1 << 20
 	if n%mb == 0 {
 		return fmt.Sprintf("%dMB", n/mb)
 	}
+
 	return fmt.Sprintf("%dB", n)
 }

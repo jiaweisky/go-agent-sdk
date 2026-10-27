@@ -39,10 +39,12 @@ func (c *S3Config) Validate() error {
 	case (c.AccessKey == "") != (c.SecretKey == ""):
 		return fmt.Errorf("storage.s3.accessKey and secretKey must be set together, or both empty for an anonymous bucket")
 	}
+
 	if c.PresignTTL != "" {
 		if err := validateNonNegativeDuration("storage.s3.presignTTL", c.PresignTTL); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }

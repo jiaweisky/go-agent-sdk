@@ -90,12 +90,15 @@ func (s *SandboxConfig) Validate() error {
 	if s == nil {
 		return nil
 	}
+
 	if err := validateSandboxSelection(s); err != nil {
 		return err
 	}
+
 	if err := validateSandboxPolicy(s.SandboxPolicy); err != nil {
 		return err
 	}
+
 	return validatePlatformSandbox(s)
 }
 
@@ -104,17 +107,20 @@ func validateSandboxSelection(s *SandboxConfig) error {
 	if s.Wrapper == "" {
 		return errors.New(`sandbox.wrapper is required (use "none" to disable it)`)
 	}
+
 	// The wrapper is a closed set; whether it can actually run on this host
 	// (platform support, wrapper binary) is resolved at startup and governed by
 	// failurePolicy.
 	if !s.Wrapper.Valid() {
 		return fmt.Errorf("sandbox.wrapper must be none, bwrap, seatbelt or appcontainer, got %q", s.Wrapper)
 	}
+
 	// A disabled sandbox ignores the policy; reject that instead of silently
 	// downgrading it.
 	if (s.Wrapper == WrapperNone || s.Profile == ProfileOff) && s.hasPolicyFields() {
 		return errors.New("sandbox policy fields are ignored when the sandbox is disabled; remove them or name a wrapper")
 	}
+
 	return validateFailurePolicy("sandbox.failurePolicy", s.FailurePolicy)
 }
 
@@ -123,21 +129,27 @@ func validateSandboxPolicy(p SandboxPolicy) error {
 	if err := validateSandboxProfile(p.Profile); err != nil {
 		return err
 	}
+
 	if err := validateSandboxFilesystem(p.Filesystem); err != nil {
 		return err
 	}
+
 	if err := validateSandboxNetwork(p.Network); err != nil {
 		return err
 	}
+
 	if err := validateSandboxUnixSockets(p.UnixSockets); err != nil {
 		return err
 	}
+
 	if err := validateSandboxProcessInspection(p.ProcessInspection); err != nil {
 		return err
 	}
+
 	if err := validateSandboxEnv(p.Env); err != nil {
 		return err
 	}
+
 	return validateSandboxViolations(p.Violations)
 }
 
@@ -160,20 +172,25 @@ func validateSandboxFilesystem(f *SandboxFilesystem) error {
 	if f == nil {
 		return nil
 	}
+
 	if err := validateFileAccess("read", f.Read); err != nil {
 		return err
 	}
+
 	if err := validateFileAccess("write", f.Write); err != nil {
 		return err
 	}
+
 	if runtime.GOOS != "linux" {
 		return nil
 	}
+
 	for _, entry := range append(append([]string{}, f.DenyRead...), f.DenyWrite...) {
 		if strings.ContainsAny(entry, "*?[") {
 			return fmt.Errorf("sandbox.filesystem deny glob %q is unsupported on linux; use a literal path", entry)
 		}
 	}
+
 	return nil
 }
 
@@ -183,6 +200,7 @@ func validateFileAccess(field, mode string) error {
 	case "", sandboxmode.FSModeAllow, sandboxmode.FSModeOff:
 		return nil
 	}
+
 	return fmt.Errorf("sandbox.filesystem.%s must be allow or off, got %q", field, mode)
 }
 
@@ -190,9 +208,11 @@ func validateSandboxNetwork(n *SandboxNetwork) error {
 	if n == nil {
 		return nil
 	}
+
 	if len(n.AllowedDomains) > 0 {
 		return errors.New("sandbox.network.allowedDomains is not implemented; use no-egress or a host proxy")
 	}
+
 	switch n.Mode {
 	case "", sandboxmode.NetworkOff, sandboxmode.NetworkNoEgress:
 		return nil
@@ -207,9 +227,11 @@ func validateSandboxUnixSockets(u *SandboxUnixSockets) error {
 	if u == nil {
 		return nil
 	}
+
 	if u.Mode != sandboxmode.SocketAllowlist && len(u.Allow) > 0 {
 		return errors.New("sandbox.unixSockets.allow requires mode allowlist")
 	}
+
 	switch u.Mode {
 	case "", sandboxmode.SocketInherit, sandboxmode.SocketDeny, sandboxmode.SocketAllowAll:
 		return nil
@@ -228,6 +250,7 @@ func validateSandboxProcessInspection(mode string) error {
 	case "", "deny", "allow":
 		return nil
 	}
+
 	return fmt.Errorf("sandbox.processInspection must be deny or allow, got %q", mode)
 }
 
@@ -235,10 +258,12 @@ func validateSandboxEnv(e *SandboxEnv) error {
 	if e == nil {
 		return nil
 	}
+
 	switch e.Mode {
 	case "", sandboxmode.EnvScrub, sandboxmode.EnvInherit:
 		return nil
 	}
+
 	return fmt.Errorf("sandbox.env.mode must be scrub or inherit, got %q", e.Mode)
 }
 
@@ -246,6 +271,7 @@ func validateSandboxViolations(v *SandboxViolations) error {
 	if v == nil {
 		return nil
 	}
+
 	switch v.Mode {
 	case "", sandboxmode.ViolationHeuristic, sandboxmode.ViolationOff:
 		return nil
@@ -273,7 +299,9 @@ func validatePlatformSandboxFor(goos string, s *SandboxConfig) error {
 	if !s.Enabled() {
 		return nil
 	}
+
 	readMode, writeMode := s.SandboxPolicy.EffectiveAccess()
+
 	switch goos {
 	case "darwin":
 		// Seatbelt can express every supported combination: reads and writes may
@@ -282,12 +310,15 @@ func validatePlatformSandboxFor(goos string, s *SandboxConfig) error {
 		if readMode == sandboxmode.FSModeOff {
 			return errors.New("sandbox.filesystem.read: off is not supported on windows; use read: allow or wrapper: none")
 		}
+
 		if writeMode == sandboxmode.FSModeOff {
 			return errors.New("sandbox.filesystem.write: off is not supported on windows; use write: allow or wrapper: none")
 		}
+
 		if s.ProcessInspection == "allow" {
 			return errors.New("sandbox.processInspection: allow is not supported on windows; the AppContainer cannot be relaxed")
 		}
+
 		if fs := s.Filesystem; fs != nil && (len(fs.DenyRead) > 0 || len(fs.DenyWrite) > 0) {
 			return errors.New("sandbox.filesystem denyRead/denyWrite are not supported on windows; " +
 				"the AppContainer only grants allow-list access")
@@ -298,6 +329,7 @@ func validatePlatformSandboxFor(goos string, s *SandboxConfig) error {
 				"set read: off or use wrapper: none")
 		}
 	}
+
 	return nil
 }
 
@@ -309,13 +341,16 @@ func (p SandboxPolicy) EffectiveAccess() (readMode, writeMode string) {
 	case ProfileCustom:
 		readMode, writeMode = sandboxmode.FSModeOff, sandboxmode.FSModeOff
 	}
+
 	if p.Filesystem != nil {
 		if p.Filesystem.Read != "" {
 			readMode = p.Filesystem.Read
 		}
+
 		if p.Filesystem.Write != "" {
 			writeMode = p.Filesystem.Write
 		}
 	}
+
 	return readMode, writeMode
 }

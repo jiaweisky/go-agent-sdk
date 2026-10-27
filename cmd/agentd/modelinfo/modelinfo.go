@@ -35,17 +35,22 @@ func New(c Config) (schema.ModelInfo, error) {
 	if err != nil {
 		return schema.ModelInfo{}, err
 	}
+
 	info.ID = schema.ModelID(c.ID)
 	info.ProviderID = c.ProviderID
+
 	if len(c.Inputs) > 0 {
 		info.Capabilities.Input = c.Inputs
 	}
+
 	if len(c.Forms) > 0 || len(c.MIMEs) > 0 {
 		info.Capabilities.Media = &schema.ModelMediaCapability{Forms: c.Forms, MIMEs: c.MIMEs}
 	}
+
 	for name, value := range c.Headers {
 		info.Request.Headers[name] = value
 	}
+
 	return info, nil
 }
 
@@ -55,6 +60,7 @@ func FromConfig(entry config.ModelConfig) (schema.ModelInfo, error) {
 	if entry.Media != nil {
 		forms = entry.Media.Forms
 	}
+
 	return New(Config{
 		ID:           entry.ID,
 		Protocol:     entry.Protocol,
@@ -77,9 +83,11 @@ func Resolve(registry config.ModelRegistry, id string) (schema.ModelInfo, error)
 	if !ok {
 		entry, ok = registry.DefaultEntry()
 	}
+
 	if !ok {
 		return schema.ModelInfo{}, fmt.Errorf("model %q: model registry has no entry", id)
 	}
+
 	return FromConfig(entry)
 }
 
@@ -89,13 +97,16 @@ func List(registry config.ModelRegistry) ([]schema.ModelInfo, error) {
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("model registry has no models")
 	}
+
 	infos := make([]schema.ModelInfo, 0, len(ids))
 	for _, id := range ids {
 		info, err := Resolve(registry, id)
 		if err != nil {
 			return nil, err
 		}
+
 		infos = append(infos, info)
 	}
+
 	return infos, nil
 }

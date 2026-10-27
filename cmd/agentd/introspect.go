@@ -46,13 +46,16 @@ func authorized(req *http.Request, auth *config.AuthConfig) bool {
 	if auth == nil {
 		return true
 	}
+
 	if auth.Token == "" {
 		return false
 	}
+
 	token := bearerToken(req)
 	if token == "" {
 		token = req.URL.Query().Get("auth_token")
 	}
+
 	return constEq(token, auth.Token)
 }
 
@@ -63,6 +66,7 @@ func publicPath(patterns []string, path string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -92,11 +96,14 @@ func sanitizeURL(raw string) string {
 	if raw == "" {
 		return ""
 	}
+
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.User == nil {
 		return raw
 	}
+
 	parsed.User = nil
+
 	return parsed.String()
 }
 
@@ -415,6 +422,7 @@ func buildConfigDocument(cfg config.Config, section, server string) configDocume
 		ProviderFileAPIs: providerFileAPIViews(cfg.ProviderFileAPIs),
 		Servers:          serverViews(cfg.Servers, server),
 	}
+
 	if cfg.Control != nil {
 		doc.Control = &controlView{
 			Listen:        cfg.Control.Listen,
@@ -423,6 +431,7 @@ func buildConfigDocument(cfg config.Config, section, server string) configDocume
 			Auth:          authViewOf(cfg.Control.Auth),
 		}
 	}
+
 	if cfg.Wrap != nil {
 		doc.Wrap = &wrapView{
 			Wrapper:       string(cfg.Wrap.Wrapper),
@@ -430,6 +439,7 @@ func buildConfigDocument(cfg config.Config, section, server string) configDocume
 			SandboxPolicy: cfg.Wrap.SandboxPolicy,
 		}
 	}
+
 	switch section {
 	case "models":
 		doc = configDocument{Models: doc.Models}
@@ -440,6 +450,7 @@ func buildConfigDocument(cfg config.Config, section, server string) configDocume
 	case "wrap":
 		doc = configDocument{Wrap: doc.Wrap}
 	}
+
 	return doc
 }
 
@@ -447,10 +458,12 @@ func providerFileAPIViews(profiles map[string]*config.ProviderFileAPI) map[strin
 	if len(profiles) == 0 {
 		return nil
 	}
+
 	views := make(map[string]*providerFileAPIView, len(profiles))
 	for name, profile := range profiles {
 		views[name] = providerFileAPIViewOf(profile)
 	}
+
 	return views
 }
 
@@ -459,6 +472,7 @@ func modelViews(models []config.ModelConfig) []modelView {
 	for _, m := range models {
 		views = append(views, modelViewOf(m))
 	}
+
 	return views
 }
 
@@ -476,9 +490,11 @@ func modelViewOf(m config.ModelConfig) modelView {
 		OutputLimit:     m.OutputLimit,
 		Credentials:     credentialsView{APIKey: redact(m.Credentials.APIKey)},
 	}
+
 	if m.Media != nil {
 		v.Media = &mediaView{Input: m.Media.Input, Forms: m.Media.Forms}
 	}
+
 	if len(m.Headers) > 0 {
 		v.Headers = make([]string, 0, len(m.Headers))
 		for name := range m.Headers {
@@ -486,6 +502,7 @@ func modelViewOf(m config.ModelConfig) modelView {
 		}
 		sort.Strings(v.Headers)
 	}
+
 	if a := m.Credentials.AWS; a != nil {
 		v.Credentials.AWS = &awsView{
 			Region:          a.Region,
@@ -494,6 +511,7 @@ func modelViewOf(m config.ModelConfig) modelView {
 			SessionToken:    redact(a.SessionToken),
 		}
 	}
+
 	return v
 }
 
@@ -545,6 +563,7 @@ func storageViewOf(s *config.StorageConfig) *storageView {
 	if s == nil {
 		return nil
 	}
+
 	return &storageView{
 		Backend:       string(s.Backend),
 		URL:           sanitizeURL(s.URL),
@@ -567,6 +586,7 @@ func s3StorageViewOf(s *config.S3Config) *s3StorageView {
 	if s == nil {
 		return nil
 	}
+
 	return &s3StorageView{
 		Endpoint:   sanitizeURL(s.Endpoint),
 		Region:     s.Region,
@@ -582,6 +602,7 @@ func cosStorageViewOf(c *config.COSConfig) *cosStorageView {
 	if c == nil {
 		return nil
 	}
+
 	return &cosStorageView{
 		Region:       c.Region,
 		Bucket:       c.Bucket,
@@ -597,10 +618,12 @@ func cardViews(cards map[string]config.CardConfig) map[string]cardView {
 	if len(cards) == 0 {
 		return nil
 	}
+
 	views := make(map[string]cardView, len(cards))
 	for agent, card := range cards {
 		views[agent] = cardViewOf(card)
 	}
+
 	return views
 }
 
@@ -615,13 +638,17 @@ func cardViewOf(c config.CardConfig) cardView {
 		DefaultInputModes:  c.DefaultInputModes,
 		DefaultOutputModes: c.DefaultOutputModes,
 	}
+
 	if c.Provider != nil {
 		v.Provider = &providerView{Organization: c.Provider.Organization, URL: sanitizeURL(c.Provider.URL)}
 	}
+
 	if len(c.Skills) > 0 {
 		v.Skills = skillViews(c.Skills)
 	}
+
 	v.Extended = extendedCardViewOf(c.Extended)
+
 	return v
 }
 
@@ -629,6 +656,7 @@ func extendedCardViewOf(c *config.ExtendedCardConfig) *extendedCardView {
 	if c == nil {
 		return nil
 	}
+
 	v := &extendedCardView{
 		Name:               c.Name,
 		Description:        c.Description,
@@ -638,12 +666,15 @@ func extendedCardViewOf(c *config.ExtendedCardConfig) *extendedCardView {
 		DefaultInputModes:  c.DefaultInputModes,
 		DefaultOutputModes: c.DefaultOutputModes,
 	}
+
 	if c.Provider != nil {
 		v.Provider = &providerView{Organization: c.Provider.Organization, URL: sanitizeURL(c.Provider.URL)}
 	}
+
 	if len(c.Skills) > 0 {
 		v.Skills = skillViews(c.Skills)
 	}
+
 	return v
 }
 
@@ -655,6 +686,7 @@ func skillViews(skills []config.SkillConfig) []skillView {
 			Tags: s.Tags, Examples: s.Examples, InputModes: s.InputModes, OutputModes: s.OutputModes,
 		})
 	}
+
 	return out
 }
 
@@ -662,6 +694,7 @@ func pushNotificationsViewOf(p *config.PushNotificationsConfig) *pushNotificatio
 	if p == nil {
 		return nil
 	}
+
 	return &pushNotificationsView{
 		Enabled:              p.Enabled,
 		Timeout:              p.Timeout,
@@ -674,6 +707,7 @@ func signingViewOf(s *config.SigningConfig) *signingView {
 	if s == nil {
 		return nil
 	}
+
 	return &signingView{
 		KeyFile:   s.KeyFile,
 		KeyID:     s.KeyID,
@@ -686,10 +720,12 @@ func transportStrings(transports []config.A2ATransport) []string {
 	if len(transports) == 0 {
 		return nil
 	}
+
 	out := make([]string, 0, len(transports))
 	for _, transport := range transports {
 		out = append(out, string(transport))
 	}
+
 	return out
 }
 
@@ -697,10 +733,12 @@ func isolationViewOf(iso *config.IsolationConfig) *isolationView {
 	if iso == nil {
 		return nil
 	}
+
 	v := &isolationView{Mode: string(iso.Mode), BaseDir: iso.BaseDir, BaseRef: iso.BaseRef}
 	if iso.Cow != nil {
 		v.Cow = &cowView{Mode: string(iso.Cow.Mode)}
 	}
+
 	return v
 }
 
@@ -708,6 +746,7 @@ func sandboxViewOf(sb *config.SandboxConfig) *sandboxView {
 	if sb == nil {
 		return nil
 	}
+
 	return &sandboxView{
 		Wrapper:       string(sb.Wrapper),
 		FailurePolicy: string(sb.FailurePolicy),
@@ -719,6 +758,7 @@ func providerFileAPIViewOf(p *config.ProviderFileAPI) *providerFileAPIView {
 	if p == nil {
 		return nil
 	}
+
 	v := &providerFileAPIView{
 		Kind:          p.Kind,
 		URL:           sanitizeURL(p.URL),
@@ -729,18 +769,23 @@ func providerFileAPIViewOf(p *config.ProviderFileAPI) *providerFileAPIView {
 		MaxBytes:      p.Limits.MaxBytes,
 		Timeout:       p.Limits.Timeout,
 	}
+
 	for name := range p.Auth.Headers {
 		v.HeaderNames = append(v.HeaderNames, name)
 	}
+
 	for name := range p.Fields {
 		v.FieldNames = append(v.FieldNames, name)
 	}
+
 	for name := range p.ModelHeaders {
 		v.ModelHeaders = append(v.ModelHeaders, name)
 	}
+
 	sort.Strings(v.HeaderNames)
 	sort.Strings(v.FieldNames)
 	sort.Strings(v.ModelHeaders)
+
 	return v
 }
 
@@ -748,10 +793,12 @@ func serverMediaViewOf(m *config.ServerMediaConfig) *serverMediaView {
 	if m == nil {
 		return nil
 	}
+
 	v := &serverMediaView{Delivery: mediaDeliveryViewOf(m.Delivery)}
 	if m.Uploads != nil {
 		v.Uploads = &mediaUploadsView{URLHost: storageViewOf(m.Uploads.URLHost)}
 	}
+
 	return v
 }
 
@@ -759,6 +806,7 @@ func mediaDeliveryViewOf(m *config.MediaDeliveryConfig) *mediaDeliveryView {
 	if m == nil {
 		return nil
 	}
+
 	view := &mediaDeliveryView{
 		InlineLimitBytes: mediaSizeLimitViewOf(m.InlineLimitBytes),
 		Prefer:           m.Prefer,
@@ -766,9 +814,11 @@ func mediaDeliveryViewOf(m *config.MediaDeliveryConfig) *mediaDeliveryView {
 		Downsample:       m.Downsample,
 		MaxBytes:         mediaSizeLimitViewOf(m.MaxBytes),
 	}
+
 	if m.Spool != nil {
 		view.SpoolDir = m.Spool.Dir
 	}
+
 	return view
 }
 
@@ -777,6 +827,7 @@ func mediaSizeLimitViewOf(m config.MediaSizeLimit) *mediaSizeLimitView {
 	if m == (config.MediaSizeLimit{}) {
 		return nil
 	}
+
 	return &mediaSizeLimitView{Default: m.Default, Image: m.Image, Audio: m.Audio, Video: m.Video, File: m.File}
 }
 
@@ -784,12 +835,15 @@ func tlsView(tls *config.TLS) *secret {
 	if tls == nil {
 		return nil
 	}
+
 	value := redactSet(true)
+
 	return &value
 }
 
 func mcpViews(servers []config.MCPServer) []mcpView {
 	views := make([]mcpView, 0, len(servers))
+
 	for _, m := range servers {
 		views = append(views, mcpView{
 			Name:     m.Name,
@@ -797,47 +851,56 @@ func mcpViews(servers []config.MCPServer) []mcpView {
 			Redacted: len(m.Command) > 0 || m.URL != "" || len(m.Environment) > 0 || len(m.Headers) > 0,
 		})
 	}
+
 	return views
 }
 
 func a2aPeerViews(peers []config.A2APeer) []a2aPeerView {
 	views := make([]a2aPeerView, 0, len(peers))
+
 	for _, p := range peers {
 		views = append(views, a2aPeerView{
 			Name: p.Name, Endpoint: sanitizeURL(p.Endpoint), CardURL: sanitizeURL(p.CardURL),
 			Description: p.Description, Mode: p.ModeOrDefault(), Redacted: len(p.Headers) > 0,
 		})
 	}
+
 	return views
 }
 
 func referenceViews(references []config.Reference) []referenceView {
 	views := make([]referenceView, 0, len(references))
+
 	for _, r := range references {
 		views = append(views, referenceView{
 			Name: r.Name, Type: string(r.Type), Path: r.Path, Repository: sanitizeURL(r.Repository),
 			Branch: r.Branch, Description: r.Description, Hidden: r.Hidden,
 		})
 	}
+
 	return views
 }
 
 func permissionRuleViews(rules []config.PermissionRule) []permissionRuleView {
 	views := make([]permissionRuleView, 0, len(rules))
+
 	for _, p := range rules {
 		views = append(views, permissionRuleView{Action: p.Action, Resource: p.Resource, Effect: p.Effect})
 	}
+
 	return views
 }
 
 func serverViews(servers []config.Server, only string) []serverView {
 	views := make([]serverView, 0, len(servers))
+
 	for _, s := range servers {
 		if only != "" && s.Name != only {
 			continue
 		}
 		views = append(views, serverViewOf(s))
 	}
+
 	return views
 }
 
@@ -845,5 +908,6 @@ func authViewOf(a *config.AuthConfig) *authView {
 	if a == nil {
 		return nil
 	}
+
 	return &authView{Type: string(a.Type), Token: redact(a.Token)}
 }

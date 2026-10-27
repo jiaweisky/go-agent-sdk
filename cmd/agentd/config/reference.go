@@ -37,6 +37,7 @@ func (r Reference) Validate() error {
 	if r.Name == "" {
 		return errors.New("references: each requires a name")
 	}
+
 	switch r.Type {
 	case ReferenceLocal:
 		if r.Path == "" {
@@ -49,6 +50,7 @@ func (r Reference) Validate() error {
 	default:
 		return fmt.Errorf("reference %s: type must be local or git, got %q", r.Name, r.Type)
 	}
+
 	return nil
 }
 
@@ -59,5 +61,6 @@ func ValidateReferences(refs []Reference) error {
 			return err
 		}
 	}
+
 	return nil
 }

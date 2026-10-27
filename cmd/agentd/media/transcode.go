@@ -35,25 +35,31 @@ func FFmpegTranscoder() func(core.MediaTranscodeRequest) (core.MediaTranscodeRes
 		if len(req.Data) == 0 || req.MaxBytes <= 0 {
 			return core.MediaTranscodeResult{}, false
 		}
+
 		path, err := exec.LookPath("ffmpeg")
 		if err != nil {
 			return core.MediaTranscodeResult{}, false
 		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), transcodeTimeout)
 		defer cancel()
+
 		mime := strings.ToLower(req.MIME)
 		for _, attempt := range ffmpegAttempts(mime) {
 			cmd := exec.CommandContext(ctx, path, attempt...)
 			cmd.Stdin = bytes.NewReader(req.Data)
+
 			var out bytes.Buffer
 			cmd.Stdout = &out
 			if err := cmd.Run(); err != nil {
 				continue
 			}
+
 			if data := out.Bytes(); len(data) > 0 && int64(len(data)) <= req.MaxBytes {
 				return core.MediaTranscodeResult{MIME: outputMIME(mime), Data: data}, true
 			}
 		}
+
 		return core.MediaTranscodeResult{}, false
 	}
 }
@@ -71,6 +77,7 @@ func ffmpegAttempts(mime string) [][]string {
 	switch {
 	case strings.HasPrefix(mime, "video/"):
 		attempts := make([][]string, 0, len(videoScales))
+
 		for _, scale := range videoScales {
 			attempts = append(attempts, []string{
 				"-hide_banner", "-loglevel", "error",
@@ -82,9 +89,11 @@ func ffmpegAttempts(mime string) [][]string {
 				"-f", "mp4", "pipe:1",
 			})
 		}
+
 		return attempts
 	case strings.HasPrefix(mime, "audio/"):
 		attempts := make([][]string, 0, len(audioBitrates))
+
 		for _, bitrate := range audioBitrates {
 			attempts = append(attempts, []string{
 				"-hide_banner", "-loglevel", "error",
@@ -93,6 +102,7 @@ func ffmpegAttempts(mime string) [][]string {
 				"-f", "ogg", "pipe:1",
 			})
 		}
+
 		return attempts
 	}
 	return nil

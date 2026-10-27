@@ -30,19 +30,24 @@ func (w *WrapConfig) Validate() error {
 	if w == nil {
 		return nil
 	}
+
 	if w.Wrapper == "" {
 		return errors.New(`wrap.wrapper is required (use "none" to disable)`)
 	}
+
 	if !w.Wrapper.Valid() {
 		return fmt.Errorf("wrap.wrapper must be none, bwrap, seatbelt or appcontainer, got %q", w.Wrapper)
 	}
+
 	if err := validateFailurePolicy("wrap.failurePolicy", w.FailurePolicy); err != nil {
 		return err
 	}
+
 	cfg := &SandboxConfig{
 		Wrapper:       w.Wrapper,
 		FailurePolicy: w.FailurePolicy,
 		SandboxPolicy: w.SandboxPolicy,
 	}
+
 	return cfg.Validate()
 }

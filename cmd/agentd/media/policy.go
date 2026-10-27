@@ -14,17 +14,21 @@ func DeliveryPolicy(cfg *config.MediaDeliveryConfig, root string) *core.MediaPol
 	if cfg == nil {
 		return nil
 	}
+
 	prefer := make([]core.MediaPolicySource, 0, len(cfg.Prefer))
 	for _, name := range cfg.Prefer {
 		if name == "providerFile" {
 			name = "file"
 		}
+
 		prefer = append(prefer, core.MediaPolicySource(name))
 	}
+
 	var spool *core.MediaSpoolPolicy
 	if cfg.Spool != nil {
 		spool = &core.MediaSpoolPolicy{Dir: strings.ReplaceAll(cfg.Spool.Dir, "{Root}", root)}
 	}
+
 	return &core.MediaPolicy{
 		InlineLimitBytes: sizeLimits(cfg.InlineLimitBytes),
 		Prefer:           prefer,
@@ -43,8 +47,10 @@ func sizeLimits(m config.MediaSizeLimit) core.MediaSizeLimits {
 			by[name] = value
 		}
 	}
+
 	if len(by) == 0 {
 		by = nil
 	}
+
 	return core.MediaSizeLimits{Default: m.Default, ByModality: by}
 }

@@ -22,12 +22,15 @@ var processRegistry = map[string]ProcessLauncher{}
 // startup.
 func RegisterProcess(name string, launcher ProcessLauncher) {
 	validateName(name)
+
 	if launcher == nil {
 		panic("sandbox: nil process launcher for " + name)
 	}
+
 	if _, dup := processRegistry[name]; dup {
 		panic("sandbox: duplicate process registration: " + name)
 	}
+
 	processRegistry[name] = launcher
 }
 
@@ -39,12 +42,15 @@ func ResolveProcess(name string) (ProcessLauncher, error) {
 	case "", "none":
 		return nil, nil
 	}
+
 	launcher, ok := processRegistry[name]
 	if !ok {
 		return nil, fmt.Errorf("wrap.wrapper %q is not available on %s", name, runtime.GOOS)
 	}
+
 	if err := checkAvailable(name); err != nil {
 		return nil, err
 	}
+
 	return launcher, nil
 }

@@ -60,10 +60,12 @@ func (s MCPServer) validateAndParse() (time.Duration, error) {
 	case s.Type == MCPRemote && s.URL == "":
 		return 0, fmt.Errorf("mcp %s: remote requires url", s.Name)
 	}
+
 	timeout, err := ParseOptionalDuration(s.Timeout)
 	if err != nil {
 		return 0, fmt.Errorf("mcp %s: timeout: %w", s.Name, err)
 	}
+
 	return timeout, nil
 }
 
@@ -79,19 +81,24 @@ func ValidateMCPConfigs(servers []MCPServer) ([]MCPEntry, error) {
 	if len(servers) == 0 {
 		return nil, nil
 	}
+
 	entries := make([]MCPEntry, len(servers))
 	seen := make(map[string]bool, len(servers))
+
 	for i, server := range servers {
 		timeout, err := server.validateAndParse()
 		if err != nil {
 			return nil, err
 		}
+
 		if seen[server.Name] {
 			return nil, fmt.Errorf("mcp %s: duplicate name", server.Name)
 		}
+
 		seen[server.Name] = true
 		entries[i] = MCPEntry{Server: server, Timeout: timeout}
 	}
+
 	return entries, nil
 }
 
@@ -104,12 +111,15 @@ func MCPTimeouts(servers []MCPServer) ([]time.Duration, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if len(entries) == 0 {
 		return nil, nil
 	}
+
 	timeouts := make([]time.Duration, len(entries))
 	for i, entry := range entries {
 		timeouts[i] = entry.Timeout
 	}
+
 	return timeouts, nil
 }

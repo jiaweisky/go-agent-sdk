@@ -13,6 +13,7 @@ func bearerToken(req *http.Request) string {
 	if !strings.HasPrefix(value, "Bearer ") {
 		return ""
 	}
+
 	return strings.TrimSpace(strings.TrimPrefix(value, "Bearer "))
 }
 

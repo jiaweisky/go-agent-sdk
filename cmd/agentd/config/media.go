@@ -153,12 +153,15 @@ func (m *MediaDeliveryConfig) Validate() error {
 	if m == nil {
 		return nil
 	}
+
 	if err := m.InlineLimitBytes.validate("inlineLimitBytes"); err != nil {
 		return err
 	}
+
 	if err := m.MaxBytes.validate("maxBytes"); err != nil {
 		return err
 	}
+
 	seen := map[string]bool{}
 	for _, source := range m.Prefer {
 		switch source {
@@ -166,14 +169,18 @@ func (m *MediaDeliveryConfig) Validate() error {
 		default:
 			return fmt.Errorf("media.delivery.prefer: unknown source %q (providerFile, url, inline)", source)
 		}
+
 		if seen[source] {
 			return fmt.Errorf("media.delivery.prefer: duplicate source %q", source)
 		}
+
 		seen[source] = true
 	}
+
 	if m.Spool != nil && m.Spool.Dir == "" {
 		return errors.New("media.delivery.spool requires a dir")
 	}
+
 	return nil
 }
 
@@ -223,10 +230,12 @@ func validateProviderFileAPIs(profiles map[string]*ProviderFileAPI) error {
 		if strings.TrimSpace(name) == "" {
 			return errors.New("providerFileAPIs: profile name must not be empty")
 		}
+
 		if err := profile.Validate(name); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -237,13 +246,16 @@ func validateModelProviderFileAPIs(models []ModelConfig, profiles map[string]*Pr
 		if m.ProviderFileAPI == "" {
 			continue
 		}
+
 		if m.ProviderID == "" {
 			return fmt.Errorf("model %q: providerFileAPI %q requires an explicit providerID", m.ID, m.ProviderFileAPI)
 		}
+
 		if _, ok := profiles[m.ProviderFileAPI]; !ok {
 			return fmt.Errorf("model %q: unknown providerFileAPI %q; known profiles: %s", m.ID, m.ProviderFileAPI, profileNames(profiles))
 		}
 	}
+
 	return nil
 }
 
@@ -251,9 +263,11 @@ func validateProviderHeaderName(profile, group, header, value string) error {
 	if !httpguts.ValidHeaderFieldName(header) {
 		return fmt.Errorf("providerFileAPIs.%s.%s: %q is not a valid header name", profile, group, header)
 	}
+
 	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("providerFileAPIs.%s.%s.%s must not be empty", profile, group, header)
 	}
+
 	return nil
 }
 
@@ -262,7 +276,9 @@ func profileNames(profiles map[string]*ProviderFileAPI) string {
 	for name := range profiles {
 		names = append(names, name)
 	}
+
 	sort.Strings(names)
+
 	return strings.Join(names, ", ")
 }
 
@@ -271,13 +287,16 @@ func (l ProviderFileLimits) TimeoutDuration() (time.Duration, error) {
 	if l.Timeout == "" {
 		return 0, nil
 	}
+
 	d, err := time.ParseDuration(l.Timeout)
 	if err != nil {
 		return 0, fmt.Errorf("media provider files timeout: %w", err)
 	}
+
 	if d <= 0 {
 		return 0, errors.New("media provider files timeout must be positive")
 	}
+
 	return d, nil
 }
 
@@ -301,6 +320,7 @@ func (p *ProviderFileAPI) Validate(name string) error {
 			return err
 		}
 	}
+
 	if len(p.Auth.Headers) == 0 {
 		return fmt.Errorf("providerFileAPIs.%s.auth.headers is required", name)
 	}
@@ -327,6 +347,7 @@ func (p *ProviderFileAPI) Validate(name string) error {
 	if len(p.MIME.Allowed) == 0 {
 		return fmt.Errorf("providerFileAPIs.%s.mime.allowed must not be empty", name)
 	}
+
 	for _, mime := range p.MIME.Allowed {
 		if mime != strings.TrimSpace(mime) || !strings.Contains(mime, "/") || mime != strings.ToLower(mime) {
 			return fmt.Errorf("providerFileAPIs.%s.mime.allowed entry %q must be a lower-case MIME type without spaces", name, mime)
@@ -336,6 +357,7 @@ func (p *ProviderFileAPI) Validate(name string) error {
 	if p.Limits.MaxBytes <= 0 {
 		return fmt.Errorf("providerFileAPIs.%s.limits.maxBytes must be positive", name)
 	}
+
 	if _, err := p.Limits.TimeoutDuration(); err != nil {
 		return fmt.Errorf("providerFileAPIs.%s.limits: %w", name, err)
 	}
@@ -359,6 +381,7 @@ func ValidateInputModalities(modalities []string) error {
 			return fmt.Errorf("unknown input modality %q (text, image, audio, video, pdf)", modality)
 		}
 	}
+
 	return nil
 }
 
@@ -369,11 +392,13 @@ func ValidateMediaForms(forms map[string][]string) error {
 		if !slices.Contains(MediaModalityNames, modality) {
 			return fmt.Errorf("unknown media modality %q (image, audio, video, file)", modality)
 		}
+
 		for _, form := range list {
 			if !slices.Contains(MediaFormNames, form) {
 				return fmt.Errorf("media %s: unknown form %q (inline, url, file)", modality, form)
 			}
 		}
 	}
+
 	return nil
 }

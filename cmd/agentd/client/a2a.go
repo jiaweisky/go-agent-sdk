@@ -24,6 +24,7 @@ func ExposeAgents(
 		name   string
 		expose *schema.AgentExpose
 	}
+
 	plans := make([]plan, 0, len(names))
 	for _, name := range names {
 		info := client.Agents().Get(schema.AgentID(name))
@@ -49,6 +50,7 @@ func ExposeAgents(
 				expose.InputModes = agentModes
 			}
 		}
+
 		plans = append(plans, plan{name: name, expose: expose})
 	}
 
@@ -57,12 +59,15 @@ func ExposeAgents(
 		if err := client.RegisterAgent(p.name, agent.AgentConfig{Expose: p.expose}); err != nil {
 			return nil, fmt.Errorf("expose agent %q: %w", p.name, err)
 		}
+
 		info := client.Agents().Get(schema.AgentID(p.name))
 		if info == nil {
 			return nil, fmt.Errorf("expose agent %q: agent disappeared after registration", p.name)
 		}
+
 		exposed = append(exposed, *info)
 	}
+
 	return exposed, nil
 }
 
@@ -76,12 +81,14 @@ func applyCard(expose *schema.AgentExpose, card config.CardConfig) {
 	expose.IconURL = card.IconURL
 	expose.InputModes = slices.Clone(card.DefaultInputModes)
 	expose.OutputModes = slices.Clone(card.DefaultOutputModes)
+
 	if card.Provider != nil {
 		expose.Provider = &schema.AgentProvider{
 			Organization: card.Provider.Organization,
 			URL:          card.Provider.URL,
 		}
 	}
+
 	expose.Skills = cardSkills(card.Skills)
 }
 
@@ -89,9 +96,11 @@ func applyCard(expose *schema.AgentExpose, card config.CardConfig) {
 // public expose (including model-derived input modes).
 func ExtendedExposeFrom(base schema.AgentExpose, card config.CardConfig) schema.AgentExpose {
 	base.Path = ""
+
 	if card.Extended != nil {
 		applyExtendedCard(&base, *card.Extended)
 	}
+
 	return base
 }
 
@@ -100,30 +109,38 @@ func applyExtendedCard(expose *schema.AgentExpose, extended config.ExtendedCardC
 	if extended.Name != "" {
 		expose.Name = extended.Name
 	}
+
 	if extended.Description != "" {
 		expose.Description = extended.Description
 	}
+
 	if extended.Version != "" {
 		expose.Version = extended.Version
 	}
+
 	if extended.DocumentationURL != "" {
 		expose.DocumentationURL = extended.DocumentationURL
 	}
+
 	if extended.IconURL != "" {
 		expose.IconURL = extended.IconURL
 	}
+
 	if extended.Provider != nil {
 		expose.Provider = &schema.AgentProvider{
 			Organization: extended.Provider.Organization,
 			URL:          extended.Provider.URL,
 		}
 	}
+
 	if extended.DefaultInputModes != nil {
 		expose.InputModes = slices.Clone(extended.DefaultInputModes)
 	}
+
 	if extended.DefaultOutputModes != nil {
 		expose.OutputModes = slices.Clone(extended.DefaultOutputModes)
 	}
+
 	if extended.Skills != nil {
 		expose.Skills = cardSkills(extended.Skills)
 	}
@@ -132,6 +149,7 @@ func applyExtendedCard(expose *schema.AgentExpose, extended config.ExtendedCardC
 // cardSkills maps configured skill labels to SDK card skills.
 func cardSkills(skills []config.SkillConfig) []schema.AgentSkill {
 	out := make([]schema.AgentSkill, 0, len(skills))
+
 	for _, skill := range skills {
 		out = append(out, schema.AgentSkill{
 			ID:          skill.ID,
@@ -143,6 +161,7 @@ func cardSkills(skills []config.SkillConfig) []schema.AgentSkill {
 			OutputModes: slices.Clone(skill.OutputModes),
 		})
 	}
+
 	return out
 }
 
@@ -153,6 +172,7 @@ func ModelModes(models []schema.ModelInfo) map[string][]string {
 	for _, model := range models {
 		out[string(model.ID)] = modalityMIMEs(model.Capabilities.Input)
 	}
+
 	return out
 }
 
@@ -162,6 +182,7 @@ func modalityMIMEs(modalities []string) []string {
 	if len(modalities) == 0 {
 		return nil
 	}
+
 	modes := []string{"text/plain", "application/json"}
 	for _, modality := range modalities {
 		switch modality {
@@ -175,6 +196,7 @@ func modalityMIMEs(modalities []string) []string {
 			modes = append(modes, "application/pdf")
 		}
 	}
+
 	return modes
 }
 
@@ -187,10 +209,12 @@ func registerA2APeers(client *agent.Client, peers []config.A2APeer) error {
 		if client.Agents().Get(schema.AgentID(peer.Name)) != nil {
 			return fmt.Errorf("peer %s: an agent with that name already exists", peer.Name)
 		}
+
 		if err := client.RegisterAgent(peer.Name, a2aPeerAgentConfig(peer)); err != nil {
 			return fmt.Errorf("peer %s: %w", peer.Name, err)
 		}
 	}
+
 	return nil
 }
 
@@ -198,6 +222,7 @@ func registerA2APeers(client *agent.Client, peers []config.A2APeer) error {
 // it with an A2A backend.
 func a2aPeerAgentConfig(peer config.A2APeer) agent.AgentConfig {
 	mode := peer.ModeOrDefault()
+
 	return agent.AgentConfig{
 		Description: peer.Description,
 		Mode:        &mode,

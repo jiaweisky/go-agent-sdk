@@ -35,6 +35,7 @@ func (c s3Store) ttl() time.Duration {
 			return d
 		}
 	}
+
 	return 15 * time.Minute
 }
 
@@ -52,12 +53,15 @@ func (c s3Store) objectURL(key string) (*url.URL, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if c.s3().PathStyle {
 		base.Path = path.Join(base.Path, c.s3().Bucket, key)
 		return base, nil
 	}
+
 	base.Host = c.s3().Bucket + "." + base.Host
 	base.Path = "/" + key
+
 	return base, nil
 }
 
@@ -68,33 +72,42 @@ func (c s3Store) Put(ctx context.Context, media schema.MediaUpload) (schema.Refe
 	if err != nil {
 		return schema.Reference{}, err
 	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u.String(), bytes.NewReader(media.Data))
 	if err != nil {
 		return schema.Reference{}, err
 	}
+
 	if media.Mime != "" {
 		req.Header.Set("Content-Type", media.Mime)
 	}
+
 	if !c.anonymous() {
 		c.signer().signHeader(req, media.Data)
 	}
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return schema.Reference{}, err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return schema.Reference{}, fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
+
 	if c.anonymous() {
 		return schema.Reference{Source: "url", Value: u.String()}, nil
 	}
+
 	signed, err := c.signer().presign(http.MethodGet, u, c.ttl())
 	if err != nil {
 		return schema.Reference{}, err
 	}
+
 	expires := time.Now().Add(c.ttl())
+
 	return schema.Reference{Source: "url", Value: signed, ExpiresAt: &expires}, nil
 }
 
@@ -113,6 +126,7 @@ func (s sigV4) signingKey(date string) []byte {
 	k := hmacSHA256([]byte("AWS4"+s.secretKey), date)
 	k = hmacSHA256(k, s.region)
 	k = hmacSHA256(k, s.service)
+
 	return hmacSHA256(k, "aws4_request")
 }
 
@@ -130,6 +144,7 @@ func (s sigV4) signHeader(req *http.Request, body []byte) {
 	if host == "" {
 		host = req.URL.Host
 	}
+
 	values := map[string]string{"host": host}
 	for name, list := range req.Header {
 		lower := strings.ToLower(name)
@@ -138,15 +153,18 @@ func (s sigV4) signHeader(req *http.Request, body []byte) {
 		}
 		values[lower] = strings.TrimSpace(strings.Join(list, ","))
 	}
+
 	names := make([]string, 0, len(values))
 	for name := range values {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+
 	var canonicalHeaders strings.Builder
 	for _, name := range names {
 		canonicalHeaders.WriteString(name + ":" + values[name] + "\n")
 	}
+
 	signedHeaders := strings.Join(names, ";")
 	canonicalRequest := strings.Join([]string{
 		req.Method,
@@ -156,6 +174,7 @@ func (s sigV4) signHeader(req *http.Request, body []byte) {
 		signedHeaders,
 		payloadHash,
 	}, "\n")
+
 	signature := s.sign(canonicalRequest, amzDate, date)
 	req.Header.Set("Authorization", fmt.Sprintf(
 		"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
@@ -172,12 +191,14 @@ var sigV4Skip = map[string]bool{
 // presign returns a presigned url for a method (query auth).
 func (s sigV4) presign(method string, u *url.URL, ttl time.Duration) (string, error) {
 	amzDate, date := s.timestamps()
+
 	q := u.Query()
 	q.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
 	q.Set("X-Amz-Credential", s.accessKey+"/"+s.scope(date))
 	q.Set("X-Amz-Date", amzDate)
 	q.Set("X-Amz-Expires", fmt.Sprintf("%d", int(ttl.Seconds())))
 	q.Set("X-Amz-SignedHeaders", "host")
+
 	canonicalRequest := strings.Join([]string{
 		method,
 		canonicalURI(u),
@@ -186,9 +207,11 @@ func (s sigV4) presign(method string, u *url.URL, ttl time.Duration) (string, er
 		"host",
 		"UNSIGNED-PAYLOAD",
 	}, "\n")
+
 	signature := s.sign(canonicalRequest, amzDate, date)
 	q.Set("X-Amz-Signature", signature)
 	u.RawQuery = q.Encode()
+
 	return u.String(), nil
 }
 
@@ -207,6 +230,7 @@ func (s sigV4) timestamps() (string, string) {
 func hmacSHA256(key []byte, data string) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(data))
+
 	return mac.Sum(nil)
 }
 
@@ -227,6 +251,7 @@ func canonicalURI(u *url.URL) string {
 func uriEncode(s string) string {
 	const unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
 	var b strings.Builder
+
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
 		if strings.IndexByte(unreserved, ch) >= 0 || ch == '/' {
@@ -235,16 +260,19 @@ func uriEncode(s string) string {
 		}
 		fmt.Fprintf(&b, "%%%02X", ch)
 	}
+
 	return b.String()
 }
 
 // canonicalQuery sorts query params and percent-encodes them per SigV4.
 func canonicalQuery(values url.Values) string {
 	keys := make([]string, 0, len(values))
+
 	for k := range values {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+
 	var pairs []string
 	for _, k := range keys {
 		vals := append([]string(nil), values[k]...)
@@ -253,5 +281,6 @@ func canonicalQuery(values url.Values) string {
 			pairs = append(pairs, uriEncode(k)+"="+uriEncode(v))
 		}
 	}
+
 	return strings.Join(pairs, "&")
 }

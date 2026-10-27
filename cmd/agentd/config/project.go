@@ -48,21 +48,27 @@ func (r ProjectRequest) Validate() error {
 	case len(r.Agents) == 0:
 		return errors.New("at least one agent is required")
 	}
+
 	if r.Readonly && r.Isolation != nil {
 		return errors.New("readonly shares the source directory; isolation is not allowed")
 	}
+
 	if err := r.Auth.Validate(); err != nil {
 		return err
 	}
+
 	if err := r.Sandbox.Validate(); err != nil {
 		return fmt.Errorf("project %q: %w", r.Name, err)
 	}
+
 	if err := ValidateA2APeers(r.Peers); err != nil {
 		return fmt.Errorf("project %q: %w", r.Name, err)
 	}
+
 	if err := r.Isolation.Validate(r.WorkingDirectory); err != nil {
 		return fmt.Errorf("project %q: %w", r.Name, err)
 	}
+
 	return nil
 }
 

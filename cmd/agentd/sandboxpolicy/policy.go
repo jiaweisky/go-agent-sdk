@@ -14,6 +14,7 @@ func ForServer(cfg *config.SandboxConfig, workingDir string) sandbox.Policy {
 	if !cfg.Enabled() {
 		return sandbox.Policy{WorkingDirectory: workingDir}
 	}
+
 	return resolve(cfg.SandboxPolicy, workingDir)
 }
 
@@ -23,6 +24,7 @@ func ForWrap(cfg *config.WrapConfig) sandbox.Policy {
 	if !cfg.Enabled() {
 		return sandbox.Policy{}
 	}
+
 	return resolve(cfg.SandboxPolicy, "")
 }
 
@@ -38,6 +40,7 @@ func resolve(p config.SandboxPolicy, workingDir string) sandbox.Policy {
 	if p.Profile == config.ProfileOff {
 		return sandbox.Policy{WorkingDirectory: workingDir}
 	}
+
 	policy := basePolicy(p, workingDir)
 	applyFilesystemPaths(&policy, p.Filesystem)
 	applyNetwork(&policy, p.Network)
@@ -45,6 +48,7 @@ func resolve(p config.SandboxPolicy, workingDir string) sandbox.Policy {
 	applyProcessInspection(&policy, p.ProcessInspection)
 	applyEnv(&policy, p.Env)
 	applyViolations(&policy, p.Violations, profileHasStandardDefaults(p.Profile))
+
 	return policy
 }
 
@@ -52,6 +56,7 @@ func resolve(p config.SandboxPolicy, workingDir string) sandbox.Policy {
 // no confinement for custom.
 func basePolicy(p config.SandboxPolicy, workingDir string) sandbox.Policy {
 	var policy sandbox.Policy
+
 	switch {
 	case profileHasStandardDefaults(p.Profile):
 		policy = sandbox.StandardPolicy(workingDir)
@@ -65,7 +70,9 @@ func basePolicy(p config.SandboxPolicy, workingDir string) sandbox.Policy {
 		// Unvalidated or unknown profiles get no confinement.
 		policy = sandbox.Policy{WorkingDirectory: workingDir}
 	}
+
 	policy.ReadMode, policy.WriteMode = p.EffectiveAccess()
+
 	return policy
 }
 
@@ -74,6 +81,7 @@ func applyFilesystemPaths(policy *sandbox.Policy, filesystem *config.SandboxFile
 	if filesystem == nil {
 		return
 	}
+
 	policy.DenyRead = append(policy.DenyRead, filesystem.DenyRead...)
 	policy.AllowRead = append(policy.AllowRead, filesystem.AllowRead...)
 	policy.DenyWrite = append(policy.DenyWrite, filesystem.DenyWrite...)
@@ -93,6 +101,7 @@ func applyUnixSockets(policy *sandbox.Policy, sockets *config.SandboxUnixSockets
 	if sockets == nil {
 		return
 	}
+
 	switch sockets.Mode {
 	case sandbox.SocketDeny:
 		policy.SocketMode = sandbox.SocketInherit
@@ -101,6 +110,7 @@ func applyUnixSockets(policy *sandbox.Policy, sockets *config.SandboxUnixSockets
 	default:
 		policy.SocketMode = sockets.Mode
 	}
+
 	policy.SocketAllow = append(policy.SocketAllow, sockets.Allow...)
 }
 
@@ -121,12 +131,14 @@ func applyEnv(policy *sandbox.Policy, env *config.SandboxEnv) {
 	if env == nil {
 		return
 	}
+
 	switch env.Mode {
 	case sandbox.EnvScrub:
 		policy.ScrubEnv = append(sandbox.DefaultScrubEnv(), env.Scrub...)
 	case sandbox.EnvInherit:
 		policy.ScrubEnv = nil
 	}
+
 	if env.Mode == "" && len(env.Scrub) > 0 {
 		policy.ScrubEnv = append(policy.ScrubEnv, env.Scrub...)
 	}
@@ -139,12 +151,15 @@ func applyViolations(policy *sandbox.Policy, violations *config.SandboxViolation
 		policy.ViolationMode = sandbox.ViolationHeuristic
 		policy.ReportToModel = true
 	}
+
 	if violations == nil {
 		return
 	}
+
 	if violations.Mode != "" {
 		policy.ViolationMode = violations.Mode
 	}
+
 	if violations.ReportToModel != nil {
 		policy.ReportToModel = *violations.ReportToModel
 	}

@@ -30,17 +30,20 @@ func (p reportingProcess) Run(
 	if err != nil || result == nil || !hasViolationSink(options) {
 		return result, err
 	}
+
 	// Precise mode reads the syscall trace, which can show a denial even when the
 	// command recovers and exits 0. Heuristic mode only scans a failed command.
 	if !p.precise && result.ExitCode == 0 {
 		return result, err
 	}
+
 	if violation, ok := p.detectViolation(result); ok {
 		options[0].OnViolation(violation)
 		if p.reportToModel {
 			appendDenialNote(result, options[0], violation)
 		}
 	}
+
 	return result, err
 }
 
@@ -51,6 +54,7 @@ func (p reportingProcess) RunStream(
 	if len(options) == 0 || options[0].OnViolation == nil {
 		return stream
 	}
+
 	return func(yield func(string, error) bool) {
 		reported := false
 		for line, err := range stream {
@@ -61,19 +65,23 @@ func (p reportingProcess) RunStream(
 					}
 					continue
 				}
+
 				// Never leak strace output; report it when the syscall failed.
 				if violation, ok := preciseDenial(line); ok && !reported {
 					options[0].OnViolation(violation)
 					reported = true
 				}
+
 				continue
 			}
+
 			if !reported {
 				if violation, ok := detectCommandViolation(line); ok {
 					options[0].OnViolation(violation)
 					reported = true
 				}
 			}
+
 			if !yield(line, err) {
 				return
 			}
@@ -91,14 +99,18 @@ func hasViolationSink(options []core.RunOptions) bool {
 func (p reportingProcess) detectViolation(result *core.RunResult) (core.PolicyViolation, bool) {
 	if p.precise {
 		var found *core.PolicyViolation
+
 		result.Output, found = cleanPrecise(result.Output, found)
 		result.Stderr, found = cleanPrecise(result.Stderr, found)
 		if found != nil {
 			return *found, true
 		}
+
 		return core.PolicyViolation{}, false
 	}
+
 	output := string(result.Output) + "\n" + string(result.Stderr)
+
 	return detectCommandViolation(output)
 }
 
@@ -109,13 +121,16 @@ func appendDenialNote(result *core.RunResult, option core.RunOptions, violation 
 	if violation.Path != "" {
 		detail += " " + violation.Path
 	}
+
 	note := fmt.Sprintf("\n[sandbox] blocked %s", detail)
+
 	// Only the combined-output caller (bash) reads Output as the command text.
 	// Tools that parse stdout (ripgrep) must not receive the note there.
 	if option.CombineOutput {
 		result.Output = append(result.Output, []byte(note)...)
 		return
 	}
+
 	result.Stderr = append(result.Stderr, []byte(note)...)
 }
 
@@ -142,25 +157,31 @@ func preciseDenial(line string) (core.PolicyViolation, bool) {
 	if match == nil || !syscallDenial.MatchString(line) {
 		return core.PolicyViolation{}, false
 	}
+
 	violation := core.PolicyViolation{
 		Action:    "file",
 		Rule:      "os-denied",
 		Surface:   "command",
 		Certainty: "enforced",
 	}
+
 	if match[1] == "connect" {
 		violation.Action = "network"
 		if addr := inetAddr.FindStringSubmatch(line); addr != nil {
 			violation.Host = addr[1]
 		}
+
 		return violation, true
 	}
+
 	if quoted := quotedPath.FindStringSubmatch(line); quoted != nil {
 		violation.Path = quoted[1]
 	}
+
 	if strings.Contains(line, "O_WRONLY") || strings.Contains(line, "O_RDWR") || strings.Contains(line, "O_CREAT") {
 		violation.Action = "write"
 	}
+
 	return violation, true
 }
 
@@ -168,6 +189,7 @@ func preciseDenial(line string) (core.PolicyViolation, bool) {
 func cleanPrecise(field []byte, found *core.PolicyViolation) ([]byte, *core.PolicyViolation) {
 	lines := strings.Split(string(field), "\n")
 	kept := make([]string, 0, len(lines))
+
 	for _, line := range lines {
 		if isStraceLine(line) {
 			if violation, ok := preciseDenial(line); ok && found == nil {
@@ -175,8 +197,10 @@ func cleanPrecise(field []byte, found *core.PolicyViolation) ([]byte, *core.Poli
 			}
 			continue
 		}
+
 		kept = append(kept, line)
 	}
+
 	return []byte(strings.Join(kept, "\n")), found
 }
 
@@ -205,16 +229,20 @@ func detectCommandViolation(output string) (core.PolicyViolation, bool) {
 		if !strings.Contains(output, denial.needle) {
 			continue
 		}
+
 		violation := core.PolicyViolation{
 			Action:    denial.action,
 			Rule:      "os-denied",
 			Surface:   "command",
 			Certainty: "suspected",
 		}
+
 		if match := denialLine.FindStringSubmatch(output); match != nil {
 			violation.Path = match[1]
 		}
+
 		return violation, true
 	}
+
 	return core.PolicyViolation{}, false
 }

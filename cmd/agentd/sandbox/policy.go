@@ -125,6 +125,7 @@ func (p Policy) tempPath() string {
 	if p.PrivateTemp != "" {
 		return p.PrivateTemp
 	}
+
 	return os.TempDir()
 }
 
@@ -133,6 +134,7 @@ func legacyTempReadRoots() []string {
 	if runtime.GOOS == "darwin" {
 		return []string{"/private/tmp"}
 	}
+
 	return nil
 }
 
@@ -145,6 +147,7 @@ func (p Policy) ReallowReadRoots() []string {
 		// under the user's home), so re-allow it explicitly.
 		roots = append(roots, p.PrivateTemp)
 	}
+
 	return dedupe(roots)
 }
 
@@ -161,12 +164,14 @@ func (p Policy) DenyReadRegions() []string {
 // the parent into a deny-everything rule.
 func denyReadRegions(home string) []string {
 	regions := []string{"/etc", "/private/etc", "/var/root", "/root", "/home"}
+
 	if home != "" {
 		regions = append(regions, home)
 		if parent := filepath.Dir(home); parent != home && parent != "." && parent != string(filepath.Separator) {
 			regions = append(regions, parent)
 		}
 	}
+
 	return dedupe(regions)
 }
 
@@ -175,6 +180,7 @@ func (p Policy) SocketPaths() []string {
 	if p.SocketMode != SocketAllowlist {
 		return nil
 	}
+
 	return dedupe(p.SocketAllow)
 }
 
@@ -198,6 +204,7 @@ func platformReadRoots() []string {
 
 func dedupe(paths []string) []string {
 	var out []string
+
 	for _, path := range paths {
 		if path == "" {
 			continue
@@ -213,6 +220,7 @@ func dedupe(paths []string) []string {
 			out = append(out, path)
 		}
 	}
+
 	return out
 }
 
@@ -222,6 +230,7 @@ func contains(values []string, want string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -232,6 +241,7 @@ func expandEntries(entries []string, workingDir string) []string {
 	for _, entry := range entries {
 		out = append(out, expandEntry(entry, workingDir))
 	}
+
 	return out
 }
 
@@ -239,20 +249,25 @@ func expandEntry(entry, workingDir string) string {
 	if entry == "" {
 		return ""
 	}
+
 	if strings.HasPrefix(entry, "~") {
 		if home, err := os.UserHomeDir(); err == nil {
 			entry = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(entry, "~"), string(filepath.Separator)))
 		}
 	}
+
 	if filepath.IsAbs(entry) {
 		return filepath.Clean(entry)
 	}
+
 	if strings.ContainsAny(entry, "*?[") {
 		if !strings.HasPrefix(entry, "**") {
 			return "**/" + filepath.ToSlash(entry)
 		}
+
 		return filepath.ToSlash(entry)
 	}
+
 	return filepath.Join(workingDir, entry)
 }
 
@@ -280,10 +295,12 @@ func (g PathGuard) AllowRead(_ context.Context, path string) error {
 	if g.policy.ReadMode != FSModeAllow {
 		return nil
 	}
+
 	canonical := canonicalPath(path)
 	if rule, ok := matchingDeny(canonical, g.policy.DeniedRead()); ok {
 		return denied("read", path, rule)
 	}
+
 	if rule, ok := matchingDeny(canonical, g.policy.DenyReadRegions()); ok {
 		roots := append(g.policy.ReallowReadRoots(), g.policy.SocketPaths()...)
 		for _, root := range roots {
@@ -291,8 +308,10 @@ func (g PathGuard) AllowRead(_ context.Context, path string) error {
 				return nil
 			}
 		}
+
 		return denied("read", path, rule)
 	}
+
 	return nil
 }
 
@@ -301,16 +320,19 @@ func (g PathGuard) Allow(_ context.Context, path string, _ core.FileOp) error {
 	if g.policy.WriteMode != FSModeAllow {
 		return nil
 	}
+
 	canonical := canonicalPath(path)
 	if rule, ok := matchingDeny(canonical, g.policy.DeniedWrite()); ok {
 		return denied("write", path, rule)
 	}
+
 	roots := append(g.policy.WriteRoots(), g.policy.SocketPaths()...)
 	for _, root := range roots {
 		if under(canonical, canonicalPath(root)) {
 			return nil
 		}
 	}
+
 	return denied("write", path, "allowList")
 }
 
@@ -329,10 +351,12 @@ func canonicalPath(path string) string {
 	if err != nil {
 		abs = path
 	}
+
 	abs = filepath.Clean(abs)
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		return resolved
 	}
+
 	// Resolve the deepest existing ancestor, then append the remainder.
 	dir, rest := abs, ""
 	for {
@@ -340,6 +364,7 @@ func canonicalPath(path string) string {
 		if parent == dir {
 			return abs
 		}
+
 		rest = filepath.Join(filepath.Base(dir), rest)
 		dir = parent
 		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
@@ -354,6 +379,7 @@ func under(path, root string) bool {
 	if err != nil {
 		return false
 	}
+
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
@@ -364,16 +390,19 @@ func matchingDeny(path string, deny []string) (string, bool) {
 		if pattern == "" {
 			continue
 		}
+
 		if strings.ContainsAny(pattern, "*?[") {
 			if matchGlob(pattern, path) {
 				return pattern, true
 			}
 			continue
 		}
+
 		if under(path, canonicalPath(pattern)) {
 			return pattern, true
 		}
 	}
+
 	return "", false
 }
 
@@ -383,11 +412,14 @@ var globCache sync.Map // map[string]*regexp.Regexp
 func matchGlob(pattern, path string) bool {
 	pattern = filepath.ToSlash(pattern)
 	path = filepath.ToSlash(path)
+
 	if cached, ok := globCache.Load(pattern); ok {
 		return cached.(*regexp.Regexp).MatchString(path)
 	}
+
 	expression := regexp.MustCompile(globRegex(pattern))
 	globCache.Store(pattern, expression)
+
 	return expression.MatchString(path)
 }
 
@@ -396,6 +428,7 @@ func matchGlob(pattern, path string) bool {
 func globRegex(pattern string) string {
 	var b strings.Builder
 	b.WriteString("^")
+
 	for i := 0; i < len(pattern); i++ {
 		switch pattern[i] {
 		case '*':
@@ -411,7 +444,9 @@ func globRegex(pattern string) string {
 			b.WriteString(regexp.QuoteMeta(string(pattern[i])))
 		}
 	}
+
 	b.WriteString("$")
+
 	return b.String()
 }
 
@@ -428,6 +463,7 @@ func (s scrubbedProcess) Run(
 	if len(options) > 0 {
 		options[0].Env, options[0].ExtendEnv = scrubEnv(options[0].Env, options[0].ExtendEnv, s.patterns)
 	}
+
 	return s.inner.Run(ctx, command, args, options...)
 }
 
@@ -437,6 +473,7 @@ func (s scrubbedProcess) RunStream(
 	if len(options) > 0 {
 		options[0].Env, options[0].ExtendEnv = scrubEnv(options[0].Env, options[0].ExtendEnv, s.patterns)
 	}
+
 	return s.inner.RunStream(ctx, command, args, options...)
 }
 
@@ -452,11 +489,13 @@ func scrubEnv(env map[string]string, extend bool, patterns []string) (map[string
 			}
 		}
 	}
+
 	for key, value := range env {
 		if !scrubName(key, patterns) {
 			filtered[key] = value
 		}
 	}
+
 	return filtered, false
 }
 
@@ -466,6 +505,7 @@ func scrubName(name string, patterns []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -473,6 +513,8 @@ func matchName(pattern, name string) bool {
 	if runtime.GOOS == "windows" {
 		pattern, name = strings.ToUpper(pattern), strings.ToUpper(name)
 	}
+
 	matched, err := filepath.Match(pattern, name)
+
 	return err == nil && matched
 }

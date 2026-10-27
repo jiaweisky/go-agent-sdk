@@ -12,6 +12,7 @@ func parseDuration(raw string, emptyDefault time.Duration, field string) (time.D
 	if raw == "" {
 		return emptyDefault, nil
 	}
+
 	duration, err := time.ParseDuration(raw)
 	if err != nil {
 		if field != "" {
@@ -19,12 +20,14 @@ func parseDuration(raw string, emptyDefault time.Duration, field string) (time.D
 		}
 		return 0, err
 	}
+
 	if duration < 0 {
 		if field != "" {
 			return 0, fmt.Errorf("%s must not be negative", field)
 		}
 		return 0, errors.New("must not be negative")
 	}
+
 	return duration, nil
 }
 

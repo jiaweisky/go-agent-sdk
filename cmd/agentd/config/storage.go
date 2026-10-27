@@ -75,14 +75,17 @@ func (s *StorageConfig) Validate() error {
 	if s == nil {
 		return nil
 	}
+
 	switch s.Backend {
 	case "", StorageHTTP:
 		if s.URL == "" {
 			return errors.New("storage.url is required")
 		}
+
 		if err := validateNonNegativeDuration("storage.presignTTL", s.PresignTTL); err != nil {
 			return err
 		}
+
 		return validateHTTPAuth(s)
 	case StorageLocal:
 		if s.Root == "" {
@@ -101,6 +104,7 @@ func (s *StorageConfig) Validate() error {
 	default:
 		return fmt.Errorf("storage.backend must be http, local, s3 or cos, got %q", s.Backend)
 	}
+
 	return nil
 }
 
@@ -110,13 +114,16 @@ func validateNonNegativeDuration(field, raw string) error {
 	if raw == "" {
 		return nil
 	}
+
 	duration, err := time.ParseDuration(raw)
 	if err != nil {
 		return fmt.Errorf("%s: %w", field, err)
 	}
+
 	if duration < 0 {
 		return fmt.Errorf("%s must not be negative", field)
 	}
+
 	return nil
 }
 
@@ -135,8 +142,10 @@ func validateHTTPAuth(s *StorageConfig) error {
 	default:
 		return fmt.Errorf("storage.auth must be none, basic or bearer, got %q", s.Auth)
 	}
+
 	if (s.Header == "") != (s.Value == "") {
 		return errors.New("storage.header and storage.value must be set together")
 	}
+
 	return nil
 }

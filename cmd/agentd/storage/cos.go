@@ -47,6 +47,7 @@ func (c cosStore) ttl() time.Duration {
 			return d
 		}
 	}
+
 	return 15 * time.Minute
 }
 
@@ -57,9 +58,11 @@ func (c cosStore) host() string {
 	if ep == "" {
 		return c.cos().Bucket + ".cos." + c.cos().Region + ".myqcloud.com"
 	}
+
 	if u, err := url.Parse(ep); err == nil && u.Host != "" {
 		return u.Host
 	}
+
 	return ep
 }
 
@@ -79,29 +82,37 @@ func (c cosStore) objectURL(key string) string {
 // still fetchable); the reference expires with the presign TTL.
 func (c cosStore) Put(ctx context.Context, media schema.MediaUpload) (schema.Reference, error) {
 	key := objectName(media)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.objectURL(key), bytes.NewReader(media.Data))
 	if err != nil {
 		return schema.Reference{}, err
 	}
+
 	if media.Mime != "" {
 		req.Header.Set("Content-Type", media.Mime)
 	}
+
 	if !c.anonymous() {
 		c.authorize(req, key, http.MethodPut)
 	}
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return schema.Reference{}, err
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return schema.Reference{}, fmt.Errorf("storage: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
+
 	if c.anonymous() {
 		return schema.Reference{Source: "url", Value: c.objectURL(key)}, nil
 	}
+
 	expires := c.clock().Add(c.ttl())
+
 	return schema.Reference{Source: "url", Value: c.presign("get", key, expires), ExpiresAt: &expires}, nil
 }
 
@@ -113,6 +124,7 @@ func (c cosStore) authorize(req *http.Request, key, method string) {
 		"q-sign-algorithm=sha1&q-ak=%s&q-sign-time=%s&q-key-time=%s&q-header-list=host&q-url-param-list=%s&q-signature=%s",
 		c.cos().SecretID, keyTime, keyTime, paramList, signature)
 	req.Header.Set("Authorization", auth)
+
 	if c.cos().SessionToken != "" {
 		req.Header.Set("x-cos-security-token", c.cos().SessionToken)
 	}
@@ -121,6 +133,7 @@ func (c cosStore) authorize(req *http.Request, key, method string) {
 // presign renders a query-signed URL (the q-sign-* components as parameters).
 func (c cosStore) presign(method, key string, expires time.Time) string {
 	keyTime, signature, _ := c.signature(method, key, nil, expires)
+
 	q := url.Values{}
 	q.Set("q-sign-algorithm", "sha1")
 	q.Set("q-ak", c.cos().SecretID)
@@ -129,11 +142,13 @@ func (c cosStore) presign(method, key string, expires time.Time) string {
 	q.Set("q-header-list", "host")
 	q.Set("q-url-param-list", "")
 	q.Set("q-signature", signature)
+
 	if c.cos().SessionToken != "" {
 		// Temporary credentials carry the session token as a query parameter; it
 		// is not part of the signed parameters.
 		q.Set("x-cos-security-token", c.cos().SessionToken)
 	}
+
 	return c.objectURL(key) + "?" + q.Encode()
 }
 
@@ -148,6 +163,7 @@ func (c cosStore) signature(
 	signKey := hmacSHA1Hex([]byte(c.cos().SecretKey), keyTime)
 	httpString := method + "\n/" + key + "\n" + paramString + "\n" + "host=" + c.host() + "\n"
 	stringToSign := "sha1\n" + keyTime + "\n" + sha1Hex(httpString) + "\n"
+
 	return keyTime, hmacSHA1Hex([]byte(signKey), stringToSign), paramList
 }
 
@@ -156,6 +172,7 @@ func (c cosStore) signature(
 // The q-sign-* components and the session token are not part of the signature.
 func cosParameters(q url.Values) (params, list string) {
 	lower := make(map[string][]string, len(q))
+
 	for k, vs := range q {
 		lk := strings.ToLower(k)
 		if strings.HasPrefix(lk, "q-") || lk == "x-cos-security-token" {
@@ -163,23 +180,28 @@ func cosParameters(q url.Values) (params, list string) {
 		}
 		lower[lk] = append(lower[lk], vs...)
 	}
+
 	keys := make([]string, 0, len(lower))
 	for k := range lower {
 		keys = append(keys, k)
 	}
+
 	sort.Strings(keys)
 	parts := make([]string, 0, len(keys))
+
 	for _, k := range keys {
 		for _, v := range lower[k] {
 			parts = append(parts, k+"="+v)
 		}
 	}
+
 	return strings.Join(parts, "&"), strings.Join(keys, ";")
 }
 
 func hmacSHA1Hex(key []byte, msg string) string {
 	h := hmac.New(sha1.New, key)
 	h.Write([]byte(msg))
+
 	return hex.EncodeToString(h.Sum(nil))
 }
 

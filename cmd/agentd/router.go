@@ -29,16 +29,20 @@ type router struct {
 
 func newRouter(entries []*builtServer, introspect *introspectDoc, addr net.Addr) http.Handler {
 	r := &router{entries: entries, introspect: introspect, addr: addr}
+
 	for _, e := range entries {
 		if e.cfg.Host != "" {
 			r.hosts = append(r.hosts, e)
 		}
+
 		if e.cfg.PathPrefix != "" {
 			r.pathPrefixes = append(r.pathPrefixes, e)
 		}
+
 		if e.cfg.Host == "" && e.cfg.PathPrefix == "" {
 			r.root = e
 		}
+
 		if e.cfg.Kind == config.KindA2A {
 			r.a2a = append(r.a2a, e)
 			if e.cfg.Default {
@@ -46,9 +50,11 @@ func newRouter(entries []*builtServer, introspect *introspectDoc, addr net.Addr)
 			}
 		}
 	}
+
 	if r.defA2A == nil && len(r.a2a) > 0 {
 		r.defA2A = r.a2a[0]
 	}
+
 	return r
 }
 
@@ -56,21 +62,26 @@ func (r *router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.serveDiscovery(w, req) {
 		return
 	}
+
 	if r.serveIntrospection(w, req) {
 		return
 	}
+
 	if e := r.matchHost(req); e != nil {
 		e.handler.ServeHTTP(w, req)
 		return
 	}
+
 	if e, pathPrefix := r.matchPathPrefix(req.URL.Path); e != nil {
 		http.StripPrefix(pathPrefix, e.handler).ServeHTTP(w, req)
 		return
 	}
+
 	if r.root != nil {
 		r.root.handler.ServeHTTP(w, req)
 		return
 	}
+
 	http.NotFound(w, req)
 }
 
@@ -79,26 +90,31 @@ func (r *router) matchHost(req *http.Request) *builtServer {
 	if host == "" {
 		return nil
 	}
+
 	for _, e := range r.hosts {
 		if config.NormalizeHost(e.cfg.Host) == host {
 			return e
 		}
 	}
+
 	return nil
 }
 
 func (r *router) matchPathPrefix(path string) (*builtServer, string) {
 	best := (*builtServer)(nil)
 	bestPathPrefix := ""
+
 	for _, e := range r.pathPrefixes {
 		pathPrefix := config.NormalizePathPrefix(e.cfg.PathPrefix)
 		if !pathMatchesPathPrefix(path, pathPrefix) {
 			continue
 		}
+
 		if len(pathPrefix) > len(bestPathPrefix) {
 			best, bestPathPrefix = e, pathPrefix
 		}
 	}
+
 	return best, bestPathPrefix
 }
 
@@ -112,25 +128,30 @@ func (r *router) serveDiscovery(w http.ResponseWriter, req *http.Request) bool {
 	if req.Method != http.MethodGet {
 		return false
 	}
+
 	switch req.URL.Path {
 	case "/.well-known/agent-card.json":
 		if r.defA2A == nil {
 			return false
 		}
+
 		cards := r.defA2A.cards(req)
 		if len(cards) == 0 {
 			return false
 		}
+
 		writeJSON(w, cards[0])
 		return true
 	case "/.well-known/agents.json":
 		if len(r.a2a) == 0 {
 			return false
 		}
+
 		cards := []*a2a.AgentCard{}
 		for _, e := range r.a2a {
 			cards = append(cards, e.cards(req)...)
 		}
+
 		writeJSON(w, cards)
 		return true
 	}
@@ -146,23 +167,28 @@ func (r *router) serveIntrospection(w http.ResponseWriter, req *http.Request) bo
 	if r.introspect == nil {
 		return false
 	}
+
 	path := req.URL.Path
 	if path != "/api/config" && path != "/api/info" {
 		return false
 	}
+
 	if req.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		writeIntrospectError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only GET is supported")
 		return true
 	}
+
 	if !r.authorizeIntrospection(w, req) {
 		return true
 	}
+
 	if path == "/api/config" {
 		r.serveConfig(w, req)
 	} else {
 		r.serveInfo(w)
 	}
+
 	return true
 }
 
@@ -175,21 +201,26 @@ func (r *router) authorizeIntrospection(w http.ResponseWriter, req *http.Request
 		writeIntrospectError(w, http.StatusNotFound, "not_found", "no server serves this listener")
 		return false
 	}
+
 	if entry.cfg.Auth == nil || publicPath(entry.cfg.PublicRoutes, req.URL.Path) || authorized(req, entry.cfg.Auth) {
 		return true
 	}
+
 	w.Header().Set("WWW-Authenticate", "Bearer")
 	writeIntrospectError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+
 	return false
 }
 
 func (r *router) serveConfig(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
+
 	section := query.Get("section")
 	if !validSection(section) {
 		writeIntrospectError(w, http.StatusBadRequest, "bad_request", "section must be models, servers, control or wrap")
 		return
 	}
+
 	sources := []sourceView{{Kind: "file", Path: r.introspect.path}}
 	writeJSONStatus(w, http.StatusOK, configResponse{
 		SchemaVersion: configSchemaVersion,
@@ -203,16 +234,20 @@ func (r *router) serveInfo(w http.ResponseWriter) {
 	if r.addr != nil {
 		info.Listen = r.addr.String()
 	}
+
 	for _, e := range r.entries {
 		info.Servers = append(info.Servers, e.cfg.Name)
 		if e.cfg.Kind != config.KindA2A || r.addr == nil {
 			continue
 		}
+
 		base := publicBaseURL(e.cfg, r.addr)
+
 		for _, path := range e.cardPaths {
 			info.A2A = append(info.A2A, base+path)
 		}
 	}
+
 	writeJSONStatus(w, http.StatusOK, info)
 }
 
@@ -223,9 +258,11 @@ func requestHost(req *http.Request) string {
 	if host == "" {
 		host = req.Host
 	}
+
 	if i := strings.IndexByte(host, ','); i >= 0 {
 		host = host[:i]
 	}
+
 	return config.NormalizeHost(host)
 }
 
