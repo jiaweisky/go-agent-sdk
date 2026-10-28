@@ -103,7 +103,7 @@ func freePort(t *testing.T) (string, int) {
 // sufficient to serve a discovery card without calling a model.
 func wrapConfig(wrapper, root, listen string) string {
 	return fmt.Sprintf(`wrap:
-  process: %s
+  wrapper: %s
 models:
   - id: m
     model: m
