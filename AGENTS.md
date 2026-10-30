@@ -33,6 +33,8 @@ The code intentionally keeps deviations from the original upstream design. Do no
 - automatic title generation;
 - no `websearch` tool in the MVP built-in set;
 - the agent tool allowlist (`tools:` in agent definitions);
+- the agent tool blacklist (`tools_exclude:` in agent definitions, applied after
+  the allowlist);
 - the operator-configured inbound media delivery policy;
 - two media-hosting paths: provider-independent `MediaStore` and provider-bound `MediaUploader`.
 

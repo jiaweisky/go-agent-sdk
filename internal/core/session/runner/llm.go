@@ -992,6 +992,7 @@ func (r *LLMRunner) materializeTools(
 	}
 	if agent.Info != nil {
 		mat = tool.Restrict(mat, agent.Info.Tools)
+		mat = tool.Exclude(mat, agent.Info.ToolsExclude)
 	}
 	return mat, nil
 }

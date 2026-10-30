@@ -123,6 +123,10 @@ func applyAgentInfo(target *schema.AgentInfo, item AgentInfo, home string, base 
 	if item.Tools != nil {
 		target.Tools = item.Tools
 	}
+	// The blacklist also replaces as a whole; nil leaves the target untouched.
+	if item.ToolsExclude != nil {
+		target.ToolsExclude = item.ToolsExclude
+	}
 	if item.Backend != nil {
 		target.Backend = item.Backend
 	}

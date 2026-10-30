@@ -285,6 +285,35 @@ func Restrict(mat *Materialization, names []string) *Materialization {
 	}
 }
 
+// Exclude removes the named tools from a materialization after an allowlist.
+// Unlike Restrict, an empty/nil list removes nothing. Removed tools are absent
+// from the model-facing definitions and their calls are rejected as unknown.
+func Exclude(mat *Materialization, names []string) *Materialization {
+	if mat == nil || len(names) == 0 {
+		return mat
+	}
+	denied := make(map[string]bool, len(names))
+	for _, name := range names {
+		denied[name] = true
+	}
+	defs := make([]schema.ToolDefinition, 0, len(mat.Definitions))
+	for _, def := range mat.Definitions {
+		if !denied[def.Name] {
+			defs = append(defs, def)
+		}
+	}
+	inner := mat.Settle
+	return &Materialization{
+		Definitions: defs,
+		Settle: func(execCtx context.Context, input ExecuteInput) (*Settlement, error) {
+			if denied[input.Call.Name] {
+				return &Settlement{Result: schema.ToolResultValue{Type: "error", Value: "Unknown tool: " + input.Call.Name}}, nil
+			}
+			return inner(execCtx, input)
+		},
+	}
+}
+
 func (r *Registry) lookup(name string) (registrationEntry, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

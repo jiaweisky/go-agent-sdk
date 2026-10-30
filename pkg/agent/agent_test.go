@@ -1260,6 +1260,52 @@ func TestRegisterAgentModeAndHidden(t *testing.T) {
 	}
 }
 
+func TestRegisterAgentToolsExclude(t *testing.T) {
+	client := newTestClient(t)
+
+	if err := client.RegisterAgent("limited", AgentConfig{
+		System:       "s",
+		Tools:        []string{"bash", "read", "grep"},
+		ToolsExclude: []string{"bash"},
+	}); err != nil {
+		t.Fatalf("register limited: %v", err)
+	}
+	info := client.rt.agents.Get(schema.AgentID("limited"))
+	if !reflect.DeepEqual(info.ToolsExclude, []string{"bash"}) {
+		t.Fatalf("ToolsExclude = %+v", info.ToolsExclude)
+	}
+
+	// A partial update without ToolsExclude keeps the current blacklist.
+	if err := client.RegisterAgent("limited", AgentConfig{Description: "updated"}); err != nil {
+		t.Fatalf("update limited: %v", err)
+	}
+	info = client.rt.agents.Get(schema.AgentID("limited"))
+	if !reflect.DeepEqual(info.ToolsExclude, []string{"bash"}) {
+		t.Fatalf("ToolsExclude after partial update = %+v", info.ToolsExclude)
+	}
+	if !reflect.DeepEqual(info.Tools, []string{"bash", "read", "grep"}) {
+		t.Fatalf("Tools after partial update = %+v", info.Tools)
+	}
+
+	// An explicit empty list replaces the blacklist (clears it).
+	if err := client.RegisterAgent("limited", AgentConfig{ToolsExclude: []string{}}); err != nil {
+		t.Fatalf("clear limited: %v", err)
+	}
+	info = client.rt.agents.Get(schema.AgentID("limited"))
+	if len(info.ToolsExclude) != 0 {
+		t.Fatalf("ToolsExclude after clear = %+v", info.ToolsExclude)
+	}
+
+	// A new non-empty list replaces the old one as a whole.
+	if err := client.RegisterAgent("limited", AgentConfig{ToolsExclude: []string{"grep"}}); err != nil {
+		t.Fatalf("replace limited: %v", err)
+	}
+	info = client.rt.agents.Get(schema.AgentID("limited"))
+	if !reflect.DeepEqual(info.ToolsExclude, []string{"grep"}) {
+		t.Fatalf("ToolsExclude after replace = %+v", info.ToolsExclude)
+	}
+}
+
 type taskLLM struct{ parentCalls *int }
 
 func (f taskLLM) Prepare(context.Context, *llmschema.LLMRequest) (*llmschema.PreparedRequest, error) {

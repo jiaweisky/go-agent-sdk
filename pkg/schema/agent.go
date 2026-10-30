@@ -59,6 +59,11 @@ type AgentInfo struct {
 	// absent) means every registered tool; an explicitly empty list means no
 	// tools at all.
 	Tools []string `json:"tools,omitempty"`
+	// ToolsExclude is a Go-side extension: tool names removed from the
+	// materialized toolset after the allowlist. Nil/empty removes nothing. It
+	// lets an agent start from every registered tool (including MCP tools
+	// discovered at runtime) and exclude only the unwanted ones.
+	ToolsExclude []string `json:"tools_exclude,omitempty"`
 	// Backend selects how the agent executes: a local LLM loop (nil) or a
 	// remote A2A agent.
 	Backend *AgentBackend `json:"backend,omitempty"`

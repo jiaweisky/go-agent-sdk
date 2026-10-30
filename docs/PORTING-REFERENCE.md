@@ -32,6 +32,14 @@ recorded below.
   an explicit `tools: []` means no tools at all. v2 core has no such field
   (tool availability is permission-driven only). Discussed and confirmed with
   the user.
+- **Go-side deviation (not in v2 core)**: **agent tool blacklist** — the agent
+  definition frontmatter gains a `tools_exclude:` field
+  (`schema.AgentInfo.ToolsExclude`): the named tools are removed after the
+  `tools:` allowlist is applied, so an agent can start from every registered
+  tool (including MCP tools discovered at runtime) and subtract only the
+  unwanted ones. It is functionally equivalent to denying those tools via
+  permission rules (`deny *` style), but reads better in configuration. The
+  field absent or empty removes nothing. Discussed and confirmed with the user.
 - **Go-side deviation (not in v2 core)**: the **inbound media delivery policy**
   (`docs/DESIGN-MEDIA.md` {M16} §4.12) — the source of an inbound attachment
   (inline / url / provider `file`) is chosen by an **operator-configured

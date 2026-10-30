@@ -19,6 +19,9 @@ type AgentInfo struct {
 	// schema.AgentInfo): nil means every tool, an explicit empty list means
 	// none.
 	Tools []string `json:"tools,omitempty"`
+	// ToolsExclude is the tool-name blacklist (Go-side extension; see
+	// schema.AgentInfo). It is applied after Tools and removes matching tools.
+	ToolsExclude []string `json:"tools_exclude,omitempty"`
 	// Backend declares how the agent executes: a local LLM loop (unset) or a
 	// remote A2A agent. It lets a markdown agent file describe a peer reached
 	// over the wire, instead of requiring RegisterAgent.

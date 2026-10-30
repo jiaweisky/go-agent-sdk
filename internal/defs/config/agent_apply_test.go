@@ -140,3 +140,21 @@ func TestApplyDirAgentsDisabled(t *testing.T) {
 		t.Fatal("temp agent should be removed")
 	}
 }
+
+func TestApplyDirAgentsToolsExclude(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "agent", "ops.md"),
+		"---\ndescription: ops\nmode: primary\ntools_exclude:\n  - webfetch\n  - task\n---\nOps.\n")
+
+	agents := core.NewAgent()
+	if err := ApplyDirAgents(agents, []string{dir}, core.Global{Home: "/home/u"}, core.PermissionRuleset{}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	ops := agents.Get(schema.AgentID("ops"))
+	if ops == nil {
+		t.Fatal("ops agent missing")
+	}
+	if len(ops.ToolsExclude) != 2 || ops.ToolsExclude[0] != "webfetch" || ops.ToolsExclude[1] != "task" {
+		t.Fatalf("ToolsExclude = %+v", ops.ToolsExclude)
+	}
+}

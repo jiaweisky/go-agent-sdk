@@ -245,6 +245,9 @@ type AgentConfig struct {
 	// keeps the current value (every tool for a new agent); a non-nil slice —
 	// including an explicit empty one — replaces it (empty means no tools).
 	Tools []string
+	// ToolsExclude removes tool names after the allowlist. Nil keeps the
+	// current value; a non-nil slice replaces it.
+	ToolsExclude []string
 	// Backend selects how the agent executes. Nil keeps the current backend
 	// (a local LLM loop for a newly created agent).
 	Backend *schema.AgentBackend
@@ -321,6 +324,9 @@ func applyAgentConfig(info *schema.AgentInfo, cfg AgentConfig) {
 	// non-nil slice — including an explicit empty one — replaces the allowlist.
 	if cfg.Tools != nil {
 		info.Tools = cfg.Tools
+	}
+	if cfg.ToolsExclude != nil {
+		info.ToolsExclude = cfg.ToolsExclude
 	}
 	if cfg.Backend != nil {
 		info.Backend = cfg.Backend
@@ -513,6 +519,7 @@ func (c *Client) AgentTools(agentID string, permissions schema.PermissionRuleset
 	// The allowlist scopes the capability surface the same way the turn loop
 	// does, so what is advertised here matches what sessions can actually use.
 	mat = tool.Restrict(mat, info.Tools)
+	mat = tool.Exclude(mat, info.ToolsExclude)
 	definitions := mat.Definitions
 	tools := make([]AgentTool, 0, len(definitions))
 	for _, definition := range definitions {
