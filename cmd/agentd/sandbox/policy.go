@@ -304,7 +304,7 @@ func (g PathGuard) AllowRead(_ context.Context, path string) error {
 	if rule, ok := matchingDeny(canonical, g.policy.DenyReadRegions()); ok {
 		roots := append(g.policy.ReallowReadRoots(), g.policy.SocketPaths()...)
 		for _, root := range roots {
-			if under(canonical, canonicalPath(root)) {
+			if Under(canonical, canonicalPath(root)) {
 				return nil
 			}
 		}
@@ -328,7 +328,7 @@ func (g PathGuard) Allow(_ context.Context, path string, _ core.FileOp) error {
 
 	roots := append(g.policy.WriteRoots(), g.policy.SocketPaths()...)
 	for _, root := range roots {
-		if under(canonical, canonicalPath(root)) {
+		if Under(canonical, canonicalPath(root)) {
 			return nil
 		}
 	}
@@ -373,14 +373,30 @@ func canonicalPath(path string) string {
 	}
 }
 
-// under reports whether path is inside root (or equals it).
-func under(path, root string) bool {
-	rel, err := filepath.Rel(root, path)
+// Under reports whether path is inside root (or equals it). Empty paths and
+// roots never match. Both values are cleaned, so trailing separators are
+// ignored.
+func Under(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	if err != nil {
 		return false
 	}
 
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// UnderAny reports whether path is inside any of roots (or equals one).
+func UnderAny(path string, roots []string) bool {
+	for _, root := range roots {
+		if Under(path, root) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // matchingDeny returns the deny entry that matches path. A literal entry is a
@@ -398,7 +414,7 @@ func matchingDeny(path string, deny []string) (string, bool) {
 			continue
 		}
 
-		if under(path, canonicalPath(pattern)) {
+		if Under(path, canonicalPath(pattern)) {
 			return pattern, true
 		}
 	}

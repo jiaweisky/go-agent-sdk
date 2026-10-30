@@ -140,3 +140,47 @@ func TestScrubEnv(t *testing.T) {
 		t.Fatalf("the explicit environment was lost: %v", filtered)
 	}
 }
+
+func TestUnder(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		root string
+		want bool
+	}{
+		{"equal", "/etc", "/etc", true},
+		{"child", "/etc/hosts", "/etc", true},
+		{"deep child", "/etc/pki/tls/certs", "/etc", true},
+		{"prefix sibling", "/etcetera", "/etc", false},
+		{"parent", "/etc", "/etc/pki", false},
+		{"unrelated", "/data/poe", "/etc", false},
+		{"empty path", "", "/etc", false},
+		{"empty root", "/etc/hosts", "", false},
+		{"trailing slash root", "/etc/hosts", "/etc/", true},
+		{"trailing slash path", "/etc/hosts/", "/etc", true},
+	} {
+		if got := Under(tc.path, tc.root); got != tc.want {
+			t.Errorf("%s: Under(%q, %q) = %v, want %v", tc.name, tc.path, tc.root, got, tc.want)
+		}
+	}
+}
+
+func TestUnderAny(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		path  string
+		roots []string
+		want  bool
+	}{
+		{"one of many", "/etc/hosts", []string{"/data", "/etc", "/usr"}, true},
+		{"none of many", "/etc/hosts", []string{"/data", "/usr"}, false},
+		{"empty list", "/etc/hosts", nil, false},
+		{"empty entry skipped", "/etc/hosts", []string{"", "/etc"}, true},
+		{"trailing slash root", "/etc/hosts", []string{"/etc/"}, true},
+		{"prefix sibling", "/etcetera", []string{"/etc"}, false},
+	} {
+		if got := UnderAny(tc.path, tc.roots); got != tc.want {
+			t.Errorf("%s: UnderAny(%q, %v) = %v, want %v", tc.name, tc.path, tc.roots, got, tc.want)
+		}
+	}
+}

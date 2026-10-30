@@ -198,7 +198,7 @@ func bwrapWriteArgs(dirs []string, policy Policy) []string {
 func bwrapDenyWriteArgs(bound []string, policy Policy) []string {
 	var argv []string
 	for _, path := range bwrapDenyCandidates(policy.DeniedWrite()) {
-		if !bwrapUnderAny(path, bound) {
+		if !UnderAny(path, bound) {
 			continue
 		}
 
@@ -211,17 +211,6 @@ func bwrapDenyWriteArgs(bound []string, policy Policy) []string {
 	}
 
 	return argv
-}
-
-// bwrapUnderAny reports whether path lies inside one of roots.
-func bwrapUnderAny(path string, roots []string) bool {
-	for _, root := range roots {
-		if under(path, root) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // bwrapBinds expands the bind list: each path is bound at its canonical

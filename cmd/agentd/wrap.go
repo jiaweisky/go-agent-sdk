@@ -48,8 +48,11 @@ func wrapProcess(cfg config.Config, configPath string) error {
 	policy := sandboxpolicy.ForWrap(w)
 	// The wrapped process must still read its own executable, config file, DNS
 	// and CA-trust files, state roots and config dirs to start and serve;
-	// writes stay limited to the shared roots.
-	policy.AllowRead = append(policy.AllowRead, wrapReadPaths(cfg, executable, configPath, roots)...)
+	// writes stay limited to the shared roots. Skip paths already covered by an
+	// allowed directory (for example /etc), but keep a symlink's resolved
+	// target when it lives outside the allowed directory (for example
+	// /etc/resolv.conf -> /run/systemd/resolve/...).
+	policy.AllowRead = addWrapReadPaths(policy.AllowRead, wrapReadPaths(cfg, executable, configPath, roots))
 	policy.AllowWrite = append(policy.AllowWrite, roots...)
 
 	// The sentinel marks the child as already wrapped so it does not recurse.
@@ -60,6 +63,25 @@ func wrapProcess(cfg config.Config, configPath string) error {
 	fmt.Fprintf(os.Stderr, "agentd: entering whole-process sandbox %q\n", w.Wrapper)
 
 	return launcher(policy, executable, os.Args[1:])
+}
+
+// addWrapReadPaths appends extra read paths unless an allowed directory already
+// covers them. A symlink whose target is outside the allowed directories adds
+// the resolved target instead of the symlink path: binding the symlink over a
+// read-only parent is fragile, while binding the target keeps the symlink
+// usable.
+func addWrapReadPaths(allowed []string, extra []string) []string {
+	for _, path := range extra {
+		if sandbox.UnderAny(path, allowed) {
+			if resolved, err := filepath.EvalSymlinks(path); err == nil && !sandbox.UnderAny(resolved, allowed) {
+				allowed = append(allowed, resolved)
+			}
+			continue
+		}
+		allowed = append(allowed, path)
+	}
+
+	return allowed
 }
 
 // wrapRoots is the set of directories the wrapped process may write: every

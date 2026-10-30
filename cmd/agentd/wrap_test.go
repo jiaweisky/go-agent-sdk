@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -79,5 +80,49 @@ func TestWrapProcessFailurePolicy(t *testing.T) {
 	}, "")
 	if err != nil {
 		t.Fatalf("fail-open must not fail: %v", err)
+	}
+}
+
+func TestAddWrapReadPaths(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+
+	plain := filepath.Join(base, "hosts")
+	if err := os.WriteFile(plain, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write plain: %v", err)
+	}
+
+	outsideTarget := filepath.Join(outside, "resolved.conf")
+	if err := os.WriteFile(outsideTarget, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write outside target: %v", err)
+	}
+	outsideLink := filepath.Join(base, "resolv.conf")
+	if err := os.Symlink(outsideTarget, outsideLink); err != nil {
+		t.Fatalf("symlink outside: %v", err)
+	}
+
+	insideTarget := filepath.Join(base, "inside.conf")
+	if err := os.WriteFile(insideTarget, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write inside target: %v", err)
+	}
+	insideLink := filepath.Join(base, "inside-link.conf")
+	if err := os.Symlink(insideTarget, insideLink); err != nil {
+		t.Fatalf("symlink inside: %v", err)
+	}
+
+	notCovered := filepath.Join(outside, "other")
+
+	got := addWrapReadPaths([]string{base}, []string{plain, outsideLink, insideLink, notCovered})
+	if !slices.Contains(got, outsideTarget) {
+		t.Fatalf("outside symlink target must be added: %v", got)
+	}
+	if slices.Contains(got, outsideLink) {
+		t.Fatalf("covered symlink path must not be added: %v", got)
+	}
+	if slices.Contains(got, plain) || slices.Contains(got, insideLink) || slices.Contains(got, insideTarget) {
+		t.Fatalf("paths covered by the base directory must be skipped: %v", got)
+	}
+	if !slices.Contains(got, notCovered) {
+		t.Fatalf("uncovered path must be added: %v", got)
 	}
 }
